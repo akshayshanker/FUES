@@ -66,8 +66,8 @@ def FUES(e_grid, vf, c, a_prime, m_bar = 2):
 @njit
 def _scan(e_grid, vf, c, a_prime, m_bar):
 
-    # leading value that is checked is j+1
-    # leading value to be checked is i+2
+    # leading value that is checked is j
+    # leading value to be checked is i+1
 
     dela = np.zeros(len(vf))
 
