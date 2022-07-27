@@ -89,11 +89,13 @@ def _scan(e_grid, vf, c, a_prime, m_bar):
                 pass
             else:
                 # right turn is made and jump registered 
+                # remove point
                 if g_1 <= g_minus_1 and np.abs(
                         (a_prime[i + 1] - a_prime[j]) / (e_grid[i + 1] - e_grid[j])) > m_bar:
                     vf[i + 1] = np.nan
 
-                # if left turn is made or right turn with no jump 
+                # left turn is made or right turn with no jump 
+                # keep point 
                 else:
                     dela[i + 1] = np.abs((a_prime[i + 1] -
                                           a_prime[j]) / (e_grid[i + 1] - e_grid[j]))
