@@ -1,5 +1,5 @@
-"""Solutition of Ishkakov et al (2017) retirement choice
-model using FUES-EGM by Dobrescu and Shanker (2022)
+"""Solution of Ishkakov et al (2017) retirement choice
+model using FUES-EGM by Dobrescu and Shanker (2022).
 
 Author: Akshay Shanker, University of Sydney, akshay.shanker@me.com.
 
@@ -17,8 +17,7 @@ from FUES import FUES
 class RetirementModel:
 
     """
-    A class that stores primitives for the Retirement choice
-    work choice model.
+    A class that stores primitives for the retirement choice model.
 
     Parameters
     ----------
@@ -29,7 +28,7 @@ class RetirementModel:
     delta: float
             fixed cost to work
     smooth_sigma: float
-                    smoothing parameter
+            smoothing parameter
     y: float
             wage for worker
     b: float
@@ -111,9 +110,9 @@ def Operator_Factory(rm):
     ----------
 
     Ts_ret: callabe
-                     Solver for retirees using EGM
+            Solver for retirees using EGM
     Ts_work: callable
-                     Solver for workers using EGM
+            Solver for workers using EGM
 
     """
 
@@ -137,16 +136,16 @@ def Operator_Factory(rm):
         Parameters
         ----------
         xp : 1D array
-                  points of x values
+                points of x values
         yp : 1D array
-                  points of y values
+                points of y values
         x  : 1D array
-                  points to interpolate
+                points to interpolate
 
         Returns
         -------
         evals: 1D array
-                        y values at x
+                y values at x
 
         """
 
@@ -182,26 +181,26 @@ def Operator_Factory(rm):
         Parameters
         ----------
         sigma_prime_ret : 1D array
-                                                t+1 period consumption function
+                          t+1 period consumption function
         yp : VF_prime_ret
-                  t+1 period value function (retired)
+                t+1 period value function (retired)
         x  : 1D array
-                  points to interpolate
+             points to interpolate
         t : int
-                Age
+             Age
 
         Returns
         -------
         sigma_ret_t: 1D array
-                                 consunption policy on assets at start of time t
+                        consumption policy on assets at start of time t
         vf_ret_t: 1D array
-                                 time t value
+                        time t value
 
         Notes
         -----
         Note whether or not to work decision in time t is made
         at the start of time t. Thus, if agent chooses to retire,
-        total cash at hand will be a_{t}(1+r).
+        total cash at hand will be a(t)(1+r).
 
         """
 
@@ -231,7 +230,7 @@ def Operator_Factory(rm):
         # min value of time t assets before which t+1 constraint binds
         min_a_val = endog_grid[0]
 
-        # interpolate policy and value function  on even grid
+        # interpolate policy and value function on even grid
         sigma_ret_t = interp_as(endog_grid, sigma_ret_t_inv, asset_grid_A)
         vf_ret_t = interp_as(endog_grid, vf_ret_t_inv, asset_grid_A)
 
@@ -286,8 +285,6 @@ def Operator_Factory(rm):
         sigma_work_t: 1D array
                         refined work choice for worke at time t
                         on start of  time t assets
-
-
         Notes
         -----
 
@@ -319,7 +316,7 @@ def Operator_Factory(rm):
         asset_grid_wealth = R * asset_grid_A + y
 
         # remove sub-optimal points using FUES
-        egrid1, vf_clean, sigma_clean, dela = FUES(
+        egrid1, vf_clean, sigma_clean,a_prime_clean, dela = FUES(
             endog_grid, vf_work_t_inv, sigma_work_t_inv, asset_grid_A, m_bar = 2)
 
         # interpolate on even start of period t asset grid for worker
@@ -439,7 +436,7 @@ if __name__ == "__main__":
         a_prime = cp.asset_grid_A
 
         # generate refined grid, value function and policy using FUES 
-        x_clean, vf_clean, c_clean, dela = FUES(x, vf, c, a_prime,2)
+        x_clean, vf_clean, c_clean,a_prime_clean, dela = FUES(x, vf, c, a_prime,2)
 
         for j in range(1):
 
