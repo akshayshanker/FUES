@@ -35,11 +35,11 @@ class RetirementModel:
     b: float
             lower bound for assets
     grid_max_A: float
-            max liquod asset
+            max liquid asset
     grid_size: int
             grid size for liquid asset
     T: int
-            terminal age
+        terminal age
 
     Attributes
     ----------
@@ -472,6 +472,8 @@ if __name__ == "__main__":
 
             ax[0].set_ylim(7.75, 8.27)
             ax[0].set_xlim(44, 54.5)
+            #ax[0].set_ylim(7.75,8.27)
+            #ax[0].set_xlim(48,56)
             ax[0].set_xlabel('Assets (t)', fontsize=11)
             ax[0].set_ylabel('Value', fontsize=11)
             ax[0].spines['right'].set_visible(False)
@@ -504,6 +506,8 @@ if __name__ == "__main__":
 
             ax[1].set_ylim(20,40)
             ax[1].set_xlim(44, 54.2)
+            #ax[1].set_ylim(20,55)
+            #ax[1].set_xlim(48,60)
             ax[1].set_ylabel('Assets (t+1)', fontsize=11)
             ax[1].set_xlabel('Assets (t)', fontsize=11)
             ax[1].spines['right'].set_visible(False)
