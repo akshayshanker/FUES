@@ -466,7 +466,7 @@ def Operator_Factory(cp):
 			FUES(egrid_unrefined_1D\
 				, vf_unrefined_1D\
 				,c_unrefined_1D,\
-				a_prime_unrefined_1D, m_bar = 2)
+				a_prime_unrefined_1D, m_bar = 0.5)
 
 			min_a_prime_val = egrid_refined_1D[np.argmin(a_prime_refined_1D)]
 			#print(np.mean(dela))
@@ -578,10 +578,10 @@ if __name__ == "__main__":
 				 b = 1e-01, 
 				 grid_max_A = 40,
 				 grid_max_H = 10, 
-				 grid_size = 500,
-				 grid_size_H = 7,
+				 grid_size = 1000,
+				 grid_size_H = 3,
 				 gamma_1 = 0,
-				 xi = 0, kappa = 0.075, phi = 0.33, theta = 0.77)
+				 xi = 0, kappa = 0.075, phi = 0.07, theta = 0.77)
 
 	bellman_operator, Euler_Operator, condition_V = Operator_Factory(cp)
 
@@ -598,7 +598,7 @@ if __name__ == "__main__":
 	bell_toll = 1e-4
 	t = 0
 	new_V = V_init
-	max_iter = 150
+	max_iter = 200
 	pl.close()
 	
 	while  bell_error> bell_toll and t<max_iter: 
@@ -615,8 +615,81 @@ if __name__ == "__main__":
 
 
 
-	for i in range(len(cp.asset_grid_H)):
-		pl.plot(cp.asset_grid_A,a_pols_new[1,:,i])
+	#for i in range(len(cp.asset_grid_H)):
+	#	pl.plot(cp.asset_grid_A,a_pols_new[1,:,i])
+	# Plots for Bellman 
+	"""
+	pl.close()
+
+
+	import matplotlib.pylab as pl
+	f,a = pl.subplots(1,1)
+
+	#for i_z in range(len(cp.z_vals)):
+	a_pols_bell = np.copy(a_pols)
+	#	pl.plot(cp.asset_grid_A, V_pols_new[1,:,i_h])
+
+	pl.close()
+	sns.set(style="whitegrid",rc={"font.size":10,"axes.titlesize":10,"axes.labelsize":10}) 
+	fig, ax = pl.subplots(1,1) 
+	#i_h = 1 
+	for i_h in range(len(cp.asset_grid_H)):
+		ax.plot(cp.asset_grid_A,new_c_prime[0,:,i_h], label = 'housing_{}'.format(i_h))
+		ax.plot(cp.asset_grid_A,new_c_prime[0,:,i_h], label = 'housing_{}'.format(i_h))
+		#pl.plot(cp.asset_grid_A,cp.asset_grid_A, linestyle= 'dotted')
+		ax.legend()
+		#pl.ylim(0,10)
+
+	#pl.xlim(5,8)
+	ax.legend()
+	ax.set_xlim(0,20)
+	ax.set_ylim(0,10)
+	ax.spines['right'].set_visible(False)
+	ax.spines['top'].set_visible(False)
+	pl.savefig('plots/cons_policy.png')
+	pl.close()
+
+	for i_h in range(len(cp.asset_grid_H)):
+		pl.plot(cp.asset_grid_A,h_pols_new[0,:,i_h], label = 'housing_{}'.format(i_h))
+		#pl.plot(cp.asset_grid_A,cp.asset_grid_A, linestyle= 'dotted')
+		pl.legend()
+		#pl.ylim(0,10)
+
+	#pl.xlim(5,8)
+	pl.savefig('plots/h_policy.png')
+	pl.close()
+	sns.set(style="whitegrid",rc={"font.size":10,"axes.titlesize":10,"axes.labelsize":10}) 
+	fig, ax = pl.subplots(1,2) 
+
+	for i_h, lab, col in zip(range(len(cp.asset_grid_H)), ['Low', 'Med', 'High'], ['red', 'black', 'blue']):
+		ax[0].plot(asset_grid_A_fues,new_a_pols_new_fues[0,:,i_h], antialiased=True, label = '{} H(t)'.format(lab), color = col)
+		ax[0].set_title("FUES",fontsize=11)
+		#if i_h == 2:
+		#	ax.plot(cp.asset_grid_A,new_c_prime[0,:,i_h], linestyle= 'dashed', color = 'black', label = 'VFI')
+		#else:
+		ax[1].plot(cp.asset_grid_A,a_pols_new[0,:,i_h], color = col)
+		ax[1].set_title("VFI",fontsize=11)
+		#pl.plot(cp.asset_grid_A,cp.new_c_prime, )
+		ax[0].legend(prop={'size': 9})
+
+
+	#pl.xlim(5,8)
+	ax[0].set_xlim(0,20)
+	ax[0].set_xlabel('Assets (t)',fontsize=12)
+	ax[0].set_ylabel('Consumption',fontsize=12)
+	ax[0].set_ylim(0,20)
+	ax[0].spines['right'].set_visible(False)
+	ax[0].spines['top'].set_visible(False)
+	ax[1].set_xlim(0,20)
+	ax[1].set_xlabel('Assets (t)',fontsize=12)
+	ax[1].set_ylabel('Consumption',fontsize=12)
+	ax[1].set_ylim(0,20)
+	ax[1].spines['right'].set_visible(False)
+	ax[1].spines['top'].set_visible(False)
+	fig.tight_layout()
+	fig.savefig('plots/fella_poll.png')
+	pl.close() 
+	""" 
 
 	# Euler iteration 
 
@@ -636,7 +709,7 @@ if __name__ == "__main__":
 
 	bhask_error = 1
 	bhask_toll = 1e-04
-	max_iter = 100
+	max_iter = 200
 	k = 0
 	V_new = np.copy(V_init)
 	c_new = np.copy(c_init)
