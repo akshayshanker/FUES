@@ -8,7 +8,6 @@ Author: Akshay Shanker, University of Sydney, akshay.shanker@me.com.
 import numpy as np
 from numba import njit
 
-
 @njit
 def FUES(e_grid, vf, c, a_prime, m_bar = 2):
     """
@@ -17,13 +16,13 @@ def FUES(e_grid, vf, c, a_prime, m_bar = 2):
     Parameters
     ----------
     e_grid: 1D array 
-             unrefined endogenous grid
+            unrefined endogenous grid
     vf: 1d array
-         value points at endogenous grid
+            value points at endogenous grid
     c: 1D array 
-        policy 1 points at endogenous grid
+            policy 1 points at endogenous grid
     a_prime: 1D array
-        policy 2 points at endogenous grid
+            policy 2 points at endogenous grid
     m_bar: float
             jump detection threshold
 
@@ -37,11 +36,9 @@ def FUES(e_grid, vf, c, a_prime, m_bar = 2):
     dela: 1D array
             a_prime(i+1) - a_prime(i) values along
             refined grid 
-
     """
 
     # sort policy and vf by e grid order 
-
     vf = np.take(vf, np.argsort(e_grid))
     c = np.take(c, np.argsort(e_grid))
     a_prime = np.take(a_prime, np.argsort(e_grid))
@@ -69,16 +66,20 @@ def _scan(e_grid, vf, c, a_prime, m_bar):
     # leading value that is checked is j
     # leading value to be checked is i+1
 
-    dela = np.zeros(len(vf))
+   
 
+    # create copy of value function that
+    # remains as an unrefined set of points 
     vf_full = np.copy(vf)
+
+    # empty array to stor policy function change
+    dela = np.zeros(len(vf))
 
     for i in range(len(e_grid) - 2):
 
         # inital two points on clean grid 
         if i <= 1:
             j = i
-        
         else:
             g_minus_1 = (vf_full[j] - vf_full[j - 1]) / \
                 (e_grid[j] - e_grid[j - 1])

@@ -99,7 +99,7 @@ class RetirementModel:
 def Operator_Factory(rm):
     """
     Operator takes in a RetirementModel and returns functions
-    to solve the model
+    to solve the model.
 
     Parameters
     ----------
@@ -107,7 +107,7 @@ def Operator_Factory(rm):
             instance of retirement model
 
     Returns
-    ----------
+    -------
 
     Ts_ret: callabe
             Solver for retirees using EGM
@@ -198,7 +198,7 @@ def Operator_Factory(rm):
 
         Notes
         -----
-        Note whether or not to work decision in time t is made
+        Whether or not to work decision in time t is made
         at the start of time t. Thus, if agent chooses to retire,
         total cash at hand will be a(t)(1+r).
 
