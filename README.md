@@ -2,7 +2,7 @@
 EGM using fast upper-envelope scan 
 
 
-Initial replication material for `Fast upper-envelope scan for discrete-continuous dynamic programming' by Dobrescu and Shanker (2022). 
+Initial beta replication material for `Fast upper-envelope scan for discrete-continuous dynamic programming' by Dobrescu and Shanker (2022). 
 
 Please see the top-level code for ```retirement.py``` and ```fella.py``` for exmaple use of Euler iteration and VFI for the retirement and discrete grid housing model.
 
