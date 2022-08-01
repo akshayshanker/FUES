@@ -19,7 +19,7 @@ from FUES import FUES
 
 class ConsumerProblem:
     """
-    A class that stores primitives for the Consumer Problem for
+    A class that stores primitives for the consumer problem for
     model with fixed adjustment cost and discrete housing grid. The
     income process is assumed to be a finite state Markov chain.
 
@@ -30,29 +30,29 @@ class ConsumerProblem:
     r_H : float
              return on housing
     beta : float, optional(default=0.96)
-                    The discount factor, must satisfy (1 + r) * beta < 1
+             The discount factor, must satisfy (1 + r) * beta < 1
     delta: float
-                    Depreciation rate
-    Pi : array_like(float), optional(default=((0.60, 0.40),(0.05, 0.95))
-            A 2D NumPy array giving the Markov matrix for {z_t}
-    z_vals : array_like(float), optional(default=(0.5, 0.95))
-            The state space of {z_t}
-    b : float, optional(default=0)
-            The borrowing constraint
-    grid_max_A: float, optional(default=16)
-                            max liquid assets
-    grid_size : scalar(int), optional(default=50)
-                            Number of grid points to solve problem, a grid on [-b, grid_max]
+            Depreciation rate
+    Pi : array_like 
+            A 2D NumPy array giving the Markov matrix for shocks
+    z_vals : 1D array
+            The state space of shocks 
+    b : float
+            The borrowing constraint lower bound
+    grid_max_A: float
+                 Max liquid asset
+    grid_size : int
+                 Liq. asset grid size 
     gamma_1: float
     phi : float
-                    ratio of h_prime that becomes fixed adjustment cost
+            Ratio of h_prime that becomes fixed adjustment cost
     xi: float
     kappa: float
-                    scaling for housing in utility
+            Caling for housing in utility
     theta: float
-                    non-durable consumption share
+            Non-durable consumption share
     iota: float
-                    housing utility constant shift term
+            Housing utility constant shift term
 
     u : callable, optional(default=np.log)
             The utility function
@@ -61,6 +61,29 @@ class ConsumerProblem:
 
     Attributes
     ----------
+
+    X_all: 3D array
+            full state-sapce of shocks, assets, housing
+    X_all_big: 4D array
+                Conditioned state space
+                full state-space + housing choice made at t
+    X_exog: 3D array 
+                small state-space of discrete states
+                shocks, housing at t and housing choice made at t
+    u: callable
+        utility 
+    uc_inv: callable
+             inverse of marginal utility of cons. 
+    du: callable
+         marginal utility of consumption
+
+
+    Notes
+    ----
+
+    To understand the grids above, 
+    recall agent enters with housing state H(t). 
+    Then agent makes a housing choice H(t+1). 
 
 
     """
@@ -82,7 +105,7 @@ class ConsumerProblem:
                  xi=0.1,
                  kappa=0.075,
                  theta=0.77,
-                 iota=0.01):
+                 iota=.001):
 
         self.grid_size = grid_size
         self.grid_size_H = grid_size_H
@@ -219,9 +242,50 @@ def Operator_Factory(cp):
         return evals
 
     @njit
-    def obj(a_prime, a, h, i_h, h_prime, i_h_prime, z, i_z, V, R, R_H, t):
+    def obj(a_prime,\
+                 a,
+                 h,
+                 i_h,
+                 h_prime,
+                 i_h_prime,
+                 z,
+                 i_z,
+                 V,
+                 R,
+                 R_H,
+                 t):
+
         """Objective function to be *maximised* by Bellman operator
 
+        Parameters
+        ----------
+        a_prime: float 
+                    next period liquid assets 
+        a: float 
+            current period liquid asset 
+        h: float
+            current period housing
+        i_h: int
+              current period housing index
+        h_prime: float
+                    next period housing level
+        i_h_prime: int
+                    next period housing index
+        z: float
+            exog shock
+        i_z: int
+                shock index 
+        V: 3D array
+            Value function
+        R: float 
+            interest rate + 1
+        R_H: float 
+        t: int 
+
+        Returns
+        -------
+        u: float
+            utility
 
         """
         if i_h != i_h_prime:
@@ -252,14 +316,28 @@ def Operator_Factory(cp):
 
         Parameters
         ----------
-        V : array_like(float)
-                A NumPy array of dim len(cp.asset_grid) times len(cp.z_vals)
+        V : 3D array 
+                Value function at t interation 
+        t: int 
 
         Returns
         -------
-        array_like(float)
-                Returns either the greed policy given V or the updated value
-                function TV.
+        new_a_prime: 3D array 
+                        t-1 asset policy
+        new_h_prime: 3D array
+                        t-1 housing policy
+        new_V: 3D array
+                    t-1 value function 
+        new_z_prime: 3D array
+                    total cash at hand after adjustment 
+        new_V_adj_big: 4D array
+                        Value function conditioned on H_prime choice
+
+        new_a_big: 4D array 
+                    Asset policy conditioned on H_prime choice 
+
+        new_c_prime: 3D array 
+                        Consumption policy 
 
         """
 
@@ -277,7 +355,7 @@ def Operator_Factory(cp):
         new_a_big = np.empty(shape_big)
         new_c_prime = np.empty(shape)
 
-        # loop over the state space
+        # loop over the time t state space
         for state in prange(len(X_all)):
             a = asset_grid_A[X_all[state][1]]
             h = asset_grid_H[X_all[state][2]]
@@ -291,6 +369,7 @@ def Operator_Factory(cp):
             z_vals_prime = np.zeros(len(asset_grid_H))
             cvals_prime = np.zeros(len(asset_grid_H))
 
+            # loop over t+1 housing discrete choices 
             for i_h_prime in range(len(asset_grid_H)):
                 h_prime = asset_grid_H[i_h_prime]
                 lower_bound = asset_grid_A[0]
@@ -325,6 +404,7 @@ def Operator_Factory(cp):
 
                 z_vals_prime[i_h_prime] = upper_bound
 
+                # wealth is cash at hand after housing adjustment paid for 
                 wealth = R * a + z - (h_prime - h) - phi * h_prime * chi
                 new_a_big[i_z, i_a, i_h, i_h_prime] = xf
                 cvals_prime[i_h_prime] = wealth - xf
@@ -357,8 +437,7 @@ def Operator_Factory(cp):
         new_UD_a = np.zeros(np.shape(new_Ud_a_uc))
         new_UD_h = np.zeros(np.shape(new_Ud_h_uc))
 
-        # numpy dot sum product over last 
-        # axis of matrix_A (t+1 continuation value unconditioned)
+        # numpy dot sum product over last axis of matrix_A (t+1 continuation value unconditioned)
         # see nunpy dot docs
         for state in range(len(X_all)):
             i_a = int(X_all[state][1])
@@ -375,6 +454,9 @@ def Operator_Factory(cp):
 
     @njit
     def Euler_Operator(V, sigma, dela):
+        """
+        Euler operator finds next period policy function
+        using EGM and FUES"""
 
         # The value function should be conditioned on time t
         # continuous state, time t discrete state and time
@@ -423,6 +505,8 @@ def Operator_Factory(cp):
             UC_prime_zprimes = np.empty(len(z_vals))
             V_prime_zprimes = np.empty(len(z_vals))
 
+            # perform the EGM step at each a_prime value
+            # pull out the endog grid using FOCs
             for i_z_prime in range(len(z_vals)):
                 #print(sigma[i_z_prime, i_a_prime, i_h_prime])
                 UC_prime_zprimes[i_z_prime] = uc(
@@ -464,7 +548,7 @@ def Operator_Factory(cp):
 
             egrid_refined_1D, vf_refined_1D, c_refined_1D, a_prime_refined_1D, dela_out = \
                 FUES(egrid_unrefined_1D, vf_unrefined_1D, c_unrefined_1D,
-                     a_prime_unrefined_1D, m_bar=dela[i_z, i_h, i_h_prime] * 1.2)
+                     a_prime_unrefined_1D, m_bar=dela[i_z, i_h, i_h_prime] * 1.5)
 
             min_a_prime_val = egrid_refined_1D[np.argmin(a_prime_refined_1D)]
             dela_new[i_z, i_h, i_h_prime] = np.mean(dela_out[dela_out > 0])
@@ -475,6 +559,8 @@ def Operator_Factory(cp):
                 chi = 0
 
             wealth_grid = np.copy(asset_grid_A)
+            #print(len(egrid_refined_1D))
+            #print(len(a_prime_refined_1D))
             new_a_prime_refined_big[i_z, :, i_h, i_h_prime] = interp_as(
                 egrid_refined_1D, a_prime_refined_1D, wealth_grid)
             new_c_refined_big[i_z, :, i_h, i_h_prime] = interp_as(
@@ -491,21 +577,27 @@ def Operator_Factory(cp):
 
                 if wealth_grid[k] <= min_a_prime_val and asset_grid_A[k] < 2.5:
                     new_c_refined_big[i_z, k, i_h, i_h_prime] = c_const_t
-                    new_v_refined_big[i_z,k,i_h,i_h_prime]\
-                     = new_v_refined_big_cons[i_z, k,i_h,i_h_prime]
+                    new_v_refined_big[i_z,
+                                      k,
+                                      i_h,
+                                      i_h_prime] = new_v_refined_big_cons[i_z,
+                                                                          k,
+                                                                          i_h,
+                                                                          i_h_prime]
                     new_a_prime_refined_big[i_z, k, i_h, i_h_prime] = b
 
             aftr_adj_cash = z + wealth_grid * R - h_prime + h - chi * h_prime * phi
             new_v_refined_big[i_z, :, i_h,
                               i_h_prime][aftr_adj_cash <= 0] = -np.inf
 
-        # make discrete choice
+        # make discrete choice at time t, i.e. H(t+1)
 
         for i in range(len(X_all)):
 
             i_z = int(X_all[i][0])
             i_a = int(X_all[i][1])
             i_h = int(X_all[i][2])
+            
             # pick out max element
             new_v_refined[i_z, i_a, i_h] = np.max(
                 new_v_refined_big[i_z, i_a, i_h, :])
@@ -513,11 +605,19 @@ def Operator_Factory(cp):
             max_index = int(np.argmax(new_v_refined_big[i_z, i_a, i_h, :]))
             new_H_refined[i_z, i_a, i_h] = max_index
 
-            new_a_prime_refined[i_z,i_a,i_h]\
-             = new_a_prime_refined_big[i_z,i_a,i_h,max_index]
+            new_a_prime_refined[i_z,
+                                i_a,
+                                i_h] = new_a_prime_refined_big[i_z,
+                                                               i_a,
+                                                               i_h,
+                                                               max_index]
 
-            new_c_refined[i_z,i_a,i_h]\
-             = new_c_refined_big[i_z,i_a,i_h, max_index]
+            new_c_refined[i_z,
+                          i_a,
+                          i_h] = new_c_refined_big[i_z,
+                                                   i_a,
+                                                   i_h,
+                                                   max_index]
 
         return new_v_refined, new_c_refined, new_a_prime_refined, new_H_refined, dela_new
 
@@ -528,6 +628,9 @@ if __name__ == "__main__":
     import seaborn as sns
     from matplotlib.ticker import FormatStrFormatter
 
+
+    # Instantize the consumer problem with parameters 
+    
     cp = ConsumerProblem(r=0,
                          r_H=0,
                          beta=.92,
@@ -544,7 +647,7 @@ if __name__ == "__main__":
 
     bellman_operator, Euler_Operator, condition_V = Operator_Factory(cp)
 
-    # === Solve r.h.s. of Bellman equation === #
+    # Inital empty grids 
     shape = (len(cp.z_vals), len(cp.asset_grid_A), len(cp.asset_grid_H))
     shape_big = (len(cp.z_vals), len(cp.asset_grid_A),
                  len(cp.asset_grid_H), len(cp.asset_grid_H))
@@ -554,7 +657,7 @@ if __name__ == "__main__":
         shape), np.ones(shape), np.ones(shape)
     V_pols, h_pols, a_pols = np.empty(shape), np.empty(shape), np.empty(shape)
 
-    bell_error = 1
+    bell_error = 0
     bell_toll = 1e-4
     t = 0
     new_V = V_init
@@ -567,6 +670,7 @@ if __name__ == "__main__":
                 "axes.labelsize": 10})
     fig, ax = pl.subplots(1, 2)
 
+    # Solve via VFI and plot 
     start_time = time.time()
     while bell_error > bell_toll and t < max_iter:
 
@@ -585,10 +689,6 @@ if __name__ == "__main__":
 
     print("VFI in {} seconds".format(time.time() - start_time))
 
-    #ax[0].set_ylim(7.75, 8.27)
-    #ax[0].set_xlim(44, 54.5)
-    # ax[0].set_ylim(7.75,8.27)
-    # ax[0].set_xlim(48,56)
     ax[0].set_xlabel('Assets (t)', fontsize=11)
     ax[0].set_ylabel('Assets (t+1)', fontsize=11)
     ax[0].spines['right'].set_visible(False)
@@ -602,17 +702,14 @@ if __name__ == "__main__":
     ax[1].set_ylabel('Assets (t+1)', fontsize=11)
     ax[1].spines['right'].set_visible(False)
     ax[1].spines['top'].set_visible(False)
-    #ax[1].legend(frameon=False, prop={'size': 10})
     ax[1].set_yticklabels(ax[0].get_yticks(), size=9)
     ax[1].set_xticklabels(ax[0].get_xticks(), size=9)
     ax[1].yaxis.set_major_formatter(FormatStrFormatter("%.1f"))
     ax[1].xaxis.set_major_formatter(FormatStrFormatter("%.0f"))
 
-    for i, col, lab in zip([1, 2, 3], ['blue', 'red', 'black'], [
-            'Low H(t)', 'Med. H(t)', 'High H(t)']):
-        ax[0].plot(cp.asset_grid_A, a_pols_new[1, :, i], color=col, label=lab)
 
-    # Euler iteration
+    
+    # Solve via EGM and plot 
     # Initial values
     V_init, c_init, a_init = np.ones(shape), np.ones(shape), np.ones(shape)
 
