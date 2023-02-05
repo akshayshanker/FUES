@@ -22,7 +22,8 @@ import copy
 
 @njit 
 def append_push(x_array, m):
-    """ Deletes first value of array, pushes back index of all undeleted
+    """ Deletes first value of array,
+        pushes back index of all undeleted
         values and appends m to final index"""
 
     for i in range(len(x_array)-1):
@@ -33,9 +34,11 @@ def append_push(x_array, m):
 
 @njit
 def back_scan_gradients(m_array, a_prime,vf_full, e_grid,j, q):
-    """ Computes gradients of j'ith value function q'th policy 
-        with respect to all m'th value and policy respectively 
-        in list m_array""" 
+    """ Computes gradients of value correspondence points
+        and policy points with respect to all m values and policy 
+        points in backward scan array m_array
+
+        See Figure 5, right panel in DS (2023) """ 
    
     gradients_m_vf = np.zeros(len(m_array))
     gradients_m_a  = np.zeros(len(m_array))
@@ -48,6 +51,25 @@ def back_scan_gradients(m_array, a_prime,vf_full, e_grid,j, q):
                                  / (e_grid[q] - e_grid[m_int]))
 
     return gradients_m_vf, gradients_m_a
+
+@njit 
+def fwd_scan_gradients(a_prime,vf_full, e_grid,j, q, LB):
+    """ Computes gradients of value correspondence points
+        and  policy points with respect to values and policy 
+        points for next LB points in grid
+
+        See Figure 5, left panel in DS (2023)"""
+
+    gradients_f_vf = np.zeros(LB)
+    gradients_f_a  = np.zeros(LB)
+
+    for f in range(LB):
+        gradients_f_vf[f] = (vf_full[q] - vf_full[q+1 +f]) \
+                                / (e_grid[q] - e_grid[q + 1 +f])
+        gradients_f_a[f]  = np.abs((a_prime[j] - a_prime[q + 1 +f])\
+                                 / (e_grid[j] - e_grid[q + 1+f]))
+
+    return gradients_f_vf, gradients_f_a
                 
 
 @njit
@@ -57,7 +79,7 @@ def perp(a) :
     Parameters
     ----------
     a: 1D array
-        points b 1/m
+        points (b, 1/m)
 
     Returns
     -------
@@ -68,6 +90,7 @@ def perp(a) :
     b = np.empty(np.shape(a))
     b[0] = -a[1]
     b[1] = a[0]
+    
     return b
 
 
@@ -140,8 +163,8 @@ def FUES(e_grid, vf, c, a_prime, b = 1e-10, m_bar = 2, LB = 10):
     -----
     Policy 2 is used to determine jumps in policy. 
 
-    The procedure below attaches NaN values to vf array where points are 
-    sub-optimal.
+    The procedure below attaches NaN values to vf array 
+    where points are sub-optimal.
 
     The code below checks to see if multiple EGM points equal the lower
     bound of the endogenous grid. If multiple EGM points equal the lower bound,
@@ -197,9 +220,8 @@ def FUES(e_grid, vf, c, a_prime, b = 1e-10, m_bar = 2, LB = 10):
 
 
 @njit
-def _scan(e_grid, vf, c, a_prime, m_bar, LB):
+def _scan(e_grid, vf, c, a_prime, m_bar, LB, fwd_scan_do= True):
     """" Implements the scan for FUES"""
-
 
     # leading index for optimal values  j
     # leading index for value to be `checked' is i+1
@@ -225,7 +247,6 @@ def _scan(e_grid, vf, c, a_prime, m_bar, LB):
             k_minus_1 = np.copy(np.array([k]))[0] - 1
         
         else:
-
             # value function gradient betweeen previous two optimal points 
             g_j_minus_1 = (vf_full[j] - vf_full[k]) / \
                         (e_grid[j] - e_grid[k])
@@ -237,18 +258,41 @@ def _scan(e_grid, vf, c, a_prime, m_bar, LB):
             g_tilde_a = np.abs((a_prime[i + 1] - a_prime[j])\
                             / (e_grid[i + 1] - e_grid[j]))
 
-            # If right turn is made and jump registered 
-            # remove point
+            # if right turn is made and jump registered 
+            # remove point or perform forward scan 
             if g_1 < g_j_minus_1 and g_tilde_a > m_bar:
-                vf[i + 1] = np.nan
+                keep_i_1_point = False 
 
-                # append index array of previously deleted points
-                m_array = append_push(m_array,i+1)
+                if fwd_scan_do == True:
+                    gradients_f_vf, gradients_f_a\
+                    = fwd_scan_gradients(a_prime,vf_full,\
+                                         e_grid,j, i+1, LB)
+
+                    # get index of closest next point with same 
+                    # discrete choice as point j
+                    if len(np.where(gradients_f_a< m_bar)[0])> 0:
+                        m_index_fwd = np.where(gradients_f_a< m_bar)[0][0]
+                        g_m_vf = gradients_f_vf[m_index_fwd]
+                        g_m_a = gradients_f_a[m_index_fwd]
+
+                        if g_1> g_m_vf:
+                            keep_i_1_point = True
+                        else:
+                            pass
+                    else:
+                        pass 
+
+                    if keep_i_1_point == False:
+                        vf[i + 1] = np.nan
+                        m_array = append_push(m_array,i+1)
+                    else:
+                        previous_opt_is_intersect = True
+                        k = np.copy(np.array([j]))[0]
+                        j = np.copy(np.array([i]))[0] + 1
 
             # If value falls, remove points 
             elif vf_full[i + 1] - vf_full[j]<0:
                 vf[i + 1] = np.nan
-
                 # append index array of previously deleted points
                 m_array = append_push(m_array,i+1)
 
@@ -261,17 +305,18 @@ def _scan(e_grid, vf, c, a_prime, m_bar, LB):
             # if left turn is made or right turn with no jump, then
             # keep point provisionally and conduct backward scan 
             else:
-                
                 # backward scan 
-                # compute value gradients (i+1) and policy gradients (j)
+                # compute value gradients (from i+1) and 
+                # policy gradients (from j)
                 # wrt to LB previously deleted values 
                 gradients_m_vf, gradients_m_a = back_scan_gradients(m_array,\
                                          a_prime,vf_full,e_grid, j, i+1)
+                keep_j_point = True
 
-                # index m of last that is deleted that does not jump from 
-                # leading point where left turn is made 
+                # index m of last point that is deleted and does not jump from 
+                # leading point where left turn is made. 
                 # this is the closest previous point on the same 
-                # discrete specific 
+                # discrete choice specific 
                 # policy as the leading value we have just jumped to
                 if len(np.where(gradients_m_a< m_bar)[0])> 0:
                     m_index_bws = np.where(gradients_m_a< m_bar)[0][-1]
@@ -282,8 +327,7 @@ def _scan(e_grid, vf, c, a_prime, m_bar, LB):
                 
                 else:
                     m_index_bws = 0
-                    g_m_vf = gradients_m_vf[m_index_bws]
-                    g_m_a = gradients_m_a[m_index_bws]
+                    keep_j_point = True
 
                 # index of m'th point on the e_grid 
                 m_ind = int(m_array[m_index_bws])
@@ -291,9 +335,12 @@ def _scan(e_grid, vf, c, a_prime, m_bar, LB):
                 # if the gradient joining the leading point i+1 (we have just
                 # jumped to) and the point m(the last point on the same 
                 # choice specific policy) is shallower than the 
-                # gradient joining the
+                # gradient joining the i+1 and j, then delete j'th point
 
-                if g_1 > g_j_minus_1 and g_1>=g_m_vf:
+                if g_1 > g_j_minus_1 and g_1>=g_m_vf and g_tilde_a > m_bar :
+                    keep_j_point = False
+
+                if keep_j_point == False:
                     pj = np.copy(np.array([e_grid[j], vf_full[j]]))
                     pi1 = np.copy(np.array([e_grid[i+1], vf_full[i+1]]))
                     pk = np.copy(np.array([e_grid[k], vf_full[k]]))
@@ -309,14 +356,9 @@ def _scan(e_grid, vf, c, a_prime, m_bar, LB):
                 else:
 
                     previous_opt_is_intersect = False
-
                     if g_1 > g_j_minus_1:
                        previous_opt_is_intersect = True
-                       #print(g_1)
-                       #print(g_m_vf)
-                       #print(e_grid[i+1])
-                       #print(e_grid[j])
-                       #print(e_grid[m_ind])
+
                     k = np.copy(np.array([j]))[0]
                     j = np.copy(np.array([i]))[0] + 1
 

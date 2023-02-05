@@ -6,11 +6,11 @@ Author: Akshay Shanker, University of Sydney, akshay.shanker@me.com.
 Todo
 ---
 
-Implement forward scan 
+1. Implement forward scan 
 
-Error comparision with interpolated policy function rather than value function
-if DC-EGM and FUES are not exact
-
+2. Error comparision with interpolated policy function 
+	rather than value function
+	if DC-EGM and FUES are not exact
 
 """
 
@@ -25,7 +25,8 @@ from FUES.FUES import FUES
 from FUES.math_funcs import interp_as, upper_envelope
 
 from HARK.interpolation import LinearInterp
-from HARK.dcegm import calc_segments, calc_multiline_envelope, calc_cross_points
+from HARK.dcegm import calc_segments, calc_multiline_envelope,\
+						 calc_cross_points
 from interpolation import interp
 
 import seaborn as sns
@@ -45,7 +46,8 @@ def plot_egrids(age, e_grid, vf_work,sigma_work_dt, a_prime):
 	a_prime = np.array(cp.asset_grid_A)
 
 	# generate refined grid, value function and policy using FUES 
-	x_clean, vf_clean, c_clean,a_prime_clean, dela = FUES(x, vf, c, a_prime,0.8)
+	x_clean, vf_clean, c_clean,a_prime_clean, dela \
+						= FUES(x, vf, c, a_prime,0.8)
 	# interpolate
 	vf_interp_fues  = np.interp(x,x_clean, vf_clean)
 
@@ -76,8 +78,8 @@ def plot_egrids(age, e_grid, vf_work,sigma_work_dt, a_prime):
 		marker='x',
 		linewidth=0.75)
 
-	ax[0].set_ylim(7.75, 8.27)
-	ax[0].set_xlim(44, 54.5)
+	#ax[0].set_ylim(7.75, 8.27)
+	#ax[0].set_xlim(44, 54.5)
 	#ax[0].set_ylim(7.75,8.27)
 	#ax[0].set_xlim(48,56)
 	ax[0].set_xlabel('Assets (t)', fontsize=11)
@@ -181,7 +183,7 @@ def plot_dcegm_cf(age, g_size, e_grid, vf_work,sigma_work_dt, a_prime,\
 
 	# generate refined grid, value function and policy using FUES 
 	x_clean, vf_clean, c_clean,a_prime_clean, dela = FUES(x, vf,\
-														 c, a_prime,m_bar =2)
+														 c, a_prime,m_bar =3)
 	#print(np.where(np.array(x) == x_clean))
 	# interpolate
 	vf_interp_fues  = np.interp(x,x_clean, vf_clean)
@@ -257,7 +259,7 @@ def plot_dcegm_cf(age, g_size, e_grid, vf_work,sigma_work_dt, a_prime,\
 		vf_clean * cp.beta - cp.delta,
 		color='blue',
 		s=15,
-		marker='x',
+		marker='o',
 		label = 'FUES-EGM optimal points',
 		linewidth=0.75)
 
@@ -272,8 +274,8 @@ def plot_dcegm_cf(age, g_size, e_grid, vf_work,sigma_work_dt, a_prime,\
 
 
 		ax[0].scatter(m_upper2,a1_env2,
-		color='green',
-		#linestyle='--',
+		color='red',
+		marker='x',
 		label = 'DC-EGM policy function',
 		linewidth=0.75)
 
@@ -303,8 +305,8 @@ def plot_dcegm_cf(age, g_size, e_grid, vf_work,sigma_work_dt, a_prime,\
 				linewidth=0.75)
 
 
-		ax[1].set_ylim(5,6)
-		ax[1].set_xlim(56, 64)
+		ax[1].set_ylim(6,6.4)
+		ax[1].set_xlim(20,30)
 		ax[1].set_xlabel('Assets (t)', fontsize=11)
 		ax[1].set_ylabel('Value', fontsize=11)
 		ax[1].spines['right'].set_visible(False)
@@ -312,8 +314,8 @@ def plot_dcegm_cf(age, g_size, e_grid, vf_work,sigma_work_dt, a_prime,\
 		ax[1].legend(frameon=False, prop={'size': 10})
 
 
-		ax[0].set_ylim(20,45)
-		ax[0].set_xlim(56, 64)
+		ax[0].set_ylim(0,5)
+		ax[0].set_xlim(20,40)
 		ax[0].set_xlabel('Assets (t)', fontsize=11)
 		ax[0].set_ylabel('Assets (t+1)', fontsize=11)
 		ax[0].spines['right'].set_visible(False)
@@ -334,7 +336,7 @@ if __name__ == "__main__":
 	from examples.retirement_choice import Operator_Factory,RetirementModel
 	
 	g_size = 2000
-	beta_min = 0.9
+	beta_min = 0.85
 	beta_max = 0.98
 	N_params = 100
 
@@ -378,15 +380,18 @@ if __name__ == "__main__":
 		v_upper, v1_env,vf_interp_fues,a_interp_fues,m_upper, a1_env \
 			= plot_dcegm_cf(age_dcegm, g_size, e_grid,\
 				 			vf_work,sigma_work_dt, cp.asset_grid_A,\
-				 			plot = False)
+				 			plot = True)
 
 		if len(a1_env) == len(a_interp_fues):
-			errors[param_i] = np.max(np.abs(a1_env-a_interp_fues))/len(a1_env)
+			errors[param_i] = \
+					np.max(np.abs(a1_env-a_interp_fues))/len(a1_env)
 
 		else: 
-			errors[param_i] = np.max(np.abs(vf_interp_fues-v_upper))/len(v_upper)
+			errors[param_i] =\
+					 np.max(np.abs(vf_interp_fues-v_upper))/len(v_upper)
 
-		#print(errors[param_i ])
+		print(errors[param_i ])
+		print(beta)
 		
 		param_i = param_i +1
 
