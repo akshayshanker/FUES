@@ -17,5 +17,6 @@ Upper envelope and policy functions for Ishkakov et al (2017) params and smoothi
 
 ![ret_cons_all_sigma](https://user-images.githubusercontent.com/8477783/181172415-72f866b9-348e-4de9-9855-fb509591deb2.png)
 
-Comparison with DC-EGM (age 17)
+Comparison with DC-EGM (age 17)   
+
 ![ret_vf_aprime_all_2000_cf_17](https://user-images.githubusercontent.com/8477783/216799589-e17681e9-749f-42a5-94ad-e324c4001091.png)
