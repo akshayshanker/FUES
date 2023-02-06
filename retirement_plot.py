@@ -3,7 +3,7 @@ model using FUES-EGM by Dobrescu and Shanker (2022).
 
 Author: Akshay Shanker, University of Sydney, akshay.shanker@me.com.
 
-See examples/retirement_choice for model file
+See examples/retirement_choice for model. 
 
 Todo
 ----
@@ -192,7 +192,6 @@ def plot_dcegm_cf(age, g_size, e_grid, vf_work, c_worker, a_prime,
 
     for j in range(len(start)):
         idx = range(start[j], end[j] + 1)
-        #pl.plot(x[idx], vf[idx])
         segments.append([x[idx], vf[idx]])
         c_segments.append(c[idx])
         a_segments.append(a_prime[idx])
@@ -202,15 +201,12 @@ def plot_dcegm_cf(age, g_size, e_grid, vf_work, c_worker, a_prime,
     m_upper, v_upper, inds_upper = upper_envelope(segments)
     vf_interp_fues = np.interp(m_upper, x_clean, vf_clean)
     a_interp_fues = np.interp(m_upper, x_clean, a_prime_clean)
-    # print(np.mean(np.abs()))
 
     c1_env = np.zeros_like(m_upper) + np.nan
     a1_env = np.zeros_like(m_upper) + np.nan
     v1_env = np.zeros_like(m_upper) + np.nan
-    # print(len(inds_upper))
 
     for k, c_segm in enumerate(c_segments):
-        # print(len(c_segm))
         c1_env[inds_upper == k] = c_segm[m_segments[k] .searchsorted(
             m_upper[inds_upper == k])]
 
@@ -407,8 +403,9 @@ if __name__ == "__main__":
     # Compare values policy from DC-EGM with FUES
     # Note we solve the model using FUES. Then at age_dcegm, we take the full
     # EGM grid and compute the upper envelope using DC-EGM and compare to FUES.
-    # Comparison performed on EGM grid points selected by DC-EGM (not all EGM
-    # points, to avoid picking up interpolation error due different methods
+    # Comparison performed on EGM grid points selected by DC-EGM 
+    # (not all EGM points, to avoid picking up interpolation 
+    #  error due different methods
     # of interpolation grids used by DC-EGM and FUES 
 
     for p_list in range(len(params)):
