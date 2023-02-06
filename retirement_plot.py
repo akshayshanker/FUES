@@ -405,8 +405,8 @@ if __name__ == "__main__":
     # EGM grid and compute the upper envelope using DC-EGM and compare to FUES.
     # Comparison performed on EGM grid points selected by DC-EGM 
     # (not all EGM points, to avoid picking up interpolation 
-    #  error due different methods
-    # of interpolation grids used by DC-EGM and FUES 
+    #  error due different interpolation grids 
+    # used by DC-EGM and FUES 
 
     for p_list in range(len(params)):
 
