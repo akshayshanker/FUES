@@ -95,6 +95,9 @@ def interp_as(xp, yp, x, extrap=True):
 
 def upper_envelope(segments,  calc_crossings=False):
     """
+
+    Cloned HARK line segment upper_envelope function  
+
     Finds the upper envelope of a list of non-decreasing segments
     Parameters
     ----------
