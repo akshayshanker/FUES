@@ -3,6 +3,14 @@ model using FUES-EGM by Dobrescu and Shanker (2022).
 
 Author: Akshay Shanker, University of Sydney, akshay.shanker@me.com.
 
+
+Todo
+----
+
+1. Complete docstrings for key functions 
+	and relabel policy functions for 
+	clarity in exposition 
+
 """
 
 import numpy as np
