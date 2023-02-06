@@ -282,7 +282,7 @@ def Operator_Factory(cp):
 
 		# remove sub-optimal points using FUES
 		egrid1, vf_clean, sigma_clean,a_prime_clean, dela = FUES(
-			endog_grid, vf_work_t_inv, sigma_work_t_inv, asset_grid_A, m_bar = 0.8)
+			endog_grid, vf_work_t_inv, sigma_work_t_inv, asset_grid_A, m_bar = 2)
 
 
 		# interpolate on even start of period t asset grid for worker
@@ -290,14 +290,14 @@ def Operator_Factory(cp):
 		sigma_work_t = interp_as(egrid1, sigma_clean, asset_grid_wealth)
 
 
-		pos = np.where(np.abs(np.diff(a_prime_clean)/np.diff(egrid1)) > 1)[0] + 1
+		#pos = np.where(np.abs(np.diff(a_prime_clean)/np.diff(egrid1)) > 1)[0] + 1
 		#print(pos)
 
-		for p in pos:
+		#for p in pos:
 			#print(pos)
 			#print(vf_clean)
-			sigma_clean[p+1] = sigma_clean[p]
-			vf_clean[p+1]= vf_clean[p]
+		#	sigma_clean[p+1] = sigma_clean[p]
+		#	vf_clean[p+1]= vf_clean[p]
 			#egrid1 = np.insert(egrid1, pos, np.nan)
 
 
@@ -320,7 +320,7 @@ def Operator_Factory(cp):
 		uc_t = du(sigma_t)
 
 		return uc_t, sigma_work_t_inv, vf_t, vf_work_t_inv,\
-			endog_grid, sigma_work_t
+			endog_grid, sigma_t
 
 	
 
@@ -340,11 +340,11 @@ def Operator_Factory(cp):
 		
 
 		# Empty grids for workers for each t
-		vf_work = np.empty((cp.T, cp.grid_size)) # value function for worker (unrefined)
-		vf_uncond = np.empty((cp.T, cp.grid_size)) # value function refined unconditioned
-		sigma_work = np.empty((cp.T, cp.grid_size)) # consumption function refined unconditioned
-		sigma_work_dt = np.empty((cp.T, cp.grid_size)) # consumption policy function for worker (unrefined)
-		e_grid = np.empty((cp.T, cp.grid_size)) # endogenous grid for worker (unrefined)
+		vf_work_unref = np.empty((cp.T, cp.grid_size)) # value function for worker (unrefined)
+		vf_refined = np.empty((cp.T, cp.grid_size)) # value function refined
+		c_refined = np.empty((cp.T, cp.grid_size)) # consumption function refined unconditioned
+		c_worker_unref = np.empty((cp.T, cp.grid_size)) # consumption policy function for worker (unrefined)
+		e_grid_worker_unref = np.empty((cp.T, cp.grid_size)) # endogenous grid for worker (unrefined)
 
 		# Step 1: Solve retiree policy
 		sigma_prime_ret, VF_prime_ret\
@@ -363,7 +363,7 @@ def Operator_Factory(cp):
 		uc_prime_work = cp.du(sigma_prime_terminal)
 
 	   #time_start = time.time()
-	   # backward induction to solve for workers each period 
+	   #backward induction to solve for workers each period 
 		for i in range(T):
 
 			age = int(T - i - 1)
@@ -371,17 +371,18 @@ def Operator_Factory(cp):
 				uc_prime_work, VF_prime_work, sigma_retirees[age, :], vf_retirees[age, :], age, 2)
 
 			# store the grids for plotting 
-			vf_work[age, :] = vf_work_t_inv
-			vf_uncond[age, :] = vf_t
-			sigma_work_dt[age, :] = sigma_work_t_inv
-			e_grid[age, :] = endog_grid
-			sigma_work[age] = cons_pol
+			vf_work_unref[age, :] = vf_work_t_inv
+			vf_refined[age, :] = vf_t
+			c_worker_unref[age, :] = sigma_work_t_inv
+			e_grid_worker_unref[age, :] = endog_grid
+			c_refined[age,:] = cons_pol
 
 			# next period inputs to solver 
 			uc_prime_work = uc_t
 			VF_prime_work = vf_t
+			#print(age)
 
-		return e_grid, vf_work,vf_uncond, sigma_work_dt,sigma_work
+		return e_grid_worker_unref, vf_work_unref,vf_refined, c_worker_unref,c_refined
 
 	return Ts_ret, Ts_work, iter_bell
 

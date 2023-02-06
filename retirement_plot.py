@@ -1,12 +1,12 @@
-"""Solution of Ishkakov et al (2017) retirement choice
+""" Script to plot solution of Ishkakov et al (2017) retirement choice
 model using FUES-EGM by Dobrescu and Shanker (2022).
 
 Author: Akshay Shanker, University of Sydney, akshay.shanker@me.com.
 
-Todo
----
+See examples/retirement_choice for model file
 
-1. Implement forward scan
+Todo
+----
 
 
 """
@@ -16,6 +16,7 @@ from numba import jit
 import time
 import dill as pickle
 from numba import njit, prange
+from sklearn.utils.extmath import cartesian 
 
 from FUES.FUES import FUES
 
@@ -31,23 +32,22 @@ from matplotlib.ticker import FormatStrFormatter
 import matplotlib.pylab as pl
 
 
-def plot_egrids(age, e_grid, vf_work, sigma_work_dt, a_prime):
-    # Plot unrefined vs refined endogenous grid for different ages
+def plot_egrids(age, e_grid, vf_work, c_worker, g_size):
+    # Plot value corr. and policy on 
+    # unrefined vs refined endogenous grid for age
 
     # get unrefined endogenous grid, value function and consumption
     # for worker at time t
     x = np.array(e_grid[age])
     vf = np.array(vf_work[age])
-    c = np.array(sigma_work_dt[age])
+    c = np.array(c_worker[age])
     a_prime = np.array(cp.asset_grid_A)
 
     # generate refined grid, value function and policy using FUES
     x_clean, vf_clean, c_clean, a_prime_clean, dela \
         = FUES(x, vf, c, a_prime, 0.8)
-    # interpolate
-    vf_interp_fues = np.interp(x, x_clean, vf_clean)
 
-    # Plot  upper envelope and asset policy
+    # make plots  
     pl.close()
     fig, ax = pl.subplots(1, 2)
     sns.set(
@@ -74,12 +74,10 @@ def plot_egrids(age, e_grid, vf_work, sigma_work_dt, a_prime):
         marker='x',
         linewidth=0.75)
 
-    #ax[0].set_ylim(7.75, 8.27)
-    #ax[0].set_xlim(44, 54.5)
-    # ax[0].set_ylim(7.75,8.27)
-    # ax[0].set_xlim(48,56)
     ax[0].set_xlabel('Assets (t)', fontsize=11)
     ax[0].set_ylabel('Value', fontsize=11)
+    ax[0].set_ylim(7.6, 8.5)
+    ax[0].set_xlim(44, 55)
     ax[0].spines['right'].set_visible(False)
     ax[0].spines['top'].set_visible(False)
     ax[0].legend(frameon=False, prop={'size': 10})
@@ -108,10 +106,8 @@ def plot_egrids(age, e_grid, vf_work, sigma_work_dt, a_prime):
         linewidth=0.75,
         label='Optimal points')
 
-    ax[1].set_ylim(20, 45)
-    ax[1].set_xlim(44, 54.2)
-    # ax[1].set_ylim(20,55)
-    # ax[1].set_xlim(48,60)
+    ax[1].set_ylim(20, 40)
+    ax[1].set_xlim(44, 55)
     ax[1].set_ylabel('Assets (t+1)', fontsize=11)
     ax[1].set_xlabel('Assets (t)', fontsize=11)
     ax[1].spines['right'].set_visible(False)
@@ -129,7 +125,7 @@ def plot_egrids(age, e_grid, vf_work, sigma_work_dt, a_prime):
     return None
 
 
-def plot_cons_pol(e_grid, vf_work, sigma_work, a_prime):
+def plot_cons_pol(sigma_work):
     # Plot consumption policy  for difference ages
     sns.set(style="whitegrid",
             rc={"font.size": 10,
@@ -142,9 +138,9 @@ def plot_cons_pol(e_grid, vf_work, sigma_work, a_prime):
 
         cons_pol = np.copy(sigma_work[t])
 
-        # remove jump joints
-        pos = np.where(np.abs(np.diff(cons_pol) /
-                       np.diff(cp.asset_grid_A)) > 0.4)[0] + 1
+        # remove jump joints for plotting only
+        pos = np.where(np.abs(np.diff(cons_pol))\
+                    /np.diff(cp.asset_grid_A)> 0.3)[0] + 1
         y1 = np.insert(cons_pol, pos, np.nan)
         x1 = np.insert(cp.asset_grid_A, pos, np.nan)
 
@@ -167,13 +163,13 @@ def plot_cons_pol(e_grid, vf_work, sigma_work, a_prime):
     return None
 
 
-def plot_dcegm_cf(age, g_size, e_grid, vf_work, sigma_work_dt, a_prime,
+def plot_dcegm_cf(age, g_size, e_grid, vf_work, c_worker, a_prime,
                   plot=True):
     # get unrefined endogenous grid, value function and consumption
     # for worker at time t
     x = e_grid[age]
     vf = vf_work[age]
-    c = sigma_work_dt[age]
+    c = c_worker[age]
     a_prime = cp.asset_grid_A
     time_start_dcegm = time.time()
 
@@ -181,8 +177,7 @@ def plot_dcegm_cf(age, g_size, e_grid, vf_work, sigma_work_dt, a_prime,
 
     # generate refined grid, value function and policy using FUES
     x_clean, vf_clean, c_clean, a_prime_clean, dela = FUES(x, vf,
-                                                           c, a_prime, m_bar=3)
-    #print(np.where(np.array(x) == x_clean))
+                                                           c, a_prime, m_bar=2)
     # interpolate
     vf_interp_fues = np.interp(x, x_clean, vf_clean)
     # len(vf_interp_fues[x_clean.searchsorted(x)])
@@ -254,8 +249,10 @@ def plot_dcegm_cf(age, g_size, e_grid, vf_work, sigma_work_dt, a_prime,
             color='blue',
             s=15,
             marker='x',    
-            label='FUES-EGM optimal points',
+            label='FUES-EGM points',
             linewidth=0.75)
+
+
 
         ax[0].scatter(
             x,
@@ -269,16 +266,12 @@ def plot_dcegm_cf(age, g_size, e_grid, vf_work, sigma_work_dt, a_prime,
         ax[0].scatter(m_upper2, a1_env2,
                       edgecolors='red',
                       marker='o',
+                      s=15,
                       label='DC-EGM point',
                       facecolors='none',
                       linewidth=0.75)
 
-        for k, a_segm in enumerate(a_segments):
-            ax[0].plot(m_segments[k], a_segm,
-                       color='black',
-                       linestyle='--',
-                       #label = 'DC-EGM policy function',
-                       linewidth=0.75)
+
             # print(m_segments[k])
 
         #for k, v_segm in enumerate(v_segments):
@@ -293,8 +286,20 @@ def plot_dcegm_cf(age, g_size, e_grid, vf_work, sigma_work_dt, a_prime,
             color='blue',
             s=15,
             marker='x',
-            label='FUES-EGM opt. point',
+            label='FUES-EGM points',
             linewidth=0.75)
+
+        for k, a_segm in enumerate(a_segments):
+            if k == 0:
+                label1 = 'DC-EGM line seg.'
+            else:
+                label1 = None 
+
+            ax[0].plot(m_segments[k], a_segm,
+                       color='black',
+                       linestyle='--',
+                       label = label1,
+                       linewidth=0.75)
 
         ax[1].set_ylim(7.5, 9.2)
         ax[1].set_xlim(40,80)
@@ -310,7 +315,7 @@ def plot_dcegm_cf(age, g_size, e_grid, vf_work, sigma_work_dt, a_prime,
         ax[0].set_ylabel('Assets (t+1)', fontsize=11)
         ax[0].spines['right'].set_visible(False)
         ax[0].spines['top'].set_visible(False)
-        ax[0].legend(frameon=False, prop={'size': 10})
+        ax[0].legend(frameon=False, prop={'size': 10}, loc = 'upper left')
 
         fig.tight_layout()
         fig.savefig('plots/retirement/ret_vf_aprime_all_{}_cf_{}.png'
@@ -323,32 +328,100 @@ if __name__ == "__main__":
 
     from examples.retirement_choice import Operator_Factory, RetirementModel
 
+    
+    # Generate baseline parameter solution using FUES and make plots 
+
+    # Create instance of RetirementModel
+    g_size_baseline = 2000
+    cp = RetirementModel(r=0.02,
+                         beta= 0.98,
+                         delta=1,
+                         y=20,
+                         b=1E-10,
+                         grid_max_A=500,
+                         grid_size=g_size_baseline,
+                         T=20,
+                         smooth_sigma=0)
+
+    # Unpack solver operators 
+    Ts_ret, Ts_work, iter_bell = Operator_Factory(cp)
+
+    # Get optimal value and policy functions using FUES
+    # by iterating on the Bellman equation 
+    e_grid_worker_unref, vf_work_unref,vf_refined,\
+             c_worker_unref,c_refined = iter_bell(cp)
+
+    # 1. Example use of FUES to refine EGM grids
+    # get unrefined endogenous grid, value function and consumption
+    # for worker at time age
+    age = 17 
+    x = np.array(e_grid_worker_unref[age])
+    vf = np.array(vf_work_unref[age])
+    c = np.array(c_worker_unref[age])
+    a_prime = np.array(cp.asset_grid_A)
+
+    # generate refined grid, value function and policy using FUES
+    x_clean, vf_clean, c_clean, a_prime_clean, dela \
+        = FUES(x, vf, c, a_prime, 2)
+
+
+    # 2. Plot and save value function and policy on EGM grids
+    # and refined EGM grids 
+    plot_egrids(17, e_grid_worker_unref, vf_work_unref,\
+                     c_worker_unref, g_size_baseline)
+
+    # 3. Plot consumption function (for worker, 
+    # but before next period work decision
+    # made)
+    plot_cons_pol(c_refined)
+
+    # 4. Compute and plot comparison with DC-EGM 
+
+    v_upper, v1_env, vf_interp_fues, a_interp_fues, m_upper, a1_env \
+        = plot_dcegm_cf(age, g_size_baseline, e_grid_worker_unref,
+                            vf_work_unref, c_worker_unref, cp.asset_grid_A,
+                            plot=True)
+
+    # 5. Evalute DC-EGM and FUES upper envelope for 
+    # variety of parameter draws 
+
     g_size = 2000
     beta_min = 0.85
     beta_max = 0.98
-    N_params = 100
+    N_params = 50
+    y_min = 10
+    y_max = 25
+    delta_min = 0.5
+    delta_max = 1.5
+
+    betas = np.linspace(beta_min, beta_max, N_params)
+    ys = np.linspace(y_min, y_max, N_params)
+    deltas = np.linspace(delta_min, delta_max, N_params)
+    params = cartesian([betas,ys,deltas])
 
     # age at which to compcare DC-EGM with FUES
     age_dcegm = 17
 
-    errors = np.empty(N_params)
-
-    # index for parameter draw
-    param_i = 0
+    errors = np.empty(len(params))
 
     # Compare values policy from DC-EGM with FUES
     # Note we solve the model using FUES. Then at age_dcegm, we take the full
     # EGM grid and compute the upper envelope using DC-EGM and compare to FUES.
     # Comparison performed on EGM grid points selected by DC-EGM (not all EGM
-    # points, to avoid picking up interpolation error)
+    # points, to avoid picking up interpolation error due different methods
+    # of interpolation grids used by DC-EGM and FUES 
 
-    for beta in np.linspace(beta_min, beta_max, N_params):
+    for p_list in range(len(params)):
+
+        beta = params[p_list][0]
+        delta = params[p_list][2]
+        y = params[p_list][1]
 
         # Create instance of RetirementModel
         cp = RetirementModel(r=0.02,
                              beta=beta,
-                             delta=1,
-                             y=20,
+                             delta=delta,
+                             y=y,
                              b=1E-1,
                              grid_max_A=500,
                              grid_size=g_size,
@@ -359,14 +432,14 @@ if __name__ == "__main__":
         Ts_ret, Ts_work, iter_bell = Operator_Factory(cp)
 
         # Get optimal value and policy functions using FUES
-        e_grid, vf_work, vf_uncond, sigma_work_dt, sigma_work = iter_bell(cp)
+        e_grid, vf_work, vf_uncond, c_worker, sigma_work = iter_bell(cp)
 
         # calc upper envelope using DC-EGM and compare on EGM points to
         # FUES
         v_upper, v1_env, vf_interp_fues, a_interp_fues, m_upper, a1_env \
             = plot_dcegm_cf(age_dcegm, g_size, e_grid,
-                            vf_work, sigma_work_dt, cp.asset_grid_A,
-                            plot=True)
+                            vf_work, c_worker, cp.asset_grid_A,
+                            plot=False)
 
         if len(a1_env) == len(a_interp_fues):
             errors[param_i] = \
@@ -376,7 +449,7 @@ if __name__ == "__main__":
             errors[param_i] =\
                 np.max(np.abs(vf_interp_fues - v_upper)) / len(v_upper)
 
-        #print(errors[param_i ])
+        print(errors[param_i ])
         # print(beta)
 
         param_i = param_i + 1
