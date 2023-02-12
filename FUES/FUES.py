@@ -1,5 +1,5 @@
-"""Functions to implement fast upper-envelope scan as described by
-Dobrescu and Shanker (2022)
+"""Functions to implement fast upper-envelope scan by
+Dobrescu and Shanker (2023)
 
 Author: Akshay Shanker, University of Sydney, akshay.shanker@me.com.
 
@@ -23,7 +23,7 @@ import copy
 
 @njit
 def append_push(x_array, m):
-    """ Deletes first value of array,
+    """ Delete first value of array,
         pushes back index of all undeleted
         values and appends m to final index"""
 
@@ -36,9 +36,9 @@ def append_push(x_array, m):
 
 @njit
 def back_scan_gradients(m_array, a_prime, vf_full, e_grid, j, q):
-    """ Computes gradients of value correspondence points
+    """ Compute gradients of value correspondence points
         and policy points with respect to all m values and policy
-        points in backward scan array m_array
+        points in m_array
 
         See Figure 5, right panel in DS (2023) """
 
@@ -145,10 +145,10 @@ def FUES(e_grid, vf, c, a_prime, b=1e-10, m_bar=2, LB=10):
             policy 2 points at endogenous grid
     b: float64
         lower bound for the endogenous grid
-    m_bar: float
+    m_bar: float64
             jump detection threshold
     LB: int
-         length of backward scan search
+         length of bwd and fwd scan search
 
     Returns
     -------
@@ -167,21 +167,18 @@ def FUES(e_grid, vf, c, a_prime, b=1e-10, m_bar=2, LB=10):
     -----
     Policy 2 is used to determine jumps in policy.
 
-    The procedure below attaches NaN values to vf array
-    where points are sub-optimal.
+    FUES attaches NaN values to vf array
+    where points are sub-optimal and not to be retained.
 
     The code below checks to see if multiple EGM points equal the lower
     bound of the endogenous grid. If multiple EGM points equal the lower bound,
-    the one yielding the highest value is retained.
-
-    So far in applications in DS (2022),
-    the only multiple EGM values occur on the lower bound (see Application 2
-    for DS, 2022).
-
+    the one yielding the highest value is retained. So far in applications 
+    in DS (2023),the only multiple EGM values occur on the 
+    lower bound (see Application 2 for DS, 2023).
 
     Todo
     ----
-    Incorporate explicit step to check for multiple
+    Incorporate explicit check for multiple
     equal EGM grid values (other than the lb).
 
     Incorporate full functionality to attach crossing points.
@@ -189,7 +186,7 @@ def FUES(e_grid, vf, c, a_prime, b=1e-10, m_bar=2, LB=10):
     """
 
     # determine locations where enogenous grid points are
-    # equal the lower bound
+    # equal to the lower bound
     if len(vf[np.where(e_grid <= b)]) > 0:
         vf_lb_max = max(vf[np.where(e_grid <= b)])
 
@@ -198,7 +195,7 @@ def FUES(e_grid, vf, c, a_prime, b=1e-10, m_bar=2, LB=10):
             if e_grid[i] <= b and vf[i] < vf_lb_max:
                 vf[i] = np.nan
 
-    # remove any NaN values from vf array
+    # remove NaN values from vf array
     e_grid = e_grid[np.where(~np.isnan(vf))]
     c = c[np.where(~np.isnan(vf))]
     a_prime = a_prime[np.where(~np.isnan(vf))]
@@ -225,7 +222,7 @@ def FUES(e_grid, vf, c, a_prime, b=1e-10, m_bar=2, LB=10):
 def _scan(e_grid, vf, c, a_prime, m_bar, LB, fwd_scan_do=True):
     """" Implements the scan for FUES"""
 
-    # leading index for optimal values  j
+    # leading index for optimal values j
     # leading index for value to be `checked' is i+1
 
     # create copy of value function
@@ -235,7 +232,7 @@ def _scan(e_grid, vf, c, a_prime, m_bar, LB, fwd_scan_do=True):
     # empty array to store policy function gradient
     dela = np.zeros(len(vf))
 
-    # array of previously deleted indices to be used in backward scan
+    # array of previously sub-optimal indices to be used in backward scan
     m_array = np.zeros(LB)
 
     # FUES scan
