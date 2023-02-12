@@ -263,6 +263,7 @@ def Operator_Factory(cp):
         """
 
         # Empty grids for time t consumption, vf, enog grid
+        time_start_all = time.time()
         sigma_work_t_inv = np.zeros(grid_size)
         vf_work_t_inv = np.zeros(grid_size)
         endog_grid = np.zeros(grid_size)
@@ -282,14 +283,15 @@ def Operator_Factory(cp):
             endog_grid[i] = c_t + asset_grid_A[i]
 
         min_a_val = endog_grid[0]
-        # print(min_a_val)
 
         # wealth grid points located at time t asset grid points
         asset_grid_wealth = R * asset_grid_A + y
 
         # remove sub-optimal points using FUES
+        time_start_fues = time.time()
         egrid1, vf_clean, sigma_clean, a_prime_clean, dela = FUES(
             endog_grid, vf_work_t_inv, sigma_work_t_inv, asset_grid_A, m_bar=2)
+        time_end_fues = time.time()
 
         # interpolate on even start of period t asset grid for worker
         vf_work_t = interp_as(egrid1, vf_clean, asset_grid_wealth)
@@ -323,8 +325,13 @@ def Operator_Factory(cp):
         vf_t = work_choice * (vf_work_t) + (1 - work_choice) * vf_ret_t
         uc_t = du(sigma_t)
 
+        time_end_all = time.time()
+
+        time_fues = time_end_fues - time_start_fues 
+        time_all  =  time_end_all - time_start_all
+
         return uc_t, sigma_work_t_inv, vf_t, vf_work_t_inv,\
-            endog_grid, sigma_t
+            endog_grid, sigma_t, time_fues, time_all
 
     def iter_bell(cp):
         T = cp.T
@@ -368,14 +375,18 @@ def Operator_Factory(cp):
         VF_prime_work = cp.u(sigma_prime_terminal)
         uc_prime_work = cp.du(sigma_prime_terminal)
 
-   #time_start = time.time()
-   # backward induction to solve for workers each period
+        iter_time_age_fues = np.zeros(cp.T)
+        iter_time_age_all = np.zeros(cp.T)
+
+        #
+        # backward induction to solve for workers each period
         for i in range(T):
-
             age = int(T - i - 1)
-            uc_t, sigma_work_t_inv, vf_t, vf_work_t_inv, endog_grid, cons_pol = Ts_work(
-                uc_prime_work, VF_prime_work, sigma_retirees[age, :], vf_retirees[age, :], age, 2)
-
+            uc_t, sigma_work_t_inv, vf_t, vf_work_t_inv,\
+            endog_grid, cons_pol, time_fues, time_all\
+                 = Ts_work(uc_prime_work, VF_prime_work,\
+                            sigma_retirees[age, :],\
+                             vf_retirees[age, :], age, 2)
             # store the grids for plotting
             vf_work_unref[age, :] = vf_work_t_inv
             vf_refined[age, :] = vf_t
@@ -386,8 +397,16 @@ def Operator_Factory(cp):
             # next period inputs to solver
             uc_prime_work = uc_t
             VF_prime_work = vf_t
-            # print(age)
+            
 
-        return e_grid_worker_unref, vf_work_unref, vf_refined, c_worker_unref, c_refined
+            iter_time_age_fues[age] = time_fues
+            iter_time_age_all[age] = time_all
+
+        mean_times = np.zeros(2)
+        mean_times[1]  = np.mean(iter_time_age_all)
+        mean_times[0] = np.mean(iter_time_age_fues)
+
+
+        return e_grid_worker_unref, vf_work_unref, vf_refined, c_worker_unref, c_refined, mean_times
 
     return Ts_ret, Ts_work, iter_bell

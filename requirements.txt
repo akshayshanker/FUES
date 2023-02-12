@@ -1,0 +1,11 @@
+dill==0.3.4
+HARK==1.0.0.dev3
+interpolation==2.2.4
+matplotlib==3.5.2
+numba==0.56.4
+numpy==1.23.5
+PyYAML==6.0
+quantecon==0.6.0
+scikit_learn==1.2.1
+scipy==1.9.1
+seaborn==0.11.2

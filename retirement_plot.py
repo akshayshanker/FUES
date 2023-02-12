@@ -345,7 +345,7 @@ if __name__ == "__main__":
     # Get optimal value and policy functions using FUES
     # by iterating on the Bellman equation 
     e_grid_worker_unref, vf_work_unref,vf_refined,\
-             c_worker_unref,c_refined = iter_bell(cp)
+             c_worker_unref,c_refined, iter_time_age = iter_bell(cp)
 
     # 1. Example use of FUES to refine EGM grids
     # get unrefined endogenous grid, value function and consumption
@@ -384,7 +384,7 @@ if __name__ == "__main__":
     g_size = 2000
     beta_min = 0.85
     beta_max = 0.98
-    N_params = 50
+    N_params = 10
     y_min = 10
     y_max = 25
     delta_min = 0.5
@@ -399,6 +399,8 @@ if __name__ == "__main__":
     age_dcegm = 17
 
     errors = np.empty(len(params))
+    fues_times = np.empty(len(params))
+    all_iter_times = np.empty(len(params))
 
     # Compare values policy from DC-EGM with FUES
     # Note we solve the model using FUES. Then at age_dcegm, we take the full
@@ -407,6 +409,7 @@ if __name__ == "__main__":
     # (not all EGM points, to avoid picking up interpolation 
     #  error due different interpolation grids 
     # used by DC-EGM and FUES 
+    param_i = 0
 
     for p_list in range(len(params)):
 
@@ -429,7 +432,8 @@ if __name__ == "__main__":
         Ts_ret, Ts_work, iter_bell = Operator_Factory(cp)
 
         # Get optimal value and policy functions using FUES
-        e_grid, vf_work, vf_uncond, c_worker, sigma_work = iter_bell(cp)
+        e_grid, vf_work, vf_uncond, c_worker, sigma_work, mean_times\
+             = iter_bell(cp)
 
         # calc upper envelope using DC-EGM and compare on EGM points to
         # FUES
@@ -446,14 +450,22 @@ if __name__ == "__main__":
             errors[param_i] =\
                 np.max(np.abs(vf_interp_fues - v_upper)) / len(v_upper)
 
-        print(errors[param_i ])
-        # print(beta)
+        #print(errors[param_i ])
+        fues_times[param_i] = mean_times[0]
+        all_iter_times[param_i]  = mean_times[1]
+        #print(beta)
 
         param_i = param_i + 1
 
-    print(
-        "Avg error between DC-EGM and FUES for {} beta values between {}  and {} is {}".format(
-            N_params,
-            beta_min,
-            beta_max,
-            np.mean(errors)))
+
+    print("Test DC-EGM vs. FUES on uniform grid of {} parameters:".format(N_params**3))
+    print(' '    'beta: ({},{}), delta: ({},{}), y: ({},{})'\
+            .format(beta_min, beta_max, y_min, y_max, delta_min, delta_max))
+    print("Avg. error between DC-EGM and FUES: {0:.6f}"\
+            .format(np.mean(errors)))
+    print('Timings:')
+    print(' '    'Avg. FUES time (secs): {0:.6f}'\
+            .format(np.mean(fues_times)))
+    print(' '    'Avg. worker iteration time (secs): {0:.6f}'\
+            .format(np.mean(all_iter_times)))
+
