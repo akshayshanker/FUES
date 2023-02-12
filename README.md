@@ -43,7 +43,7 @@ Comparison with DC-EGM (age 17)
 
 The following code block in `retirement_plot.py' compares DC-EGM with FUES across an array of parameter values. 
 
-https://github.com/akshayshanker/FUES_EGM/blob/91309700904b3c9bb2fa23f0d919f5d6c083d2ff/retirement_plot.py#L381-L459
+https://github.com/akshayshanker/FUES_EGM/blob/fa725a6285fee9def7e8ad07606603a658cdccf6/retirement_plot.py#L381-L470
 
 To perform the comparison, we first solve the full model using FUES, which gives the final solution computed using FUES 
 and also the unrefined endogenous grids for each age. For a given age, we then compute the upper envelope using DC-EGM
@@ -54,10 +54,10 @@ by DC-EGM and FUES. DC-EGM interpolates line  segments on the unrefined grid whi
 interpolates over the unrefined grid.)
 
 ```
-Test DC-EGM vs. FUES on uniform grid of 8 parameters:
+Test DC-EGM vs. FUES on uniform grid of 1000 parameters:
  beta: (0.85,0.98), delta: (10,25), y: (0.5,1.5)
 Avg. error between DC-EGM and FUES: 0.000000
 Timings:
- Avg. FUES time (secs): 0.008220
- Avg. worker iteration time (secs): 0.025791
+ Avg. FUES time (secs): 0.001375
+ Avg. worker iteration time (secs): 0.004314
  ```
