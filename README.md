@@ -41,7 +41,7 @@ Comparison with DC-EGM (age 17)
 
 ### Comparison to DC-EGM
 
-The following code block in `retirement_plot.py' compares DC-EGM with FUES across an array of parameter values. 
+The following code block in `retirement_plot.py` compares DC-EGM with FUES across an array of parameter values:
 
 https://github.com/akshayshanker/FUES_EGM/blob/fa725a6285fee9def7e8ad07606603a658cdccf6/retirement_plot.py#L381-L470
 
