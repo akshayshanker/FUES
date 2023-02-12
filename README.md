@@ -49,7 +49,7 @@ To perform the comparison, we first solve the full model using FUES, which gives
 and also the unrefined endogenous grids for each age. For a given age, we then compute the upper envelope using DC-EGM
 and FUES. The upper envelopes are compared on the optimal endogenous grid points as determined by DC-EGM. 
 
-(Compared on optimal points to avoid picking up errors arising from different the interpolation steps used 
+(Compared on optimal points to avoid picking up errors arising from different interpolation steps used 
 by DC-EGM and FUES. DC-EGM interpolates line  segments on the unrefined grid while FUES first calculates the optimal points then 
 interpolates over the unrefined grid.)
 
