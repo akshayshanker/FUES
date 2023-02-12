@@ -3,9 +3,11 @@ EGM using fast upper-envelope scan.
 
 Initial beta replication material for `Fast upper-envelope scan for discrete-continuous dynamic programming' by Dobrescu and Shanker (2023). 
 
+See `slides.pdf` for overview of upper envelope scan.  
+
 ## Example use of FUES
 
-Suppose we have arrays an unrefined endogenous grid `x_hat`, the value correspondence on the unrefined grid `v_hat`
+Suppose we have the following arrays: an unrefined endogenous grid `x_hat`, the value correspondence on the unrefined grid `v_hat`
 and two policy functions, `c_hat` and `a_prime_hat`. 
 
 ```
@@ -15,8 +17,8 @@ x_clean, vf_clean, c_clean, a_prime_clean, dela \
         = FUES(x_hat, v_hat, c_hat, a_prime_hat, M_bar = 2, LB = 10)
 ```
 
-The output arrays are the refined grids. The value `M_bar` is the jump detection threshold and `LB` is the number of steps to take
-in the forward and backward scan. 
+The output arrays are refined grids. The value `M_bar` is the jump detection threshold and `LB` is the number of steps to take
+in the forward and backward scans. 
 
 
 
