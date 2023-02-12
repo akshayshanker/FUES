@@ -7,6 +7,9 @@ See examples/retirement_choice for model.
 
 Todo
 ----
+- Improve integration with DC-EGM and implement
+    timing comparison with DC-EGM with jit compiled
+    version of DC-EGM
 
 
 """
@@ -379,7 +382,7 @@ if __name__ == "__main__":
                             plot=True)
 
     # 5. Evalute DC-EGM and FUES upper envelope for 
-    # variety of parameter draws 
+    # parms on a grid.  
 
     g_size = 2000
     beta_min = 0.85
@@ -449,14 +452,10 @@ if __name__ == "__main__":
         else:
             errors[param_i] =\
                 np.max(np.abs(vf_interp_fues - v_upper)) / len(v_upper)
-
-        #print(errors[param_i ])
         fues_times[param_i] = mean_times[0]
         all_iter_times[param_i]  = mean_times[1]
-        #print(beta)
 
         param_i = param_i + 1
-
 
     print("Test DC-EGM vs. FUES on uniform grid of {} parameters:".format(N_params**3))
     print(' '    'beta: ({},{}), delta: ({},{}), y: ({},{})'\
