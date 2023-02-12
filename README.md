@@ -1,8 +1,9 @@
 # FUES_EGM
-EGM using fast upper-envelope scan.
-
+EGM using fast upper-envelope scan (fues).
 
 Initial beta replication material for `Fast upper-envelope scan for discrete-continuous dynamic programming' by Dobrescu and Shanker (2023). 
+
+See `slides....pdf` for overview of upper envelope scan. 
 
 ## Example use of FUES
 
