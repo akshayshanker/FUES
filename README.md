@@ -58,7 +58,7 @@ interpolates over the unrefined grid.)
 
 ```
 Test DC-EGM vs. FUES on uniform grid of 1000 parameters:
- beta: (0.85,0.98), delta: (10,25), y: (0.5,1.5)
+ beta: (0.85,0.98), y: (10,25), delta: (0.5,1.5)
 Avg. error between DC-EGM and FUES: 0.000000
 Timings:
  Avg. FUES time (secs): 0.001375
