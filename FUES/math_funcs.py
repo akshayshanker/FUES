@@ -2,7 +2,8 @@ import math
 from numba import njit, vectorize, prange
 import numpy as np
 from quantecon.optimize.root_finding import brentq
-from HARK.dcegm import calc_segments, calc_multiline_envelope, calc_cross_points
+#from HARK.dcegm import calc_segments, calc_multiline_envelope, calc_cross_points
+from HARK.dcegm import calc_nondecreasing_segments, upper_envelope, calc_linear_crossing
 
 @njit
 def rootsearch(f,a,b,dx, h_prime,z, Ud_prime_a, Ud_prime_h,t):

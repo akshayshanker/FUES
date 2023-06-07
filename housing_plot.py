@@ -331,9 +331,9 @@ if __name__ == "__main__":
             fig_pol.tight_layout()
             fig_val.tight_layout()
 
-        fig_pol.savefig('hous_plots/policy_adj_housing_{}.png'.format(plot_t))
-        fig_val.savefig('hous_plots/value_housing_{}.png'.format(plot_t))
-        fig_pol_a.savefig('hous_plots/policy_adj_assets_{}.png'.format(plot_t))
+        fig_pol.savefig('plots/housing/policy_adj_housing_{}.png'.format(plot_t))
+        fig_val.savefig('plots/housing/value_housing_{}.png'.format(plot_t))
+        fig_pol_a.savefig('plots/housing/policy_adj_assets_{}.png'.format(plot_t))
 
         pl.close()
 
@@ -393,7 +393,7 @@ if __name__ == "__main__":
         ax[1, 1].plot(e_grid_cean, hprime_clean, color='blue',
                       linewidth=0.75)
 
-        fig.savefig('hous_plots/scan_test_{}.png'.format(plot_t))
+        fig.savefig('plots/housing/scan_test_{}.png'.format(plot_t))
 
         # FUES-EGM Plots for paper
 
@@ -468,7 +468,7 @@ if __name__ == "__main__":
         fig.tight_layout()
         ax[1].legend(frameon=False, prop={'size': 10})
         fig.savefig(
-            'hous_plots/hous_vf_aprime_all_small_{}.png'.format(plot_t))
+            'plots/housing/hous_vf_aprime_all_small_{}.png'.format(plot_t))
 
         # Plot all EGM points
         pl.close()
@@ -540,4 +540,4 @@ if __name__ == "__main__":
 		fig.tight_layout()
 		ax[1].legend(frameon=False, prop={'size': 10})
 		"""
-        fig.savefig('hous_plots/hous_vf_aprime_all_big_{}.png'.format(plot_t))
+        fig.savefig('plots/housing/hous_vf_aprime_all_big_{}.png'.format(plot_t))

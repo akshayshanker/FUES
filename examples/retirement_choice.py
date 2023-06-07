@@ -24,7 +24,8 @@ from FUES.FUES import FUES
 from FUES.math_funcs import interp_as, upper_envelope
 
 from HARK.interpolation import LinearInterp
-from HARK.dcegm import calc_segments, calc_multiline_envelope, calc_cross_points
+#from HARK.dcegm import calc_segments, calc_multiline_envelope, calc_cross_points
+from HARK.dcegm import calc_nondecreasing_segments, upper_envelope, calc_linear_crossing
 from interpolation import interp
 
 
