@@ -889,7 +889,6 @@ def Operator_Factory(cp):
             i_h = X_all[state][2]
             i_z = int(X_all[state][0])
             z = z_vals[i_z]
-            # print(z)
 
             # for non-adjusters
             wealth_nadj = R * a + y_func(t, z)
@@ -963,15 +962,6 @@ def Operator_Factory(cp):
     def condition_V(new_V_uc, new_Ud_a_uc, new_Ud_h_uc):
         """ Condition the t+1 continuation vaue on
         time t information"""
-
-        # make the exogenuos state index the last
-        #matrix_A_V = new_V_uc.transpose((1,2,0))
-        #matrix_A_ua = new_Ud_a_uc.transpose((1,2,0))
-        #matrix_A_uh = new_Ud_h_uc.transpose((1,2,0))
-
-        # rows of EBA_P2 correspond to time t all exogenous state index
-        # cols of EBA_P2 correspond to transition to t+1 exogenous state index
-        #matrix_B = Pi
 
         new_V = np.zeros(np.shape(new_V_uc))
         new_UD_a = np.zeros(np.shape(new_Ud_a_uc))
