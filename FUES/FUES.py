@@ -128,7 +128,7 @@ def seg_intersect(a1, a2, b1, b2):
 
 
 @njit
-def FUES(e_grid, vf, c, a_prime, b=1e-10, m_bar=2, LB=10):
+def FUES(e_grid, vf, c, a_prime,del_a, b=1e-10, m_bar=2, LB=10, edog_mbar = True):
     """
     FUES function returns refined EGM grid, value function and
     policy function
@@ -143,12 +143,18 @@ def FUES(e_grid, vf, c, a_prime, b=1e-10, m_bar=2, LB=10):
             policy 1 points at endogenous grid
     a_prime: 1D array
             policy 2 points at endogenous grid
+    del_a: 1D array
+            derivative of poblicy function
     b: float64
         lower bound for the endogenous grid
+
     m_bar: float64
-            jump detection threshold
+            fixed jump detection threshold
     LB: int
          length of bwd and fwd scan search
+    edog_mbar: Bool
+         flag if m_bar is enodgenous using 
+         policy function derivative 
 
     Returns
     -------
@@ -175,6 +181,9 @@ def FUES(e_grid, vf, c, a_prime, b=1e-10, m_bar=2, LB=10):
     the one yielding the highest value is retained. So far in applications 
     in DS (2023),the only multiple EGM values occur on the 
     lower bound (see Application 2 for DS, 2023).
+
+    If endogenous M_bar is used, then policy_a is assumed to 
+    be convex conditional on all future discrete choices. 
 
     Todo
     ----
@@ -209,7 +218,7 @@ def FUES(e_grid, vf, c, a_prime, b=1e-10, m_bar=2, LB=10):
 
     # scan attaches NaN to vf at all sub-optimal points
     e_grid_clean, vf_with_nans, c_clean, a_prime_clean, dela\
-        = _scan(e_grid, vf, c, a_prime, m_bar, LB)
+        = _scan(e_grid, vf, c, a_prime,del_a, m_bar, LB,edog_mbar)
 
     return e_grid_clean[np.where(~np.isnan(vf_with_nans))],\
         vf[np.where(~np.isnan(vf_with_nans))],\
@@ -219,7 +228,7 @@ def FUES(e_grid, vf, c, a_prime, b=1e-10, m_bar=2, LB=10):
 
 
 @njit
-def _scan(e_grid, vf, c, a_prime, m_bar, LB, fwd_scan_do=True):
+def _scan(e_grid, vf, c, a_prime,del_a, m_bar, LB, fwd_scan_do=True, edog_mbar= True):
     """" Implements the scan for FUES"""
 
     # leading index for optimal values j
@@ -253,13 +262,22 @@ def _scan(e_grid, vf, c, a_prime, m_bar, LB, fwd_scan_do=True):
             # gradient with leading index to be checked
             g_1 = (vf_full[i + 1] - vf_full[j]) / (e_grid[i + 1] - e_grid[j])
 
+            # gradient of policy function at current index 
+            M_L = del_a[i+1]
+            M_U = del_a[j]
+
             # policy gradient with leading index to be checked
-            g_tilde_a = np.abs((a_prime[i + 1] - a_prime[j])
-                               / (e_grid[i + 1] - e_grid[j]))
+            g_tilde_a = (a_prime[i + 1] - a_prime[j])
+                               / (e_grid[i + 1] - e_grid[j])
+
+            # Set lower and upper bound to m_bar if fixed m_bar used 
+            if edog_mbar:
+                M_L = m_bar
+                M_U = b_bar 
 
             # if right turn is made and jump registered
             # remove point or perform forward scan
-            if g_1 < g_j_minus_1 and g_tilde_a > m_bar:
+            if g_1 < g_j_minus_1 and M_L> g_tilde_a > M_U:
                 keep_i_1_point = False
 
                 if fwd_scan_do:
