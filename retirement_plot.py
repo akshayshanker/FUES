@@ -384,10 +384,12 @@ if __name__ == "__main__":
     # 5. Evalute DC-EGM and FUES upper envelope for 
     # parms on a grid.  
 
-    g_size = 2000
+    g_size = 300
     beta_min = 0.85
+    g_size_min = 300
+    g_size_max = 2000
     beta_max = 0.98
-    N_params = 10
+    N_params = 2
     y_min = 10
     y_max = 25
     delta_min = 0.5
@@ -395,8 +397,10 @@ if __name__ == "__main__":
 
     betas = np.linspace(beta_min, beta_max, N_params)
     ys = np.linspace(y_min, y_max, N_params)
+    gsizes = np.linspace(g_size_min, g_size_max, N_params)
     deltas = np.linspace(delta_min, delta_max, N_params)
     params = cartesian([betas,ys,deltas])
+
 
     # age at which to compcare DC-EGM with FUES
     age_dcegm = 17
@@ -455,11 +459,13 @@ if __name__ == "__main__":
         fues_times[param_i] = mean_times[0]
         all_iter_times[param_i]  = mean_times[1]
 
+        print(errors[param_i])
+
         param_i = param_i + 1
 
     print("Test DC-EGM vs. FUES on uniform grid of {} parameters:".format(N_params**3))
-    print(' '    'beta: ({},{}), delta: ({},{}), y: ({},{})'\
-            .format(beta_min, beta_max, y_min, y_max, delta_min, delta_max))
+    print(' '    'beta: ({},{}), delta: ({},{}), y: ({},{})  \n '    ' exog. grid size: {}'\
+            .format(beta_min, beta_max, y_min, y_max, delta_min, delta_max,g_size))
     print("Avg. error between DC-EGM and FUES: {0:.6f}"\
             .format(np.mean(errors)))
     print('Timings:')
