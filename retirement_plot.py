@@ -26,8 +26,8 @@ from FUES.FUES import FUES
 from FUES.math_funcs import interp_as, upper_envelope
 
 from HARK.interpolation import LinearInterp
-from HARK.dcegm import calc_segments, calc_multiline_envelope,\
-    calc_cross_points
+from HARK.dcegm import calc_nondecreasing_segments, upper_envelope, calc_linear_crossing
+
 from interpolation import interp
 
 import seaborn as sns
@@ -176,7 +176,8 @@ def plot_dcegm_cf(age, g_size, e_grid, vf_work, c_worker, a_prime,
     a_prime = cp.asset_grid_A
     time_start_dcegm = time.time()
 
-    start, end = calc_segments(x, vf)
+#     start, end = calc_segments(x, vf)
+    start, end = calc_nondecreasing_segments(x, vf)
 
     # generate refined grid, value function and policy using FUES
     x_clean, vf_clean, c_clean, a_prime_clean, dela = FUES(x, vf,
