@@ -151,41 +151,41 @@ def Operator_Factory(cp):
     T = cp.T
 
     @njit
-    def Ts_ret(sigma_prime_ret,
+    def retiree_solver(sigma_prime_ret,
             VF_prime_ret,
             uc_pprime_dcp_ret,
             t):
         """
-        Generates time t policy for retiree
+        Generates time t policy for retiree.
 
         Parameters
         ----------
         sigma_prime_ret : 1D array
-                        t+1 period consumption function
+            t+1 period consumption function.
         VF_prime_ret : 1D array
-                    t+1 period value function (retired)
+            t+1 period value function (retired).
         uc_pprime_dcp_ret : 1D array
-                            derivative of the consumption policy with respect to asset
+            Derivative of the consumption policy with respect to asset.
         t : int
-            Age
+            Age.
 
         Returns
         -------
-        sigma_ret_t: 1D array
-                    consumption policy on assets at start of time t
-        vf_ret_t: 1D array
-                time t value
-        del_a_ret_t: 1D array
-                    derivative of the asset policy with respect to asset
-        uc_pprime_dcp_ret: 1D array
-                        derivative of the consumption policy with respect to asset
+        sigma_ret_t : 1D array
+            Consumption policy on assets at start of time t.
+        vf_ret_t : 1D array
+            Time t value.
+        del_a_ret_t : 1D array
+            Derivative of the asset policy with respect to asset.
+        uc_pprime_dcp_ret : 1D array
+            Derivative of the consumption policy with respect to asset.
 
         Notes
         -----
-        Whether or not to work decision in time t is made
-        at the start of time t. Thus, if agent chooses to retire,
-        total cash at hand will be a(t)(1+r).
+        Whether or not to work decision in time t is made at the start of time t.
+        Thus, if agent chooses to retire, total cash at hand will be a(t)(1+r).
         """
+
 
         # Empty grids for time t consumption, vf, enog grid
         sigma_ret_t_inv = np.zeros(grid_size)
@@ -222,8 +222,10 @@ def Operator_Factory(cp):
         del_a_ret_t = interp_as(endog_grid, dela_a_ret_t_inv, asset_grid_A)
 
         # impose lower bound on liquid assets where a_t < min_a_val
-        sigma_ret_t[np.where(asset_grid_A <= min_a_val)] = asset_grid_A[np.where(asset_grid_A <= min_a_val)]
-        vf_ret_t[np.where(asset_grid_A <= min_a_val)] = u(asset_grid_A[np.where(asset_grid_A <= min_a_val)]) + beta * VF_prime_ret[0]
+        sigma_ret_t[np.where(asset_grid_A <= min_a_val)] \
+                = asset_grid_A[np.where(asset_grid_A <= min_a_val)]
+        vf_ret_t[np.where(asset_grid_A <= min_a_val)]\
+                = u(asset_grid_A[np.where(asset_grid_A <= min_a_val)]) + beta * VF_prime_ret[0]
         del_a_ret_t[np.where(asset_grid_A <= min_a_val)] = 0
         uc_pprime_dcp_ret = ddu(sigma_ret_t)*(R - del_a_ret_t)
 
@@ -231,7 +233,7 @@ def Operator_Factory(cp):
 
 
     #@njit
-    def Ts_work(uc_prime_work,
+    def worker_solver(uc_prime_work,
                 uc_pprime_dcp_work, 
                 VF_prime_work,
                 sigma_ret_t,
@@ -337,11 +339,6 @@ def Operator_Factory(cp):
         sigma_work_t = interp_as(egrid1, sigma_clean, asset_grid_wealth)
         dela_work_t = interp_as(egrid1, dela_clean, asset_grid_wealth)
 
-        #pos = np.where(np.abs(np.diff(a_prime_clean)/np.diff(egrid1)) > 1)[0] + 1
-        #for p in pos:
-        #    sigma_clean[p+1] = sigma_clean[p]
-        #    vf_clean[p+1] = vf_clean[p]
-
         # binding t+1 asset constraint points
         sigma_work_t[np.where(asset_grid_wealth < min_a_val)]\
             = asset_grid_wealth[np.where(asset_grid_wealth < min_a_val)] - asset_grid_A[0]
@@ -373,78 +370,85 @@ def Operator_Factory(cp):
             endog_grid, sigma_t, uddca_t,del_a_unrefined, time_fues, time_all
 
 
-    def iter_bell(cp):
-        T = cp.T
-        grid_size = cp.grid_size
+    def iter_bell(policy_params):
+        max_age = policy_params.max_age
+        grid_len = policy_params.grid_len
 
-        # Values at terminal states
-        sigma_prime_terminal = np.copy(cp.asset_grid_A)
-        v_prime_terminal = cp.u(sigma_prime_terminal)
-        uc_pprime_dcp_terminal = ddu(sigma_prime_terminal) * R
+        # Terminal state values
+        initial_asset_grid = np.copy(policy_params.asset_grid)
+        initial_value_func = policy_params.utility(initial_asset_grid)
+        consumption_derivative_terminal = ddu(initial_asset_grid) * R
 
-        # Empty grids for retirees for each t
-        sigma_retirees = np.empty((cp.T, cp.grid_size))
-        vf_retirees = np.empty((cp.T, cp.grid_size))
-        dela_retirees = np.empty((cp.T, cp.grid_size))
+        # Allocate memory for retiree data for each age
+        retiree_consumption = np.empty((max_age, grid_len))
+        retiree_values = np.empty((max_age, grid_len))
+        retiree_asset_derivatives = np.empty((max_age, grid_len))
 
-        # Empty grids for workers for each t
-        vf_work_unref = np.empty((cp.T, cp.grid_size))
-        vf_refined = np.empty((cp.T, cp.grid_size))
-        c_worker_unref = np.empty((cp.T, cp.grid_size))
-        e_grid_worker_unref = np.empty((cp.T, cp.grid_size))
-        c_refined = np.empty((cp.T, cp.grid_size))
-        dela_unrefined = np.empty((cp.T, cp.grid_size))
+        # Allocate memory for worker data for each age
+        worker_unrefined_values = np.empty((max_age, grid_len))
+        worker_refined_values = np.empty((max_age, grid_len))
+        worker_unrefined_consumption = np.empty((max_age, grid_len))
+        worker_endog_grid = np.empty((max_age, grid_len))
+        worker_refined_consumption = np.empty((max_age, grid_len))
+        asset_pol_derivative_unrefined = np.empty((max_age, grid_len))
 
-        iter_time_age_fues = np.zeros(cp.T)
-        iter_time_age_all = np.zeros(cp.T)
+        fues_times = np.zeros(max_age)
+        all_times = np.zeros(max_age)
 
-        # Step 1: Solve retiree policy
-        sigma_prime_ret, VF_prime_ret, uc_pprime_dcp_ret = np.copy(sigma_prime_terminal), np.copy(v_prime_terminal), np.copy(uc_pprime_dcp_terminal)
+        # Solve retiree policy
+        next_consumption, next_value_func, next_cons_derivative = (
+            np.copy(initial_asset_grid),
+            np.copy(initial_value_func),
+            np.copy(consumption_derivative_terminal))
 
-        # backward induction to solve for retirees each period
-        for i in range(T):
-            age = int(T - i - 1)
-            sigma_ret_t, vf_ret_t, del_a_ret_t, uc_pprime_dcp_ret_t = Ts_ret(sigma_prime_ret, VF_prime_ret, uc_pprime_dcp_ret, age)
-            sigma_retirees[age, :] = sigma_ret_t
-            vf_retirees[age, :] = vf_ret_t
-            dela_retirees[age, :] = del_a_ret_t
-            sigma_prime_ret, VF_prime_ret, uc_pprime_dcp_ret = sigma_ret_t, vf_ret_t, uc_pprime_dcp_ret_t
+        # Backward induction for retirees
+        for i in range(max_age):
+            age = int(max_age - i - 1)
+            consumption, value, asset_derivative, cons_derivative = (
+                retiree_solver(next_consumption, next_value_func, next_cons_derivative, age))
+            
+            retiree_consumption[age, :] = consumption
+            retiree_values[age, :] = value
+            retiree_asset_derivatives[age, :] = asset_derivative
 
-        # Step 2: Solve general policy for workers
-        VF_prime_work = cp.u(sigma_prime_terminal)
-        uc_prime_work = cp.du(sigma_prime_terminal)
-        uc_pprime_dcp_work = ddu(sigma_prime_terminal) * R 
+            next_consumption, next_value_func, next_cons_derivative = (
+                consumption, value, cons_derivative)
 
-        # backward induction to solve for workers each period
-        for i in range(T):
-            age = int(T - i - 1)
-            uc_t, sigma_work_t_inv, vf_t, vf_work_t_inv, endog_grid, cons_pol, uddca_t, dela_t_inv, time_fues, time_all = Ts_work(
-                uc_prime_work, uc_pprime_dcp_work, VF_prime_work,
-                sigma_retirees[age, :], vf_retirees[age, :],
-                dela_retirees[age, :], age, 2)
+        # Solve general policy for workers
+        next_worker_value = policy_params.utility(initial_asset_grid)
+        next_worker_cons_derivative = policy_params.utility_derivative(initial_asset_grid)
+        next_euler_derivative = ddu(initial_asset_grid) * R
 
-            # store the grids for plotting
-            vf_work_unref[age, :] = vf_work_t_inv
-            vf_refined[age, :] = vf_t
-            c_worker_unref[age, :] = sigma_work_t_inv
-            e_grid_worker_unref[age, :] = endog_grid
-            c_refined[age, :] = cons_pol
-            dela_unrefined[age, :] = dela_t_inv
+        # Backward induction for workers
+        for i in range(max_age):
+            age = int(max_age - i - 1)
+            results = worker_solver(
+                next_worker_cons_derivative, next_euler_derivative, next_worker_value,
+                retiree_consumption[age, :], retiree_values[age, :],
+                retiree_asset_derivatives[age, :], age, 2)
+            
+            (worker_cons_derivative, unrefined_consumption, worker_value, 
+            unrefined_worker_value, endogenous_grid, refined_consumption, 
+            euler_derivative, unrefined_asset_derivative, fues_time, total_time) = results
 
-            # next period inputs to solver
-            uc_prime_work = uc_t
-            VF_prime_work = vf_t
-            uc_pprime_dcp_work = uddca_t
+            worker_unrefined_values[age, :] = unrefined_worker_value
+            worker_refined_values[age, :] = worker_value
+            worker_unrefined_consumption[age, :] = unrefined_consumption
+            worker_endog_grid[age, :] = endogenous_grid
+            worker_refined_consumption[age, :] = refined_consumption
+            asset_pol_derivative_unrefined[age, :] = unrefined_asset_derivative
 
-            iter_time_age_fues[age] = time_fues
-            iter_time_age_all[age] = time_all
+            next_worker_cons_derivative = worker_cons_derivative
+            next_worker_value = worker_value
+            next_euler_derivative = euler_derivative
 
-        mean_times = np.zeros(2)
-        mean_times[1] = np.mean(iter_time_age_all)
-        mean_times[0] = np.mean(iter_time_age_fues)
+            fues_times[age] = fues_time
+            all_times[age] = total_time
 
-        return e_grid_worker_unref, vf_work_unref, vf_refined, c_worker_unref, c_refined,dela_unrefined, mean_times
+        average_times = [np.mean(fues_times), np.mean(all_times)]
 
+        return (worker_endog_grid, worker_unrefined_values, worker_refined_values, 
+                worker_unrefined_consumption, worker_refined_consumption, 
+                asset_pol_derivative_unrefined, average_times)
 
-
-    return Ts_ret, Ts_work, iter_bell
+    return retiree_solver, worker_solver, iter_bell
