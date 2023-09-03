@@ -239,71 +239,62 @@ def Operator_Factory(cp):
                 dela_ret_t, 
                 t, m_bar):
         """
-        Generates time t policy for worker
+        Generates time t policy for worker.
 
         Parameters
         ----------
-        uc_prime_work: 1D array
-                        t+1 period MUC. on t+1 state
-                        if work choice = 1 at t
+        uc_prime_work : 1D array
+            t+1 period MUC on t+1 state if work choice = 1 at t.
         VF_prime_work : 1D array
-                        t+1 period VF on t+1 state
-                        if work choice = 1 at t
-        uc_pprime_dcp_work: 1D array
-                            t+1 period derivative of RHS of Euler
-                                wrt to t+1 state
-        sigma_ret_t  : 1D array
-                        t consumption on t+1 state
-                        if work choice at = 0
+            t+1 period VF on t+1 state if work choice = 1 at t.
+        uc_pprime_dcp_work : 1D array
+            t+1 period derivative of RHS of Euler wrt to t+1 state.
+        sigma_ret_t : 1D array
+            t consumption on t+1 state if work choice at = 0.
         vf_ret_t : 1D array
-                    t VF if work dec at t = 0
+            t VF if work decision at t = 0.
         dela_ret_t : 1D array
-                    t derivative of asset policy if work dec at t = 0
+            t derivative of asset policy if work decision at t = 0.
         t : int
-            Age
-        m_bar: float 
-                jump detection threshold for FUES
+            Age.
+        m_bar : float 
+            Jump detection threshold for FUES.
 
         Returns
         -------
-        uc_t: 1D array
-                unconditioned time t MUC on assets(t)
-        sigma_work_t_inv: 1D array
-                        unrefined consumption for worker at time t on wealth
-        vf_t: 1D array
-                        unconditioned time t value on assets(t)
-        vf_work_t_inv: 1D array
-                        unrefined time t value for worker at time t on wealth
-        endog_grid: 1D array
-                        unrefined endogenous grid
-        sigma_work_t: 1D array
-                        refined work choice for worker at time t
-                        on start of time t assets
-        del_a: 1D array
-                derivative of worker asset policy wrt to assets
+        uc_t : 1D array
+            Unconditioned time t MUC on assets(t).
+        sigma_work_t_inv : 1D array
+            Unrefined consumption for worker at time t on wealth.
+        vf_t : 1D array
+            Unconditioned time t value on assets(t).
+        vf_work_t_inv : 1D array
+            Unrefined time t value for worker at time t on wealth.
+        endog_grid : 1D array
+            Unrefined endogenous grid.
+        sigma_work_t : 1D array
+            Refined work choice for worker at time t on start of time t assets.
+        del_a : 1D array
+            Derivative of worker asset policy wrt to assets.
 
         uddca_t : 1D array
-                        derivative of RHS of the time t Euler wrt 
-                        to t assets 
+            Derivative of RHS of the time t Euler wrt to t assets.
 
         Notes
         -----
-        Note uddca_t gives the derivative of the RHS of the Euler wrt to 
-        t asets, not t-1 assets. I.e. this is the derivative
-        wrt to start of time t period assets. 
+        - uddca_t gives the derivative of the RHS of the Euler wrt to t assets,
+        not t-1 assets. This is the derivative wrt to start of time t period 
+        assets.
+        
+        - uddca_t is evaluated unconditional on the time t choice of whether or 
+        not to work in t+1.
 
-        uddca_t is also evaluated unconditonal on the time t choice
-        of whether or not to work in t+1. 
+        - del_a_unrefined is the derivative of the unrefined asset policy wrt to 
+        start of time t for someone choosing to work in t+1, defined on the 
+        unrefined endogenous grid.
 
-        del_a_unrefined returned is the derivative of the un refined asset 
-        policy wrt to start of time t
-        of someone to chooses to work in t+1, defined on the unrefined 
-        endogenpus grid. 
-
-        del_a not returned by function 
-        is the derivative of the refined asset policy wrt to start of time t
-
-
+        - del_a, not returned by function, is the derivative of the refined asset 
+        policy wrt to start of time t.
         """
 
         # Empty grids for time t consumption, vf, enog grid
