@@ -166,7 +166,7 @@ def FUES(e_grid, vf, c, a_prime,del_a, b=1e-10, m_bar=2, LB=10, edog_mbar = True
                 policy 1 on refined grid
     a_prime_clean: 1D array
                     policy 2 on refined grid
-    dela: 1D array
+    del_a_clean: 1D array
             gradient of policy 2 on refined grid
 
     Notes
@@ -192,39 +192,51 @@ def FUES(e_grid, vf, c, a_prime,del_a, b=1e-10, m_bar=2, LB=10, edog_mbar = True
 
     Incorporate full functionality to attach crossing points.
 
+    For the forward and backward scans we are still
+    using the exogenously specified M_bar. This should be 
+    replaced by the enodgenously determined maximumum
+    gradients of the policy function. 
+
     """
 
-    # determine locations where enogenous grid points are
-    # equal to the lower bound
-    if len(vf[np.where(e_grid <= b)]) > 0:
-        vf_lb_max = max(vf[np.where(e_grid <= b)])
+    # Determine locations where endogenous grid points are equal to the lower bound
+    indices_lb = np.where(e_grid <= b)
 
-        # remove sub-optimal lb EGM points
+    if len(vf[indices_lb]) > 0:
+        vf_lb_max = max(vf[indices_lb])
+
+        # Remove sub-optimal lb EGM points
         for i in range(len(e_grid)):
             if e_grid[i] <= b and vf[i] < vf_lb_max:
                 vf[i] = np.nan
 
-    # remove NaN values from vf array
-    e_grid = e_grid[np.where(~np.isnan(vf))]
-    c = c[np.where(~np.isnan(vf))]
-    a_prime = a_prime[np.where(~np.isnan(vf))]
-    vf = vf[np.where(~np.isnan(vf))]
+    # Remove NaN values from vf array
+    not_nan_indices = np.where(~np.isnan(vf))
+    e_grid = e_grid[not_nan_indices]
+    c = c[not_nan_indices]
+    a_prime = a_prime[not_nan_indices]
+    vf = vf[not_nan_indices]
 
-    # sort policy and vf by e_grid order
-    vf = np.take(vf, np.argsort(e_grid))
-    c = np.take(c, np.argsort(e_grid))
-    a_prime = np.take(a_prime, np.argsort(e_grid))
+    # Sort policy and vf by e_grid order
+    sort_indices = np.argsort(e_grid)
+    vf = np.take(vf, sort_indices)
+    c = np.take(c, sort_indices)
+    a_prime = np.take(a_prime, sort_indices)
+    del_a = np.take(del_a, sort_indices)
     e_grid = np.sort(e_grid)
 
-    # scan attaches NaN to vf at all sub-optimal points
-    e_grid_clean, vf_with_nans, c_clean, a_prime_clean, dela\
-        = _scan(e_grid, vf, c, a_prime,del_a, m_bar, LB,edog_mbar)
+    # Scan attaches NaN to vf at all sub-optimal points
+    e_grid_clean, vf_with_nans, c_clean, a_prime_clean, del_a_clean = \
+        _scan(e_grid, vf, c, a_prime, del_a, m_bar, LB, edog_mbar=edog_mbar)
 
-    return e_grid_clean[np.where(~np.isnan(vf_with_nans))],\
-        vf[np.where(~np.isnan(vf_with_nans))],\
-        c_clean[np.where(~np.isnan(vf_with_nans))],\
-        a_prime_clean[np.where(~np.isnan(vf_with_nans))],\
-        dela
+    non_nan_indices = np.where(~np.isnan(vf_with_nans))
+    
+    return (e_grid_clean[non_nan_indices],
+        vf[non_nan_indices],
+        c_clean[non_nan_indices],
+        a_prime_clean[non_nan_indices],
+        del_a_clean[non_nan_indices])
+        
 
 
 @njit
@@ -239,7 +251,7 @@ def _scan(e_grid, vf, c, a_prime,del_a, m_bar, LB, fwd_scan_do=True, edog_mbar= 
     vf_full = np.copy(vf)
 
     # empty array to store policy function gradient
-    dela = np.zeros(len(vf))
+    #dela = np.zeros(len(vf))
 
     # array of previously sub-optimal indices to be used in backward scan
     m_array = np.zeros(LB)
@@ -262,22 +274,24 @@ def _scan(e_grid, vf, c, a_prime,del_a, m_bar, LB, fwd_scan_do=True, edog_mbar= 
             # gradient with leading index to be checked
             g_1 = (vf_full[i + 1] - vf_full[j]) / (e_grid[i + 1] - e_grid[j])
 
-            # gradient of policy function at current index 
-            M_L = del_a[i+1]
-            M_U = del_a[j]
+            # Absolute gradients of policy function at current index 
+            # and at testing point
+            M_L = np.abs(del_a[j])
+            M_U = np.abs(del_a[i+1])
+            M_max = max(M_L, M_U)
 
             # policy gradient with leading index to be checked
-            g_tilde_a = (a_prime[i + 1] - a_prime[j])
-                               / (e_grid[i + 1] - e_grid[j])
+            g_tilde_a = np.abs((a_prime[i + 1] - a_prime[j])\
+                               / (e_grid[i + 1] - e_grid[j]))
 
-            # Set lower and upper bound to m_bar if fixed m_bar used 
-            if edog_mbar:
-                M_L = m_bar
-                M_U = b_bar 
+            # Set detection threshold to m_bar if fixed m_bar used 
+            if edog_mbar == False:
+                M_max = m_bar
 
             # if right turn is made and jump registered
             # remove point or perform forward scan
-            if g_1 < g_j_minus_1 and M_L> g_tilde_a > M_U:
+
+            if g_1 < g_j_minus_1 and  np.abs(g_tilde_a)> M_max:
                 keep_i_1_point = False
 
                 if fwd_scan_do:
@@ -380,4 +394,4 @@ def _scan(e_grid, vf, c, a_prime,del_a, m_bar, LB, fwd_scan_do=True, edog_mbar= 
                     k = np.copy(np.array([j]))[0]
                     j = np.copy(np.array([i]))[0] + 1
 
-    return e_grid, vf, c, a_prime, dela
+    return e_grid, vf, c, a_prime

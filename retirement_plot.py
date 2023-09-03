@@ -35,7 +35,7 @@ from matplotlib.ticker import FormatStrFormatter
 import matplotlib.pylab as pl
 
 
-def plot_egrids(age, e_grid, vf_work, c_worker, g_size):
+def plot_egrids(age, e_grid, vf_work, c_worker, del_a, g_size):
     # Plot value corr. and policy on 
     # unrefined vs refined endogenous grid for age
 
@@ -47,8 +47,8 @@ def plot_egrids(age, e_grid, vf_work, c_worker, g_size):
     a_prime = np.array(cp.asset_grid_A)
 
     # generate refined grid, value function and policy using FUES
-    x_clean, vf_clean, c_clean, a_prime_clean, dela \
-        = FUES(x, vf, c, a_prime, 0.8)
+    x_clean, vf_clean, c_clean, a_prime_clean, del_a_clean \
+        = FUES(x, vf, c, a_prime,del_a, 0.8)
 
     # make plots  
     pl.close()
@@ -166,7 +166,7 @@ def plot_cons_pol(sigma_work):
     return None
 
 
-def plot_dcegm_cf(age, g_size, e_grid, vf_work, c_worker, a_prime,
+def plot_dcegm_cf(age, g_size, e_grid, vf_work, c_worker,dela_worker, a_prime,
                   plot=True):
     # get unrefined endogenous grid, value function and consumption
     # for worker at time t
@@ -174,14 +174,15 @@ def plot_dcegm_cf(age, g_size, e_grid, vf_work, c_worker, a_prime,
     vf = vf_work[age]
     c = c_worker[age]
     a_prime = cp.asset_grid_A
+    dela = dela_worker[age]
     time_start_dcegm = time.time()
 
 #     start, end = calc_segments(x, vf)
     start, end = calc_nondecreasing_segments(x, vf)
 
     # generate refined grid, value function and policy using FUES
-    x_clean, vf_clean, c_clean, a_prime_clean, dela = FUES(x, vf,
-                                                           c, a_prime, m_bar=2)
+    x_clean, vf_clean, c_clean, a_prime_clean, dela_clean = FUES(x, vf,
+                                                           c, a_prime, dela,m_bar=2)
     # interpolate
     vf_interp_fues = np.interp(x, x_clean, vf_clean)
     # len(vf_interp_fues[x_clean.searchsorted(x)])
@@ -349,7 +350,7 @@ if __name__ == "__main__":
     # Get optimal value and policy functions using FUES
     # by iterating on the Bellman equation 
     e_grid_worker_unref, vf_work_unref,vf_refined,\
-             c_worker_unref,c_refined, iter_time_age = iter_bell(cp)
+             c_worker_unref,c_refined, dela_unrefined, iter_time_age = iter_bell(cp)
 
     # 1. Example use of FUES to refine EGM grids
     # get unrefined endogenous grid, value function and consumption
@@ -358,17 +359,18 @@ if __name__ == "__main__":
     x = np.array(e_grid_worker_unref[age])
     vf = np.array(vf_work_unref[age])
     c = np.array(c_worker_unref[age])
+    dela = np.array(dela_unrefined[age])
     a_prime = np.array(cp.asset_grid_A)
 
     # generate refined grid, value function and policy using FUES
-    x_clean, vf_clean, c_clean, a_prime_clean, dela \
-        = FUES(x, vf, c, a_prime, 2)
+    x_clean, vf_clean, c_clean, a_prime_clean, dela_clean \
+        = FUES(x, vf, c, a_prime,dela, 2)
 
 
     # 2. Plot and save value function and policy on EGM grids
     # and refined EGM grids 
     plot_egrids(17, e_grid_worker_unref, vf_work_unref,\
-                     c_worker_unref, g_size_baseline)
+                     c_worker_unref,dela_unrefined, g_size_baseline)
 
     # 3. Plot consumption function (for worker, 
     # but before next period work decision
@@ -379,7 +381,7 @@ if __name__ == "__main__":
 
     v_upper, v1_env, vf_interp_fues, a_interp_fues, m_upper, a1_env \
         = plot_dcegm_cf(age, g_size_baseline, e_grid_worker_unref,
-                            vf_work_unref, c_worker_unref, cp.asset_grid_A,
+                            vf_work_unref, c_worker_unref, dela_unrefined, cp.asset_grid_A,
                             plot=True)
 
     # 5. Evalute DC-EGM and FUES upper envelope for 
@@ -440,14 +442,14 @@ if __name__ == "__main__":
         Ts_ret, Ts_work, iter_bell = Operator_Factory(cp)
 
         # Get optimal value and policy functions using FUES
-        e_grid, vf_work, vf_uncond, c_worker, sigma_work, mean_times\
+        e_grid, vf_work, vf_uncond, c_worker, sigma_work,dela_unrefined, mean_times\
              = iter_bell(cp)
 
         # calc upper envelope using DC-EGM and compare on EGM points to
         # FUES
         v_upper, v1_env, vf_interp_fues, a_interp_fues, m_upper, a1_env \
             = plot_dcegm_cf(age_dcegm, g_size, e_grid,
-                            vf_work, c_worker, cp.asset_grid_A,
+                            vf_work, c_worker,dela_unrefined, cp.asset_grid_A,
                             plot=False)
 
         if len(a1_env) == len(a_interp_fues):
