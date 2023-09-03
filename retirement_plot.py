@@ -182,7 +182,7 @@ def plot_dcegm_cf(age, g_size, e_grid, vf_work, c_worker,dela_worker, a_prime,
 
     # generate refined grid, value function and policy using FUES
     x_clean, vf_clean, c_clean, a_prime_clean, dela_clean = FUES(x, vf,
-                                                           c, a_prime, dela,m_bar=2)
+                                                           c, a_prime, dela,m_bar=2, endog_mbar= True)
     # interpolate
     vf_interp_fues = np.interp(x, x_clean, vf_clean)
     # len(vf_interp_fues[x_clean.searchsorted(x)])
@@ -387,7 +387,7 @@ if __name__ == "__main__":
     # 5. Evalute DC-EGM and FUES upper envelope for 
     # parms on a grid.  
 
-    g_size = 300
+    g_size = 2000
     beta_min = 0.85
     g_size_min = 300
     g_size_max = 2000

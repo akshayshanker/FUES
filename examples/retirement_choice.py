@@ -279,11 +279,31 @@ def Operator_Factory(cp):
         sigma_work_t: 1D array
                         refined work choice for worker at time t
                         on start of time t assets
-        dca_t : 1D array
-                        derivative of the asset policy
+        del_a: 1D array
+                derivative of worker asset policy wrt to assets
+
+        uddca_t : 1D array
+                        derivative of RHS of the time t Euler wrt 
+                        to t assets 
 
         Notes
         -----
+        Note uddca_t gives the derivative of the RHS of the Euler wrt to 
+        t asets, not t-1 assets. I.e. this is the derivative
+        wrt to start of time t period assets. 
+
+        uddca_t is also evaluated unconditonal on the time t choice
+        of whether or not to work in t+1. 
+
+        del_a_unrefined returned is the derivative of the un refined asset 
+        policy wrt to start of time t
+        of someone to chooses to work in t+1, defined on the unrefined 
+        endogenpus grid. 
+
+        del_a not returned by function 
+        is the derivative of the refined asset policy wrt to start of time t
+
+
         """
 
         # Empty grids for time t consumption, vf, enog grid
@@ -291,7 +311,7 @@ def Operator_Factory(cp):
         sigma_work_t_inv = np.zeros(grid_size)
         vf_work_t_inv = np.zeros(grid_size)
         endog_grid = np.zeros(grid_size)
-        del_a = np.zeros(grid_size)
+        del_a_unrefined = np.zeros(grid_size)
 
         # Loop through each time T+1 state in the exogenous grid
         for i in range(len(asset_grid_A)):
@@ -307,7 +327,7 @@ def Operator_Factory(cp):
             endog_grid[i] = c_t + asset_grid_A[i]
 
             # derivative of current period asset policy
-            del_a[i] = R * ddu(c_t)/(ddu(c_t) + beta * R * uc_pprime_dcp_work[i])
+            del_a_unrefined[i] = R * ddu(c_t)/(ddu(c_t) + beta * R * uc_pprime_dcp_work[i])
             #print(uc_pprime_dcp_work[i])
 
         min_a_val = endog_grid[0]
@@ -318,7 +338,7 @@ def Operator_Factory(cp):
         # remove sub-optimal points using FUES
         time_start_fues = time.time()
         egrid1, vf_clean, sigma_clean, a_prime_clean, dela_clean = FUES(
-            endog_grid, vf_work_t_inv, sigma_work_t_inv, asset_grid_A, del_a, m_bar=2)
+            endog_grid, vf_work_t_inv, sigma_work_t_inv, asset_grid_A, del_a_unrefined, m_bar=2)
         time_end_fues = time.time()
 
         # interpolate on even start of period t asset grid for worker
@@ -352,14 +372,14 @@ def Operator_Factory(cp):
         vf_t = work_choice * (vf_work_t) + (1 - work_choice) * vf_ret_t
         dela_t = work_choice * (dela_work_t) + (1 - work_choice) * dela_ret_t
         uc_t = du(sigma_t)
-        dca_t = ddu(sigma_t)*(R - dela_t)
+        uddca_t = ddu(sigma_t)*(R - dela_t)
 
         time_end_all = time.time()
         time_fues = time_end_fues - time_start_fues 
         time_all = time_end_all - time_start_all
 
         return uc_t, sigma_work_t_inv, vf_t, vf_work_t_inv,\
-            endog_grid, sigma_t, dca_t,del_a, time_fues, time_all
+            endog_grid, sigma_t, uddca_t,del_a_unrefined, time_fues, time_all
 
 
     def iter_bell(cp):
@@ -407,7 +427,7 @@ def Operator_Factory(cp):
         # backward induction to solve for workers each period
         for i in range(T):
             age = int(T - i - 1)
-            uc_t, sigma_work_t_inv, vf_t, vf_work_t_inv, endog_grid, cons_pol, dca_t, dela_t_inv, time_fues, time_all = Ts_work(
+            uc_t, sigma_work_t_inv, vf_t, vf_work_t_inv, endog_grid, cons_pol, uddca_t, dela_t_inv, time_fues, time_all = Ts_work(
                 uc_prime_work, uc_pprime_dcp_work, VF_prime_work,
                 sigma_retirees[age, :], vf_retirees[age, :],
                 dela_retirees[age, :], age, 2)
@@ -423,7 +443,7 @@ def Operator_Factory(cp):
             # next period inputs to solver
             uc_prime_work = uc_t
             VF_prime_work = vf_t
-            uc_pprime_dcp_work = dca_t
+            uc_pprime_dcp_work = uddca_t
 
             iter_time_age_fues[age] = time_fues
             iter_time_age_all[age] = time_all

@@ -128,7 +128,7 @@ def seg_intersect(a1, a2, b1, b2):
 
 
 @njit
-def FUES(e_grid, vf, c, a_prime,del_a, b=1e-10, m_bar=2, LB=10, edog_mbar = True):
+def FUES(e_grid, vf, c, a_prime,del_a, b=1e-10, m_bar=2, LB=10, endog_mbar = True):
     """
     FUES function returns refined EGM grid, value function and
     policy function
@@ -226,8 +226,8 @@ def FUES(e_grid, vf, c, a_prime,del_a, b=1e-10, m_bar=2, LB=10, edog_mbar = True
     e_grid = np.sort(e_grid)
 
     # Scan attaches NaN to vf at all sub-optimal points
-    e_grid_clean, vf_with_nans, c_clean, a_prime_clean, del_a_clean = \
-        _scan(e_grid, vf, c, a_prime, del_a, m_bar, LB, edog_mbar=edog_mbar)
+    e_grid_clean, vf_with_nans, c_clean, a_prime_clean = \
+        _scan(e_grid, vf, c, a_prime, del_a, m_bar, LB, endog_mbar=endog_mbar)
 
     non_nan_indices = np.where(~np.isnan(vf_with_nans))
     
@@ -235,12 +235,12 @@ def FUES(e_grid, vf, c, a_prime,del_a, b=1e-10, m_bar=2, LB=10, edog_mbar = True
         vf[non_nan_indices],
         c_clean[non_nan_indices],
         a_prime_clean[non_nan_indices],
-        del_a_clean[non_nan_indices])
+        del_a[non_nan_indices])
         
 
 
 @njit
-def _scan(e_grid, vf, c, a_prime,del_a, m_bar, LB, fwd_scan_do=True, edog_mbar= True):
+def _scan(e_grid, vf, c, a_prime,del_a, m_bar, LB, fwd_scan_do=True, endog_mbar= True):
     """" Implements the scan for FUES"""
 
     # leading index for optimal values j
@@ -285,13 +285,13 @@ def _scan(e_grid, vf, c, a_prime,del_a, m_bar, LB, fwd_scan_do=True, edog_mbar= 
                                / (e_grid[i + 1] - e_grid[j]))
 
             # Set detection threshold to m_bar if fixed m_bar used 
-            if edog_mbar == False:
+            if endog_mbar == False:
                 M_max = m_bar
 
             # if right turn is made and jump registered
             # remove point or perform forward scan
 
-            if g_1 < g_j_minus_1 and  np.abs(g_tilde_a)> M_max:
+            if g_1 < g_j_minus_1 and  g_tilde_a > M_max:
                 keep_i_1_point = False
 
                 if fwd_scan_do:
