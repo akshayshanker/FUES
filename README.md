@@ -14,10 +14,13 @@ and two policy functions, `c_hat` and `a_prime_hat`.
 from FUES.FUES import FUES
 
 x_clean, vf_clean, c_clean, a_prime_clean, dela \
-        = FUES(x_hat, v_hat, c_hat, a_prime_hat, M_bar = 2, LB = 10)
+        = FUES(x_hat, v_hat, c_hat, a_prime_hat, dela, LB = 10)
 ```
 
-The outputs are the refined grids, `M_bar` is the jump detection threshold and `LB` is the number of steps to take in the forward and backward scans. 
+The outputs are the refined grids, `dela` is the time t policy function derivative used to 
+endogenously detect jumps in the policy function and `LB` is the number of steps to take in the forward and backward scans. 
+
+The derivative of time t policy function can be derived using the implicit function theorem and the Euler equation. The derivative can then be evaluated at the exogenous grid points (see Section 2.1.4 of the latest working paper).  
 
 ## Application 1
 
