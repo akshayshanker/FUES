@@ -210,6 +210,7 @@ def Operator_Factory(cp):
     def roots(f, a, l, h_prime, z, Ud_prime_a, Ud_prime_h, t, eps=1e-3):
 
         sols_array = np.zeros(EGM_N)
+        sols_array.fill(np.nan)
         i = 0
         while True:
             x1, x2 = rootsearch(f, a, l, eps, h_prime, z,
@@ -219,7 +220,7 @@ def Operator_Factory(cp):
                 root = brentq(f, x1, x2,
                               args=(h_prime, z, Ud_prime_a, Ud_prime_h, t),
                               xtol=1e-12)
-                if root is not None:
+                if root is not None and root[-1] is True:
                     sols_array[i] = root[0]
 
             else:
@@ -546,7 +547,7 @@ def Operator_Factory(cp):
 
         for j in range(len(a_prime_points)):
             # recover consumption associated with liquid asset Euler
-            if a_prime_points[j] > 0:
+            if np.isnan(a_prime_points[j]) == False:
                 point_for_c = np.array([a_prime_points[j], h_prime])
 
                 Ud_prime_h_val = eval_linear(UGgrid_all, Ud_prime_h,
@@ -689,7 +690,7 @@ def Operator_Factory(cp):
 
                 e_grid_cean, vf_clean, c_clean, a_prime_clean, dela\
                     = FUES(endog_grid_unrefined_points, vf_unrefined_points,
-                           c_unrefined_points, asset_grid_A, b, m_bar=m_bar)
+                           c_unrefined_points, asset_grid_A,c_unrefined_points, b, m_bar=m_bar, endog_mbar = False)
                 # print(endog_grid_unrefined_points)
                 a_under_bar = min(e_grid_cean)
 
@@ -792,10 +793,10 @@ def Operator_Factory(cp):
 
             # print(egrid_unref_points)
 
-            e_grid_cean, vf_clean, a_prime_clean, hprime_clean, dela\
+            e_grid_cean, vf_clean, a_prime_clean, a_prime_clean, dela\
                 = FUES(egrid_unref_points, vf_unrefined_points,
-                       aprime_unrefined_points, hprime_unrefined_points,
-                       b, m_bar=m_bar)
+                       aprime_unrefined_points, hprime_unrefined_points,a_prime_clean
+                       b, m_bar=m_bar, endog_mbar = False)
 
             new_a_prime_refined[index_z, :]\
                 = interp_as(e_grid_cean, a_prime_clean, asset_grid_WE)

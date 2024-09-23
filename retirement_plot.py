@@ -325,15 +325,172 @@ def plot_dcegm_cf(age, g_size, e_grid, vf_work, c_worker,dela_worker, a_prime,
     return v_upper, v1_env, vf_interp_fues, a_prime_clean, m_upper, a1_env2
 
 
+def test_performance_for_grid_sizes_and_deltas(grid_sizes, delta_values):
+    # Initialize lists to hold results for LaTeX tables
+    latex_errors_data = []
+    latex_timings_data = []
+
+    for g_size_baseline in grid_sizes:
+        for delta in delta_values:
+            print(f"\nTesting with grid size: {g_size_baseline} and delta: {delta}")
+
+            # Create instance of RetirementModel
+            cp = RetirementModel(
+                r=0.02,
+                beta=0.97,
+                delta=delta,
+                y=20,
+                b=1E-10,
+                grid_max_A=500,
+                grid_size=g_size_baseline,
+                T=50,
+                smooth_sigma=0.05
+            )
+
+            # Unpack solver operators 
+            Ts_ret, Ts_work, iter_bell = Operator_Factory(cp)
+
+            # Initialize variables to store best times and errors
+            best_time_RFC = float('inf')
+            best_time_FUES = float('inf')
+            best_time_DCEGM = float('inf')
+            best_error_RFC = float('inf')
+            best_error_FUES = float('inf')
+            best_error_DCEGM = float('inf')
+
+            for _ in range(3):  # Run each test 3 times and take the best
+                # Test RFC
+                time_start = time.time()
+                e_grid_worker_unref, vf_work_unref, vf_refined, c_worker_unref, c_refined_RFC, dela_unrefined, iter_time_age = iter_bell(cp, method='RFC')
+                time_end_RFC = np.mean(iter_time_age[0])
+                Euler_error_RFC = euler(cp, c_refined_RFC)
+                
+                # Test FUES
+                time_start = time.time()
+                _, _, _, _, c_refined_FUES, _, iter_time_age = iter_bell(cp, method='FUES')
+                time_end_FUES = np.mean(iter_time_age[0])
+                Euler_error_FUES = euler(cp, c_refined_FUES)
+
+                # Test DCEGM
+                time_start = time.time()
+                _, _, _, _, c_refined_DCEGM, _, iter_time_age = iter_bell(cp, method='DCEGM')
+                time_end_DCEGM = np.mean(iter_time_age[0])
+                Euler_error_DCEGM = euler(cp, c_refined_DCEGM)
+
+                # Take the best of 3 runs for timings
+                best_time_RFC = min(best_time_RFC, time_end_RFC)
+                best_time_FUES = min(best_time_FUES, time_end_FUES)
+                best_time_DCEGM = min(best_time_DCEGM, time_end_DCEGM)
+
+                # Take the best of 3 runs for errors
+                best_error_RFC = min(best_error_RFC, Euler_error_RFC)
+                best_error_FUES = min(best_error_FUES, Euler_error_FUES)
+                best_error_DCEGM = min(best_error_DCEGM, Euler_error_DCEGM)
+
+            # Store the best results for the LaTeX tables
+            latex_errors_data.append([g_size_baseline, delta, best_error_RFC, best_error_FUES, best_error_DCEGM])
+            latex_timings_data.append([g_size_baseline, delta, best_time_RFC*1000, best_time_FUES*1000, best_time_DCEGM*1000])
+
+            # Print results for current grid size and delta
+            print(f'Euler errors for grid size {g_size_baseline}, delta {delta}: RFC: {best_error_RFC:.6f}, FUES: {best_error_FUES:.6f}, DCEGM: {best_error_DCEGM:.6f}')
+            print(f'Timings for grid size {g_size_baseline}, delta {delta}: RFC: {best_time_RFC:.6f}, FUES: {best_time_FUES:.6f}, DCEGM: {best_time_DCEGM:.6f}')
+
+    # Generate LaTeX tables after all grid sizes and deltas are tested
+    #generate_latex_table(, "errors", "Euler Errors", "Retirement model")
+    generate_latex_table(latex_timings_data,latex_errors_data,"Timings (seconds)", "Retirement model")
+
+
+
+def generate_latex_table(data, errors, table_type, caption):
+    """
+    Generates a LaTeX table with performance (RFC, FUES, DCEGM) and Euler errors.
+
+    Parameters:
+    data : list of lists
+        Data for RFC, FUES, DCEGM timings.
+    errors : list of lists
+        Data for corresponding Euler errors.
+    table_type : str
+        Type of the table for labeling.
+    caption : str
+        Caption for the LaTeX table.
+    """
+    
+    # Header for LaTeX table with multirow and cool formatting
+    latex_code = f"""
+\\begin{{table}}[htbp]
+\\centering
+\\small
+\\begin{{tabular}}{{ccccc|ccc}}
+\\toprule
+\\multirow{{2}}{{*}}{{\\textit{{Grid Size}}}} & \\multirow{{2}}{{*}}{{\\textit{{Delta}}}} & \\multicolumn{{3}}{{c}}{{\\textbf{{Timing (Seconds)}}}} & \\multicolumn{{3}}{{c}}{{\\textbf{{Euler Error (Log10)}}}} \\\\
+ & & \\textbf{{RFC}} & \\textbf{{FUES}} & \\textbf{{DCEGM}} & \\textbf{{RFC}} & \\textbf{{FUES}} & \\textbf{{DCEGM}} \\\\
+\\midrule
+"""
+
+    # Get unique grid sizes to handle panels
+    unique_grid_sizes = np.unique([row[0] for row in data])
+
+    for grid_size in unique_grid_sizes:
+        # Filter data by the current grid size
+        filtered_data = [row for row in data if row[0] == grid_size]
+        filtered_errors = [row for row in errors if row[0] == grid_size]
+
+        if len(filtered_data) != len(filtered_errors):
+            raise ValueError(f"Mismatch in data and errors for grid size {grid_size}. Check the input data.")
+
+        # Add the first row for this grid size with \multirow spanning the number of deltas
+        latex_code += f"\\multirow{{{len(filtered_data)}}}{{*}}{{\\textit{{{int(grid_size)}}}}} "
+
+        # Add each row for the deltas under the current grid size
+        for i, row in enumerate(filtered_data):
+            if i < len(filtered_errors):  # Defensive check to avoid index out of range
+                error_row = filtered_errors[i]
+                if i == 0:
+                    # First row includes the grid size via \multirow
+                    latex_code += f"& {row[1]:.2f} & {row[2]:.3f} & {row[3]:.3f} & {row[4]:.3f} & " \
+                                  f"{error_row[2]:.3f} & {error_row[3]:.3f} & {error_row[4]:.3f} \\\\\n"
+                else:
+                    # Subsequent rows omit the grid size
+                    latex_code += f" & {row[1]:.2f} & {row[2]:.3f} & {row[3]:.3f} & {row[4]:.3f} & " \
+                                  f"{error_row[2]:.3f} & {error_row[3]:.3f} & {error_row[4]:.3f} \\\\\n"
+            else:
+                raise IndexError(f"Mismatch: filtered_errors has fewer elements than filtered_data for grid size {grid_size}.")
+
+        latex_code += "\\midrule\n"
+
+    # Footer for LaTeX table
+    latex_code += f"""
+\\bottomrule
+\\end{{tabular}}
+\\caption{{\\textit{{{caption}}} comparison across different grid sizes, delta values, and accuracy (Euler error)}}
+\\label{{tab:{table_type}_comparison}}
+\\end{{table}}
+"""
+    # Write the LaTeX code to a file
+    with open(f"{table_type}_RT_table.tex", "w") as file:
+        file.write(latex_code)
+
+    print(f"\nGenerated LaTeX {table_type} table saved to {table_type}_RT_table.tex.")
+
+
+
+
 if __name__ == "__main__":
 
-    from examples.retirement_choice import Operator_Factory, RetirementModel
+    from examples.retirement_choice import Operator_Factory, RetirementModel, euler
 
+
+    grid_sizes = [500, 1000, 2000, 3000]  # Adjust or add more grid sizes as necessary
+    delta_values = [0.5, 1,1.5,2]  # Test for different delta values
+
+    test_performance_for_grid_sizes_and_deltas(grid_sizes, delta_values)
     
     # Generate baseline parameter solution using FUES and make plots 
 
     # Create instance of RetirementModel
-    g_size_baseline = 2000
+    g_size_baseline = 3000
+
     cp = RetirementModel(r=0.02,
                          beta= 0.98,
                          delta=1,
@@ -342,15 +499,34 @@ if __name__ == "__main__":
                          grid_max_A=500,
                          grid_size=g_size_baseline,
                          T=20,
-                         smooth_sigma=0)
+                         smooth_sigma=0.05)
 
     # Unpack solver operators 
     Ts_ret, Ts_work, iter_bell = Operator_Factory(cp)
 
     # Get optimal value and policy functions using FUES
     # by iterating on the Bellman equation 
+
+    time_start = time.time()
     e_grid_worker_unref, vf_work_unref,vf_refined,\
-             c_worker_unref,c_refined, dela_unrefined, iter_time_age = iter_bell(cp)
+             c_worker_unref,c_refined_RFC, dela_unrefined, iter_time_age = iter_bell(cp, method = 'RFC')
+    time_end_RFC = time.time() - time_start
+    
+    time_start = time.time()
+    _, _,_,_,c_refined_FUES, _, _ = iter_bell(cp, method = 'FUES')
+    time_end_FUES = time.time() - time_start
+    
+    time_start = time.time()
+    _, _,_,_,c_refined_DCEGM,_, _ = iter_bell(cp, method = 'DCEGM')
+    time_end_DCEGM = time.time() - time_start
+    
+    Euler_error_RFC = euler(cp, c_refined_RFC)
+    Euler_error_FUES = euler(cp, c_refined_FUES)
+    Euler_error_DCEGM = euler(cp, c_refined_DCEGM)
+
+    print('Euler errors: RFC: {0:.6f}, FUES: {1:.6f}, DCEGM: {2:.6f}'.format(Euler_error_RFC, Euler_error_FUES, Euler_error_DCEGM))
+    
+    print('Timings: RFC: {0:.6f}, FUES: {1:.6f}, DCEGM: {2:.6f}'.format(time_end_RFC, time_end_FUES, time_end_DCEGM))
 
     # 1. Example use of FUES to refine EGM grids
     # get unrefined endogenous grid, value function and consumption

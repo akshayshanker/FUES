@@ -128,7 +128,7 @@ def seg_intersect(a1, a2, b1, b2):
 
 
 @njit
-def FUES(e_grid, vf, c, a_prime,del_a, b=1e-10, m_bar=2, LB=10, endog_mbar = True):
+def FUES(e_grid, vf, c, a_prime,del_a, b=1e-10, m_bar=2, LB=4, endog_mbar = False):
     """
     FUES function returns refined EGM grid, value function and
     policy function
@@ -199,23 +199,7 @@ def FUES(e_grid, vf, c, a_prime,del_a, b=1e-10, m_bar=2, LB=10, endog_mbar = Tru
 
     """
 
-    # Determine locations where endogenous grid points are equal to the lower bound
-    indices_lb = np.where(e_grid <= b)
-
-    if len(vf[indices_lb]) > 0:
-        vf_lb_max = max(vf[indices_lb])
-
-        # Remove sub-optimal lb EGM points
-        for i in range(len(e_grid)):
-            if e_grid[i] <= b and vf[i] < vf_lb_max:
-                vf[i] = np.nan
-
-    # Remove NaN values from vf array
-    not_nan_indices = np.where(~np.isnan(vf))
-    e_grid = e_grid[not_nan_indices]
-    c = c[not_nan_indices]
-    a_prime = a_prime[not_nan_indices]
-    vf = vf[not_nan_indices]
+    
 
     # Sort policy and vf by e_grid order
     sort_indices = np.argsort(e_grid)
@@ -226,8 +210,8 @@ def FUES(e_grid, vf, c, a_prime,del_a, b=1e-10, m_bar=2, LB=10, endog_mbar = Tru
     e_grid = np.sort(e_grid)
 
     # Scan attaches NaN to vf at all sub-optimal points
-    e_grid_clean, vf_with_nans, c_clean, a_prime_clean = \
-        _scan(e_grid, vf, c, a_prime, del_a, m_bar, LB, endog_mbar=endog_mbar)
+    e_grid_clean, vf_with_nans, a_prime_clean, c_clean = \
+        _scan(e_grid, vf, a_prime,c, del_a, m_bar, LB, endog_mbar=endog_mbar)
 
     non_nan_indices = np.where(~np.isnan(vf_with_nans))
     

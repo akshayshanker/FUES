@@ -20,6 +20,8 @@ import dill as pickle
 from numba import njit, prange
 
 from FUES.FUES import FUES
+from FUES.RFC_simple import rfc
+from FUES.DCEGM import dcegm
 
 from FUES.math_funcs import interp_as, upper_envelope
 
@@ -88,7 +90,11 @@ class RetirementModel:
         self.y = y
         self.grid_max_A = grid_max_A
 
+        
+
         self.asset_grid_A = np.linspace(b, grid_max_A, grid_size)
+
+        self.eulerK = len(self.asset_grid_A)
 
         # define functions
         @njit
@@ -114,6 +120,45 @@ class RetirementModel:
 
         self.u, self.du, self.uc_inv, self.ddu = u, du, uc_inv, ddu
         
+
+#@njit
+def euler(cp,sigma_work):
+    
+    
+
+     
+    a_grid = cp.asset_grid_A
+
+    euler = np.zeros((cp.T-1,cp.eulerK))
+    euler.fill(np.nan)
+
+    # b. loop over time
+    for t in range(cp.T-1):
+        for i_a in range(cp.eulerK):
+                
+                # i. state
+                a = a_grid[i_a]
+                
+
+                
+                # iii. continuous choice
+                c = np.interp(a,a_grid,sigma_work[t])
+                a_prime = a*cp.R + cp.y - c 
+                
+                if a_prime < 0.001: continue
+
+                
+                c_plus =  np.interp(a,a_grid,sigma_work[t+1])
+
+                # oooo. accumulate
+                RHS = cp.beta*cp.R*cp.du(c_plus)    
+
+                # v. euler error
+                euler_raw = c - cp.uc_inv(RHS)
+                
+                euler[t, i_a] = np.log10(np.abs(euler_raw/c)+1e-16)
+    
+    return np.nanmean(euler)
 
 
 def Operator_Factory(cp):
@@ -149,6 +194,51 @@ def Operator_Factory(cp):
     R = cp.R
     b = cp.b
     T = cp.T
+
+    def EGM_UE(endog_grid,\
+                        vf_work_t_inv,
+                        sigma_work_t_inv,
+                        asset_grid_A,
+                        del_a_unrefined,
+                        m_bar=2,
+                        method = 'DCEGM'):
+        
+        if method == 'FUES':
+            
+            egrid1, vf_clean, sigma_clean, a_prime_clean, dela_clean = FUES(
+                endog_grid, vf_work_t_inv, sigma_work_t_inv, asset_grid_A, del_a_unrefined, m_bar=1.01)
+            #print(egrid1)
+            
+        if method == 'DCEGM':
+            a_prime_clean, egrid1,sigma_clean, vf_clean,dela_clean = dcegm(sigma_work_t_inv,del_a_unrefined,vf_work_t_inv, asset_grid_A,endog_grid)
+
+        if method == 'RFC':
+            #Generate inputs for RFC
+            grad = cp.du(sigma_work_t_inv)
+            xr = np.array([endog_grid]).T
+            vfr =  np.array([vf_work_t_inv]).T
+            gradr = np.array([grad]).T
+            pr =  np.array([asset_grid_A]).T
+            mbar = 1.1
+            radius = 0.5
+            
+            #run rfc_vectorized
+            sub_points, roofRfc, close_ponts = rfc(xr,gradr,vfr,pr,mbar,radius, 40)
+    
+    
+            mask = np.ones(endog_grid.shape[0] ,dtype=bool)
+            mask[sub_points] = False
+            egrid1 = endog_grid[mask]
+            vf_clean = vfr[mask][:,0]
+            sigma_clean = sigma_work_t_inv[mask]
+            a_prime_clean = asset_grid_A[mask]
+            #get del_a array
+            dela_clean = del_a_unrefined[mask]
+
+            #print(vf_clean.shape)
+
+
+        return egrid1, vf_clean, sigma_clean, a_prime_clean, dela_clean
 
     @njit
     def retiree_solver(sigma_prime_ret,
@@ -239,7 +329,7 @@ def Operator_Factory(cp):
                 sigma_ret_t,
                 vf_ret_t,
                 dela_ret_t, 
-                t, m_bar):
+                t, m_bar, method = 'FUES'):
         """
         Generates time t policy for worker.
 
@@ -310,8 +400,10 @@ def Operator_Factory(cp):
         for i in range(len(asset_grid_A)):
             # marginal utility of next period consumption on T+1 state
             uc_prime = beta * R * uc_prime_work[i]
-            c_t = uc_inv(uc_prime)
 
+            #print(uc_prime)
+            c_t = uc_inv(uc_prime)
+            #if c_t NaN
             # current period value function on T+1 state
             vf_work_t_inv[i] = u(c_t) + beta * VF_prime_work[i] - delta
             sigma_work_t_inv[i] = c_t
@@ -330,8 +422,8 @@ def Operator_Factory(cp):
 
         # remove sub-optimal points using FUES
         time_start_fues = time.time()
-        egrid1, vf_clean, sigma_clean, a_prime_clean, dela_clean = FUES(
-            endog_grid, vf_work_t_inv, sigma_work_t_inv, asset_grid_A, del_a_unrefined, m_bar=2)
+        egrid1, vf_clean, sigma_clean, a_prime_clean, dela_clean = EGM_UE(
+            endog_grid, vf_work_t_inv, sigma_work_t_inv, asset_grid_A, del_a_unrefined, m_bar=1.01, method= method)
         time_end_fues = time.time()
 
         # interpolate on even start of period t asset grid for worker
@@ -355,8 +447,12 @@ def Operator_Factory(cp):
         else:
             work_choice = np.exp(vf_work_t/smooth_sigma)/((np.exp(vf_ret_t/smooth_sigma)\
                             + np.exp(vf_work_t/smooth_sigma)))
+            work_choice = np.where(np.isnan(work_choice) | np.isinf(work_choice), 0, work_choice)
 
         sigma_t = work_choice * sigma_work_t + (1 - work_choice) * sigma_ret_t
+        #print(sigma_t)
+        sigma_t[np.where(sigma_t<0.0001)] = 0.0001
+        #print(sigma_t)
         vf_t = work_choice * (vf_work_t) + (1 - work_choice) * vf_ret_t
         dela_t = work_choice * (dela_work_t) + (1 - work_choice) * dela_ret_t
         uc_t = du(sigma_t)
@@ -370,13 +466,13 @@ def Operator_Factory(cp):
             endog_grid, sigma_t, uddca_t,del_a_unrefined, time_fues, time_all
 
 
-    def iter_bell(policy_params):
-        max_age = policy_params.max_age
-        grid_len = policy_params.grid_len
+    def iter_bell(policy_params, method  = 'FUES'):
+        max_age = policy_params.T
+        grid_len = policy_params.grid_size
 
         # Terminal state values
-        initial_asset_grid = np.copy(policy_params.asset_grid)
-        initial_value_func = policy_params.utility(initial_asset_grid)
+        initial_asset_grid = np.copy(policy_params.asset_grid_A)
+        initial_value_func = policy_params.u(initial_asset_grid)
         consumption_derivative_terminal = ddu(initial_asset_grid) * R
 
         # Allocate memory for retiree data for each age
@@ -415,8 +511,8 @@ def Operator_Factory(cp):
                 consumption, value, cons_derivative)
 
         # Solve general policy for workers
-        next_worker_value = policy_params.utility(initial_asset_grid)
-        next_worker_cons_derivative = policy_params.utility_derivative(initial_asset_grid)
+        next_worker_value = policy_params.u(initial_asset_grid)
+        next_worker_cons_derivative = policy_params.du(initial_asset_grid)
         next_euler_derivative = ddu(initial_asset_grid) * R
 
         # Backward induction for workers
@@ -425,7 +521,7 @@ def Operator_Factory(cp):
             results = worker_solver(
                 next_worker_cons_derivative, next_euler_derivative, next_worker_value,
                 retiree_consumption[age, :], retiree_values[age, :],
-                retiree_asset_derivatives[age, :], age, 2)
+                retiree_asset_derivatives[age, :], age, 2, method = method)
             
             (worker_cons_derivative, unrefined_consumption, worker_value, 
             unrefined_worker_value, endogenous_grid, refined_consumption, 
