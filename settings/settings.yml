@@ -6,3 +6,24 @@ lambdas:
 - -1.71E-06
 - 0.0241546
 - -0.00011022
+
+fella:
+  r: 0.03
+  r_H: 0
+  beta: 0.93
+  delta: 0
+  Pi:
+    - [0.99, 0.01, 0]
+    - [0.01, 0.98, 0.01]
+    - [0, 0.09, 0.91]
+  z_vals: [0.1, 0.526, 4.66]
+  b: 1e-10
+  grid_max_A: 15.0
+  grid_max_H: 7.5  # Reference variable, adjust if needed
+  grid_size: 1000  # Reference variable, adjust if needed
+  grid_size_H: 7.0
+  gamma_1: 0
+  xi: 0
+  kappa: 0.07
+  phi: 0.09
+  theta: 0.6
