@@ -128,7 +128,7 @@ def seg_intersect(a1, a2, b1, b2):
 
 
 @njit
-def FUES(e_grid, vf, c, a_prime,del_a, b=1e-10, m_bar=2, LB=4, endog_mbar = False):
+def FUES(e_grid, vf, policy_1, policy_2,del_a, b=1e-10, m_bar=2, LB=4, endog_mbar = False):
     """
     FUES function returns refined EGM grid, value function and
     policy function
@@ -139,12 +139,12 @@ def FUES(e_grid, vf, c, a_prime,del_a, b=1e-10, m_bar=2, LB=4, endog_mbar = Fals
             unrefined endogenous grid
     vf: 1D array
             value correspondence points at endogenous grid
-    c: 1D array
+    policy_1: 1D array
             policy 1 points at endogenous grid
-    a_prime: 1D array
+    policy_2: 1D array
             policy 2 points at endogenous grid
     del_a: 1D array
-            derivative of poblicy function
+            derivative of policy function 1
     b: float64
         lower bound for the endogenous grid
 
@@ -162,9 +162,9 @@ def FUES(e_grid, vf, c, a_prime,del_a, b=1e-10, m_bar=2, LB=4, endog_mbar = Fals
                     refined endogenous grid
     vf_clean: 1D array
                 value function on refined grid
-    c_clean: 1D array
+    policy_1_clean: 1D array
                 policy 1 on refined grid
-    a_prime_clean: 1D array
+    policy_2_clean: 1D array
                     policy 2 on refined grid
     del_a_clean: 1D array
             gradient of policy 2 on refined grid
@@ -199,29 +199,26 @@ def FUES(e_grid, vf, c, a_prime,del_a, b=1e-10, m_bar=2, LB=4, endog_mbar = Fals
 
     """
 
-    
-
     # Sort policy and vf by e_grid order
     sort_indices = np.argsort(e_grid)
     vf = np.take(vf, sort_indices)
-    c = np.take(c, sort_indices)
-    a_prime = np.take(a_prime, sort_indices)
+    policy_1 = np.take(policy_1, sort_indices)
+    policy_2 = np.take(policy_2, sort_indices)
     del_a = np.take(del_a, sort_indices)
     e_grid = np.sort(e_grid)
 
     # Scan attaches NaN to vf at all sub-optimal points
-    e_grid_clean, vf_with_nans, a_prime_clean, c_clean = \
-        _scan(e_grid, vf, a_prime,c, del_a, m_bar, LB, endog_mbar=endog_mbar)
+    e_grid_clean, vf_with_nans, policy_1_nans, policy_2_nans = \
+        _scan(e_grid, vf,policy_1,policy_2, del_a, m_bar, LB, endog_mbar=endog_mbar)
 
     non_nan_indices = np.where(~np.isnan(vf_with_nans))
     
     return (e_grid_clean[non_nan_indices],
         vf[non_nan_indices],
-        c_clean[non_nan_indices],
-        a_prime_clean[non_nan_indices],
+        policy_1[non_nan_indices],
+        policy_2[non_nan_indices],
         del_a[non_nan_indices])
         
-
 
 @njit
 def _scan(e_grid, vf, c, a_prime,del_a, m_bar, LB, fwd_scan_do=True, endog_mbar= True):
