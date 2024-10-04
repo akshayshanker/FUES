@@ -35,7 +35,7 @@ def dcegm(c, dela, vf, a_prime, x):
         v_segments.append(vf[idx])
         dela_segments.append(dela[idx])
 
-    m_upper, v_upper, inds_upper = upper_envelope(segments)
+    m_upper, v_upper, inds_upper = upper_envelope(segments, calc_crossings=False)
     c1_env = np.zeros_like(m_upper) + np.nan
     a1_env = np.zeros_like(m_upper) + np.nan
     v1_env = np.zeros_like(m_upper) + np.nan

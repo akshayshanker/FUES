@@ -1,7 +1,7 @@
 """
 
 Module that contains class and solvers for discrete
-choice housing model (Fella, 2014).
+choice housing model (Fella, 2014) using FUES, RFC, DC-EGM. 
 
 Author: Akshay Shanker, University of Sydney, a.shanker@unsw.edu.au
 
@@ -13,13 +13,11 @@ from sklearn.utils.extmath import cartesian
 from numba import njit, prange
 import matplotlib.pylab as pl
 from quantecon.optimize.scalar_maximization import brent_max
+from quantecon.markov.approximation import tauchen
 from numba import njit
 from numba.typed import Dict
 from numba.core import types
 from quantecon import MarkovChain
-
-
-
 import os
 import sys
 
@@ -34,6 +32,8 @@ from FUES.FUES import FUES
 from FUES.RFC_simple import rfc
 from FUES.DCEGM import dcegm
 from FUES.math_funcs import interp_as
+
+from FUES.fues_numba import fues_numba_unconstrained 
 
 class ConsumerProblem:
     """
@@ -139,7 +139,7 @@ class ConsumerProblem:
 
         self.Pi, self.z_vals = np.array(Pi), np.asarray(z_vals)
 
-        self.asset_grid_A = np.linspace(b, grid_max_A, grid_size)
+        self.asset_grid_A = np.linspace(b, grid_max_A, grid_size*2)
         self.asset_grid_H = np.linspace(b, grid_max_H, grid_size_H)
         self.asset_grid_M = np.linspace(b, grid_max_A + grid_max_H, grid_size)
 
@@ -186,7 +186,6 @@ class ConsumerProblem:
         self.du = term_du
         self.u_vec = u_vec
 
-
 def welfare_loss_log_utility(v_fues, v_dcegm, c_dcegm):
     """
     Calculate welfare loss in consumption terms using log utility.
@@ -212,14 +211,13 @@ def welfare_loss_log_utility(v_fues, v_dcegm, c_dcegm):
 
     return welfare_loss
 
-
 def EGM_UE(egrid, vf, c, a, dela, endog_mbar=False, method='FUES', m_bar=1.2):
     """
     Wrapper function to select between FUES, RFC and DC-EGM upper envelope methods
     """
 
     if method == 'FUES':
-        # FUES method
+        # FUES method original 
         policies_dict = Dict.empty(
             key_type=types.unicode_type,
             value_type=types.float64[:],
@@ -230,11 +228,17 @@ def EGM_UE(egrid, vf, c, a, dela, endog_mbar=False, method='FUES', m_bar=1.2):
         policies_dict['vf'] = np.array(vf)
         test_pols = np.array(a)
 
-        egrid_refined_1D, vf_refined_1D, c_refined_1D, a_prime_refined_1D, dela = \
+        egrid_refined_1D, vf_refined_1D, a_prime_refined_1D, c_refined_1D, dela = \
             FUES(
-                egrid, vf, policies_dict['c'], policies_dict['a'],
+                egrid, vf, policies_dict['a'], policies_dict['c'],
                 policies_dict['a'], m_bar=m_bar, LB=4, endog_mbar=False
             )
+        
+    if method == 'FUES_numba':
+        # FUES coded by OSE
+        egrid_refined_1D, vf_refined_1D, c_refined_1D, a_prime_refined_1D = fues_numba_unconstrained(
+            egrid, vf, c,a, jump_thresh=m_bar
+        )
 
     elif method == 'DCEGM':
         # DCEGM method
@@ -262,7 +266,6 @@ def EGM_UE(egrid, vf, c, a, dela, endog_mbar=False, method='FUES', m_bar=1.2):
         a_prime_refined_1D = a[mask]
 
     return egrid_refined_1D, vf_refined_1D, c_refined_1D, a_prime_refined_1D, vf
-
 
 def Operator_Factory(cp):
     """ Operator that generates functions to solve model"""
@@ -304,8 +307,6 @@ def Operator_Factory(cp):
         Calculate the Euler error for the Fella housing model with a stationary policy function.
         
         Parameters:
-        cp : ConsumerProblem
-            The consumer problem with model parameters.
         z_series : np.array
             The series of exogenous shock states (z) over time.
         H_post_state : np.array
@@ -314,14 +315,13 @@ def Operator_Factory(cp):
             The stationary policy function for consumption (c) over the state space (z, m, h).
         a_state : np.array
             The stationary policy function for liquid assets (a_prime) over the state space (z, m, h).
-        c_on_post_state : np.array
+        c_post_state : np.array
             The future stationary policy function for consumption (c) over the post-state space (z, a, h).
         
         Returns:
         float
             The average log10 Euler error across exogenous states, asset grid points, and housing grid points.
         """
-
 
         # Initialize the Euler error array
         euler = np.full(len(z_series), np.nan)
@@ -352,7 +352,7 @@ def Operator_Factory(cp):
             a_prime = np.interp(wealth, asset_grid_M, a_state[i_z, :, i_h_prime])
             c = np.interp(wealth, asset_grid_M, c_state[i_z, :, i_h_t])
             
-            if a_prime < b or wealth < b:
+            if a_prime < b or wealth < b or a_prime >= grid_max_A:
                 continue
 
             RHS = 0
@@ -369,6 +369,7 @@ def Operator_Factory(cp):
             # Update states
             a_t = a_prime
             i_h_t = i_h_prime
+
         
         # n cross_section 
         n_cross = int(np.sqrt(len(z_series)))
@@ -587,9 +588,9 @@ def Operator_Factory(cp):
         return new_V, new_UD_a, new_UD_h
         
     @njit 
-    def invertEuler(V, sigma, dela):
+    def invertEuler(V, sigma):
         """
-        Invert the Euler equation to find the consumption policy function
+        Invert the Euler equation to find the raw consumption policy function
         """
 
         c_raw = np.zeros(shape)
@@ -612,37 +613,40 @@ def Operator_Factory(cp):
             vf_prime = np.dot(Pi[i_z, :], VF_primes)
             v_curr =  u(c_t, h_prime) + vf_prime 
             market_resources = a_prime + c_t
-            #print(market_resources)
             e_grid_raw[i_z, i_a_prime, i_h_prime] = market_resources
             c_raw[i_z, i_a_prime, i_h_prime] = c_t
             v_raw[i_z, i_a_prime, i_h_prime] = v_curr
-        #print(e_grid_raw)
+
         return c_raw, v_raw, e_grid_raw
     
-    @njit 
+    @njit
     def H_choice(new_v_refined, a_prime_refined, c_refined):
         """ 
-        Interpolate the value function and policy function on the 
-        start of period state space and choose the optimal housing choice. 
+        Interpolate the refined value function and policy function on the 
+        start-of-period state space and choose the optimal housing choice.
 
         Parameters
         ----------
         new_v_refined: 3D array
-                        Value function on active state space and conditioned on housing choice
+            Value function on active state space and conditioned on housing
+            choice
         a_prime_refined: 3D array
-                        Asset policy on active state space and conditioned on housing choice
+            Asset policy on active state space and conditioned on housing
+            choice
         c_refined: 3D array
-                    Consumption policy on active state space and conditioned on housing choice
+            Consumption policy on active state space and conditioned on housing
+            choice
         
         Returns
         -------
-        new_v_refined: 3D array
-                        Value function on state space
+        v_new: 3D array
+            Value function on start of period state space
+        c_new: 3D array
+            Consumption policy on start of period state
         a_new: 3D array
-                Asset policy on state space
+            Asset policy on start of period state space
         H_new: 3D array
-                Housing policy on state space
-        
+            Housing policy on start of period state space
         """
 
         a_new = np.zeros(shape)
@@ -660,56 +664,76 @@ def Operator_Factory(cp):
             i_h = int(X_all_big[i][2])
             i_h_prime = int(X_all_big[i][3])
             a = asset_grid_A[i_a]
-
             h = asset_grid_H[i_h]
             h_prime = asset_grid_H[i_h_prime]
 
             chi = 0
-
             if i_h != i_h_prime:
                 chi = 1
 
-            wealth_curr = a* R + z_vals[i_z] + chi*(h - h_prime) - phi * np.abs(h_prime)*chi
+            wealth_curr = (a * R + z_vals[i_z] + chi * (h - h_prime) - 
+                        phi * np.abs(h_prime) * chi)
 
             if wealth_curr < 0:
                 V_new_big[i_z, i_a, i_h, i_h_prime] = -np.inf
-            
             else:
-                V_new_big[i_z, i_a, i_h, i_h_prime] = np.interp(wealth_curr, asset_grid_M, new_v_refined[i_z, :, i_h_prime])
-                sigma_new_big[i_z, i_a, i_h, i_h_prime] = np.interp(wealth_curr, asset_grid_M, c_refined[i_z, :, i_h_prime])
-                a_new_big[i_z, i_a, i_h, i_h_prime] = np.interp(wealth_curr, asset_grid_M, a_prime_refined[i_z, :, i_h_prime])
-        
-        for i in range(len(X_all)):
+                V_new_big[i_z, i_a, i_h, i_h_prime] = np.interp(
+                    wealth_curr, asset_grid_M, new_v_refined[i_z, :, i_h_prime])
+                sigma_new_big[i_z, i_a, i_h, i_h_prime] = np.interp(
+                    wealth_curr, asset_grid_M, c_refined[i_z, :, i_h_prime])
+                a_new_big[i_z, i_a, i_h, i_h_prime] = np.interp(
+                    wealth_curr, asset_grid_M, a_prime_refined[i_z, :, i_h_prime])
 
+        for i in range(len(X_all)):
             i_z = int(X_all[i][0])
             i_a = int(X_all[i][1])
             i_h = int(X_all[i][2])
 
-            # pick out max element
             max_index = int(np.argmax(V_new_big[i_z, i_a, i_h, :]))
-    
-            v_new[i_z, i_a, i_h] = V_new_big[i_z, i_a, i_h,max_index]
-            H_new[i_z, i_a, i_h] = max_index
 
-            a_new[i_z, i_a,i_h] = a_new_big[i_z, i_a, i_h, max_index]
-            c_new[i_z,i_a, i_h] = sigma_new_big[i_z, i_a, i_h, max_index]
-        
+            v_new[i_z, i_a, i_h] = V_new_big[i_z, i_a, i_h, max_index]
+            H_new[i_z, i_a, i_h] = max_index
+            a_new[i_z, i_a, i_h] = a_new_big[i_z, i_a, i_h, max_index]
+            c_new[i_z, i_a, i_h] = sigma_new_big[i_z, i_a, i_h, max_index]
+
         return v_new, c_new, a_new, H_new
-            
+
     #@njit
-    def Euler_Operator(V, sigma, dela, method='FUES'):
+    def Euler_Operator(V, sigma, method='FUES'):
         """
         Euler operator finds next period policy function using EGM and FUES
+
+        Parameterrs
+        ----------
+        V: 3D array
+            Value function for time t+1 conditioned to time t end of period 
+        sigma: 3D array
+            Consumption policy for time t+1 on t+1 start of period state
+        method: str 
+            Method to use for upper envelope (FUES, RFC, DCEGM)
+
+        Returns
+        -------
+        results: dict
+            Dictionary containing the updated policy functions and value functions
+
+
+
         """
 
         # The value function should be conditioned on time t
         # continuous state, time t discrete state, and time t+1 discrete state choice
 
-        c_raw, v_raw, e_grid_raw = invertEuler(V, sigma, dela)
+        c_raw, v_raw, e_grid_raw = invertEuler(V, sigma)
 
         new_a_prime_refined1 = np.zeros(shape_active)
         new_c_refined1 = np.zeros(shape_active)
         new_v_refined1 = np.zeros(shape_active)
+
+        new_v_refined1_dict = {}
+        new_c_refined1_dict = {}
+        new_a_prime_refined1_dict = {}
+        new_e_refined_dict = {}
 
         for i in range(len(X_exog)):
 
@@ -726,7 +750,13 @@ def Operator_Factory(cp):
             egrid_refined_1D, vf_refined_1D, c_refined_1D, a_prime_refined_1D, dela_out = \
                 EGM_UE(egrid_unrefined_1D, vf_unrefined_1D, c_unrefined_1D,
                     a_prime_unrefined_1D, vf_unrefined_1D, method=method,
-                    m_bar=1.4)
+                    m_bar=1.0111)
+            
+            new_v_refined1_dict[f"{i_z}-{i_h_prime}"] = vf_refined_1D
+            new_c_refined1_dict[f"{i_z}-{i_h_prime}"] = c_refined_1D
+            new_a_prime_refined1_dict[f"{i_z}-{i_h_prime}"] = a_prime_refined_1D
+            new_e_refined_dict[f"{i_z}-{i_h_prime}"] = egrid_refined_1D
+
             UE_time = time.time() - start
 
             min_c_val = np.min(c_unrefined_1D)
@@ -745,7 +775,7 @@ def Operator_Factory(cp):
             a_prime_refined_1D = np.concatenate((b_array, a_prime_refined_1D))
 
             new_a_prime_refined1[i_z, :, i_h_prime] = interp_as(
-                egrid_refined_1D, a_prime_refined_1D, asset_grid_M, extrap=False)
+                egrid_refined_1D, a_prime_refined_1D, asset_grid_M,extrap=False)
             new_c_refined1[i_z, :, i_h_prime] = interp_as(
                 egrid_refined_1D, c_refined_1D, asset_grid_M, extrap=False)
             new_v_refined1[i_z, :, i_h_prime] = interp_as(
@@ -754,7 +784,7 @@ def Operator_Factory(cp):
         new_v_refined_bar, new_c_refined, new_a_prime_refined, new_H_refined = \
             H_choice(new_v_refined1, new_a_prime_refined1, new_c_refined1)
 
-        results = {'post_state': {}, 'state': {}}
+        results = {'post_state': {}, 'state': {}, 'EGM': {}}
 
         results['post_state']['c'] = new_c_refined
         results['post_state']['a'] = new_a_prime_refined
@@ -765,6 +795,18 @@ def Operator_Factory(cp):
         results['state']['a'] = new_a_prime_refined1
         results['state']['vf'] = new_v_refined1
 
+        results['EGM']['unrefined'] = {}
+        results['EGM']['refined'] = {}
+        results['EGM']['unrefined']['v'] = v_raw
+        results['EGM']['unrefined']['c'] = c_raw
+        results['EGM']['unrefined']['e'] = e_grid_raw
+
+        results['EGM']['refined']['v'] = new_v_refined1_dict
+        results['EGM']['refined']['c'] = new_c_refined1_dict
+        results['EGM']['refined']['a'] = new_a_prime_refined1_dict
+        results['EGM']['refined']['e'] = new_e_refined_dict
+
+    
         return results, UE_time
 
     return bellman_operator, Euler_Operator, condition_V, euler_error_fella
@@ -812,7 +854,7 @@ def iterate_euler(cp, method="FUES", max_iter=200, tol=1e-4, verbose = True):
     # Euler iteration loop
     while k < max_iter and bhask_error > tol:
         # Perform one step of Euler operator based on the selected method
-        results, UE_time1 = Euler_Operator(V_new, c_new, dela, method=method)
+        results, UE_time1 = Euler_Operator(V_new, c_new, method=method)
         
         # Update error and policies
         bhask_error = np.max(np.abs(results['post_state']['vf'] - V_new))  # Calculate error based on policy function changes
@@ -833,67 +875,94 @@ def iterate_euler(cp, method="FUES", max_iter=200, tol=1e-4, verbose = True):
     return results
 
 
-def compare_methods_grid(fella_settings,Pi, grid_sizes_A, grid_sizes_H, max_iter=100, tol=1e-03, n =3):
+def compare_methods_grid(fella_settings, mc, z_series, grid_sizes_A, 
+                         grid_sizes_H, max_iter=100, tol=1e-03, n=4):
     """
     Compare the performance of FUES, DCEGM, and RFC over different grid sizes.
+
+    Parameters
+    ----------
+    fella_settings : dict
+        Settings for the FUES algorithm.
+    mc : MarkovChain
+        Markov chain instance for the consumer problem.
+    z_series : np.ndarray
+        Simulated series for the z values.
+    grid_sizes_A : list
+        List of asset grid sizes to compare.
+    grid_sizes_H : list
+        List of housing grid sizes to compare.
+    max_iter : int, optional
+        Maximum number of iterations for the solver, default is 100.
+    tol : float, optional
+        Tolerance for convergence, default is 1e-03.
+    n : int, optional
+        Number of repetitions to average results over, default is 4.
+
+    Returns
+    -------
+    results_summary : list
+        A list containing performance metrics for each grid size and method.
+    latex_table : str
+        A LaTeX-formatted table of the results.
     """
     results_summary = []
 
-    # simulate markoc chain for model and fix 
-
-    mc = MarkovChain(Pi)
-    z_series = mc.simulate(ts_length=1000000,  init = 1)
-
-
     for grid_size_A in grid_sizes_A:
         for grid_size_H in grid_sizes_H:
-            # Update the grid size in the model parameters (assuming cp has the grid size properties)
-            ##cp.asset_grid_A = np.linspace(0, 1, grid_size_A)  # Adjust asset grid as needed
+            # Update the grid size in the model parameters
+            print(grid_size_A)
             cp = ConsumerProblem(
-                    r=fella_settings['r'],
-                    r_H=fella_settings['r_H'],
-                    beta=fella_settings['beta'],
-                    delta=fella_settings['delta'],
-                    Pi=fella_settings['Pi'],
-                    z_vals=fella_settings['z_vals'],
-                    b=float(fella_settings['b']),  # Ensure b is a float
-                    grid_max_A=float(fella_settings['grid_max_A']),  # Convert to float
-                    grid_max_H=float(fella_settings['grid_max_H']),  # Convert to float
-                    grid_size=grid_size_A,
-                    grid_size_H=grid_size_H,
-                    gamma_1=fella_settings['gamma_1'],
-                    xi=fella_settings['xi'],
-                    kappa=fella_settings['kappa'],
-                    phi=fella_settings['phi'],
-                    theta=fella_settings['theta']
-                )
+                r=fella_settings['r'],
+                r_H=fella_settings['r_H'],
+                beta=fella_settings['beta'],
+                delta=fella_settings['delta'],
+                Pi=fella_settings['Pi'],
+                z_vals=fella_settings['z_vals'],
+                b=float(fella_settings['b']),
+                grid_max_A=float(fella_settings['grid_max_A']),
+                grid_max_H=float(fella_settings['grid_max_H']),
+                grid_size=grid_size_A,
+                grid_size_H=grid_size_H,
+                gamma_1=fella_settings['gamma_1'],
+                xi=fella_settings['xi'],
+                kappa=fella_settings['kappa'],
+                phi=fella_settings['phi'],
+                theta=fella_settings['theta']
+            )
+
             for method in ['FUES', 'DCEGM', 'RFC']:
                 best_time = np.inf
                 best_euler_error = np.inf
                 total_runtime = 0
 
-                for _ in range(n):  # Run each method 4 times
+                for _ in range(n):  # Run each method n times
                     start_time = time.time()
-                    results = iterate_euler(cp, method=method, max_iter=max_iter, tol=tol, verbose = False)
+                    results = iterate_euler(cp, method=method, 
+                                            max_iter=max_iter, tol=tol, 
+                                            verbose=False)
                     runtime = time.time() - start_time
-
                     total_runtime += runtime
+
                     if results['UE_time'] < best_time:
                         best_time = results['UE_time']
                         best_results = results
 
                     # Calculate Euler error for each iteration
-                    _, _, _,euler_error_fella= Operator_Factory(cp)
-                    E_error, _, _,_= euler_error_fella(z_series, 
-                                                        results['post_state']['H_prime'],
-                                                        results['state']['c'], 
-                                                        results['state']['a'], 
-                                                        results['post_state']['c'])
+                    _, _, _, euler_error_fella = Operator_Factory(cp)
+                    E_error, _, _, _ = euler_error_fella(
+                        z_series,
+                        results['post_state']['H_prime'],
+                        results['state']['c'],
+                        results['state']['a'],
+                        results['post_state']['c']
+                    )
+
                     if E_error < best_euler_error:
                         best_euler_error = E_error
 
                 # Record the average total time and best UE_time
-                avg_total_runtime = total_runtime / 4
+                avg_total_runtime = total_runtime / n
                 results_summary.append({
                     'Grid_Size_A': grid_size_A,
                     'Grid_Size_H': grid_size_H,
@@ -903,13 +972,12 @@ def compare_methods_grid(fella_settings,Pi, grid_sizes_A, grid_sizes_H, max_iter
                     'Best_Euler_Error': best_euler_error
                 })
 
-    # save results summary as pickle file
+    # Save results summary as a pickle file
     with open('../results/fella_timings.pkl', 'wb') as file:
         pickle.dump(results_summary, file)
 
     # Create a LaTeX table
     latex_table = create_latex_table(results_summary)
-
     file_path = '../results/fella_timings.tex'
 
     with open(file_path, 'w') as file:
@@ -952,7 +1020,7 @@ def create_latex_table(results_summary):
         # Convert time to milliseconds
         time_ms = result['Best_UE_time'] * 1000
         # Euler error formatted without scientific notation
-        euler_error = f"{result['Best_Euler_Error']:.6f}"
+        euler_error = f"{result['Best_Euler_Error']:.3f}"
 
         # Initialize dictionary entries for grid_size_A and grid_size_H
         if grid_size_A not in grid_results:
@@ -1003,7 +1071,7 @@ from matplotlib.ticker import FormatStrFormatter
 
 # Main block of code
 if __name__ == "__main__":
-
+    
     import yaml
 
     # Load the YAML file
@@ -1013,60 +1081,56 @@ if __name__ == "__main__":
     # Extract the 'fella' section from the settings
     fella_settings = settings['fella']
 
+    # Uncomment the following lines if you need to load a pickle file 
+    # with timing results or generate a LaTeX table from it.
 
-    # open pickle file with table
-    #with open('../results/fella_timings.pkl', 'rb') as file:
-    #    results_summary = pickle.load(file)
+    # with open('../results/fella_timings.pkl', 'rb') as file:
+    #     results_summary = pickle.load(file)
     
-    # Create a LaTeX table
-    #table = latex_table = create_latex_table(results_summary)
-    
-    #print(table)
+    # table = create_latex_table(results_summary)
+    # print(table)
+    # file_path = '../results/fella_timings.tex'
+    # with open(file_path, 'w') as file:
+    #     file.write(latex_table)
 
-    #file_path = '.,/results/fella_timings.tex'
-
-    #with open(file_path, 'w') as file:
-    #    file.write(latex_table)
-
-    # Timing comparisons and table
-    grid_sizes_A = [500, 1000,2000]
-    grid_sizes_H = [3,5,7,10]
-    
-    
-
-    # Bellman operator and plotting
+    # Grid sizes for comparison
+    grid_sizes_A = [300,500, 1000, 2000, 3000]
+    grid_sizes_H = [3, 5, 10,15]
 
     # Instantiate the consumer problem with parameters
     cp = ConsumerProblem(
-        r=0.03,
+        r=0.0346,
         r_H=0,
         beta=0.93,
         delta=0,
         Pi=((0.99, 0.01, 0), (0.01, 0.98, 0.01), (0, 0.09, 0.91)),
-        z_vals=(0.1, 0.526, 4.66),
+        z_vals=(0.2, 0.526, 4.66),
         b=1e-200,
-        grid_max_A=15,
-        grid_max_H=7.5,
+        grid_max_A=30,
+        grid_max_H=5,
         grid_size=1000,
-        grid_size_H=10,
+        grid_size_H=6,
         gamma_1=0,
         xi=0,
-        kappa=0.07,
-        phi=0.09,
-        theta=0.6
+        kappa=0.077,
+        phi=0.11,
+        theta=0.77
     )
 
-    compare_methods_grid(fella_settings,cp.Pi, grid_sizes_A, grid_sizes_H,
-                         max_iter=100, tol=1e-03)
-
     mc = MarkovChain(cp.Pi)
+    z_series = mc.simulate(ts_length=1000000, init=1)
 
-    z_series = mc.simulate(ts_length=1000000,  init = 1)
-    #z_series = z_series.reshape(10000,10000)
+    # Uncomment this block if you want to compare methods across grids.
+    # compare_methods_grid(fella_settings, mc, z_series, grid_sizes_A, 
+    #                      grid_sizes_H, max_iter=200, tol=1e-03)
 
-    bellman_operator, euler_operator, condition_V,euler_error_fella = Operator_Factory(cp)
+    ####################################################################
+    # Bellman operator, errors, and plotting
+    ####################################################################
+    
+    bellman_operator, euler_operator, condition_V, euler_error_fella = \
+        Operator_Factory(cp)
 
-    # Initialize empty grids
     shape = (len(cp.z_vals), len(cp.asset_grid_A), len(cp.asset_grid_H))
     V_init = np.ones(shape)
     a_policy = np.empty(shape)
@@ -1077,17 +1141,16 @@ if __name__ == "__main__":
     bell_toll = 1e-3
     iteration = 0
     new_V = V_init
-    max_iter = 100
-    pl.close()
+    max_iter = 200
 
-    sns.set(style="whitegrid",
-            rc={"font.size": 10, "axes.titlesize": 10, "axes.labelsize": 10})
+    sns.set(style="whitegrid", rc={"font.size": 10, "axes.titlesize": 10, 
+                                   "axes.labelsize": 10})
 
     # Solve via VFI and plot
     start_time = time.time()
     while bell_error > bell_toll and iteration < max_iter:
         V = np.copy(new_V)
-        a_new_policy, h_new_policy, V_new_policy, _, _, _, _ = \
+        a_new_policy, h_new_policy, V_new_policy, _, _, _, new_c_policy = \
             bellman_operator(iteration, V)
 
         new_V, _, _ = condition_V(V_new_policy, V_new_policy, V_new_policy)
@@ -1103,51 +1166,35 @@ if __name__ == "__main__":
 
     # Euler error and additional policy function plotting
     results_FUES = iterate_euler(cp, method='FUES', max_iter=max_iter, 
-                                 tol=1e-03)
+                                 tol=1e-03, verbose=True)
     print(f"FUES in {results_FUES['UE_time']} seconds")
 
-    vf_FUES, c_FUES, a_FUES, h_FUES = results_FUES['post_state']['vf'], \
-                                      results_FUES['post_state']['c'], \
-                                      results_FUES['post_state']['a'], \
-                                      results_FUES['post_state']['H_prime']
+    euler_error_FUES, _, v_val_est_fues, cons_fues = euler_error_fella(
+        z_series, results_FUES['post_state']['H_prime'],
+        results_FUES['state']['c'], results_FUES['state']['a'], 
+        results_FUES['post_state']['c'])
 
-    euler_error_FUES, _, v_val_est_fues, cons_fues = euler_error_fella(z_series,
-                                                results_FUES['post_state']['H_prime'],
-                                                 results_FUES['state']['c'], 
-                                                 results_FUES['state']['a'], 
-                                                 results_FUES['post_state']['c'])
-    print(euler_error_FUES)
+    print(f"Euler error FUES is {euler_error_FUES}")
     print(np.nanmean(v_val_est_fues))
 
     results_DCEGM = iterate_euler(cp, method='DCEGM', max_iter=max_iter, 
-                                  tol=1e-03)
+                                  tol=1e-03, verbose=True)
     print(f"DCEGM in {results_DCEGM['UE_time']} seconds")
 
-    vf_DCEGM, c_DCEGM, a_DCEGM, h_DCEGM = results_DCEGM['post_state']['vf'], \
-                                          results_DCEGM['post_state']['c'], \
-                                          results_DCEGM['post_state']['a'], \
-                                          results_DCEGM['post_state']['H_prime']
+    euler_error_DCEGM, _, v_val_est_dcegm, cons_decegm = euler_error_fella(
+        z_series, results_DCEGM['post_state']['H_prime'],
+        results_DCEGM['state']['c'], results_DCEGM['state']['a'], 
+        results_DCEGM['post_state']['c'])
 
-    euler_error_DCEGM, _, v_val_est_dcegm, cons_decegm = euler_error_fella(z_series,
-                                                results_DCEGM['post_state']['H_prime'],
-                                                  results_DCEGM['state']['c'], 
-                                                  results_FUES['state']['a'], 
-                                                  results_DCEGM['post_state']['c'])
-    print(euler_error_DCEGM)
-    
+    print(f"Euler error DCEGM is {euler_error_DCEGM}")
     print(np.nanmean(v_val_est_dcegm))
 
-    print("FUES welfare is {}, DCEGM is {}".format(np.nanmean(v_val_est_fues), np.nanmean(v_val_est_dcegm)))
-
     CV = welfare_loss_log_utility(v_val_est_fues, v_val_est_dcegm, cons_decegm)
+    print(f"FUES welfare is {np.nanmean(v_val_est_fues)}, "
+          f"DCEGM is {np.nanmean(v_val_est_dcegm)}")
+    print(f"Consumption equivalent welfare loss is {CV}")
 
-    # Calcualte welfare loss
-
-    #welfare_loss_dcegm = np.sum(np.abs(v_val_est_fues - v_val_est_dcegm))
-
-
-
-    # Plotting
+    # Plotting final policy functions
     fig, ax = pl.subplots(1, 2)
     ax[0].set_xlabel('Assets (t)', fontsize=11)
     ax[0].set_ylabel('Assets (t+1)', fontsize=11)
@@ -1156,7 +1203,7 @@ if __name__ == "__main__":
     ax[0].set_yticklabels(ax[0].get_yticks(), size=9)
     ax[0].set_xticklabels(ax[0].get_xticks(), size=9)
     ax[0].yaxis.set_major_formatter(FormatStrFormatter("%.1f"))
-    ax[0].xaxis.set_major_formatter(FormatStrFormatter("%.0f"))
+    ax[0].xaxis.set_major_formatter(FormatStrFormatter("%.1f"))
 
     ax[1].set_xlabel('Assets (t)', fontsize=11)
     ax[1].set_ylabel('Assets (t+1)', fontsize=11)
@@ -1165,14 +1212,16 @@ if __name__ == "__main__":
     ax[1].set_yticklabels(ax[0].get_yticks(), size=9)
     ax[1].set_xticklabels(ax[0].get_xticks(), size=9)
     ax[1].yaxis.set_major_formatter(FormatStrFormatter("%.1f"))
-    ax[1].xaxis.set_major_formatter(FormatStrFormatter("%.0f"))
+    ax[1].xaxis.set_major_formatter(FormatStrFormatter("%.1f"))
 
-    for i, col, lab in zip([1, 4, 7], ['blue', 'red', 'black'], 
+    for i, col, lab in zip([1, 2, 3], ['blue', 'red', 'black'], 
                            ['H = low', 'H = med.', 'H = high']):
         ax[1].plot(cp.asset_grid_M, results_FUES['state']['c'][1, :, i], 
                    color=col, label=lab)
         ax[1].plot(cp.asset_grid_M, results_DCEGM['state']['c'][1, :, i], 
-                   color='black', linestyle='--')
+                   color='black', linestyle=':')
+        #ax[0].plot(cp.asset_grid_M, new_c_policy[1, :, i], 
+        #           color=col, label=lab)
 
     ax[0].legend(frameon=False, prop={'size': 10})
     ax[0].set_title("VFI", fontsize=11)
@@ -1180,4 +1229,59 @@ if __name__ == "__main__":
 
     fig.tight_layout()
     pl.savefig('../results/plots/fella/Fella_policy.png')
+
+    # Plotting raw and refined EGM grids
+    fig, ax = pl.subplots(1, 2, figsize=(12, 6))
+    sns.set(style="white", rc={"font.size": 9, "axes.titlesize": 9, 
+                               "axes.labelsize": 9})
+
+    # Set labels and formatting for the right panel (FUES)
+    ax[1].set_xlabel('Assets (t)', fontsize=11)
+    ax[1].set_ylabel('Value function', fontsize=11)
+    ax[1].spines['right'].set_visible(False)
+    ax[1].spines['top'].set_visible(False)
+    ax[1].set_yticklabels(ax[1].get_yticks(), size=9)
+    ax[1].set_xticklabels(ax[1].get_xticks(), size=9)
+    ax[1].yaxis.set_major_formatter(FormatStrFormatter("%.1f"))
+    ax[1].xaxis.set_major_formatter(FormatStrFormatter("%.0f"))
+
+    # Plot unrefined and refined value functions for DCEGM (left panel)
+    for i, col, lab in zip([1, 4], ['blue', 'red'], ['H = low', 'H = med.', 'H = high']):
+        ax[0].scatter(results_DCEGM['EGM']['unrefined']['e'][1, :, i],
+                    results_DCEGM['EGM']['unrefined']['v'][1, :, i],
+                    color=col, label=f'Unrefined {lab}', linewidth=0.75,
+                    s=20, edgecolors='r', facecolors='none')
+        ax[0].scatter(results_DCEGM['EGM']['refined']['e'][f'1-{i}'],
+                    results_DCEGM['EGM']['refined']['v'][f'1-{i}'],
+                    label=f'Refined {lab}', marker='x', linewidth=0.75,
+                    s=15, color='blue')
+
+    # Plot unrefined and refined value functions for FUES (right panel)
+    for i, col, lab in zip([1, 4], ['blue', 'red'], ['H = low', 'H = med.', 'H = high']):
+        ax[1].scatter(results_FUES['EGM']['unrefined']['e'][1, :, i],
+                    results_FUES['EGM']['unrefined']['v'][1, :, i],
+                    color=col, label=f'Unrefined {lab}', linewidth=0.75,
+                    s=20, edgecolors='r', facecolors='none')
+        ax[1].scatter(results_FUES['EGM']['refined']['e'][f'1-{i}'],
+                    results_FUES['EGM']['refined']['v'][f'1-{i}'],
+                    label=f'Refined {lab}', marker='x', linewidth=0.75,
+                    s=15, color='blue')
+
+    # Add legends and titles
+    ax[0].legend(frameon=False, prop={'size': 10})
+    ax[0].set_title("DCEGM: Unrefined vs Refined", fontsize=11)
+    ax[0].set_xlim([2, 3.4])
+    ax[0].set_ylim([-13, -11])
+
+    ax[1].legend(frameon=False, prop={'size': 10})
+    ax[1].set_title("FUES: Unrefined vs Refined", fontsize=11)
+    ax[1].set_xlim([2, 3.5])
+    ax[1].set_ylim([-13, -11])
+
+    # Adjust layout and save the plot
+    fig.tight_layout()
+    pl.savefig('../results/plots/fella/Fella_policy_refined_vs_unrefined.png')
+    pl.show()
+
+                           
 
