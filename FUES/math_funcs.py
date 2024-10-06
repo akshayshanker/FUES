@@ -231,7 +231,7 @@ def correct_jumps1d(data, x, gradient_jump_threshold, policy_value_funcs):
 
     return corrected_data, corrected_policy_value_funcs
 
-def mask_jumps(data, threshold=1.1):
+def mask_jumps(data, threshold=0.9):
     """
     Mask the data by introducing NaNs where there are large jumps/discontinuities.
     

@@ -15,24 +15,22 @@ Todo
 """
 
 import numpy as np
-from numba import jit
 import time
 import dill as pickle
-from numba import njit, prange
 from sklearn.utils.extmath import cartesian 
-
-from FUES.FUES import FUES
-
-from FUES.math_funcs import interp_as, upper_envelope
-
 from HARK.interpolation import LinearInterp
-from HARK.dcegm import calc_nondecreasing_segments, upper_envelope, calc_linear_crossing
-
-from interpolation import interp
-
+from HARK.dcegm import calc_nondecreasing_segments, upper_envelope
 import seaborn as sns
 from matplotlib.ticker import FormatStrFormatter
 import matplotlib.pylab as pl
+
+# Import local modules
+import os,sys 
+cwd = os.getcwd()
+sys.path.append('..')
+os.chdir(cwd)
+from FUES.FUES import FUES
+from examples.retirement import Operator_Factory, RetirementModel, euler
 
 
 def plot_egrids(age, e_grid, vf_work, c_worker, del_a, g_size):
@@ -397,8 +395,7 @@ def test_performance_for_grid_sizes_and_deltas(grid_sizes, delta_values):
 
     # Generate LaTeX tables after all grid sizes and deltas are tested
     #generate_latex_table(, "errors", "Euler Errors", "Retirement model")
-    generate_latex_table(latex_timings_data,latex_errors_data,"Timings (seconds)", "Retirement model")
-
+    generate_latex_table(latex_timings_data,latex_errors_data,"timing", "Retirement model")
 
 
 def generate_latex_table(data, errors, table_type, caption):
@@ -468,21 +465,16 @@ def generate_latex_table(data, errors, table_type, caption):
 \\end{{table}}
 """
     # Write the LaTeX code to a file
-    with open(f"{table_type}_RT_table.tex", "w") as file:
+    with open(f"..\results\retirement_{table_type}t.tex", "w") as file:
         file.write(latex_code)
 
     print(f"\nGenerated LaTeX {table_type} table saved to {table_type}_RT_table.tex.")
 
-
-
-
 if __name__ == "__main__":
 
-    from examples.retirement_choice import Operator_Factory, RetirementModel, euler
-
-
+    
     grid_sizes = [500, 1000, 2000, 3000]  # Adjust or add more grid sizes as necessary
-    delta_values = [0.5, 1,1.5,2]  # Test for different delta values
+    delta_values = [0.25, 0.5, 1,1.5,2]  # Test for different delta values
 
     test_performance_for_grid_sizes_and_deltas(grid_sizes, delta_values)
     

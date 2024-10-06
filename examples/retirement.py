@@ -145,7 +145,7 @@ def euler(cp,sigma_work):
                 c = np.interp(a,a_grid,sigma_work[t])
                 a_prime = a*cp.R + cp.y - c 
                 
-                if a_prime < 0.001: continue
+                if a_prime < 0.001 or a_prime>300: continue
 
                 
                 c_plus =  np.interp(a,a_grid,sigma_work[t+1])
@@ -205,8 +205,8 @@ def Operator_Factory(cp):
         
         if method == 'FUES':
             
-            egrid1, vf_clean, sigma_clean, a_prime_clean, dela_clean = FUES(
-                endog_grid, vf_work_t_inv, sigma_work_t_inv, asset_grid_A, del_a_unrefined, m_bar=1.01)
+            egrid1, vf_clean, a_prime_clean, sigma_clean, dela_clean = FUES(
+                endog_grid, vf_work_t_inv, asset_grid_A,sigma_work_t_inv, 1-del_a_unrefined, m_bar=1.01, endog_mbar = True,LB = 6)
             #print(egrid1)
             
         if method == 'DCEGM':
@@ -233,7 +233,7 @@ def Operator_Factory(cp):
             sigma_clean = sigma_work_t_inv[mask]
             a_prime_clean = asset_grid_A[mask]
             #get del_a array
-            dela_clean = del_a_unrefined[mask]
+            dela_clean = 1- del_a_unrefined[mask]
 
             #print(vf_clean.shape)
 

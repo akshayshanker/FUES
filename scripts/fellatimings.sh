@@ -9,4 +9,4 @@
 
 module load python3/3.12.1
 
-python3 fella.py
+python3 fella_plot.py

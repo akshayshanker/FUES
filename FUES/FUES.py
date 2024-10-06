@@ -275,7 +275,7 @@ def _scan(e_grid, vf, a_prime,del_a, m_bar, LB, fwd_scan_do=True, endog_mbar= Tr
             # and at testing point
             M_L = np.abs(del_a[j])
             M_U = np.abs(del_a[i+1])
-            M_max = max(M_L, M_U)
+            M_max = max(M_L, M_U) + 0.001
 
             # policy gradient with leading index to be checked
             d_p_prime = a_prime[i + 1] - a_prime[j]
@@ -284,7 +284,7 @@ def _scan(e_grid, vf, a_prime,del_a, m_bar, LB, fwd_scan_do=True, endog_mbar= Tr
 
             # Set detection threshold to m_bar if fixed m_bar used 
             if endog_mbar == False:
-                M_max = m_bar
+                M_max = m_bar 
 
             # if right turn is made and jump registered
             # remove point or perform forward scan
