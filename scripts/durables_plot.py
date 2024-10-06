@@ -42,8 +42,15 @@ def euler_housing(results, cp):
 	R_H = cp.R_H
 	delta = cp.delta
 
+	if cp.stat== True: 
+		t0 = cp.T1-1 -50
+		T = cp.T1-1
+	else:
+		t0 = cp.t0
+		T = cp.T
+
 	# loop over grid
-	for t in range(cp.t0, cp.T - 1):
+	for t in range(t0, T):
 		for i_h in range(len(h_grid)):
 			for i_a in range(len(a_grid)):
 				for i_z in range(len(cp.z_vals)):
