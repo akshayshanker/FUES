@@ -9,5 +9,4 @@
 
 module load python3/3.12.1
 
-cd /home/141/as3442/FUES_EGM/examples
 python3 fella.py

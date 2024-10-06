@@ -22,6 +22,23 @@ import copy
 
 
 @njit
+def uniqueEG(egrid, vf):
+    unique_values = np.unique(egrid)
+    max_vf_indices = np.full_like(egrid, -1)  # Initialize with -1
+
+    for value in unique_values:
+        if np.isnan(value):
+            continue
+        else:
+            indices = np.where(egrid == value)[0]
+            max_index = indices[np.argmax(vf[indices])]
+            max_vf_indices[max_index] = max_index
+
+    mask = (max_vf_indices != -1)
+    return mask
+
+
+@njit
 def append_push(x_array, m):
     """ Delete first value of array,
         pushes back index of all undeleted

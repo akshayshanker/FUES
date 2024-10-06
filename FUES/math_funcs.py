@@ -230,3 +230,26 @@ def correct_jumps1d(data, x, gradient_jump_threshold, policy_value_funcs):
                 corrected_policy_value_funcs[key][i] = corrected_policy_value_funcs[key][i - 2] + slope_extra * (x[i] - x[i - 2])
 
     return corrected_data, corrected_policy_value_funcs
+
+def mask_jumps(data, threshold=1.1):
+    """
+    Mask the data by introducing NaNs where there are large jumps/discontinuities.
+    
+    Use in plotting. 
+
+    Parameters:
+    data : np.ndarray
+        The data array to be masked.
+    threshold : float, optional
+        The threshold for detecting jumps. Any jump larger than this value will be masked.
+        
+    Returns:
+    np.ndarray
+        The masked data array.
+    """
+    masked_data = np.copy(data)
+    diffs = np.abs(np.diff(data))
+    
+    # Mask out the points after large jumps
+    masked_data[1:][diffs > threshold] = np.nan
+    return masked_data

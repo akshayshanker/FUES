@@ -400,10 +400,8 @@ def Operator_Factory(cp):
         for i in range(len(asset_grid_A)):
             # marginal utility of next period consumption on T+1 state
             uc_prime = beta * R * uc_prime_work[i]
-
-            #print(uc_prime)
             c_t = uc_inv(uc_prime)
-            #if c_t NaN
+
             # current period value function on T+1 state
             vf_work_t_inv[i] = u(c_t) + beta * VF_prime_work[i] - delta
             sigma_work_t_inv[i] = c_t
