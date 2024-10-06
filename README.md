@@ -1,7 +1,6 @@
-# FUES_EGM
-The Endogenous grid method (EGM) using fast upper-envelope scan (FUES).
+# Fast Upper-Envelope Scan (FUES) for Discrete-Continuous Dynamic Programming
 
-Initial beta replication material for `Fast upper-envelope scan for discrete-continuous dynamic programming' by Dobrescu and Shanker (2023). 
+The Endogenous grid method (EGM) using fast upper-envelope scan (FUES).
 
 See `slides....pdf` for overview of upper envelope scan. 
 

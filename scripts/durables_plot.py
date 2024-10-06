@@ -511,6 +511,8 @@ if __name__ == "__main__":
 						 T = 200,
 						 theta=24, t0 =0, root_eps=1e-1, stat= True)
 	
+	print(cp.stat)
+	
 	# 0. Solve with Bellman 
 	#iterVFI, iterEGM, condition_V, NEGM = Operator_Factory(cp)
 	#pickle.dump(bell_results, open("bell_results_300.p", "wb"))

@@ -126,6 +126,7 @@ class ConsumerProblem:
         self.t0 = t0
         self.root_eps = root_eps
         self.tol_timeiter = tol_timeiter
+        self.stat = stat
 
        # define functions
         @njit
