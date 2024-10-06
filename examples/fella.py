@@ -34,7 +34,7 @@ from FUES.RFC_simple import rfc
 from FUES.DCEGM import dcegm
 from FUES.math_funcs import interp_as, correct_jumps1d
 
-from FUES.fues_numba import fues_numba_unconstrained 
+from FUES.bonnFues import fues_numba_unconstrained 
 
 class ConsumerProblem:
     """
