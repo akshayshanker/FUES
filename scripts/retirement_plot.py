@@ -335,14 +335,14 @@ def test_performance_for_grid_sizes_and_deltas(grid_sizes, delta_values):
             # Create instance of RetirementModel
             cp = RetirementModel(
                 r=0.02,
-                beta=0.97,
+                beta=0.96,
                 delta=delta,
                 y=20,
                 b=1E-10,
                 grid_max_A=500,
                 grid_size=g_size_baseline,
                 T=50,
-                smooth_sigma=0.05
+                smooth_sigma=0.05,
             )
 
             # Unpack solver operators 
@@ -465,15 +465,21 @@ def generate_latex_table(data, errors, table_type, caption):
 \\end{{table}}
 """
     # Write the LaTeX code to a file
-    with open(f"..\results\retirement_{table_type}t.tex", "w") as file:
-        file.write(latex_code)
+    # Create the results directory if it doesn't exist
+    results_dir = os.path.join("..", "results")
+    os.makedirs(results_dir, exist_ok=True)
 
-    print(f"\nGenerated LaTeX {table_type} table saved to {table_type}_RT_table.tex.")
+    # Define the path to save the file
+    file_path = os.path.join(results_dir, f"retirement_{table_type}.tex")
+
+    # Save the LaTeX code to the file in the results directory
+    with open(file_path, "w") as file:
+        file.write(latex_code)
 
 if __name__ == "__main__":
 
     
-    grid_sizes = [500, 1000, 2000, 3000]  # Adjust or add more grid sizes as necessary
+    grid_sizes = [500,1000,2000,3000]  # Adjust or add more grid sizes as necessary
     delta_values = [0.25, 0.5, 1,1.5,2]  # Test for different delta values
 
     test_performance_for_grid_sizes_and_deltas(grid_sizes, delta_values)
@@ -603,7 +609,7 @@ if __name__ == "__main__":
                              b=1E-1,
                              grid_max_A=500,
                              grid_size=g_size,
-                             T=20,
+                             T=50,
                              smooth_sigma=0)
 
         # Unpack solvers

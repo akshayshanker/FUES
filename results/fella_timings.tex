@@ -1,0 +1,47 @@
+\begin{table}[htbp]
+\centering
+\small
+\begin{tabular}{ccccc|ccc}
+\toprule
+\multirow{2}{*}{\textit{Grid Size A}} & \multirow{2}{*}{\textit{Grid Size H}} & \multicolumn{3}{c}{\textbf{Timing (milliseconds)}} & \multicolumn{3}{c}{\textbf{Euler error (Log10)}} \\
+ & & \textbf{RFC} & \textbf{FUES} & \textbf{DCEGM} & \textbf{RFC} & \textbf{FUES} & \textbf{DCEGM} \\
+\midrule
+\multirow{1}{*}{\textit{300}} & 3 & 2.241 & 0.537 & 1.370 & -2.352 & -2.346 & -2.347 \\
+\midrule
+\multirow{1}{*}{\textit{300}} & 5 & 2.083 & 0.551 & 1.336 & -2.302 & -2.271 & -2.063 \\
+\midrule
+\multirow{1}{*}{\textit{300}} & 10 & 2.159 & 0.541 & 1.252 & -2.308 & -2.274 & -2.279 \\
+\midrule
+\multirow{1}{*}{\textit{300}} & 15 & 2.143 & 0.538 & 1.305 & -2.291 & -2.274 & -2.281 \\
+\multirow{1}{*}{\textit{500}} & 3 & 2.338 & 0.600 & 1.324 & -2.224 & -2.222 & -2.213 \\
+\midrule
+\multirow{1}{*}{\textit{500}} & 5 & 2.623 & 0.644 & 1.531 & -2.217 & -2.243 & -1.907 \\
+\midrule
+\multirow{1}{*}{\textit{500}} & 10 & 2.801 & 0.644 & 1.614 & -2.238 & -1.878 & -1.855 \\
+\midrule
+\multirow{1}{*}{\textit{500}} & 15 & 2.879 & 0.645 & 1.545 & -1.945 & -2.191 & -2.087 \\
+\multirow{1}{*}{\textit{1000}} & 3 & 3.578 & 0.996 & 1.999 & -2.261 & -2.263 & -2.249 \\
+\midrule
+\multirow{1}{*}{\textit{1000}} & 5 & 4.286 & 0.971 & 2.849 & -2.277 & -2.270 & -2.217 \\
+\midrule
+\multirow{1}{*}{\textit{1000}} & 10 & 3.948 & 0.985 & 3.163 & -2.411 & -2.264 & -1.999 \\
+\midrule
+\multirow{1}{*}{\textit{1000}} & 15 & 4.021 & 0.916 & 2.759 & -2.298 & -2.298 & -2.234 \\
+\multirow{1}{*}{\textit{2000}} & 3 & 5.947 & 1.527 & 3.388 & -2.316 & -2.316 & -2.316 \\
+\midrule
+\multirow{1}{*}{\textit{2000}} & 5 & 7.084 & 1.578 & 3.811 & -2.157 & -1.985 & -1.933 \\
+\midrule
+\multirow{1}{*}{\textit{2000}} & 10 & 7.034 & 1.603 & 4.601 & -2.492 & -2.328 & -2.315 \\
+\midrule
+\multirow{1}{*}{\textit{2000}} & 15 & 6.997 & 1.597 & 5.229 & -2.419 & -2.374 & -2.344 \\
+\multirow{1}{*}{\textit{3000}} & 3 & 7.997 & 2.075 & 4.471 & -2.365 & -2.356 & -2.355 \\
+\midrule
+\multirow{1}{*}{\textit{3000}} & 5 & 9.509 & 2.140 & 6.254 & -2.423 & -2.326 & -2.386 \\
+\midrule
+\multirow{1}{*}{\textit{3000}} & 10 & 9.885 & 2.181 & 8.704 & -2.229 & -2.397 & -2.388 \\
+\midrule
+\multirow{1}{*}{\textit{3000}} & 15 & 9.598 & 2.189 & 9.085 & -2.495 & -2.432 & -2.450 \\
+\bottomrule
+\end{tabular}
+\caption{\small Speed and accuracy of FUES, DCEGM, and RFC across different grid sizes A and H.}
+\end{table}

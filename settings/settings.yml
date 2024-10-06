@@ -1,11 +1,39 @@
-lambdas:
-- 4.7651949
-- 0.57802016
-- -0.02022858
-- 0.00030696
-- -1.71E-06
-- 0.0241546
-- -0.00011022
+durables:
+  lambdas:
+    - 4.7651949
+    - 0.57802016
+    - -0.02022858
+    - 0.00030696
+    - -1.71E-06
+    - 0.0241546
+    - -0.0001102
+  r: 0.034
+  sigma: 0.001
+  r_H: 0
+  beta: 0.91
+  alpha: 0.12
+  delta: 0
+  Pi: [[0.2, 0.8], [0.8, 0.2]]
+  z_vals: [1, 0.25]
+  b: 1e-200
+  grid_max_A: 15.0
+  grid_max_WE: 70.0
+  grid_size_W: 300
+  grid_max_H: 50.0
+  grid_size: 300
+  grid_size_H: 300
+  gamma_c: 3
+  chi: 0
+  tau: 0.09
+  K: 1.3
+  tol_bel: 1e-03
+  m_bar: 1.0001
+  T: 200
+  theta: 24
+  t0: 0
+  root_eps: 1e-1
+  stat: true
+
 
 fella:
   r: 0.0346
