@@ -342,7 +342,7 @@ def solveNEGM(cp, LS=True, verbose=True, method = 'DCEGM'):
 
 	return results
 
-def compare_grids_and_tau_mpi(cp_settings, tau_values, grid_sizes, max_iter=200, tol=1e-03, rep=4, methods=['DCEGM', 'FUES', 'RFC']):
+def compare_grids_and_tau(cp_settings, tau_values, grid_sizes, max_iter=200, tol=1e-03, rep=4, methods=['DCEGM', 'FUES', 'RFC']):
 	"""
 	Compare the performance of FUES, NEGM, and RFC over different grid sizes and tau values using MPI.
 
@@ -397,7 +397,7 @@ def compare_grids_and_tau_mpi(cp_settings, tau_values, grid_sizes, max_iter=200,
 	# Each process works on its subset of combinations
 	for tau, grid_size, method in combinations[start_index:end_index]:
 		# Update the tau and grid size in the model parameters
-		cp = ConsumerProblem(cp_settings['durables'],
+		cp = ConsumerProblem(cp_settings,
 							 r=cp_settings['r'],
 							 sigma=cp_settings['sigma'],
 							 r_H=cp_settings['r_H'],
@@ -517,22 +517,24 @@ if __name__ == "__main__":
 
 	# 1. Error and timing comparisons across grid sizes and tau values
 	# Tau values and grid sizes to compare
+	cp_settings = settings['durables']
+	
 	tau_values = [0.03, 0.07, 0.15]
 	grid_sizes_A = [300, 500, 1000,2000]
 
 	# Run comparison across grid sizes and tau values
-	#results, latex_table = compare_grids_and_tau(cp_settings['durables'], tau_values, grid_sizes_A, grid_sizes_H)
+	results, latex_table = compare_grids_and_tau(cp_settings, tau_values, grid_sizes_A)
 
-	#if MPI.COMM_WORLD.Get_rank() == 0:
-	#	print(latex_table)
-	#	with open("../results/comparison_table.tex", "w") as f:
-	#		f.write(latex_table)
+	if MPI.COMM_WORLD.Get_rank() == 0:
+		print(latex_table)
+		with open("../results/comparison_table.tex", "w") as f:
+			f.write(latex_table)
 
 	# 2. Solve the model in single process interface for plotting and single table 
 
 	if MPI.COMM_WORLD.Get_rank() == 0:
 
-		cp_settings = settings['durables']
+		
 
 		cp = ConsumerProblem(cp_settings,
 							r=cp_settings['r'],
@@ -629,5 +631,5 @@ if __name__ == "__main__":
 		lines.append(txt)
 		lines.insert(0, '| Method | EGM | NEGM |\n')
 
-		with open("table_housing.tex", "w") as f:
+		with open("../results/durables_single_result.tex", "w") as f:
 			f.writelines(lines)
