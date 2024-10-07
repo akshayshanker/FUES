@@ -8,6 +8,7 @@ import matplotlib.pyplot as pl
 from matplotlib.ticker import FormatStrFormatter
 from quantecon.markov import MarkovChain
 import dill as pickle
+from itertools import groupby
 
 # Import local modules
 cwd = os.getcwd()
@@ -117,6 +118,10 @@ def compare_methods_grid(fella_settings, mc, z_series, grid_sizes_A,
                     'Best_Euler_Error': best_euler_error,
                     'Total_iterations': best_results['Total_iterations']
                 })
+
+                print(f"Grid Size A: {grid_size_A}, Grid Size H: {grid_size_H}, "
+                      f"Method: {method}, Best UE Time: {best_time}, "
+                      f"Best Euler Error: {best_euler_error}")
 
     # Save results summary as a pickle file
     with open('../results/fella_timings.pkl', 'wb') as file:
@@ -296,8 +301,8 @@ if __name__ == "__main__":
     # 2. Run the FUES, DCEGM, and RFC methods for different grid sizes
     # Grid sizes for comparison
 
-    grid_sizes_A = [300,500, 1000, 2000, 3000]
-    grid_sizes_H = [3, 6, 12,16]
+    grid_sizes_A = [300, 1000, 2000, 3000]
+    grid_sizes_H = [3, 5, 10,15]
 
     # Uncomment this block if you want to compare methods across grids.
     compare_methods_grid(fella_settings, mc, z_series, grid_sizes_A, 

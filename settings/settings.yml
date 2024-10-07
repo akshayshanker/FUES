@@ -13,27 +13,26 @@ durables:
   beta: 0.91
   alpha: 0.12
   delta: 0
-  Pi: [[0.2, 0.8], [0.8, 0.2]]
-  z_vals: [1, 0.25]
+  Pi: [[0.5, 0.5], [0.5, 0.5]]
+  z_vals: [1.25, 0.25]
   b: 1e-200
-  grid_max_A: 15.0
-  grid_max_WE: 70.0
-  grid_size_W: 300
+  grid_max_A: 15.0 # max for liquid asset grid 
+  grid_max_WE: 70.0 # max for wealth (market resources grid)
+  grid_size_W: 300 # size of wealth grid
   grid_max_H: 50.0
-  grid_size: 300
+  grid_size: 300 # size of liquid asset grid (also used for size of H grid by default)
   grid_size_H: 300
   gamma_c: 3
   chi: 0
   tau: 0.09
   K: 1.3
-  tol_bel: 1e-03
+  tol_bel: 1E-03
   m_bar: 1.0001
-  T: 200
+  max_iter: 200
   theta: 24
   t0: 0
-  root_eps: 1e-1
+  root_eps: 1E-1
   stat: true
-
 
 fella:
   r: 0.0346
@@ -47,8 +46,8 @@ fella:
   z_vals: [0.2, 0.526, 4.66]
   b: 1e-100
   grid_max_A: 30.0
-  grid_max_H: 5  # Reference variable, adjust if needed
-  grid_size: 1000  # Reference variable, adjust if needed
+  grid_max_H: 5  
+  grid_size: 1000 
   grid_size_H: 7.0
   gamma_1: 0
   xi: 0

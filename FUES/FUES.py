@@ -13,6 +13,13 @@ https://web.archive.org/web/20111108065352/https://www.cs.mun.ca/%7Erod
 /2500/notes/numpy-arrays/numpy-arrays.html
 
 
+Notes
+-----
+
+EGM grid should not have duplicate values. Run uniqueEG before passing
+endogenous grid through FUES other will throw up division by zero errors. 
+
+
 """
 
 
@@ -23,14 +30,15 @@ import copy
 
 @njit
 def uniqueEG(egrid, vf):
-    unique_values = np.unique(egrid)
+    egrid_rounded = np.round_(egrid, 10)
+    unique_values = np.unique(egrid_rounded)
     max_vf_indices = np.full_like(egrid, -1)  # Initialize with -1
 
     for value in unique_values:
         if np.isnan(value):
             continue
         else:
-            indices = np.where(egrid == value)[0]
+            indices = np.where(egrid_rounded == value)[0]
             max_index = indices[np.argmax(vf[indices])]
             max_vf_indices[max_index] = max_index
 
@@ -139,7 +147,6 @@ def seg_intersect(a1, a2, b1, b2):
 
     return np.array([intersect_x, intersect_y])
 
-
 @njit
 def FUES(e_grid, vf, policy_1, policy_2,del_a, b=1e-10, m_bar=2, LB=4, endog_mbar = False):
     """
@@ -221,6 +228,7 @@ def FUES(e_grid, vf, policy_1, policy_2,del_a, b=1e-10, m_bar=2, LB=4, endog_mba
     policy_1 = policy_1[sort_indices]
     policy_2 = policy_2[sort_indices]
     del_a = del_a[sort_indices]
+
 
     # Scan attaches NaN to vf at all sub-optimal points
     e_grid_clean, vf_with_nans = \

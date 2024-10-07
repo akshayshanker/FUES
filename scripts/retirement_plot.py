@@ -342,7 +342,7 @@ def test_performance_for_grid_sizes_and_deltas(grid_sizes, delta_values):
                 grid_max_A=500,
                 grid_size=g_size_baseline,
                 T=50,
-                smooth_sigma=0.05,
+                smooth_sigma=0,
             )
 
             # Unpack solver operators 

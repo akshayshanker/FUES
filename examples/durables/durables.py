@@ -104,6 +104,7 @@ class ConsumerProblem:
         self.gamma_c, self.chi = gamma_c, chi
         self.b = b
         self.T = T
+        self.T1 = T1
         self.grid_max_A, self.grid_max_H = grid_max_A, grid_max_H
         self.sigma = sigma
         lambdas = np.array(config['lambdas'])
@@ -111,8 +112,9 @@ class ConsumerProblem:
         self.Pi, self.z_vals = np.array(Pi), np.asarray(z_vals)
         self.asset_grid_A = np.linspace(b, np.float64(grid_max_A), grid_size)
         self.asset_grid_H = np.linspace(b, np.float64(grid_max_H), grid_size_H)
-        self.asset_grid_HE = np.linspace(b, np.float64(grid_max_H), grid_size_H*2)
+        self.asset_grid_HE = np.linspace(b, np.float64(grid_max_H), grid_size_H*3)
         self.asset_grid_WE = np.linspace(b, np.float64(grid_max_WE), grid_size_W)
+        
         self.X_all = cartesian([np.arange(len(z_vals)),
                                 np.arange(len(self.asset_grid_A)),
                                 np.arange(len(self.asset_grid_H))])
@@ -662,6 +664,7 @@ def Operator_Factory(cp):
         """
 
         endog_grid_unrefined = np.ones((len(z_vals), int(len(asset_grid_A)*2), len(asset_grid_H)))
+        
         vf_unrefined = np.ones((len(z_vals), int(len(asset_grid_A)*2), len(asset_grid_H)))
         c_unrefined = np.ones((len(z_vals), int(len(asset_grid_A)*2), len(asset_grid_H)))
 
@@ -747,27 +750,19 @@ def Operator_Factory(cp):
         # keep today's housing fixed
         for index_h_today in range(len(asset_grid_H)):
             for index_z in range(len(z_vals)):
+                
                 vf_unrefined_points = vf_unrefined[index_z, :, index_h_today]
                 endog_grid_unrefined_points\
                     = endog_grid_unrefined[index_z, :, index_h_today]
                 c_unrefined_points = c_unrefined[index_z, :, index_h_today]
-                dela = np.zeros(len(c_unrefined_points))
-
                 
+                #print(endog_grid_unrefined_points)
                 uniqueIds = uniqueEG(endog_grid_unrefined_points, vf_unrefined_points)
                 endog_grid_unrefined_points = endog_grid_unrefined_points[uniqueIds]
                 vf_unrefined_points = vf_unrefined_points[uniqueIds]
                 c_unrefined_points = c_unrefined_points[uniqueIds]
                 asset_grid_AC_unique = asset_grid_AC[uniqueIds]
-                gr_raw = np.array([du_c(c_unrefined_points)]).T
-
                 
-                v_raw = np.array([vf_unrefined_points]).T
-                sigma_raw= np.column_stack((c_unrefined_points,asset_grid_AC_unique))
-                gr_raw = np.array([du_c(c_unrefined_points)]).T
-                M_raw = np.array([endog_grid_unrefined_points]).T
-                grid = np.array([asset_grid_A]).T
-
                 if method == 'FUES':
                 
                     e_grid_clean, vf_clean, a_prime_clean, c_clean, dela = \
@@ -778,10 +773,16 @@ def Operator_Factory(cp):
                     
                 if method == 'RFC':
 
+                    v_raw = np.array([vf_unrefined_points]).T
+                    sigma_raw= np.column_stack((c_unrefined_points,asset_grid_AC_unique))
+                    gr_raw = np.array([du_c(c_unrefined_points)]).T
+                    M_raw = np.array([endog_grid_unrefined_points]).T
+                    grid = np.array([asset_grid_A]).T
+                    gr_raw = np.array([du_c(c_unrefined_points)]).T
+
                     sub_points, tngv, closest_indices = rfc(M_raw,gr_raw,v_raw,sigma_raw, J_bar = m_bar, radius = 0.5, k =20)
                     
-                
-                
+            
                     mask = np.ones(M_raw.shape[0] ,dtype=bool)
                     mask[sub_points] = False
                     e_grid_clean = M_raw[mask][:,0]
@@ -903,12 +904,14 @@ def Operator_Factory(cp):
             
             gr_h  = du_c(c_unrefined_points) 
 
-            # evaluate using RFC interpolation
-            v_raw = np.array([vf_unrefined_points]).T
-            sigma_raw= np.column_stack((hprime_unrefined_points,aprime_unrefined_points, c_unrefined_points))
-            gr_raw = np.array([gr_h]).T
-            M_raw = np.array([egrid_unref_points]).T
-            grid = np.array([asset_grid_WE]).T
+            
+            # Remove duplicates of EGM points by taking the max 
+            uniqueIds = uniqueEG(egrid_unref_points, vf_unrefined_points)
+            
+            egrid_unref_points = egrid_unref_points[uniqueIds]
+            vf_unrefined_points = vf_unrefined_points[uniqueIds]
+            c_unrefined_points = c_unrefined_points[uniqueIds]
+            aprime_unrefined_points = aprime_unrefined_points[uniqueIds]
 
             if method == 'FUES':
                 e_grid_clean, vf_clean, a_prime_clean, c_clean, hprime_clean = \
@@ -918,6 +921,13 @@ def Operator_Factory(cp):
                             )
             
             if method == 'RFC':
+
+                # evaluate using RFC interpolation
+                v_raw = np.array([vf_unrefined_points]).T
+                sigma_raw= np.column_stack((hprime_unrefined_points,aprime_unrefined_points, c_unrefined_points))
+                gr_raw = np.array([gr_h]).T
+                M_raw = np.array([egrid_unref_points]).T
+                grid = np.array([asset_grid_WE]).T
 
                 sub_points, tngv, closest_indices = rfc(M_raw,gr_raw,v_raw,sigma_raw, J_bar = m_bar, radius = 0.05, k =50)
 
@@ -929,8 +939,7 @@ def Operator_Factory(cp):
                 a_prime_clean = sigma_raw[mask,1]
                 c_clean = sigma_raw[mask,2]
 
-            
-
+    
             sortindex = np.argsort(e_grid_clean)
             e_grid_clean = e_grid_clean[sortindex]
             vf_clean = vf_clean[sortindex]
@@ -960,7 +969,7 @@ def Operator_Factory(cp):
     #@njit
     def iterEGM(t, V_prime,
                          ELambdaAnxt,
-                         ELambdaHnxt, method = 'FUES'):
+                         ELambdaHnxt, method = 'FUES', m_bar = 1.4):
         
         """"
 
@@ -996,7 +1005,7 @@ def Operator_Factory(cp):
             = _refineKeeper(endog_grid_unrefined_noadj,
                             vf_unrefined_noadj,
                             c_unrefined_noadj,
-                            V_prime, t,  method = method)
+                            V_prime, t,  method = method, m_bar = m_bar)
 
         endog_grid_unrefined_adj, vf_unrefined_adj, a_prime_unrefined_adj,\
             h_prime_unrefined_adj\
@@ -1007,7 +1016,7 @@ def Operator_Factory(cp):
             vf_unrefined_adj_1, h_prime_unrefined_adj_1, a_prime_unrefined_adj_1,\
             endog_grid_unrefined_adj_1, sigma_intersect, M_intersect\
             = refine_adj(endog_grid_unrefined_adj, vf_unrefined_adj,
-                         a_prime_unrefined_adj, h_prime_unrefined_adj, method = method)
+                         a_prime_unrefined_adj, h_prime_unrefined_adj, method = method, m_bar = m_bar)
         
         AdjGrids = {}
         AdjGrids["endog_grid_unrefined_adj"] = endog_grid_unrefined_adj_1
