@@ -206,7 +206,7 @@ def Operator_Factory(cp):
         if method == 'FUES':
             
             egrid1, vf_clean, a_prime_clean, sigma_clean, dela_clean = FUES(
-                endog_grid, vf_work_t_inv, asset_grid_A,sigma_work_t_inv, 1-del_a_unrefined, m_bar=1.01, endog_mbar = True,LB = 6)
+                endog_grid, vf_work_t_inv, asset_grid_A,sigma_work_t_inv, del_a_unrefined, m_bar=1.01, endog_mbar = True,LB = 3)
             #print(egrid1)
             
         if method == 'DCEGM':

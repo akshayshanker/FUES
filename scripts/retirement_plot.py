@@ -23,6 +23,7 @@ from HARK.dcegm import calc_nondecreasing_segments, upper_envelope
 import seaborn as sns
 from matplotlib.ticker import FormatStrFormatter
 import matplotlib.pylab as pl
+import matplotlib.lines as mlines
 
 # Import local modules
 import os,sys 
@@ -34,6 +35,10 @@ from examples.retirement import Operator_Factory, RetirementModel, euler
 
 
 def plot_egrids(age, e_grid, vf_work, c_worker, del_a, g_size):
+    """ 
+    Figure 4. in FUES version Oct 2024. 
+    """
+    
     # Plot value corr. and policy on 
     # unrefined vs refined endogenous grid for age
 
@@ -42,6 +47,7 @@ def plot_egrids(age, e_grid, vf_work, c_worker, del_a, g_size):
     x = np.array(e_grid[age])
     vf = np.array(vf_work[age])
     c = np.array(c_worker[age])
+    del_a = np.array(del_a[age])
     a_prime = np.array(cp.asset_grid_A)
 
     # generate refined grid, value function and policy using FUES
@@ -60,25 +66,26 @@ def plot_egrids(age, e_grid, vf_work, c_worker, del_a, g_size):
         vf * cp.beta - cp.delta,
         s=20,
         facecolors='none',
-        edgecolors='r')
-    ax[0].plot(
-        x_clean,
-        vf_clean * cp.beta - cp.delta,
-        color='black',
-        linewidth=1,
-        label='Value function')
+        edgecolors='r', label='EGM points')
+    
     ax[0].scatter(
         x_clean,
         vf_clean * cp.beta - cp.delta,
         color='blue',
         s=15,
         marker='x',
-        linewidth=0.75)
+        linewidth=0.75, label='FUES optimal points')
+    ax[0].plot(
+        x_clean,
+        vf_clean * cp.beta - cp.delta,
+        color='black',
+        linewidth=1,
+        label=r'Value function $V_t^{1}$')
 
-    ax[0].set_xlabel('Assets (t)', fontsize=11)
+    #ax[0].set_xlabel('Assets (t)', fontsize=11)
     ax[0].set_ylabel('Value', fontsize=11)
-    ax[0].set_ylim(7.6, 8.5)
-    ax[0].set_xlim(44, 55)
+    ax[0].set_ylim(7.6, 8.4001)
+    ax[0].set_xlim(44, 55.01)
     ax[0].spines['right'].set_visible(False)
     ax[0].spines['top'].set_visible(False)
     ax[0].legend(frameon=False, prop={'size': 10})
@@ -86,6 +93,8 @@ def plot_egrids(age, e_grid, vf_work, c_worker, del_a, g_size):
     ax[0].set_xticklabels(ax[0].get_xticks(), size=9)
     ax[0].yaxis.set_major_formatter(FormatStrFormatter("%.1f"))
     ax[0].xaxis.set_major_formatter(FormatStrFormatter("%.0f"))
+    ax[0].legend(frameon=False, prop={'size': 10})
+    ax[0].grid(True)
 
     ax[1].scatter(
         np.sort(x),
@@ -105,39 +114,58 @@ def plot_egrids(age, e_grid, vf_work, c_worker, del_a, g_size):
         color='blue',
         marker='x',
         linewidth=0.75,
-        label='Optimal points')
+        label='FUES optimal points')
+    
+    # Remove jumps to plot policy function 
+    #pos = np.where(np.abs(np.diff(c_clean)\
+    #            /np.diff(x_clean))> 0.5)[0] + 1
+    #print(pos)
+    #y1 = np.insert(c_clean, pos, np.nan)
+    #x1 = np.insert(x_clean, pos, np.nan)
+    #ax[1].plot(
+    #    np.sort(x1),
+    #    np.take(
+    #        x1 - y1,
+    #        np.argsort(x1)),
+    #    color='black',
+    #    linewidth=1,
+    #    label=r'Policy function $\sigma_t^{1}$')
 
     ax[1].set_ylim(20, 40)
-    ax[1].set_xlim(44, 55)
-    ax[1].set_ylabel('Assets (t+1)', fontsize=11)
-    ax[1].set_xlabel('Assets (t)', fontsize=11)
+    ax[1].set_xlim(44, 55.01)
+    ax[1].set_ylabel('Financial assets at time t+1', fontsize=11)
+    #ax[1].set_xlabel('Assets (t)', fontsize=11)
     ax[1].spines['right'].set_visible(False)
     ax[1].spines['top'].set_visible(False)
     ax[1].set_yticklabels(ax[1].get_yticks(), size=9)
     ax[1].set_xticklabels(ax[1].get_xticks(), size=9)
     ax[1].yaxis.set_major_formatter(FormatStrFormatter("%.0f"))
     ax[1].xaxis.set_major_formatter(FormatStrFormatter("%.0f"))
-    fig.tight_layout()
+    #fig.tight_layout()
     ax[1].legend(frameon=False, prop={'size': 10})
+    ax[1].grid(True)
+
+    # position subxlabel lower 
+    fig.tight_layout(rect=[0, 0.05, 1, 0.95])
+    fig.supxlabel('Financial assets at time t', fontsize=11)
     fig.savefig(
-        'plots/retirement/ret_vf_aprime_all_{}_{}.png'.format(age, g_size))
+        '../results/plots/retirement/ret_vf_aprime_all_{}_{}.png'.format(age, g_size))
     pl.close()
 
     return None
 
-
-def plot_cons_pol(sigma_work):
+def plot_cons_pol(sigma_work1, sigma_work2):
     # Plot consumption policy  for difference ages
     sns.set(style="whitegrid",
             rc={"font.size": 10,
                 "axes.titlesize": 10,
                 "axes.labelsize": 10})
-    fig, ax = pl.subplots(1, 1)
+    fig, ax = pl.subplots(1, 2)
 
-    for t, col, lab in zip([17, 10, 0], ['blue', 'red', 'black'], [
+    for t, col, lab in zip([17, 10, 2], ['blue', 'red', 'black'], [
             't=18', 't=10', 't=1']):
 
-        cons_pol = np.copy(sigma_work[t])
+        cons_pol = np.copy(sigma_work1[t])
 
         # remove jump joints for plotting only
         pos = np.where(np.abs(np.diff(cons_pol))\
@@ -145,27 +173,55 @@ def plot_cons_pol(sigma_work):
         y1 = np.insert(cons_pol, pos, np.nan)
         x1 = np.insert(cp.asset_grid_A, pos, np.nan)
 
-        ax.plot(x1, y1, color=col, label=lab)
-        ax.set_xlim(0, 380)
-        ax.set_ylim(0, 40)
-        ax.spines['right'].set_visible(False)
-        ax.spines['top'].set_visible(False)
-        ax.set_yticklabels(ax.get_yticks(), size=9)
-        ax.set_xticklabels(ax.get_xticks(), size=9)
-        ax.yaxis.set_major_formatter(FormatStrFormatter("%.0f"))
-        ax.xaxis.set_major_formatter(FormatStrFormatter("%.0f"))
-        ax.set_ylabel('Consumption', fontsize=11)
-        ax.set_xlabel('Assets (t)', fontsize=11)
+        ax[0].plot(x1, y1, color=col, label=lab)
+        ax[0].set_xlim(0, 380)
+        ax[0].set_ylim(0, 100)
+        ax[0].spines['right'].set_visible(False)
+        ax[0].spines['top'].set_visible(False)
+        ax[0].set_yticklabels(ax[0].get_yticks(), size=9)
+        ax[0].set_xticklabels(ax[0].get_xticks(), size=9)
+        ax[0].yaxis.set_major_formatter(FormatStrFormatter("%.0f"))
+        ax[0].xaxis.set_major_formatter(FormatStrFormatter("%.0f"))
+        ax[0].set_ylabel('Consumption', fontsize=11)
+        ax[0].set_xlabel('Assets (t)', fontsize=11)
 
-    ax.legend(frameon=False, prop={'size': 10})
-    fig.savefig('plots/retirement/ret_cons_all.png'.format(t))
+        cons_pol = np.copy(sigma_work2[t])
+
+        # remove jump joints for plotting only
+        pos = np.where(np.abs(np.diff(cons_pol))\
+                    /np.diff(cp.asset_grid_A)> 0.3)[0] + 1
+        y1a = np.insert(cons_pol, pos, np.nan)
+        x1a = np.insert(cp.asset_grid_A, pos, np.nan)
+
+        ax[1].plot(x1a, y1a, color=col, label=lab)
+        ax[1].set_xlim(0, 380)
+        ax[1].set_ylim(0, 100)
+        ax[1].spines['right'].set_visible(False)
+        ax[1].spines['top'].set_visible(False)
+        ax[1].set_yticklabels(ax[1].get_yticks(), size=9)
+        ax[1].set_xticklabels(ax[1].get_xticks(), size=9)
+        ax[1].yaxis.set_major_formatter(FormatStrFormatter("%.0f"))
+        ax[1].xaxis.set_major_formatter(FormatStrFormatter("%.0f"))
+        ax[1].set_ylabel('Consumption', fontsize=11)
+        ax[1].set_xlabel('Assets (t)', fontsize=11)
+
+
+    fig.tight_layout()
+
+    ax[0].legend(frameon=False, prop={'size': 10})
+    fig.savefig('../results/plots/retirement/cons_policy.png'.format(t))
     pl.close()
 
     return None
 
-
-def plot_dcegm_cf(age, g_size, e_grid, vf_work, c_worker,dela_worker, a_prime,
+def plot_dcegm_cf(age, g_size, e_grid, vf_work, c_worker,dela_worker, a_prime,tag = 'sigma05',
                   plot=True):
+    
+
+    """ 
+    Figure 5. in FUES version Oct 2024. 
+    """
+
     # get unrefined endogenous grid, value function and consumption
     # for worker at time t
     x = e_grid[age]
@@ -175,23 +231,23 @@ def plot_dcegm_cf(age, g_size, e_grid, vf_work, c_worker,dela_worker, a_prime,
     dela = dela_worker[age]
     time_start_dcegm = time.time()
 
-#     start, end = calc_segments(x, vf)
-    start, end = calc_nondecreasing_segments(x, vf)
-
     # generate refined grid, value function and policy using FUES
     x_clean, vf_clean, c_clean, a_prime_clean, dela_clean = FUES(x, vf,
-                                                           c, a_prime, dela,m_bar=2, endog_mbar= True)
+                                    c, a_prime, dela,m_bar=1, endog_mbar= True
+                                    )
+   
     # interpolate
     vf_interp_fues = np.interp(x, x_clean, vf_clean)
-    # len(vf_interp_fues[x_clean.searchsorted(x)])
     vf_interp_fues[x.searchsorted(x_clean)] = vf_clean
 
-    # Plot them, and store them as [m, v] pairs
+    # DC-EGM 
+    start, end = calc_nondecreasing_segments(x, vf)
     segments = []
     c_segments = []
     a_segments = []
     m_segments = []
     v_segments = []
+    dela_segments = []
 
     for j in range(len(start)):
         idx = range(start[j], end[j] + 1)
@@ -200,32 +256,36 @@ def plot_dcegm_cf(age, g_size, e_grid, vf_work, c_worker,dela_worker, a_prime,
         a_segments.append(a_prime[idx])
         m_segments.append(x[idx])
         v_segments.append(vf[idx])
+        dela_segments.append(dela[idx])
 
-    m_upper, v_upper, inds_upper = upper_envelope(segments)
-    vf_interp_fues = np.interp(m_upper, x_clean, vf_clean)
-    a_interp_fues = np.interp(m_upper, x_clean, a_prime_clean)
-
+    m_upper, v_upper, inds_upper = upper_envelope(segments, calc_crossings=False)
     c1_env = np.zeros_like(m_upper) + np.nan
     a1_env = np.zeros_like(m_upper) + np.nan
     v1_env = np.zeros_like(m_upper) + np.nan
+    d1_env = np.zeros_like(m_upper) + np.nan
 
     for k, c_segm in enumerate(c_segments):
-        c1_env[inds_upper == k] = c_segm[m_segments[k] .searchsorted(
+        c1_env[inds_upper == k] = c_segm[m_segments[k].searchsorted(
             m_upper[inds_upper == k])]
 
     for k, a_segm in enumerate(a_segments):
         a1_env[inds_upper == k] = np.interp(m_upper[inds_upper == k],
                                             m_segments[k], a_segm)
-
     for k, v_segm in enumerate(v_segments):
-        v1_env[inds_upper == k] = LinearInterp(
-            m_segments[k], v_segm)(m_upper[inds_upper == k])
+        v1_env[inds_upper == k] = np.interp(m_upper[inds_upper == k], m_segments[k], v_segm)
+    
+    for k, dela_segm in enumerate(dela_segments):
+        d1_env[inds_upper == k] = np.interp(m_upper[inds_upper == k], m_segments[k], dela_segm)
 
     a1_up = LinearInterp(m_upper, a1_env)
     indices = np.where(np.in1d(a1_env, a_prime))[0]
     a1_env2 = a1_env[indices]
     m_upper2 = m_upper[indices]
+    c_env2 = c1_env[indices]
+    v_env2 = v1_env[indices]
+    d_env2 = d1_env[indices]
 
+    # Plotting 
     if plot:
 
         pl.close()
@@ -234,96 +294,141 @@ def plot_dcegm_cf(age, g_size, e_grid, vf_work, c_worker,dela_worker, a_prime,
             style="whitegrid", rc={
                 "font.size": 9, "axes.titlesize": 9, "axes.labelsize": 9})
 
-        ax[1].scatter(
+        ax[0].scatter(
             x,
             vf * cp.beta - cp.delta,
             s=20,
             facecolors='none',
-            label='EGM points',
-            edgecolors='r')
-
-        ax[1].scatter(
+            edgecolors='r', label='EGM points')
+        ax[0].scatter(
             x_clean,
             vf_clean * cp.beta - cp.delta,
             color='blue',
             s=15,
-            marker='x',    
-            label='FUES-EGM points',
-            linewidth=0.75)
+            marker='x',
+            linewidth=0.75,
+            label='FUES optimal points')
 
-
-
-        ax[0].scatter(
+        ax[1].scatter(
             x,
             a_prime,
             edgecolors='r',
             s=15,
             facecolors='none',
-            label='EGM point',
+            label='EGM points',
             linewidth=0.75)
 
-        ax[0].scatter(m_upper2, a1_env2,
-                      edgecolors='red',
-                      marker='o',
-                      s=15,
-                      label='DC-EGM point',
-                      facecolors='none',
-                      linewidth=0.75)
+        #ax[0].scatter(m_upper2, a1_env2,
+        #              edgecolors='red',
+        #              marker='o',
+        #              s=15,
+        ##              label='DCEGM pt.',
+        #              facecolors='none',
+        #              linewidth=0.75)
 
+        for k, v_segm in enumerate(v_segments):
+            x_values = m_segments[k]
+            y_values = v_segm * cp.beta - cp.delta
+            
+            # Check if it's a single point or a segment
+            if len(x_values) == 1:
+                # If it's a single point, just scatter it with a marker
+                ax[1].scatter(x_values, y_values, color='black', marker='x', linewidth=0.75)
+            else:
+                # Plot the line segment with markers at the ends
+                ax[1].plot(x_values, y_values, color='black', linewidth=0.75)
+                
+                # Add markers at the start and end of the line
+                ax[1].scatter([x_values[0], x_values[-1]], [y_values[0], y_values[-1]], 
+                            color='black', marker='x', linewidth=0.75)
 
-            # print(m_segments[k])
-
-        #for k, v_segm in enumerate(v_segments):
-        #    ax[1].plot(m_segments[k], v_segm * cp.beta - cp.delta,
-        #               color='black',
-        #               linestyle='--',
-        #               linewidth=0.75)
-
-        ax[0].scatter(
+        ax[1].scatter(
             x_clean,
             a_prime_clean,
             color='blue',
             s=15,
             marker='x',
-            label='FUES-EGM points',
+            label='FUES optimal points',
             linewidth=0.75)
 
-        for k, a_segm in enumerate(a_segments):
-            if k == 0:
-                label1 = 'DC-EGM line seg.'
+        # Plot the line segments and scatter the points at ends
+        for k, v_segm in enumerate(v_segments):
+            x_values = m_segments[k]
+            y_values = v_segm * cp.beta - cp.delta
+            if len(x_values) == 1:
+                ax[0].scatter(x_values, y_values, color='black', marker='x', linewidth=0.75)
             else:
-                label1 = None 
+                ax[0].plot(x_values, y_values, color='black', linewidth=0.75)
+                ax[0].scatter([x_values[0], x_values[-1]], [y_values[0], y_values[-1]], color='black', marker='x', linewidth=0.75)
 
-            ax[0].plot(m_segments[k], a_segm,
-                       color='black',
-                       linestyle='--',
-                       label = label1,
-                       linewidth=0.75)
 
-        ax[1].set_ylim(7.5, 9.2)
-        ax[1].set_xlim(40,80)
-        ax[1].set_xlabel('Assets (t)', fontsize=11)
-        ax[1].set_ylabel('Value', fontsize=11)
-        ax[1].spines['right'].set_visible(False)
-        ax[1].spines['top'].set_visible(False)
-        ax[1].legend(frameon=False, prop={'size': 10})
+        for k, a_segm in enumerate(a_segments):
+            x_values = m_segments[k]
+            y_values = a_segm
+            if len(x_values) == 1:
+                ax[1].scatter(x_values, y_values, color='black', marker='x', linewidth=0.75)
+            else:
+                ax[1].plot(x_values, y_values, color='black', linewidth=0.75)
+                ax[1].scatter([x_values[0], x_values[-1]], [y_values[0], y_values[-1]], color='black', marker='x', linewidth=0.75)
 
-        ax[0].set_ylim(20, 60)
-        ax[0].set_xlim(40, 80)
-        ax[0].set_xlabel('Assets (t)', fontsize=11)
-        ax[0].set_ylabel('Assets (t+1)', fontsize=11)
+        # Collect the automatic legend handles and labels for ax[0]
+        handles0, labels0 = ax[0].get_legend_handles_labels()
+
+        # Append the custom '-x' line to the existing handles and labels
+        line_x_end_handle = mlines.Line2D([0, 1], [0, 0], color='black', linestyle='-', linewidth=0.75)  # Line part
+        marker_start_handle = mlines.Line2D([0], [0], color='black', marker='x', linestyle='None', markersize=6)  # Start marker
+        marker_end_handle = mlines.Line2D([0], [0], color='black', marker='x', linestyle='None', markersize=6)  # End marker
+
+        # Collect the automatic legend handles and labels for ax[0]
+        handles0, labels0 = ax[1].get_legend_handles_labels()
+
+        # Append the custom '-x' line to the existing handles and labels
+        handles0.append((line_x_end_handle, marker_start_handle, marker_end_handle))
+        labels0.append('DC-EGM segments')
+
+        # Set lims
+        ax[0].set_ylim(7.6, 8.4001)
+        ax[0].set_xlim(44, 55.1)
+        ax[1].set_ylim(20, 40)
+        ax[1].set_xlim(44, 55.1)
+        
+        # reformat labels for ticks
+        ax[0].set_yticklabels(ax[0].get_yticks(), size=9)
+        ax[0].set_xticklabels(ax[0].get_xticks(), size=9)
+        ax[1].set_yticklabels(ax[1].get_yticks(), size=9)
+        ax[1].set_xticklabels(ax[1].get_xticks(), size=9)
+
+        # format for ticks decimal 
+        ax[0].yaxis.set_major_formatter(FormatStrFormatter("%.1f"))
+        ax[0].xaxis.set_major_formatter(FormatStrFormatter("%.0f"))
+        ax[1].yaxis.set_major_formatter(FormatStrFormatter("%.0f"))
+        ax[1].xaxis.set_major_formatter(FormatStrFormatter("%.0f"))
+
+        # Y- Axis labels
+        ax[0].set_ylabel('Value', fontsize=11)
+        ax[1].set_ylabel('Financial assets at time t+1', fontsize=11)
+        
         ax[0].spines['right'].set_visible(False)
         ax[0].spines['top'].set_visible(False)
-        ax[0].legend(frameon=False, prop={'size': 10}, loc = 'upper left')
+        ax[1].spines['right'].set_visible(False)
+        ax[1].spines['top'].set_visible(False)
+        
+        # add legends to both
+        ax[0].legend(frameon=False, prop={'size': 10})
+        ax[1].legend(frameon=False, prop={'size': 10})
+        ax[1].legend(handles=handles0, labels=labels0, frameon=False, prop={'size': 10}, loc='upper left')
+        ax[0].legend(handles=handles0, labels=labels0, frameon=False, prop={'size': 10}, loc='upper left')
+        
 
+        # add common x label
+        fig.supxlabel('Financial assets at time t', fontsize=11)
         fig.tight_layout()
-        fig.savefig('plots/retirement/ret_vf_aprime_all_{}_cf_{}.png'
-                    .format(g_size, age))
+        fig.savefig('../results/plots/retirement/ret_vf_aprime_all_{}_cf_{}_{}.png'
+                    .format(g_size, age,tag))
 
-    return v_upper, v1_env, vf_interp_fues, a_prime_clean, m_upper, a1_env2
+    return v_upper, v_env2, vf_clean, a_prime_clean, m_upper2, a1_env2
 
-
-def test_performance_for_grid_sizes_and_deltas(grid_sizes, delta_values):
+def test_performance_for_grid_sizes_and_deltas(grid_sizes, delta_values,n =3):
     # Initialize lists to hold results for LaTeX tables
     latex_errors_data = []
     latex_timings_data = []
@@ -338,7 +443,7 @@ def test_performance_for_grid_sizes_and_deltas(grid_sizes, delta_values):
                 beta=0.96,
                 delta=delta,
                 y=20,
-                b=1E-10,
+                b=1E-100,
                 grid_max_A=500,
                 grid_size=g_size_baseline,
                 T=50,
@@ -356,7 +461,7 @@ def test_performance_for_grid_sizes_and_deltas(grid_sizes, delta_values):
             best_error_FUES = float('inf')
             best_error_DCEGM = float('inf')
 
-            for _ in range(3):  # Run each test 3 times and take the best
+            for _ in range(n):  # Run each test 3 times and take the best
                 # Test RFC
                 time_start = time.time()
                 e_grid_worker_unref, vf_work_unref, vf_refined, c_worker_unref, c_refined_RFC, dela_unrefined, iter_time_age = iter_bell(cp, method='RFC')
@@ -482,7 +587,7 @@ if __name__ == "__main__":
     grid_sizes = [500,1000,2000,3000]  # Adjust or add more grid sizes as necessary
     delta_values = [0.25, 0.5, 1,1.5,2]  # Test for different delta values
 
-    test_performance_for_grid_sizes_and_deltas(grid_sizes, delta_values)
+    #test_performance_for_grid_sizes_and_deltas(grid_sizes, delta_values)
     
     # Generate baseline parameter solution using FUES and make plots 
 
@@ -495,12 +600,24 @@ if __name__ == "__main__":
                          y=20,
                          b=1E-10,
                          grid_max_A=500,
-                         grid_size=g_size_baseline,
+                         grid_size=3000,
                          T=20,
-                         smooth_sigma=0.05)
+                         smooth_sigma=0)
+    
+    cp2 = RetirementModel(r=0.02,
+                         beta= 0.98,
+                         delta=1,
+                         y=20,
+                         b=1E-10,
+                         grid_max_A=500,
+                         grid_size=3000,
+                         T=20,
+                         smooth_sigma=0)
+
 
     # Unpack solver operators 
     Ts_ret, Ts_work, iter_bell = Operator_Factory(cp)
+    Ts_ret, Ts_work, iter_bell2 = Operator_Factory(cp2)
 
     # Get optimal value and policy functions using FUES
     # by iterating on the Bellman equation 
@@ -512,10 +629,12 @@ if __name__ == "__main__":
     
     time_start = time.time()
     _, _,_,_,c_refined_FUES, _, _ = iter_bell(cp, method = 'FUES')
+
+    _, _,_,_,c_refined_FUES2, _, _ = iter_bell2(cp2, method = 'FUES')
     time_end_FUES = time.time() - time_start
     
     time_start = time.time()
-    _, _,_,_,c_refined_DCEGM,_, _ = iter_bell(cp, method = 'DCEGM')
+    _, _,_,_,c_refined_DCEGM,_, _ = iter_bell(cp2, method = 'DCEGM')
     time_end_DCEGM = time.time() - time_start
     
     Euler_error_RFC = euler(cp, c_refined_RFC)
@@ -529,7 +648,7 @@ if __name__ == "__main__":
     # 1. Example use of FUES to refine EGM grids
     # get unrefined endogenous grid, value function and consumption
     # for worker at time age
-    age = 17 
+    age = 17
     x = np.array(e_grid_worker_unref[age])
     vf = np.array(vf_work_unref[age])
     c = np.array(c_worker_unref[age])
@@ -538,7 +657,7 @@ if __name__ == "__main__":
 
     # generate refined grid, value function and policy using FUES
     x_clean, vf_clean, c_clean, a_prime_clean, dela_clean \
-        = FUES(x, vf, c, a_prime,dela, 2)
+        = FUES(x, vf, a_prime,dela,c, 2, endog_mbar= True)
 
 
     # 2. Plot and save value function and policy on EGM grids
@@ -549,14 +668,20 @@ if __name__ == "__main__":
     # 3. Plot consumption function (for worker, 
     # but before next period work decision
     # made)
-    plot_cons_pol(c_refined)
+    plot_cons_pol(c_refined_FUES, c_refined_FUES2)
 
     # 4. Compute and plot comparison with DC-EGM 
 
     v_upper, v1_env, vf_interp_fues, a_interp_fues, m_upper, a1_env \
         = plot_dcegm_cf(age, g_size_baseline, e_grid_worker_unref,
-                            vf_work_unref, c_worker_unref, dela_unrefined, cp.asset_grid_A,
+                            vf_work_unref, c_worker_unref, dela_unrefined, cp.asset_grid_A,tag = '',
                             plot=True)
+    
+    # save as csv 
+
+    #out_csv = np.array([e_grid_worker_unref[age], a_interp_fues, m_upper, vf_interp_fues,v1_env])
+
+    #np.savetxt('../results/plots/retirement/ret_vf_aprime_all_{}_cf_{}.csv'.format(g_size_baseline, age), out_csv, delimiter=',')
 
     # 5. Evalute DC-EGM and FUES upper envelope for 
     # parms on a grid.  
@@ -580,7 +705,7 @@ if __name__ == "__main__":
 
 
     # age at which to compcare DC-EGM with FUES
-    age_dcegm = 17
+    age_dcegm = 2
 
     errors = np.empty(len(params))
     fues_times = np.empty(len(params))
@@ -594,7 +719,8 @@ if __name__ == "__main__":
     #  error due different interpolation grids 
     # used by DC-EGM and FUES 
     param_i = 0
-
+    
+    """" 
     for p_list in range(len(params)):
 
         beta = params[p_list][0]
@@ -650,4 +776,4 @@ if __name__ == "__main__":
             .format(np.mean(fues_times)))
     print(' '    'Avg. worker iteration time (secs): {0:.6f}'\
             .format(np.mean(all_iter_times)))
-
+"""
