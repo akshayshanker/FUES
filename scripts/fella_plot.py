@@ -22,7 +22,7 @@ from FUES.math_funcs import mask_jumps
 
 
 def compare_methods_grid(fella_settings, mc, z_series, grid_sizes_A, 
-                         grid_sizes_H, max_iter=100, tol=1e-03, n=4):
+                         grid_sizes_H, max_iter=100, tol=1e-03, n=3):
     """
     Compare the performance of FUES, DCEGM, and RFC over different grid sizes.
 
@@ -136,17 +136,33 @@ def compare_methods_grid(fella_settings, mc, z_series, grid_sizes_A,
 
     return results_summary, latex_table
 
+from itertools import groupby
+
+from itertools import groupby
+
 def create_latex_table(results_summary):
     """
     Generates a LaTeX table that includes timing (in milliseconds) and 
     Euler error comparisons for RFC, FUES, and DCEGM methods across 
-    different grid sizes (A and H), grouped by H where H spans multiple rows.
+    different grid sizes (A and H), grouped by A where A spans multiple rows.
+
+    The grid sizes will be sorted first by Grid_Size_A and then by Grid_Size_H.
+
+    Parameters
+    ----------
+    results_summary : list
+        A list containing performance metrics for each grid size and method.
+
+    Returns
+    -------
+    table : str
+        A LaTeX-formatted table as a string.
     """
     table = "\\begin{table}[htbp]\n\\centering\n\\small\n"
     table += (
         "\\begin{tabular}{ccccc|ccc}\n\\toprule\n"
-        "\\multirow{2}{*}{\\textit{Grid Size H}} & "
-        "\\multirow{2}{*}{\\textit{Grid Size A}} & "
+        "\\multirow{4}{*}{\\textit{Grid Size A}} & "
+        "\\multirow{3}{*}{\\textit{Grid Size H}} & "
         "\\multicolumn{3}{c}{\\textbf{Timing (milliseconds)}} & "
         "\\multicolumn{3}{c}{\\textbf{Euler error (Log10)}} \\\\\n"
         " & & \\textbf{RFC} & \\textbf{FUES} & \\textbf{DCEGM} & "
@@ -154,44 +170,49 @@ def create_latex_table(results_summary):
         "\\midrule\n"
     )
 
-    # Sort the results by Grid_Size_H and Grid_Size_A for proper ordering
-    results_summary = sorted(results_summary, key=lambda x: (x['Grid_Size_H'], x['Grid_Size_A']))
+    # Sort the results by Grid_Size_A first, then by Grid_Size_H
+    results_summary = sorted(results_summary, key=lambda x: (x['Grid_Size_A'], x['Grid_Size_H']))
 
-    # Iterate through the results grouped by Grid_Size_H
-    current_grid_size_H = None
-    grid_size_H_count = 0
-
-    for grid_size_H, group in groupby(results_summary, key=lambda x: x['Grid_Size_H']):
-        # Convert group iterator to list and count how many grid_size_A values there are
+    # Group by Grid_Size_A
+    for grid_size_A, group in groupby(results_summary, key=lambda x: x['Grid_Size_A']):
         group = list(group)
-        grid_size_A_count = len(group)
-        
-        # For each Grid_Size_H, iterate over the grid_size_A values
-        for idx, result in enumerate(group):
-            grid_size_A = result['Grid_Size_A']
-            method_results = result
+        grid_size_H_count = len(set([result['Grid_Size_H'] for result in group]))  # Count unique Grid_Size_H
+        #rint(grid_size_H_count)
 
-            # Convert time to milliseconds
-            time_rfc = f"{method_results['Best_UE_time'] * 1000:.3f}"
-            time_fues = f"{method_results['Best_FUES_time'] * 1000:.3f}"
-            time_dcegm = f"{method_results['Best_DCEGM_time'] * 1000:.3f}"
+        # For each Grid_Size_A, iterate over the grid_size_H values and methods
+        first_row = True
+        for grid_size_H in sorted(set([result['Grid_Size_H'] for result in group])):
+            # Initialize timing and Euler error values
+            time_rfc, time_fues, time_dcegm = "-", "-", "-"
+            error_rfc, error_fues, error_dcegm = "-", "-", "-"
+            print(grid_size_H)
 
-            # Euler errors
-            error_rfc = f"{method_results['Best_Euler_Error_RFC']:.3f}"
-            error_fues = f"{method_results['Best_Euler_Error_FUES']:.3f}"
-            error_dcegm = f"{method_results['Best_Euler_Error_DCEGM']:.3f}"
+            # Loop through the methods and update times and errors for the correct Grid_Size_H
+            for result in group:
+                if result['Grid_Size_H'] == grid_size_H:
+                    method = result['Method']
+                    if method == 'RFC':
+                        time_rfc = f"{result['Best_UE_time'] * 1000:.3f}"
+                        error_rfc = f"{result['Best_Euler_Error']:.3f}"
+                    elif method == 'FUES':
+                        time_fues = f"{result['Best_UE_time'] * 1000:.3f}"
+                        error_fues = f"{result['Best_Euler_Error']:.3f}"
+                    elif method == 'DCEGM':
+                        time_dcegm = f"{result['Best_UE_time'] * 1000:.3f}"
+                        error_dcegm = f"{result['Best_Euler_Error']:.3f}"
 
-            if idx == 0:
-                # First row for this Grid_Size_H, use \multirow for Grid_Size_H
+            if first_row:
+                # First row for this Grid_Size_A, use \multirow for Grid_Size_A
                 table += (
-                    f"\\multirow{{{grid_size_A_count}}}{{*}}{{{grid_size_H}}} & "
-                    f"{grid_size_A} & {time_rfc} & {time_fues} & {time_dcegm} & "
+                    f"\\multirow{{{grid_size_H_count}}}{{*}}{{{grid_size_A}}} & "
+                    f"{grid_size_H} & {time_rfc} & {time_fues} & {time_dcegm} & "
                     f"{error_rfc} & {error_fues} & {error_dcegm} \\\\\n"
                 )
+                first_row = False
             else:
-                # Subsequent rows for this Grid_Size_H (no need for multirow)
+                # Subsequent rows for this Grid_Size_A (no need for multirow)
                 table += (
-                    f" & {grid_size_A} & {time_rfc} & {time_fues} & {time_dcegm} & "
+                    f" & {grid_size_H} & {time_rfc} & {time_fues} & {time_dcegm} & "
                     f"{error_rfc} & {error_fues} & {error_dcegm} \\\\\n"
                 )
 
@@ -289,24 +310,24 @@ if __name__ == "__main__":
     # Uncomment the following lines if you need to load a pickle file 
     # with timing results or generate a LaTeX table from it.
 
-    # with open('../results/fella_timings.pkl', 'rb') as file:
-    #     results_summary = pickle.load(file)
+    with open('../results/fella_timings.pkl', 'rb') as file:
+         results_summary = pickle.load(file)
     
-    # table = create_latex_table(results_summary)
-    # print(table)
-    # file_path = '../results/fella_timings.tex'
-    # with open(file_path, 'w') as file:
-    #     file.write(latex_table)
+    latex_table = create_latex_table(results_summary)
+    print(latex_table)
+    file_path = '../results/fella_timings.tex'
+    with open(file_path, 'w') as file:
+        file.write(latex_table)
 
     # 2. Run the FUES, DCEGM, and RFC methods for different grid sizes
     # Grid sizes for comparison
 
-    grid_sizes_A = [300, 1000, 2000, 3000]
-    grid_sizes_H = [3, 5, 10,15]
+    grid_sizes_A = [500, 1000, 2000,3000]
+    grid_sizes_H = [5, 10,15]
 
     # Uncomment this block if you want to compare methods across grids.
-    compare_methods_grid(fella_settings, mc, z_series, grid_sizes_A, 
-                         grid_sizes_H, max_iter=200, tol=1e-03)
+    #compare_methods_grid(fella_settings, mc, z_series, grid_sizes_A, 
+    #                     grid_sizes_H, max_iter=200, tol=1e-03)
 
     # 3. Run the FUES and DCEGM methods for a specific grid size and plot
     # Instantiate the consumer problem with parameters

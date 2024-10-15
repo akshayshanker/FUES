@@ -69,7 +69,7 @@ def back_scan_gradients(m_array, a_prime, vf_full, e_grid, j, q):
 
     for m in range(num_elements):
         m_int = int(m_array[m])
-        delta_e_grid = e_grid[j] - e_grid[m_int]  # Cache repeated subtraction
+        delta_e_grid = max(1e-100,e_grid[j] - e_grid[m_int])  # Cache repeated subtraction
         gradients_m_vf[m] = (vf_full[j] - vf_full[m_int]) / delta_e_grid
         gradients_m_a[m] = np.abs((a_prime[q] - a_prime[m_int]) / delta_e_grid)
 
@@ -87,7 +87,7 @@ def fwd_scan_gradients(a_prime, vf_full, e_grid, j, q, LB):
     gradients_f_a = np.empty(LB)
 
     for f in range(LB):
-        delta_e_grid = e_grid[q] - e_grid[q + 1 + f]  # Cache repeated subtraction
+        delta_e_grid = max(1e-200,e_grid[q] - e_grid[q + 1 + f])  # Cache repeated subtraction
         gradients_f_vf[f] = (vf_full[q] - vf_full[q + 1 + f]) / delta_e_grid
         gradients_f_a[f] = np.abs((a_prime[j] - a_prime[q + 1 + f]) / delta_e_grid)
 
@@ -244,7 +244,7 @@ def FUES(e_grid, vf, policy_1, policy_2,del_a, b=1e-10, m_bar=2, LB=4, endog_mba
         
 
 @njit
-def _scan(e_grid, vf, a_prime,del_a, m_bar, LB, fwd_scan_do=True, endog_mbar= True):
+def _scan(e_grid, vf, a_prime,del_a, m_bar, LB, fwd_scan_do=True, endog_mbar= True, padding_mbar = - 0.011):
     """" Implements the scan for FUES"""
 
     # leading index for optimal values j
@@ -273,17 +273,19 @@ def _scan(e_grid, vf, a_prime,del_a, m_bar, LB, fwd_scan_do=True, endog_mbar= Tr
         else:
             # value function gradient betweeen previous two optimal points
             g_j_minus_1 = (vf_full[j] - vf_full[k]) / \
-                (e_grid[j] - e_grid[k])
+                (max(1e-200,e_grid[j] - e_grid[k]))
 
             # gradient with leading index to be checked
-            denom_egrid = e_grid[i + 1] - e_grid[j]
+            denom_egrid = max(1e-200,e_grid[i + 1] - e_grid[j])
+            
             g_1 = (vf_full[i + 1] - vf_full[j]) / (denom_egrid)
 
             # Absolute gradients of policy function at current index 
             # and at testing point
             M_L = np.abs(del_a[j])
             M_U = np.abs(del_a[i+1])
-            M_max = max(M_L, M_U) + 0.001
+            #print(M_U)
+            M_max = max(M_L, M_U) + padding_mbar
 
             # policy gradient with leading index to be checked
             d_p_prime = a_prime[i + 1] - a_prime[j]

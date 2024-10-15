@@ -112,6 +112,7 @@ class ConsumerProblem:
         self.Pi, self.z_vals = np.array(Pi), np.asarray(z_vals)
         self.asset_grid_A = np.linspace(b, np.float64(grid_max_A), grid_size)
         self.asset_grid_H = np.linspace(b, np.float64(grid_max_H), grid_size_H)
+        
         self.asset_grid_HE = np.linspace(b, np.float64(grid_max_H), grid_size_H*3)
         self.asset_grid_WE = np.linspace(b, np.float64(grid_max_WE), grid_size_W)
         
@@ -768,7 +769,7 @@ def Operator_Factory(cp):
                     e_grid_clean, vf_clean, a_prime_clean, c_clean, dela = \
                         FUES(endog_grid_unrefined_points, vf_unrefined_points,\
                                 asset_grid_AC_unique,c_unrefined_points, vf_unrefined_points,\
-                                m_bar=m_bar, LB=5, endog_mbar=False
+                                m_bar=m_bar, LB=2, endog_mbar=False
                                 )
                     
                 if method == 'RFC':
@@ -914,10 +915,10 @@ def Operator_Factory(cp):
             aprime_unrefined_points = aprime_unrefined_points[uniqueIds]
 
             if method == 'FUES':
-                e_grid_clean, vf_clean, a_prime_clean, c_clean, hprime_clean = \
+                e_grid_clean, vf_clean, a_prime_clean,hprime_clean, c_clean = \
                     FUES(egrid_unref_points, vf_unrefined_points,\
-                            aprime_unrefined_points,c_unrefined_points, hprime_unrefined_points,\
-                            m_bar=m_bar, LB=5, endog_mbar=False
+                            aprime_unrefined_points, hprime_unrefined_points,c_unrefined_points,\
+                            m_bar=m_bar, LB=2, endog_mbar=False
                             )
             
             if method == 'RFC':

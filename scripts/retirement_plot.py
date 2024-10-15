@@ -154,18 +154,18 @@ def plot_egrids(age, e_grid, vf_work, c_worker, del_a, g_size):
 
     return None
 
-def plot_cons_pol(sigma_work1, sigma_work2):
+def plot_cons_pol(sigma_work):
     # Plot consumption policy  for difference ages
     sns.set(style="whitegrid",
             rc={"font.size": 10,
                 "axes.titlesize": 10,
                 "axes.labelsize": 10})
-    fig, ax = pl.subplots(1, 2)
+    fig, ax = pl.subplots(1, 1)
 
-    for t, col, lab in zip([17, 10, 2], ['blue', 'red', 'black'], [
+    for t, col, lab in zip([17, 10, 0], ['blue', 'red', 'black'], [
             't=18', 't=10', 't=1']):
 
-        cons_pol = np.copy(sigma_work1[t])
+        cons_pol = np.copy(sigma_work[t])
 
         # remove jump joints for plotting only
         pos = np.where(np.abs(np.diff(cons_pol))\
@@ -173,43 +173,20 @@ def plot_cons_pol(sigma_work1, sigma_work2):
         y1 = np.insert(cons_pol, pos, np.nan)
         x1 = np.insert(cp.asset_grid_A, pos, np.nan)
 
-        ax[0].plot(x1, y1, color=col, label=lab)
-        ax[0].set_xlim(0, 380)
-        ax[0].set_ylim(0, 100)
-        ax[0].spines['right'].set_visible(False)
-        ax[0].spines['top'].set_visible(False)
-        ax[0].set_yticklabels(ax[0].get_yticks(), size=9)
-        ax[0].set_xticklabels(ax[0].get_xticks(), size=9)
-        ax[0].yaxis.set_major_formatter(FormatStrFormatter("%.0f"))
-        ax[0].xaxis.set_major_formatter(FormatStrFormatter("%.0f"))
-        ax[0].set_ylabel('Consumption', fontsize=11)
-        ax[0].set_xlabel('Assets (t)', fontsize=11)
+        ax.plot(x1, y1, color=col, label=lab)
+        ax.set_xlim(0, 380)
+        ax.set_ylim(0, 40)
+        ax.spines['right'].set_visible(False)
+        ax.spines['top'].set_visible(False)
+        ax.set_yticklabels(ax.get_yticks(), size=9)
+        ax.set_xticklabels(ax.get_xticks(), size=9)
+        ax.yaxis.set_major_formatter(FormatStrFormatter("%.0f"))
+        ax.xaxis.set_major_formatter(FormatStrFormatter("%.0f"))
+        ax.set_ylabel('Consumption at time $t$', fontsize=11)
+        ax.set_xlabel('Financial assets at time $t$', fontsize=11)
 
-        cons_pol = np.copy(sigma_work2[t])
-
-        # remove jump joints for plotting only
-        pos = np.where(np.abs(np.diff(cons_pol))\
-                    /np.diff(cp.asset_grid_A)> 0.3)[0] + 1
-        y1a = np.insert(cons_pol, pos, np.nan)
-        x1a = np.insert(cp.asset_grid_A, pos, np.nan)
-
-        ax[1].plot(x1a, y1a, color=col, label=lab)
-        ax[1].set_xlim(0, 380)
-        ax[1].set_ylim(0, 100)
-        ax[1].spines['right'].set_visible(False)
-        ax[1].spines['top'].set_visible(False)
-        ax[1].set_yticklabels(ax[1].get_yticks(), size=9)
-        ax[1].set_xticklabels(ax[1].get_xticks(), size=9)
-        ax[1].yaxis.set_major_formatter(FormatStrFormatter("%.0f"))
-        ax[1].xaxis.set_major_formatter(FormatStrFormatter("%.0f"))
-        ax[1].set_ylabel('Consumption', fontsize=11)
-        ax[1].set_xlabel('Assets (t)', fontsize=11)
-
-
-    fig.tight_layout()
-
-    ax[0].legend(frameon=False, prop={'size': 10})
-    fig.savefig('../results/plots/retirement/cons_policy.png'.format(t))
+    ax.legend(frameon=False, prop={'size': 10})
+    fig.savefig('../results/plots/retirement/ret_cons_all.png'.format(t))
     pl.close()
 
     return None
@@ -668,7 +645,7 @@ if __name__ == "__main__":
     # 3. Plot consumption function (for worker, 
     # but before next period work decision
     # made)
-    plot_cons_pol(c_refined_FUES, c_refined_FUES2)
+    plot_cons_pol(c_refined_FUES)
 
     # 4. Compute and plot comparison with DC-EGM 
 
