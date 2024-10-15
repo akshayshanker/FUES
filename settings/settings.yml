@@ -7,11 +7,11 @@ durables:
     - -1.71E-06
     - 0.0241546
     - -0.0001102
-  r: 0.034
+  r: 0.01
   sigma: 0.001
   r_H: 0
-  beta: 0.91
-  alpha: 0.12
+  beta: 0.93
+  alpha: 0.03
   delta: 0
   Pi: [[0.5, 0.5], [0.5, 0.5]]
   z_vals: [0.1, 1.0]
@@ -32,7 +32,7 @@ durables:
   theta: 1.3498
   t0: 20
   root_eps: 1E-1
-  stat: true
+  stat: False
 
 fella:
   r: 0.0346

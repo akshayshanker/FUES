@@ -418,7 +418,7 @@ def compare_grids_and_tau(cp_settings, tau_values, grid_sizes, max_iter=200, tol
                              b=np.float64(cp_settings['b']),
                              grid_max_A=cp_settings['grid_max_A'],
                              grid_max_WE=cp_settings['grid_max_WE'],
-                             grid_size_W=cp_settings['grid_size_W'],
+                             grid_size_W=grid_size,
                              grid_max_H=cp_settings['grid_max_H'],
                              grid_size=grid_size,
                              grid_size_H=grid_size,
@@ -623,11 +623,11 @@ if __name__ == "__main__":
         
         NEGMRes = timing(solveNEGM, cp, rep =1, method = 'DCEGM')
         EGMRes_fues = timing(solveEGM, cp, rep =1, method = 'FUES')
-        #EGMRes_rfc = timing(solveEGM, cp, rep =1, method = 'RFC')
+        EGMRes_rfc = timing(solveEGM, cp, rep =1, method = 'RFC')
 
         NEGMRes['label'] = 'NEGM'
         EGMRes_fues['label'] = 'FUES'
-        #EGMRes_rfc['label'] = 'EGM_RFC'
+        EGMRes_rfc['label'] = 'EGM_RFC'
         
         #EGMRes_fues  = pickle.load(open("EGMRes_fues.p", "rb"))
         #NEGMRes = pickle.load(open("NEGMRes.p", "rb"))
@@ -636,7 +636,6 @@ if __name__ == "__main__":
         plot_pols(cp,EGMRes_fues, NEGMRes, 59, [100,150,200])
 
         # 2.b. plot of adjuster endog. grids for FUES
-        EGMRes_fues  = pickle.load(open("EGMRes_fues.p", "rb"))
         plot_grids(EGMRes_fues,cp,term_t = 58)
 
         # save results option 
@@ -646,7 +645,7 @@ if __name__ == "__main__":
         # 3. Euler errors
         eulerNEGM = euler_housing(NEGMRes, cp)
         eulerEGM = euler_housing(EGMRes_fues, cp)
-        #eulerRFCEGM = euler_housing(EGMRes_rfc, cp)
+        eulerRFCEGM = euler_housing(EGMRes_rfc, cp)
         print("NEGM Euler error is {}".format(np.nanmean(eulerNEGM)))
         print("EGM Euler error is {}".format(np.nanmean(eulerEGM)))
         print("RFCEGM Euler error is {}".format(np.nanmean(eulerRFCEGM)))

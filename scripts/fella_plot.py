@@ -21,6 +21,75 @@ from examples.fella import iterate_euler, welfare_loss_log_utility
 from FUES.math_funcs import mask_jumps
 
 
+def plot_pols_fella(results_FUES, results_DCEGM, cp):
+
+    pl.close()
+    sns.set(style="white", rc={"font.size": 11, "axes.titlesize": 11, "axes.labelsize": 11})
+
+    # Plotting final policy functions with the same format as plot_pols
+    fig_pol_fella, ax_pol_fella = pl.subplots(1, 2, figsize=(8, 6))
+
+    # Colors for FUES
+    fues_colors = ['blue', 'red', 'green']  # Picked distinct colors
+
+    # Axis labels, appearance, and titles for both subplots
+    for a in ax_pol_fella:
+        a.spines['right'].set_visible(False)
+        a.spines['top'].set_visible(False)
+        a.spines['left'].set_visible(True)
+        a.spines['bottom'].set_visible(True)
+        a.grid(True)
+        a.set_yticklabels(a.get_yticks(), size=9)
+        a.set_xticklabels(a.get_xticks(), size=9)
+        a.yaxis.set_major_formatter(FormatStrFormatter("%.1f"))
+        a.xaxis.set_major_formatter(FormatStrFormatter("%.1f"))
+
+    #H_inds = cp.asset_grid_H // 3
+    H_inds = [1,4,8]
+
+    # Plotting for FUES (left subplot) and DCEGM (right subplot)
+    for i, col, lab in zip(H_inds, fues_colors, ['$H_{t}$ = low', '$H_{t}$ = med.', '$H_{t}$= high']):
+        
+        # Mask FUES and DCEGM data for jumps
+        fues_masked = mask_jumps(results_FUES['state']['c'][1, :, i], threshold=0.02)
+        dcegm_masked = mask_jumps(results_DCEGM['state']['c'][1, :, i], threshold=0.02)
+
+        # FUES: Solid colored lines on left subplot
+        ax_pol_fella[0].plot(cp.asset_grid_M, fues_masked,
+                             color=col, linestyle='-', linewidth=1, label=f'{lab}')
+
+        # DCEGM: Dotted black lines on right subplot
+        ax_pol_fella[1].plot(cp.asset_grid_M, dcegm_masked,
+                             color=col, linestyle='-', linewidth=1, label=f'{lab}')
+
+    # Set limits and titles
+    ax_pol_fella[0].set_xlim([0, 15])
+    ax_pol_fella[0].set_ylim([0, 2])
+    ax_pol_fella[0].set_title("FUES", fontsize=11)
+    ax_pol_fella[0].set_ylabel('Consumption at time $t$', fontsize=11)
+    #ax_pol_fella[0].set_xlabel('Financial assets at time $t$', fontsize=11)
+
+    ax_pol_fella[1].set_xlim([0, 15])
+    ax_pol_fella[1].set_ylim([0, 2])
+    ax_pol_fella[1].set_title("DC-EGM", fontsize=11)
+    ax_pol_fella[1].set_ylabel('Consumption at time $t$', fontsize=11)
+    #ax_pol_fella[1].set_xlabel('Financial assets at time $t$', fontsize=11)
+
+    # Add legends
+    ax_pol_fella[0].legend(frameon=False, prop={'size': 10})
+    ax_pol_fella[1].legend(frameon=False, prop={'size': 10})
+
+    # Set tight layout and save the figure
+    
+    fig_pol_fella.supxlabel(r'Financial assets at time $t$', fontsize=11)
+    fig_pol_fella.tight_layout()
+
+    # Saving figures to match the naming convention in plot_pols
+    fig_pol_fella.savefig('../results/plots/fella/fella_policy_function.png')
+
+    pl.close()
+
+
 def compare_methods_grid(fella_settings, mc, z_series, grid_sizes_A, 
                          grid_sizes_H, max_iter=100, tol=1e-03, n=3):
     """
@@ -310,14 +379,14 @@ if __name__ == "__main__":
     # Uncomment the following lines if you need to load a pickle file 
     # with timing results or generate a LaTeX table from it.
 
-    with open('../results/fella_timings.pkl', 'rb') as file:
-         results_summary = pickle.load(file)
+    #with open('../results/fella_timings.pkl', 'rb') as file:
+    #     results_summary = pickle.load(file)
     
-    latex_table = create_latex_table(results_summary)
-    print(latex_table)
-    file_path = '../results/fella_timings.tex'
-    with open(file_path, 'w') as file:
-        file.write(latex_table)
+    #latex_table = create_latex_table(results_summary)
+    #print(latex_table)
+    #file_path = '../results/fella_timings.tex'
+    #with open(file_path, 'w') as file:
+    #    file.write(latex_table)
 
     # 2. Run the FUES, DCEGM, and RFC methods for different grid sizes
     # Grid sizes for comparison
@@ -348,7 +417,7 @@ if __name__ == "__main__":
         kappa=0.077,
         phi=0.09,
         theta=0.77,
-        m_bar = 1.5, 
+        m_bar = 1.2, 
         lb = 4
     )
 
@@ -363,13 +432,13 @@ if __name__ == "__main__":
         grid_max_A=30,
         grid_max_H=5,
         grid_size=2000,
-        grid_size_H=12,
+        grid_size_H=10,
         gamma_1=0,
         xi=0,
         kappa=0.077,
         phi=0.09,
         theta=0.77, 
-        m_bar = 1.5, 
+        m_bar = 1.2, 
         lb = 4
     )
 
@@ -413,25 +482,40 @@ if __name__ == "__main__":
 
     ####################################################################
     # Run FUES and DCEGM for grid size H = 6
-    results_FUES_6 = iterate_euler(cp_6, method='FUES', max_iter=200, tol=1e-03, verbose=True)
-    results_DCEGM_6 = iterate_euler(cp_6, method='DCEGM', max_iter=200, tol=1e-03, verbose=True)
+    #results_FUES_6 = iterate_euler(cp_6, method='FUES', max_iter=200, tol=1e-03, verbose=True)
+    #results_DCEGM_6 = iterate_euler(cp_6, method='DCEGM', max_iter=200, tol=1e-03, verbose=True)
+
+    #pickle.dump(results_FUES_6, open('../results/fella_results_FUES_6.pkl', 'wb'))
+    #pickle.dump(results_DCEGM_6, open('../results/fella_results_DCEGM_6.pkl', 'wb'))
     
 
     ####################################################################
     # Run FUES and DCEGM for grid size H = 10
     results_FUES_10 = iterate_euler(cp_10, method='FUES', max_iter=200, tol=1e-03, verbose=True)
     results_DCEGM_10 = iterate_euler(cp_10, method='DCEGM', max_iter=200, tol=1e-03, verbose=True)
+
+    #results_FUES_10 = pickle.load(open('../results/fella_results_FUES_6.pkl', 'rb'))
+    #results_DCEGM_10 = pickle.load(open('../results/fella_results_DCEGM_6.pkl', 'rb'))
+
+    #pickle.dump(results_FUES_10, open('../results/fella_results_FUES_10.pkl', 'wb'))
+    #pickle.dump(results_DCEGM_10, open('../results/fella_results_DCEGM_10.pkl', 'wb'))
     
 
     # 5. Summarize the results and plot the policy functions
     # Summarize the results for H = 6
-    summarize_results(results_FUES_6, results_DCEGM_6, 6, z_series, cp_6)
+    #summarize_results(results_FUES_6, results_DCEGM_6, 6, z_series, cp_6)
     
     # Summarize the results for H = 10
     summarize_results(results_FUES_10, results_DCEGM_10, 10, z_series, cp_10)
     
+    plot_pols_fella(results_FUES_10, results_DCEGM_10, cp_10)
+    
+    """" 
     # Set seaborn style for the plot
     sns.set(style="whitegrid", rc={"font.size": 10, "axes.titlesize": 10, "axes.labelsize": 10})
+
+
+
 
     # Plotting final policy functions
     fig, ax = pl.subplots(1, 2, figsize=(12, 6))
@@ -529,3 +613,4 @@ if __name__ == "__main__":
     fig.tight_layout()
     pl.savefig('../results/plots/fella/Fella_policy_refined_vs_unrefined.png')
     pl.show()
+    """
