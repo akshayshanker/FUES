@@ -30,7 +30,7 @@ The derivative of time t policy function can be calculated using the implicit fu
 
 It is also possible to set endog_mbar = False and set m_bar = $\bar{L}$ where $\bar{L}$ is the maximum possible gradient of the policy function. 
 
-**_NOTE:_** Recall that given a stochastic sequence of discrete choices, policy functions will have bounded MPCs: $\bar{L}<\infty$. 
+ **_NOTE:_** Recall that given a stochastic sequence of discrete choices, policy functions will have bounded MPCs: $\bar{L}<\infty$. 
 
 When `m_bar` is False, dela is not used and the cut off gradient is set to m_bar (pass in a dummy array for dela).
 
