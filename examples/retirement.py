@@ -8,27 +8,21 @@ Todo
 ----
 
 1. Complete docstrings for key functions
-	and relabel policy functions for
-	clarity in exposition
+    and relabel policy functions for
+    clarity in exposition
 
 """
 
 import numpy as np
-from numba import jit
 import time
-import dill as pickle
-from numba import njit, prange
+from numba import njit
 
 from FUES.FUES import FUES
 from FUES.RFC_simple import rfc
 from FUES.DCEGM import dcegm
 
-from FUES.math_funcs import interp_as, upper_envelope
+from FUES.math_funcs import interp_as
 
-from HARK.interpolation import LinearInterp
-#from HARK.dcegm import calc_segments, calc_multiline_envelope, calc_cross_points
-from HARK.dcegm import calc_nondecreasing_segments, upper_envelope, calc_linear_crossing
-from interpolation import interp
 
 
 class RetirementModel:
@@ -78,7 +72,7 @@ class RetirementModel:
                  b=1e-2,
                  grid_max_A=50,
                  grid_size=50,
-                 T=60):
+                 T=60, padding_mbar= 0):
 
         self.grid_size = grid_size
         self.r, self.R = r, 1 + r
@@ -89,6 +83,7 @@ class RetirementModel:
         self.T = T
         self.y = y
         self.grid_max_A = grid_max_A
+        self.padding_mbar = padding_mbar
 
         
 
@@ -194,6 +189,7 @@ def Operator_Factory(cp):
     R = cp.R
     b = cp.b
     T = cp.T
+    padding_mbar = cp.padding_mbar
 
     def EGM_UE(endog_grid,\
                         vf_work_t_inv,
@@ -201,12 +197,12 @@ def Operator_Factory(cp):
                         asset_grid_A,
                         del_a_unrefined,
                         m_bar=2,
-                        method = 'DCEGM'):
+                        method = 'DCEGM', padding_mbar = 0):
         
         if method == 'FUES':
             
             egrid1, vf_clean, a_prime_clean, sigma_clean, dela_clean = FUES(
-                endog_grid, vf_work_t_inv, asset_grid_A,sigma_work_t_inv, del_a_unrefined, m_bar=1.01, endog_mbar = True,LB = 3)
+                endog_grid, vf_work_t_inv, asset_grid_A,sigma_work_t_inv, del_a_unrefined, m_bar=1.01, endog_mbar = True,LB = 3, padding_mbar=padding_mbar)
             #print(egrid1)
             
         if method == 'DCEGM':
@@ -421,7 +417,7 @@ def Operator_Factory(cp):
         # remove sub-optimal points using FUES
         time_start_fues = time.time()
         egrid1, vf_clean, sigma_clean, a_prime_clean, dela_clean = EGM_UE(
-            endog_grid, vf_work_t_inv, sigma_work_t_inv, asset_grid_A, del_a_unrefined, m_bar=1.01, method= method)
+            endog_grid, vf_work_t_inv, sigma_work_t_inv, asset_grid_A, del_a_unrefined, m_bar=1.01, method= method, padding_mbar=padding_mbar)
         time_end_fues = time.time()
 
         # interpolate on even start of period t asset grid for worker
@@ -486,7 +482,7 @@ def Operator_Factory(cp):
         worker_refined_consumption = np.empty((max_age, grid_len))
         asset_pol_derivative_unrefined = np.empty((max_age, grid_len))
 
-        fues_times = np.zeros(max_age)
+        UE_times = np.zeros(max_age)
         all_times = np.zeros(max_age)
 
         # Solve retiree policy
@@ -523,7 +519,7 @@ def Operator_Factory(cp):
             
             (worker_cons_derivative, unrefined_consumption, worker_value, 
             unrefined_worker_value, endogenous_grid, refined_consumption, 
-            euler_derivative, unrefined_asset_derivative, fues_time, total_time) = results
+            euler_derivative, unrefined_asset_derivative, EU_time, total_time) = results
 
             worker_unrefined_values[age, :] = unrefined_worker_value
             worker_refined_values[age, :] = worker_value
@@ -536,10 +532,10 @@ def Operator_Factory(cp):
             next_worker_value = worker_value
             next_euler_derivative = euler_derivative
 
-            fues_times[age] = fues_time
+            UE_times[age] = EU_time
             all_times[age] = total_time
 
-        average_times = [np.mean(fues_times), np.mean(all_times)]
+        average_times = [np.mean(UE_times), np.mean(all_times)]
 
         return (worker_endog_grid, worker_unrefined_values, worker_refined_values, 
                 worker_unrefined_consumption, worker_refined_consumption, 

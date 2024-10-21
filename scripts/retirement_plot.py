@@ -1,9 +1,9 @@
 """ Script to plot solution of Ishkakov et al (2017) retirement choice
-model using FUES-EGM by Dobrescu and Shanker (2022).
+model using FUES-EGM by Dobrescu and Shanker (2024).
 
-Author: Akshay Shanker, University of Sydney, akshay.shanker@me.com.
+Author: Akshay Shanker, University of New South Wales, akshay.shanker@me.com.
 
-See examples/retirement_choice for model. 
+See examples/retirement_choice for example module. 
 
 Todo
 ----
@@ -16,8 +16,6 @@ Todo
 
 import numpy as np
 import time
-import dill as pickle
-from sklearn.utils.extmath import cartesian 
 from HARK.interpolation import LinearInterp
 from HARK.dcegm import calc_nondecreasing_segments, upper_envelope
 import seaborn as sns
@@ -25,24 +23,45 @@ from matplotlib.ticker import FormatStrFormatter
 import matplotlib.pylab as pl
 import matplotlib.lines as mlines
 
+
 # Import local modules
 import os,sys 
-cwd = os.getcwd()
-sys.path.append('..')
-os.chdir(cwd)
+#cwd = os.getcwd()
+#sys.path.append('..')
+#os.chdir(cwd)
 from FUES.FUES import FUES
 from examples.retirement import Operator_Factory, RetirementModel, euler
 
-
-def plot_egrids(age, e_grid, vf_work, c_worker, del_a, g_size):
+def plot_egrids(age, e_grid, vf_work, c_worker, del_a, g_size, tag = 'sigma0'):
     """ 
-    Figure 4. in FUES version Oct 2024. 
-    """
-    
-    # Plot value corr. and policy on 
-    # unrefined vs refined endogenous grid for age
 
-    # get unrefined endogenous grid, value function and consumption
+    Plot unrefined vs refined endogenous grid for age. 
+    Left plot is value, right plot is policy points 
+    Figure 4. in FUES version Oct 2024. 
+    
+    Parameters
+    ----------
+    age : int
+        Age at which to plot value function and policy
+    e_grid : dict
+        Dictionary of endogenous grids for worker
+    vf_work : dict
+        Dictionary of value unrefined corrs. for worker by age
+    c_worker : dict
+        Dictionary of unrefined consumption points for worker by age
+    del_a : dict
+        Dictionary of unrefined derivative of policy function for worker by age
+    g_size : int
+        Grid size for the model for labeling.
+     
+    Returns 
+    -------
+    None 
+
+
+    """ 
+
+    # 1. Get unrefined endogenous grid, value function and consumption
     # for worker at time t
     x = np.array(e_grid[age])
     vf = np.array(vf_work[age])
@@ -50,11 +69,11 @@ def plot_egrids(age, e_grid, vf_work, c_worker, del_a, g_size):
     del_a = np.array(del_a[age])
     a_prime = np.array(cp.asset_grid_A)
 
-    # generate refined grid, value function and policy using FUES
+    # 2. Generate refined grid, value function and policy using FUES
     x_clean, vf_clean, c_clean, a_prime_clean, del_a_clean \
         = FUES(x, vf, c, a_prime,del_a, 0.8)
 
-    # make plots  
+    # 3. make plots  left 
     pl.close()
     fig, ax = pl.subplots(1, 2)
     sns.set(
@@ -82,20 +101,23 @@ def plot_egrids(age, e_grid, vf_work, c_worker, del_a, g_size):
         linewidth=1,
         label=r'Value function $V_t^{1}$')
 
-    #ax[0].set_xlabel('Assets (t)', fontsize=11)
+    # formatting     
     ax[0].set_ylabel('Value', fontsize=11)
     ax[0].set_ylim(7.6, 8.4001)
     ax[0].set_xlim(44, 55.01)
     ax[0].spines['right'].set_visible(False)
     ax[0].spines['top'].set_visible(False)
     ax[0].legend(frameon=False, prop={'size': 10})
-    ax[0].set_yticklabels(ax[0].get_yticks(), size=9)
-    ax[0].set_xticklabels(ax[0].get_xticks(), size=9)
+    ax[0].set_yticks(ax[0].get_yticks())
+    ax[0].set_xticks(ax[0].get_xticks())
+    ax[0].tick_params(axis='y', labelsize=9)
+    ax[0].tick_params(axis='x', labelsize=9)
     ax[0].yaxis.set_major_formatter(FormatStrFormatter("%.1f"))
     ax[0].xaxis.set_major_formatter(FormatStrFormatter("%.0f"))
     ax[0].legend(frameon=False, prop={'size': 10})
     ax[0].grid(True)
 
+    # right plot 
     ax[1].scatter(
         np.sort(x),
         np.take(
@@ -116,45 +138,48 @@ def plot_egrids(age, e_grid, vf_work, c_worker, del_a, g_size):
         linewidth=0.75,
         label='FUES optimal points')
     
-    # Remove jumps to plot policy function 
-    #pos = np.where(np.abs(np.diff(c_clean)\
-    #            /np.diff(x_clean))> 0.5)[0] + 1
-    #print(pos)
-    #y1 = np.insert(c_clean, pos, np.nan)
-    #x1 = np.insert(x_clean, pos, np.nan)
-    #ax[1].plot(
-    #    np.sort(x1),
-    #    np.take(
-    #        x1 - y1,
-    #        np.argsort(x1)),
-    #    color='black',
-    #    linewidth=1,
-    #    label=r'Policy function $\sigma_t^{1}$')
-
+    # fromatting 
     ax[1].set_ylim(20, 40)
     ax[1].set_xlim(44, 55.01)
     ax[1].set_ylabel('Financial assets at time t+1', fontsize=11)
-    #ax[1].set_xlabel('Assets (t)', fontsize=11)
     ax[1].spines['right'].set_visible(False)
     ax[1].spines['top'].set_visible(False)
-    ax[1].set_yticklabels(ax[1].get_yticks(), size=9)
-    ax[1].set_xticklabels(ax[1].get_xticks(), size=9)
+    ax[1].set_yticks(ax[1].get_yticks())
+    ax[1].set_xticks(ax[1].get_xticks())
+    ax[1].tick_params(axis='y', labelsize=9)
+    ax[1].tick_params(axis='x', labelsize=9)
     ax[1].yaxis.set_major_formatter(FormatStrFormatter("%.0f"))
     ax[1].xaxis.set_major_formatter(FormatStrFormatter("%.0f"))
-    #fig.tight_layout()
     ax[1].legend(frameon=False, prop={'size': 10})
     ax[1].grid(True)
 
-    # position subxlabel lower 
+    # common x label
     fig.tight_layout(rect=[0, 0.05, 1, 0.95])
     fig.supxlabel('Financial assets at time t', fontsize=11)
     fig.savefig(
-        '../results/plots/retirement/ret_vf_aprime_all_{}_{}.png'.format(age, g_size))
+        'results/plots/retirement/ret_vf_aprime_all_{}_{}_{}.png'.format(age, g_size, tag))
     pl.close()
 
     return None
 
-def plot_cons_pol(sigma_work):
+def plot_cons_pol(sigma_work, ages = [17,10,0]):
+
+    """
+    Plot consumption policy for difference ages.
+
+    Parameters
+    ----------
+    sigma_work : dict
+        Dictionary of consumption policy functions by age
+    ages : list
+        List of ages to plot consumption policy for
+    
+    Returns
+    -------
+    None
+
+    """
+    
     # Plot consumption policy  for difference ages
     sns.set(style="whitegrid",
             rc={"font.size": 10,
@@ -162,7 +187,7 @@ def plot_cons_pol(sigma_work):
                 "axes.labelsize": 10})
     fig, ax = pl.subplots(1, 1)
 
-    for t, col, lab in zip([17, 10, 0], ['blue', 'red', 'black'], [
+    for t, col, lab in zip(ages, ['blue', 'red', 'black'], [
             't=18', 't=10', 't=1']):
 
         cons_pol = np.copy(sigma_work[t])
@@ -178,29 +203,52 @@ def plot_cons_pol(sigma_work):
         ax.set_ylim(0, 40)
         ax.spines['right'].set_visible(False)
         ax.spines['top'].set_visible(False)
-        ax.set_yticklabels(ax.get_yticks(), size=9)
-        ax.set_xticklabels(ax.get_xticks(), size=9)
+        ax.set_yticks(ax.get_yticks())
+        ax.set_xticks(ax.get_xticks())
+        ax.tick_params(axis='y', labelsize=9)
+        ax.tick_params(axis='x', labelsize=9)
+
         ax.yaxis.set_major_formatter(FormatStrFormatter("%.0f"))
         ax.xaxis.set_major_formatter(FormatStrFormatter("%.0f"))
         ax.set_ylabel('Consumption at time $t$', fontsize=11)
         ax.set_xlabel('Financial assets at time $t$', fontsize=11)
 
     ax.legend(frameon=False, prop={'size': 10})
-    fig.savefig('../results/plots/retirement/ret_cons_all.png'.format(t))
+    fig.savefig('results/plots/retirement/ret_cons_all.png'.format(t))
     pl.close()
 
     return None
 
-def plot_dcegm_cf(age, g_size, e_grid, vf_work, c_worker,dela_worker, a_prime,tag = 'sigma05',
-                  plot=True):
-    
-
-    """ 
-    Figure 5. in FUES version Oct 2024. 
+def plot_dcegm_cf(
+    age, g_size, e_grid, vf_work, c_worker, dela_worker, a_prime, 
+    tag='sigma05', plot=True
+):
     """
+    Figure 5 in FUES version Oct 2024.
 
-    # get unrefined endogenous grid, value function and consumption
-    # for worker at time t
+    Plot to compare DC-EGM and FUES for worker at a specific age.
+
+    Parameters
+    ----------
+    age : int
+        Age at which to plot value function and policy.
+    g_size : int
+        Grid size for the model for labeling.
+    e_grid : dict
+        Dictionary of endogenous grids for worker.
+    vf_work : dict
+        Dictionary of value unrefined correlations for worker by age.
+    c_worker : dict
+        Dictionary of unrefined consumption points for worker by age.
+    dela_worker : dict
+        Dictionary of unrefined derivative of policy function by age.
+    a_prime : str
+        Taste shock (sigma) for labeling.
+    tag : str, optional
+        Tag for labeling, default is 'sigma05'.
+    plot : bool, optional
+        If True, generates plot. Default is True.
+    """
     x = e_grid[age]
     vf = vf_work[age]
     c = c_worker[age]
@@ -208,23 +256,16 @@ def plot_dcegm_cf(age, g_size, e_grid, vf_work, c_worker,dela_worker, a_prime,ta
     dela = dela_worker[age]
     time_start_dcegm = time.time()
 
-    # generate refined grid, value function and policy using FUES
-    x_clean, vf_clean, c_clean, a_prime_clean, dela_clean = FUES(x, vf,
-                                    c, a_prime, dela,m_bar=1, endog_mbar= True
-                                    )
-   
-    # interpolate
+    x_clean, vf_clean, c_clean, a_prime_clean, dela_clean = FUES(
+        x, vf, c, a_prime, dela, m_bar=1, endog_mbar=True
+    )
+
     vf_interp_fues = np.interp(x, x_clean, vf_clean)
     vf_interp_fues[x.searchsorted(x_clean)] = vf_clean
 
-    # DC-EGM 
     start, end = calc_nondecreasing_segments(x, vf)
-    segments = []
-    c_segments = []
-    a_segments = []
-    m_segments = []
-    v_segments = []
-    dela_segments = []
+    segments, c_segments, a_segments, m_segments = [], [], [], []
+    v_segments, dela_segments = [], []
 
     for j in range(len(start)):
         idx = range(start[j], end[j] + 1)
@@ -295,14 +336,6 @@ def plot_dcegm_cf(age, g_size, e_grid, vf_work, c_worker,dela_worker, a_prime,ta
             label='EGM points',
             linewidth=0.75)
 
-        #ax[0].scatter(m_upper2, a1_env2,
-        #              edgecolors='red',
-        #              marker='o',
-        #              s=15,
-        ##              label='DCEGM pt.',
-        #              facecolors='none',
-        #              linewidth=0.75)
-
         for k, v_segm in enumerate(v_segments):
             x_values = m_segments[k]
             y_values = v_segm * cp.beta - cp.delta
@@ -336,7 +369,8 @@ def plot_dcegm_cf(age, g_size, e_grid, vf_work, c_worker,dela_worker, a_prime,ta
                 ax[0].scatter(x_values, y_values, color='black', marker='x', linewidth=0.75)
             else:
                 ax[0].plot(x_values, y_values, color='black', linewidth=0.75)
-                ax[0].scatter([x_values[0], x_values[-1]], [y_values[0], y_values[-1]], color='black', marker='x', linewidth=0.75)
+                ax[0].scatter([x_values[0], x_values[-1]], [y_values[0], y_values[-1]],\
+                                color='black', marker='x', linewidth=0.75)
 
 
         for k, a_segm in enumerate(a_segments):
@@ -346,15 +380,19 @@ def plot_dcegm_cf(age, g_size, e_grid, vf_work, c_worker,dela_worker, a_prime,ta
                 ax[1].scatter(x_values, y_values, color='black', marker='x', linewidth=0.75)
             else:
                 ax[1].plot(x_values, y_values, color='black', linewidth=0.75)
-                ax[1].scatter([x_values[0], x_values[-1]], [y_values[0], y_values[-1]], color='black', marker='x', linewidth=0.75)
+                ax[1].scatter([x_values[0], x_values[-1]], [y_values[0],\
+                     y_values[-1]], color='black', marker='x', linewidth=0.75)
 
         # Collect the automatic legend handles and labels for ax[0]
         handles0, labels0 = ax[0].get_legend_handles_labels()
 
         # Append the custom '-x' line to the existing handles and labels
-        line_x_end_handle = mlines.Line2D([0, 1], [0, 0], color='black', linestyle='-', linewidth=0.75)  # Line part
-        marker_start_handle = mlines.Line2D([0], [0], color='black', marker='x', linestyle='None', markersize=6)  # Start marker
-        marker_end_handle = mlines.Line2D([0], [0], color='black', marker='x', linestyle='None', markersize=6)  # End marker
+        line_x_end_handle = mlines.Line2D([0, 1], [0, 0], color='black',\
+                                                linestyle='-', linewidth=0.75)  
+        marker_start_handle = mlines.Line2D([0], [0], color='black', marker='x',\
+                                                 linestyle='None', markersize=6)  
+        marker_end_handle = mlines.Line2D([0], [0], color='black', marker='x',\
+                                                linestyle='None', markersize=6)  
 
         # Collect the automatic legend handles and labels for ax[0]
         handles0, labels0 = ax[1].get_legend_handles_labels()
@@ -370,10 +408,15 @@ def plot_dcegm_cf(age, g_size, e_grid, vf_work, c_worker,dela_worker, a_prime,ta
         ax[1].set_xlim(44, 55.1)
         
         # reformat labels for ticks
-        ax[0].set_yticklabels(ax[0].get_yticks(), size=9)
-        ax[0].set_xticklabels(ax[0].get_xticks(), size=9)
-        ax[1].set_yticklabels(ax[1].get_yticks(), size=9)
-        ax[1].set_xticklabels(ax[1].get_xticks(), size=9)
+        ax[0].set_yticks(ax[0].get_yticks())
+        ax[0].set_xticks(ax[0].get_xticks())
+        ax[0].tick_params(axis='y', labelsize=9)
+        ax[0].tick_params(axis='x', labelsize=9)
+
+        ax[1].set_yticks(ax[1].get_yticks())
+        ax[1].set_xticks(ax[1].get_xticks())
+        ax[1].tick_params(axis='y', labelsize=9)
+        ax[1].tick_params(axis='x', labelsize=9)
 
         # format for ticks decimal 
         ax[0].yaxis.set_major_formatter(FormatStrFormatter("%.1f"))
@@ -389,30 +432,38 @@ def plot_dcegm_cf(age, g_size, e_grid, vf_work, c_worker,dela_worker, a_prime,ta
         ax[0].spines['top'].set_visible(False)
         ax[1].spines['right'].set_visible(False)
         ax[1].spines['top'].set_visible(False)
+        ax[0].spines['left'].set_visible(True)
+        ax[0].spines['bottom'].set_visible(True)
         
         # add legends to both
         ax[0].legend(frameon=False, prop={'size': 10})
         ax[1].legend(frameon=False, prop={'size': 10})
-        ax[1].legend(handles=handles0, labels=labels0, frameon=False, prop={'size': 10}, loc='upper left')
-        ax[0].legend(handles=handles0, labels=labels0, frameon=False, prop={'size': 10}, loc='upper left')
+        ax[1].legend(handles=handles0, labels=labels0, frameon=False,\
+                                     prop={'size': 10}, loc='upper left'
+        )
+        ax[0].legend(handles=handles0, labels=labels0, frameon=False,\
+                                     prop={'size': 10}, loc='upper left'
+        )
         
 
         # add common x label
         fig.supxlabel('Financial assets at time t', fontsize=11)
         fig.tight_layout()
-        fig.savefig('../results/plots/retirement/ret_vf_aprime_all_{}_cf_{}_{}.png'
+        fig.savefig('results/plots/retirement/ret_vf_aprime_all_{}_cf_{}_{}.png'
                     .format(g_size, age,tag))
 
     return v_upper, v_env2, vf_clean, a_prime_clean, m_upper2, a1_env2
 
-def test_performance_for_grid_sizes_and_deltas(grid_sizes, delta_values,n =3):
+def test_Timings(grid_sizes, delta_values,n =3):
     # Initialize lists to hold results for LaTeX tables
     latex_errors_data = []
     latex_timings_data = []
 
     for g_size_baseline in grid_sizes:
         for delta in delta_values:
-            print(f"\nTesting with grid size: {g_size_baseline} and delta: {delta}")
+            print(f"\nTesting with grid size: {g_size_baseline}\
+                        and delta: {delta}"\
+            )
 
             # Create instance of RetirementModel
             cp = RetirementModel(
@@ -425,6 +476,7 @@ def test_performance_for_grid_sizes_and_deltas(grid_sizes, delta_values,n =3):
                 grid_size=g_size_baseline,
                 T=50,
                 smooth_sigma=0,
+                padding_mbar= -0.011,
             )
 
             # Unpack solver operators 
@@ -438,22 +490,25 @@ def test_performance_for_grid_sizes_and_deltas(grid_sizes, delta_values,n =3):
             best_error_FUES = float('inf')
             best_error_DCEGM = float('inf')
 
-            for _ in range(n):  # Run each test 3 times and take the best
+            for _ in range(n):  # Run each test n times and take the best
                 # Test RFC
-                time_start = time.time()
-                e_grid_worker_unref, vf_work_unref, vf_refined, c_worker_unref, c_refined_RFC, dela_unrefined, iter_time_age = iter_bell(cp, method='RFC')
+                _, _, _, _, c_refined_RFC, _, iter_time_age = iter_bell(
+                    cp, method='RFC'
+                )
                 time_end_RFC = np.mean(iter_time_age[0])
                 Euler_error_RFC = euler(cp, c_refined_RFC)
-                
+
                 # Test FUES
-                time_start = time.time()
-                _, _, _, _, c_refined_FUES, _, iter_time_age = iter_bell(cp, method='FUES')
+                _, _, _, _, c_refined_FUES, _, iter_time_age = iter_bell(
+                    cp, method='FUES'
+                )
                 time_end_FUES = np.mean(iter_time_age[0])
                 Euler_error_FUES = euler(cp, c_refined_FUES)
 
                 # Test DCEGM
-                time_start = time.time()
-                _, _, _, _, c_refined_DCEGM, _, iter_time_age = iter_bell(cp, method='DCEGM')
+                _, _, _, _, c_refined_DCEGM, _, iter_time_age = iter_bell(
+                    cp, method='DCEGM'
+                )
                 time_end_DCEGM = np.mean(iter_time_age[0])
                 Euler_error_DCEGM = euler(cp, c_refined_DCEGM)
 
@@ -468,17 +523,31 @@ def test_performance_for_grid_sizes_and_deltas(grid_sizes, delta_values,n =3):
                 best_error_DCEGM = min(best_error_DCEGM, Euler_error_DCEGM)
 
             # Store the best results for the LaTeX tables
-            latex_errors_data.append([g_size_baseline, delta, best_error_RFC, best_error_FUES, best_error_DCEGM])
-            latex_timings_data.append([g_size_baseline, delta, best_time_RFC*1000, best_time_FUES*1000, best_time_DCEGM*1000])
+            latex_errors_data.append([
+                g_size_baseline, delta, best_error_RFC,
+                best_error_FUES, best_error_DCEGM
+            ])
+            latex_timings_data.append([
+                g_size_baseline, delta, best_time_RFC * 1000,
+                best_time_FUES * 1000, best_time_DCEGM * 1000
+            ])
 
             # Print results for current grid size and delta
-            print(f'Euler errors for grid size {g_size_baseline}, delta {delta}: RFC: {best_error_RFC:.6f}, FUES: {best_error_FUES:.6f}, DCEGM: {best_error_DCEGM:.6f}')
-            print(f'Timings for grid size {g_size_baseline}, delta {delta}: RFC: {best_time_RFC:.6f}, FUES: {best_time_FUES:.6f}, DCEGM: {best_time_DCEGM:.6f}')
+            print(
+                f'Euler errors for grid size {g_size_baseline}, delta {delta}: '
+                f'RFC: {best_error_RFC:.6f}, FUES: {best_error_FUES:.6f}, '
+                f'DCEGM: {best_error_DCEGM:.6f}'
+            )
+            print(
+                f'Timings for grid size {g_size_baseline}, delta {delta}: '
+                f'RFC: {best_time_RFC:.6f}, FUES: {best_time_FUES:.6f}, '
+                f'DCEGM: {best_time_DCEGM:.6f}'
+            )
 
-    # Generate LaTeX tables after all grid sizes and deltas are tested
-    #generate_latex_table(, "errors", "Euler Errors", "Retirement model")
-    generate_latex_table(latex_timings_data,latex_errors_data,"timing", "Retirement model")
-
+    # Generate LaTeX tables 
+    generate_latex_table(latex_timings_data,latex_errors_data,\
+                                "timing", "Retirement model"
+    )
 
 def generate_latex_table(data, errors, table_type, caption):
     """
@@ -494,263 +563,145 @@ def generate_latex_table(data, errors, table_type, caption):
     caption : str
         Caption for the LaTeX table.
     """
-    
-    # Header for LaTeX table with multirow and cool formatting
+    # Header for LaTeX table with multirow and formatting
     latex_code = f"""
-\\begin{{table}}[htbp]
-\\centering
-\\small
-\\begin{{tabular}}{{ccccc|ccc}}
-\\toprule
-\\multirow{{2}}{{*}}{{\\textit{{Grid Size}}}} & \\multirow{{2}}{{*}}{{\\textit{{Delta}}}} & \\multicolumn{{3}}{{c}}{{\\textbf{{Timing (Seconds)}}}} & \\multicolumn{{3}}{{c}}{{\\textbf{{Euler Error (Log10)}}}} \\\\
- & & \\textbf{{RFC}} & \\textbf{{FUES}} & \\textbf{{DCEGM}} & \\textbf{{RFC}} & \\textbf{{FUES}} & \\textbf{{DCEGM}} \\\\
-\\midrule
-"""
+        \\begin{{table}}[htbp]
+        \\centering
+        \\small
+        \\begin{{tabular}}{{ccccc|ccc}}
+        \\toprule
+        \\multirow{{2}}{{*}}{{\\textit{{Grid Size}}}} & 
+        \\multirow{{2}}{{*}}{{\\textit{{Delta}}}} & 
+        \\multicolumn{{3}}{{c}}{{\\textbf{{Timing (Seconds)}}}} & 
+        \\multicolumn{{3}}{{c}}{{\\textbf{{Euler Error (Log10)}}}} \\\\
+        & & \\textbf{{RFC}} & \\textbf{{FUES}} & \\textbf{{DCEGM}} & 
+        \\textbf{{RFC}} & \\textbf{{FUES}} & \\textbf{{DCEGM}} \\\\
+        \\midrule
+        """
 
-    # Get unique grid sizes to handle panels
     unique_grid_sizes = np.unique([row[0] for row in data])
 
     for grid_size in unique_grid_sizes:
-        # Filter data by the current grid size
         filtered_data = [row for row in data if row[0] == grid_size]
         filtered_errors = [row for row in errors if row[0] == grid_size]
 
         if len(filtered_data) != len(filtered_errors):
-            raise ValueError(f"Mismatch in data and errors for grid size {grid_size}. Check the input data.")
+            raise ValueError(
+                f"Mismatch in data and errors for grid size {grid_size}. "
+                f"Check the input data."
+            )
 
-        # Add the first row for this grid size with \multirow spanning the number of deltas
-        latex_code += f"\\multirow{{{len(filtered_data)}}}{{*}}{{\\textit{{{int(grid_size)}}}}} "
+        latex_code += f"\\multirow{{{len(filtered_data)}}}{{*}}{{\\textit{{"
+        latex_code += f"{int(grid_size)}}}}} "
 
-        # Add each row for the deltas under the current grid size
         for i, row in enumerate(filtered_data):
-            if i < len(filtered_errors):  # Defensive check to avoid index out of range
+            if i < len(filtered_errors):
                 error_row = filtered_errors[i]
+                row_str = (
+                    f"& {row[1]:.2f} & {row[2]:.3f} & {row[3]:.3f} & "
+                    f"{row[4]:.3f} & {error_row[2]:.3f} & "
+                    f"{error_row[3]:.3f} & {error_row[4]:.3f} \\\\\n"
+                )
                 if i == 0:
-                    # First row includes the grid size via \multirow
-                    latex_code += f"& {row[1]:.2f} & {row[2]:.3f} & {row[3]:.3f} & {row[4]:.3f} & " \
-                                  f"{error_row[2]:.3f} & {error_row[3]:.3f} & {error_row[4]:.3f} \\\\\n"
+                    latex_code += row_str
                 else:
-                    # Subsequent rows omit the grid size
-                    latex_code += f" & {row[1]:.2f} & {row[2]:.3f} & {row[3]:.3f} & {row[4]:.3f} & " \
-                                  f"{error_row[2]:.3f} & {error_row[3]:.3f} & {error_row[4]:.3f} \\\\\n"
+                    latex_code += f" {row_str}"
             else:
-                raise IndexError(f"Mismatch: filtered_errors has fewer elements than filtered_data for grid size {grid_size}.")
+                raise IndexError(
+                    "Mismatch: filtered_errors has fewer elements than "
+                    f"filtered_data for grid size {grid_size}."
+                )
 
         latex_code += "\\midrule\n"
 
-    # Footer for LaTeX table
     latex_code += f"""
-\\bottomrule
-\\end{{tabular}}
-\\caption{{\\textit{{{caption}}} comparison across different grid sizes, delta values, and accuracy (Euler error)}}
-\\label{{tab:{table_type}_comparison}}
-\\end{{table}}
-"""
-    # Write the LaTeX code to a file
-    # Create the results directory if it doesn't exist
+        \\bottomrule
+        \\end{{tabular}}
+        \\caption{{\\textit{{{caption}}} comparison across different grid sizes, 
+        delta values, and accuracy (Euler error)}}
+        \\label{{tab:{table_type}_comparison}}
+        \\end{{table}}
+        """
+
     results_dir = os.path.join("..", "results")
     os.makedirs(results_dir, exist_ok=True)
 
-    # Define the path to save the file
     file_path = os.path.join(results_dir, f"retirement_{table_type}.tex")
 
-    # Save the LaTeX code to the file in the results directory
     with open(file_path, "w") as file:
         file.write(latex_code)
+
 
 if __name__ == "__main__":
 
     
-    grid_sizes = [500,1000,2000,3000]  # Adjust or add more grid sizes as necessary
-    delta_values = [0.25, 0.5, 1,1.5,2]  # Test for different delta values
+    grid_sizes = [500, 1000, 2000, 3000]  # Test different grid sizes
+    delta_values = [0.25, 0.5, 1, 1.5, 2]  # Test different delta values
+    egrid_plot_age = 17
+    run_performance_tests = False
 
-    #test_performance_for_grid_sizes_and_deltas(grid_sizes, delta_values)
-    
-    # Generate baseline parameter solution using FUES and make plots 
+    # Test performance of different methods for RetirementModel across grid sizes
+    if run_performance_tests:
+        test_Timings(grid_sizes, delta_values)
 
-    # Create instance of RetirementModel
+    # Generate baseline solution using FUES and make plots
     g_size_baseline = 3000
 
-    cp = RetirementModel(r=0.02,
-                         beta= 0.98,
-                         delta=1,
-                         y=20,
-                         b=1E-10,
-                         grid_max_A=500,
-                         grid_size=3000,
-                         T=20,
-                         smooth_sigma=0)
-    
-    cp2 = RetirementModel(r=0.02,
-                         beta= 0.98,
-                         delta=1,
-                         y=20,
-                         b=1E-10,
-                         grid_max_A=500,
-                         grid_size=3000,
-                         T=20,
-                         smooth_sigma=0)
+    cp = RetirementModel(
+        r=0.02, beta=0.98, delta=1, y=20, b=1E-10, grid_max_A=500,
+        grid_size=3000, T=20, smooth_sigma=0
+    )
 
+    cp2 = RetirementModel(
+        r=0.02, beta=0.98, delta=1, y=20, b=1E-10, grid_max_A=500,
+        grid_size=3000, T=20, smooth_sigma=0
+    )
 
-    # Unpack solver operators 
+    # Unpack solver operators
     Ts_ret, Ts_work, iter_bell = Operator_Factory(cp)
     Ts_ret, Ts_work, iter_bell2 = Operator_Factory(cp2)
 
-    # Get optimal value and policy functions using FUES
-    # by iterating on the Bellman equation 
+    # Get optimal value and policy functions using FUES by iterating on Bellman
+    # precompile numba functions
+    _ = iter_bell(cp, method='RFC')
+    e_grid_worker_unref, vf_work_unref, vf_refined, c_worker_unref, \
+        c_refined_RFC, dela_unrefined, time_end_RFC = iter_bell(
+            cp, method='RFC'
+        )
 
-    time_start = time.time()
-    e_grid_worker_unref, vf_work_unref,vf_refined,\
-             c_worker_unref,c_refined_RFC, dela_unrefined, iter_time_age = iter_bell(cp, method = 'RFC')
-    time_end_RFC = time.time() - time_start
-    
-    time_start = time.time()
-    _, _,_,_,c_refined_FUES, _, _ = iter_bell(cp, method = 'FUES')
+    # precompile numba functions
+    _ = iter_bell(cp, method='FUES')
+    _, _, _, _, c_refined_FUES, _, time_end_FUES = iter_bell(cp, method='FUES')
 
-    _, _,_,_,c_refined_FUES2, _, _ = iter_bell2(cp2, method = 'FUES')
-    time_end_FUES = time.time() - time_start
-    
-    time_start = time.time()
-    _, _,_,_,c_refined_DCEGM,_, _ = iter_bell(cp2, method = 'DCEGM')
-    time_end_DCEGM = time.time() - time_start
-    
+    # precompile numba functions
+    _ = iter_bell(cp, method='DCEGM')
+    _, _, _, _, c_refined_DCEGM, _, time_end_DCEGM = iter_bell(cp, method='DCEGM')
+
     Euler_error_RFC = euler(cp, c_refined_RFC)
     Euler_error_FUES = euler(cp, c_refined_FUES)
     Euler_error_DCEGM = euler(cp, c_refined_DCEGM)
 
-    print('Euler errors: RFC: {0:.6f}, FUES: {1:.6f}, DCEGM: {2:.6f}'.format(Euler_error_RFC, Euler_error_FUES, Euler_error_DCEGM))
-    
-    print('Timings: RFC: {0:.6f}, FUES: {1:.6f}, DCEGM: {2:.6f}'.format(time_end_RFC, time_end_FUES, time_end_DCEGM))
+    print(
+        "| Method | Euler Error    | Avg. upper env. time(ms) |\n"
+        "|--------|----------------|--------------------------|\n"
+        f"| RFC    | {Euler_error_RFC: <14.6f} | {time_end_RFC[0]*1000: <24.6f} |\n"
+        f"| FUES   | {Euler_error_FUES: <14.6f} | {time_end_FUES[0]*1000: <24.6f} |\n"
+        f"| DCEGM  | {Euler_error_DCEGM: <14.6f} | {time_end_DCEGM[0]*1000: <24.6f} |\n"
+        "------------------------------------------------------\n"
+    )
 
-    # 1. Example use of FUES to refine EGM grids
-    # get unrefined endogenous grid, value function and consumption
-    # for worker at time age
-    age = 17
-    x = np.array(e_grid_worker_unref[age])
-    vf = np.array(vf_work_unref[age])
-    c = np.array(c_worker_unref[age])
-    dela = np.array(dela_unrefined[age])
-    a_prime = np.array(cp.asset_grid_A)
+    # 2. Plot and save value and policy on ref/unref. EGM grids
+    plot_egrids(
+        egrid_plot_age, e_grid_worker_unref, vf_work_unref, c_worker_unref,
+        dela_unrefined, g_size_baseline, tag='sigma0'
+    )
 
-    # generate refined grid, value function and policy using FUES
-    x_clean, vf_clean, c_clean, a_prime_clean, dela_clean \
-        = FUES(x, vf, a_prime,dela,c, 2, endog_mbar= True)
-
-
-    # 2. Plot and save value function and policy on EGM grids
-    # and refined EGM grids 
-    plot_egrids(17, e_grid_worker_unref, vf_work_unref,\
-                     c_worker_unref,dela_unrefined, g_size_baseline)
-
-    # 3. Plot consumption function (for worker, 
-    # but before next period work decision
-    # made)
+    # 3. Plot consumption function for worker, before next period's work decision
     plot_cons_pol(c_refined_FUES)
 
-    # 4. Compute and plot comparison with DC-EGM 
-
-    v_upper, v1_env, vf_interp_fues, a_interp_fues, m_upper, a1_env \
-        = plot_dcegm_cf(age, g_size_baseline, e_grid_worker_unref,
-                            vf_work_unref, c_worker_unref, dela_unrefined, cp.asset_grid_A,tag = '',
-                            plot=True)
-    
-    # save as csv 
-
-    #out_csv = np.array([e_grid_worker_unref[age], a_interp_fues, m_upper, vf_interp_fues,v1_env])
-
-    #np.savetxt('../results/plots/retirement/ret_vf_aprime_all_{}_cf_{}.csv'.format(g_size_baseline, age), out_csv, delimiter=',')
-
-    # 5. Evalute DC-EGM and FUES upper envelope for 
-    # parms on a grid.  
-
-    g_size = 2000
-    beta_min = 0.85
-    g_size_min = 300
-    g_size_max = 2000
-    beta_max = 0.98
-    N_params = 2
-    y_min = 10
-    y_max = 25
-    delta_min = 0.5
-    delta_max = 1.5
-
-    betas = np.linspace(beta_min, beta_max, N_params)
-    ys = np.linspace(y_min, y_max, N_params)
-    gsizes = np.linspace(g_size_min, g_size_max, N_params)
-    deltas = np.linspace(delta_min, delta_max, N_params)
-    params = cartesian([betas,ys,deltas])
-
-
-    # age at which to compcare DC-EGM with FUES
-    age_dcegm = 2
-
-    errors = np.empty(len(params))
-    fues_times = np.empty(len(params))
-    all_iter_times = np.empty(len(params))
-
-    # Compare values policy from DC-EGM with FUES
-    # Note we solve the model using FUES. Then at age_dcegm, we take the full
-    # EGM grid and compute the upper envelope using DC-EGM and compare to FUES.
-    # Comparison performed on EGM grid points selected by DC-EGM 
-    # (not all EGM points, to avoid picking up interpolation 
-    #  error due different interpolation grids 
-    # used by DC-EGM and FUES 
-    param_i = 0
-    
-    """" 
-    for p_list in range(len(params)):
-
-        beta = params[p_list][0]
-        delta = params[p_list][2]
-        y = params[p_list][1]
-
-        # Create instance of RetirementModel
-        cp = RetirementModel(r=0.02,
-                             beta=beta,
-                             delta=delta,
-                             y=y,
-                             b=1E-1,
-                             grid_max_A=500,
-                             grid_size=g_size,
-                             T=50,
-                             smooth_sigma=0)
-
-        # Unpack solvers
-        Ts_ret, Ts_work, iter_bell = Operator_Factory(cp)
-
-        # Get optimal value and policy functions using FUES
-        e_grid, vf_work, vf_uncond, c_worker, sigma_work,dela_unrefined, mean_times\
-             = iter_bell(cp)
-
-        # calc upper envelope using DC-EGM and compare on EGM points to
-        # FUES
-        v_upper, v1_env, vf_interp_fues, a_interp_fues, m_upper, a1_env \
-            = plot_dcegm_cf(age_dcegm, g_size, e_grid,
-                            vf_work, c_worker,dela_unrefined, cp.asset_grid_A,
-                            plot=False)
-
-        if len(a1_env) == len(a_interp_fues):
-            errors[param_i] = \
-                np.max(np.abs(a1_env - a_interp_fues)) / len(a1_env)
-
-        else:
-            errors[param_i] =\
-                np.max(np.abs(vf_interp_fues - v_upper)) / len(v_upper)
-        fues_times[param_i] = mean_times[0]
-        all_iter_times[param_i]  = mean_times[1]
-
-        print(errors[param_i])
-
-        param_i = param_i + 1
-
-    print("Test DC-EGM vs. FUES on uniform grid of {} parameters:".format(N_params**3))
-    print(' '    'beta: ({},{}), delta: ({},{}), y: ({},{})  \n '    ' exog. grid size: {}'\
-            .format(beta_min, beta_max, y_min, y_max, delta_min, delta_max,g_size))
-    print("Avg. error between DC-EGM and FUES: {0:.6f}"\
-            .format(np.mean(errors)))
-    print('Timings:')
-    print(' '    'Avg. FUES time (secs): {0:.6f}'\
-            .format(np.mean(fues_times)))
-    print(' '    'Avg. worker iteration time (secs): {0:.6f}'\
-            .format(np.mean(all_iter_times)))
-"""
+    # 4. Plot comparison with DC-EGM
+    v_upper, v1_env, vf_interp_fues, a_interp_fues, m_upper, a1_env = \
+        plot_dcegm_cf(
+            egrid_plot_age, g_size_baseline, e_grid_worker_unref, vf_work_unref,
+            c_worker_unref, dela_unrefined, cp.asset_grid_A, tag='sigma0', plot=True
+        )

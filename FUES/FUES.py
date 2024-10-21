@@ -148,7 +148,7 @@ def seg_intersect(a1, a2, b1, b2):
     return np.array([intersect_x, intersect_y])
 
 @njit
-def FUES(e_grid, vf, policy_1, policy_2,del_a, b=1e-10, m_bar=2, LB=4, endog_mbar = False):
+def FUES(e_grid, vf, policy_1, policy_2,del_a, b=1e-10, m_bar=2, LB=4, endog_mbar = False,padding_mbar = 0):
     """
     FUES function returns refined EGM grid, value function and
     policy function
@@ -232,7 +232,7 @@ def FUES(e_grid, vf, policy_1, policy_2,del_a, b=1e-10, m_bar=2, LB=4, endog_mba
 
     # Scan attaches NaN to vf at all sub-optimal points
     e_grid_clean, vf_with_nans = \
-        _scan(e_grid, vf,policy_1, del_a, m_bar, LB, endog_mbar=endog_mbar)
+        _scan(e_grid, vf,policy_1, del_a, m_bar, LB, endog_mbar=endog_mbar, padding_mbar = padding_mbar)
 
     non_nan_indices = np.where(~np.isnan(vf_with_nans))
     
@@ -244,7 +244,7 @@ def FUES(e_grid, vf, policy_1, policy_2,del_a, b=1e-10, m_bar=2, LB=4, endog_mba
         
 
 @njit
-def _scan(e_grid, vf, a_prime,del_a, m_bar, LB, fwd_scan_do=True, endog_mbar= True, padding_mbar = - 0.011):
+def _scan(e_grid, vf, a_prime,del_a, m_bar, LB, fwd_scan_do=True, endog_mbar= True, padding_mbar = 0):
     """" Implements the scan for FUES"""
 
     # leading index for optimal values j
