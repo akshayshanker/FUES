@@ -15,6 +15,9 @@ https://web.archive.org/web/20111108065352/https://www.cs.mun.ca/%7Erod
 
 Notes
 -----
+
+Work in progress.
+
 This version takes in a dictionary of policy functions and returns a dictionary of cleaned policy functions.
 
 Still needs debugging and testing currently returns too many sub-opt points. 
