@@ -561,7 +561,10 @@ def create_latex_table(results_summary):
     return table
 
 if __name__ == "__main__":
+
     
+
+    run_tets = False
     # Read settings
     with open("../settings/settings.yml", "r") as stream:
         settings = yaml.safe_load(stream) 
@@ -574,7 +577,8 @@ if __name__ == "__main__":
     grid_sizes_A = [250, 500, 1000]
 
     # Run comparison across grid sizes and tau values
-    #results, latex_table = compare_grids_and_tau(cp_settings, tau_values, grid_sizes_A)
+    if run_tets == True:
+        results, latex_table = compare_grids_and_tau(cp_settings, tau_values, grid_sizes_A)
 
     # load saved performance table results 
     #results = pickle.load(open("../results/durable_timings.pkl", "rb"))
@@ -585,7 +589,7 @@ if __name__ == "__main__":
     #    with open("../results/durables_table.tex", "w") as f:
     #        f.write(latex_table)
 
-    # 2. Solve the model in single process interface for plotting and single table 
+    # 2. Solve the baseline model in single process interface for plotting and single table 
 
     if MPI.COMM_WORLD.Get_rank() == 0:
 
