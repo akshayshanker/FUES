@@ -1,9 +1,6 @@
 import math
-from numba import njit, vectorize, prange
+from numba import njit
 import numpy as np
-from quantecon.optimize.root_finding import brentq
-#from HARK.dcegm import calc_segments, calc_multiline_envelope, calc_cross_points
-from HARK.dcegm import calc_nondecreasing_segments, upper_envelope, calc_linear_crossing
 
 @njit
 def rootsearch(f,a,b,dx, h_prime,z, Ud_prime_a, Ud_prime_h,t):
@@ -49,9 +46,8 @@ def f(x):
     return x * np.cos(x-4)
 
 
-
 @njit
-def interp_as(xp, yp, x, extrap=True):
+def interp_as(xp, yp, x, extrap=False):
     """Function  interpolates 1D
     with linear extraplolation
 
@@ -173,3 +169,83 @@ def upper_envelope(segments,  calc_crossings=False):
             env_inds = np.insert(env_inds, idx, xtra_lines)
 
     return x, y, env_inds
+
+
+@njit
+def calculate_gradient_1d(data, x):
+    gradients = np.empty_like(data, dtype=np.float64)
+    for i in range(1, len(data)):
+        gradients[i] = (data[i] - data[i - 1]) / (x[i] - x[i - 1])
+    gradients[0] = gradients[1]  # assuming continuous gradient at the start
+    return gradients
+
+@njit
+def correct_jumps1d(data, x, gradient_jump_threshold, policy_value_funcs):
+    """
+    Removes jumps in a 1D array based on gradient jump threshold and applies the same correction to
+    policy and value function arrays stored in a dictionary.
+
+    Args:
+        data (numpy.ndarray): The input 1D data array.
+        x (numpy.ndarray): The 1D array of x values corresponding to `data`.
+        gradient_jump_threshold (float): Threshold for detecting jumps in gradient.
+        policy_value_funcs (dict): A dictionary of additional 1D arrays for policy, value functions, etc.
+
+    Returns:
+        tuple: Corrected 1D data array and the updated policy_value_funcs dictionary.
+    """
+    corrected_data = np.copy(data)
+    gradients = calculate_gradient_1d(data, x)
+
+    # Ensure policy and value arrays are also copied to avoid in-place modification
+    corrected_policy_value_funcs = {key: np.copy(value) for key, value in policy_value_funcs.items()}
+
+    for i in range(1, len(data) - 1):
+        left_jump = np.abs(gradients[i]) > gradient_jump_threshold
+        right_jump = np.abs(gradients[i + 1]) > gradient_jump_threshold
+
+        # If a jump is detected, correct the main data and policy/value functions
+        if left_jump and right_jump:
+            slope = (corrected_data[i - 1] - corrected_data[i - 2]) / (x[i - 1] - x[i - 2])
+            correction = slope * (x[i] - x[i - 1])
+            corrected_data[i] = corrected_data[i - 1] + correction
+            
+            # Apply the same correction to all policy and value functions
+            for key in corrected_policy_value_funcs:
+                slope_extra = (corrected_policy_value_funcs[key][i - 1] - corrected_policy_value_funcs[key][i - 2]) / (x[i - 1] - x[i - 2])
+                correction_extra = slope_extra * (x[i] - x[i - 1])
+                corrected_policy_value_funcs[key][i] = corrected_policy_value_funcs[key][i - 1] + correction_extra
+
+        elif np.isnan(corrected_data[i]):
+            slope = (corrected_data[i - 2] - corrected_data[i - 3]) / (x[i - 2] - x[i - 3])
+            corrected_data[i] = corrected_data[i - 2] + slope * (x[i] - x[i - 2])
+            
+            # Handle NaN for policy and value functions similarly
+            for key in corrected_policy_value_funcs:
+                slope_extra = (corrected_policy_value_funcs[key][i - 2] - corrected_policy_value_funcs[key][i - 3]) / (x[i - 2] - x[i - 3])
+                corrected_policy_value_funcs[key][i] = corrected_policy_value_funcs[key][i - 2] + slope_extra * (x[i] - x[i - 2])
+
+    return corrected_data, corrected_policy_value_funcs
+
+def mask_jumps(data, threshold=0.9):
+    """
+    Mask the data by introducing NaNs where there are large jumps/discontinuities.
+    
+    Use in plotting. 
+
+    Parameters:
+    data : np.ndarray
+        The data array to be masked.
+    threshold : float, optional
+        The threshold for detecting jumps. Any jump larger than this value will be masked.
+        
+    Returns:
+    np.ndarray
+        The masked data array.
+    """
+    masked_data = np.copy(data)
+    diffs = np.abs(np.diff(data))
+    
+    # Mask out the points after large jumps
+    masked_data[1:][diffs > threshold] = np.nan
+    return masked_data

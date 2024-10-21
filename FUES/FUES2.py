@@ -16,43 +16,29 @@ https://web.archive.org/web/20111108065352/https://www.cs.mun.ca/%7Erod
 Notes
 -----
 
-EGM grid should not have duplicate values. Run uniqueEG before passing
-endogenous grid through FUES other will throw up division by zero errors. 
+Work in progress.
+
+This version takes in a dictionary of policy functions and returns a dictionary of cleaned policy functions.
+
+Still needs debugging and testing currently returns too many sub-opt points. 
 
 
 """
-
-
 import numpy as np
 from numba import njit
 import copy
-
-
-@njit
-def uniqueEG(egrid, vf):
-    egrid_rounded = np.round_(egrid, 10)
-    unique_values = np.unique(egrid_rounded)
-    max_vf_indices = np.full_like(egrid, -1)  # Initialize with -1
-
-    for value in unique_values:
-        if np.isnan(value):
-            continue
-        else:
-            indices = np.where(egrid_rounded == value)[0]
-            max_index = indices[np.argmax(vf[indices])]
-            max_vf_indices[max_index] = max_index
-
-    mask = (max_vf_indices != -1)
-    return mask
-
+from numba.typed import Dict
+from numba import types
 
 @njit
 def append_push(x_array, m):
     """ Delete first value of array,
         pushes back index of all undeleted
         values and appends m to final index"""
-    # Shift values in-place to avoid unnecessary reallocation
-    x_array[:-1] = x_array[1:]
+
+    for i in range(len(x_array) - 1):
+        x_array[i] = x_array[i + 1]
+
     x_array[-1] = m
     return x_array
 
@@ -61,19 +47,22 @@ def append_push(x_array, m):
 def back_scan_gradients(m_array, a_prime, vf_full, e_grid, j, q):
     """ Compute gradients of value correspondence points
         and policy points with respect to all m values and policy
-        points in m_array """
-    
-    num_elements = len(m_array)
-    gradients_m_vf = np.empty(num_elements)
-    gradients_m_a = np.empty(num_elements)
+        points in m_array
 
-    for m in range(num_elements):
+        See Figure 5, right panel in DS (2023) """
+
+    gradients_m_vf = np.zeros(len(m_array))
+    gradients_m_a = np.zeros(len(m_array))
+
+    for m in range(len(gradients_m_a)):
         m_int = int(m_array[m])
-        delta_e_grid = max(1e-100,e_grid[j] - e_grid[m_int])  # Cache repeated subtraction
-        gradients_m_vf[m] = (vf_full[j] - vf_full[m_int]) / delta_e_grid
-        gradients_m_a[m] = np.abs((a_prime[q] - a_prime[m_int]) / delta_e_grid)
+        gradients_m_vf[m] = (vf_full[j] - vf_full[m_int]) \
+            / max(1e-100,(e_grid[j] - e_grid[m_int]))
+        gradients_m_a[m] = np.abs((a_prime[q] - a_prime[m_int])
+                                  / max(1e-100,(e_grid[q] - e_grid[m_int])))
 
     return gradients_m_vf, gradients_m_a
+
 
 @njit
 def fwd_scan_gradients(a_prime, vf_full, e_grid, j, q, LB):
@@ -83,13 +72,14 @@ def fwd_scan_gradients(a_prime, vf_full, e_grid, j, q, LB):
 
         See Figure 5, left panel in DS (2023)"""
 
-    gradients_f_vf = np.empty(LB)
-    gradients_f_a = np.empty(LB)
+    gradients_f_vf = np.zeros(LB)
+    gradients_f_a = np.zeros(LB)
 
     for f in range(LB):
-        delta_e_grid = max(1e-200,e_grid[q] - e_grid[q + 1 + f])  # Cache repeated subtraction
-        gradients_f_vf[f] = (vf_full[q] - vf_full[q + 1 + f]) / delta_e_grid
-        gradients_f_a[f] = np.abs((a_prime[j] - a_prime[q + 1 + f]) / delta_e_grid)
+        gradients_f_vf[f] = (vf_full[q] - vf_full[q + 1 + f]) \
+            / max(1e-100,(e_grid[q] - e_grid[q + 1 + f]))
+        gradients_f_a[f] = np.abs((a_prime[j] - a_prime[q + 1 + f])
+                                  / max(1e-100,(e_grid[j] - e_grid[q + 1 + f])))
 
     return gradients_f_vf, gradients_f_a
 
@@ -118,37 +108,40 @@ def perp(a):
 
 @njit
 def seg_intersect(a1, a2, b1, b2):
-    """Intersection of two 1D line segments."""
-    
-    # Compute deltas
-    da_x = a2[0] - a1[0]
-    da_y = a2[1] - a1[1]
-    db_x = b2[0] - b1[0]
-    db_y = b2[1] - b1[1]
-    dp_x = a1[0] - b1[0]
-    dp_y = a1[1] - b1[1]
-    
-    # Compute perpendicular vector to da (perpendicular to line segment a1-a2)
-    dap_x = -da_y
-    dap_y = da_x
+    """ Intersection of two 1D line segments
 
-    # Compute dot products
-    denom = dap_x * db_x + dap_y * db_y  # dot(dap, db)
-    num = dap_x * dp_x + dap_y * dp_y    # dot(dap, dp)
-    
-    # Avoid division by zero (parallel lines case)
-    if denom == 0:
-        return np.array([np.nan, np.nan])
+    Parameters
+    ----------
+    a1: 1D array
+         First point of first line seg
+    a2: 1D array
+         Second point of first line seg
+    b1: 1D array
+         First point of first line seg
+    b2: 1D array
+         Second point of first line seg
 
-    # Intersection point calculation
-    t = num / denom
-    intersect_x = t * db_x + b1[0]
-    intersect_y = t * db_y + b1[1]
+    Returns
+    -------
+    c: 1D array
+        intersection point
 
-    return np.array([intersect_x, intersect_y])
+    """
+    da = a2 - a1
+    db = b2 - b1
+    dp = a1 - b1
+    dap = perp(da)
+    denom = max(1e-100,np.dot(dap, db))
+    num = np.dot(dap, dp)
+    return (num / denom) * db + b1
+
+
 
 @njit
-def FUES(e_grid, vf, policy_1, policy_2,del_a, b=1e-10, m_bar=2, LB=4, endog_mbar = False,padding_mbar = 0):
+def FUES(endog_grid, vf, policies_dict, test_pols,\
+            del_a,\
+            b=1e-100, m_bar=1.1, LB=10,\
+            endog_mbar=False, min_points=4):
     """
     FUES function returns refined EGM grid, value function and
     policy function
@@ -159,12 +152,12 @@ def FUES(e_grid, vf, policy_1, policy_2,del_a, b=1e-10, m_bar=2, LB=4, endog_mba
             unrefined endogenous grid
     vf: 1D array
             value correspondence points at endogenous grid
-    policy_1: 1D array
-            policy 1 points at endogenous grid
-    policy_2: 1D array
+    c: 1D array
+            consumption points at endogenous grid
+    a_prime: 1D array
             policy 2 points at endogenous grid
     del_a: 1D array
-            derivative of policy function 1
+            derivative of policy 2 function
     b: float64
         lower bound for the endogenous grid
 
@@ -175,19 +168,19 @@ def FUES(e_grid, vf, policy_1, policy_2,del_a, b=1e-10, m_bar=2, LB=4, endog_mba
     edog_mbar: Bool
          flag if m_bar is enodgenous using 
          policy function derivative 
+    min_points: int
+         minimum number of non-NaN points to retain in the output arrays
 
     Returns
     -------
-    e_grid_clean: 1D array
-                    refined endogenous grid
-    vf_clean: 1D array
-                value function on refined grid
-    policy_1_clean: 1D array
-                policy 1 on refined grid
-    policy_2_clean: 1D array
-                    policy 2 on refined grid
-    del_a_clean: 1D array
-            gradient of policy 2 on refined grid
+    Dictionary of cleaned arrays:
+    {
+        'e_grid_clean': 1D array,
+        'vf_clean': 1D array,
+        'c_clean': 1D array,
+        'a_prime_clean': 1D array,
+        'del_a_clean': 1D array
+    }
 
     Notes
     -----
@@ -219,33 +212,91 @@ def FUES(e_grid, vf, policy_1, policy_2,del_a, b=1e-10, m_bar=2, LB=4, endog_mba
 
     """
 
-    # Sort policy and vf by e_grid order
-    sort_indices = np.argsort(e_grid)
+    # Check if each input array has at least 4 non-NaN points
+    if np.count_nonzero(~np.isnan(endog_grid)) < min_points:
+        # If any of the arrays have less than 4 non-NaN points, return only the non-NaN points
+        not_nan_indices = np.where(~np.isnan(endog_grid))
+        e_grid_clean = endog_grid[not_nan_indices]
+        vf_clean = vf[not_nan_indices]
+        test_pols_clean = test_pols[not_nan_indices]
+        policies_clean = Dict.empty(
+            key_type=types.unicode_type,
+            value_type=types.float64[:],
+        )
+        for key in policies_dict:
+            policy = policies_dict[key][not_nan_indices]
+            policies_clean[key] = policy
 
-    # Sort e_grid and other arrays using the sorted indices
-    e_grid = e_grid[sort_indices]
-    vf = vf[sort_indices]
-    policy_1 = policy_1[sort_indices]
-    policy_2 = policy_2[sort_indices]
-    del_a = del_a[sort_indices]
+        return e_grid_clean, vf_clean, policies_clean, test_pols_clean
 
+    # Determine locations where endogenous grid points are equal to the lower bound
+    indices_lb = np.where(endog_grid <= b)
+
+    if len(vf[indices_lb]) > 0:
+        vf_lb_max = max(vf[indices_lb])
+
+        # Remove sub-optimal lb EGM points
+        for i in range(len(endog_grid)):
+            if endog_grid[i] <= b and vf[i] < vf_lb_max:
+                vf[i] = np.nan
+
+    # Remove NaN values from vf array first 
+    # clean before scan function clean 
+    not_nan_indices = np.where(~np.isnan(vf))
+    endog_grid = endog_grid[not_nan_indices]
+    vf = vf[not_nan_indices]
+    test_pols = test_pols[not_nan_indices]
+    del_a = del_a[not_nan_indices]
+
+    # Sort policies and vf by endog_grid order
+    sort_indices = np.argsort(endog_grid)
+    vf = np.take(vf, sort_indices)
+    test_pols = np.take(test_pols, sort_indices)
+    endog_grid = np.sort(endog_grid)
+
+    policies_pre_clean = Dict.empty(
+        key_type=types.unicode_type,
+        value_type=types.float64[:],
+    )
+    for key in policies_dict:
+        policy = policies_dict[key][not_nan_indices]
+        policy = np.take(policy, sort_indices)
+        policies_pre_clean[key] = policy
 
     # Scan attaches NaN to vf at all sub-optimal points
-    e_grid_clean, vf_with_nans = \
-        _scan(e_grid, vf,policy_1, del_a, m_bar, LB, endog_mbar=endog_mbar, padding_mbar = padding_mbar)
+    e_grid_clean, vf_with_nans, test_pols_clean = \
+        _scan(endog_grid, vf, test_pols, del_a, m_bar, LB, endog_mbar=endog_mbar)
+
+    if vf_with_nans[-1]<vf_with_nans[-2]:
+        vf_with_nans[-1] = np.nan
+    
 
     non_nan_indices = np.where(~np.isnan(vf_with_nans))
-    
-    return (e_grid_clean[non_nan_indices],
-        vf[non_nan_indices],
-        policy_1[non_nan_indices],
-        policy_2[non_nan_indices],
-        del_a[non_nan_indices])
-        
+
+    policies_clean_out = Dict.empty(
+        key_type=types.unicode_type,
+        value_type=types.float64[:],
+    )
+    for key in policies_dict:
+        policy = policies_pre_clean[key][non_nan_indices]
+        policies_clean_out[key] = policy
+
+    test_pols_clean = test_pols[non_nan_indices]
+    endog_grid_clean = e_grid_clean[non_nan_indices]    
+    vf_clean = vf_with_nans[non_nan_indices]
+    #print(vf_with_nans)
+
+    return endog_grid_clean, vf_clean, policies_clean_out, test_pols_clean
 
 @njit
-def _scan(e_grid, vf, a_prime,del_a, m_bar, LB, fwd_scan_do=True, endog_mbar= True, padding_mbar = 0):
-    """" Implements the scan for FUES"""
+def _scan(e_grid, vf, a_prime,del_a, m_bar, LB, fwd_scan_do=False, endog_mbar= True):
+    """" Implements the scan for FUES
+
+    Todo
+    ----
+    - fix issue of EGM points being zero in diff
+
+    '"""
 
     # leading index for optimal values j
     # leading index for value to be `checked' is i+1
@@ -261,45 +312,53 @@ def _scan(e_grid, vf, a_prime,del_a, m_bar, LB, fwd_scan_do=True, endog_mbar= Tr
     m_array = np.zeros(LB)
 
     # FUES scan
-    for i in range(len(e_grid) - 2):
+    for i in range(len(e_grid) - 1):
 
         # inital two points are optimal (assumption)
         if i <= 1:
-            j = i
-            k = j-1
-            #previous_opt_is_intersect = False
-            #k_minus_1 = np.copy(np.array([k]))[0] - 1
+            j = np.copy(np.array([i]))[0]
+            k = np.copy(np.array([j - 1]))[0]
+            previous_opt_is_intersect = False
+            k_minus_1 = np.copy(np.array([k]))[0] - 1
 
         else:
             # value function gradient betweeen previous two optimal points
+            #print((e_grid[j] - e_grid[k]))
+            e_grid_diff_minus_1 = max(1E-100,e_grid[j] - e_grid[k])
             g_j_minus_1 = (vf_full[j] - vf_full[k]) / \
-                (max(1e-200,e_grid[j] - e_grid[k]))
+                e_grid_diff_minus_1
+            
 
             # gradient with leading index to be checked
-            denom_egrid = max(1e-200,e_grid[i + 1] - e_grid[j])
-            
-            g_1 = (vf_full[i + 1] - vf_full[j]) / (denom_egrid)
+            #rint(i+1) 
+            #print(j)
+            e_grid_diff = max(1E-100,e_grid[i + 1] - e_grid[j])
+            g_1 = (vf_full[i + 1] - vf_full[j]) / e_grid_diff
 
             # Absolute gradients of policy function at current index 
             # and at testing point
             M_L = np.abs(del_a[j])
             M_U = np.abs(del_a[i+1])
-            #print(M_U)
-            M_max = max(M_L, M_U) + padding_mbar
+            M_max = max(M_L, M_U)
 
             # policy gradient with leading index to be checked
-            d_p_prime = a_prime[i + 1] - a_prime[j]
-            g_tilde_a = np.abs((d_p_prime)\
-                               / (denom_egrid))
+            g_tilde_a = np.abs((a_prime[i + 1] - a_prime[j])\
+                               / e_grid_diff)
 
             # Set detection threshold to m_bar if fixed m_bar used 
             if endog_mbar == False:
-                M_max = m_bar 
+                M_max = m_bar
 
             # if right turn is made and jump registered
             # remove point or perform forward scan
 
-            if g_1 < g_j_minus_1 and  g_tilde_a > M_max:
+            # If value falls, remove points
+            if vf_full[i + 1] - vf_full[j] < 0:
+                vf[i + 1] = np.nan
+                # append index array of previously deleted points
+                m_array = append_push(m_array, i + 1)
+
+            elif g_1 < g_j_minus_1 and  g_tilde_a > M_max:
                 keep_i_1_point = False
 
                 if fwd_scan_do:
@@ -326,18 +385,14 @@ def _scan(e_grid, vf, a_prime,del_a, m_bar, LB, fwd_scan_do=True, endog_mbar= Tr
                         m_array = append_push(m_array, i + 1)
                     else:
                         previous_opt_is_intersect = True
-                        k = j
-                        j = i + 1
+                        k = np.copy(np.array([j]))[0]
+                        j = np.copy(np.array([i]))[0] + 1
 
-            # If value falls, remove points
-            elif vf_full[i + 1] - vf_full[j] < 0:
-                vf[i + 1] = np.nan
-                # append index array of previously deleted points
-                m_array = append_push(m_array, i + 1)
+
 
             # assume value is monotone in policy and delete if not
             # satisfied
-            elif g_1 < g_j_minus_1 and d_p_prime < 0:
+            elif g_1 < g_j_minus_1 and a_prime[i + 1] - a_prime[j] < 0:
                 vf[i + 1] = np.nan
                 m_array = append_push(m_array, i + 1)
 
@@ -365,9 +420,12 @@ def _scan(e_grid, vf, a_prime,del_a, m_bar, LB, fwd_scan_do=True, endog_mbar= Tr
                     g_m_vf = gradients_m_vf[m_index_bws]
                     g_m_a = gradients_m_a[m_index_bws]
 
+                # if no points found in the backward scan, the candidate is retained \
+                # hack: setting g_m_vf = 100
                 else:
                     m_index_bws = 0
                     keep_j_point = True
+                    g_m_vf = 1E100
 
                 # index of m'th point on the e_grid
                 m_ind = int(m_array[m_index_bws])
@@ -381,17 +439,17 @@ def _scan(e_grid, vf, a_prime,del_a, m_bar, LB, fwd_scan_do=True, endog_mbar= Tr
                     keep_j_point = False
 
                 if not keep_j_point:
-                    pj = np.array([e_grid[j], vf_full[j]])
-                    pi1 = np.array([e_grid[i + 1], vf_full[i + 1]])
-                    pk = np.array([e_grid[k], vf_full[k]])
-                    pm = np.array([e_grid[m_ind], vf_full[m_ind]])
+                    pj = np.copy(np.array([e_grid[j], vf_full[j]]))
+                    pi1 = np.copy(np.array([e_grid[i + 1], vf_full[i + 1]]))
+                    pk = np.copy(np.array([e_grid[k], vf_full[k]]))
+                    pm = np.copy(np.array([e_grid[m_ind], vf_full[m_ind]]))
                     intrsect = seg_intersect(pj, pk, pi1, pm)
 
                     vf[j] = np.nan
                     vf_full[j] = intrsect[1]
                     e_grid[j] = intrsect[0]
                     previous_opt_is_intersect = True
-                    j = i + 1
+                    j = np.copy(np.array([i]))[0] + 1
 
                 else:
 
@@ -399,7 +457,7 @@ def _scan(e_grid, vf, a_prime,del_a, m_bar, LB, fwd_scan_do=True, endog_mbar= Tr
                     if g_1 > g_j_minus_1:
                         previous_opt_is_intersect = True
 
-                    k = j
-                    j = i + 1
+                    k = np.copy(np.array([j]))[0]
+                    j = np.copy(np.array([i]))[0] + 1
 
-    return e_grid, vf
+    return e_grid, vf, a_prime

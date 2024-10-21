@@ -1,8 +1,57 @@
-lambdas:
-- 4.7651949
-- 0.57802016
-- -0.02022858
-- 0.00030696
-- -1.71E-06
-- 0.0241546
-- -0.00011022
+durables:
+  lambdas:
+    - 4.7651949
+    - 0.57802016
+    - -0.02022858
+    - 0.00030696
+    - -1.71E-06
+    - 0.0241546
+    - -0.0001102
+  r: 0.01
+  sigma: 0.001
+  r_H: 0
+  beta: 0.93
+  alpha: 0.03
+  delta: 0
+  Pi: [[0.5, 0.5], [0.5, 0.5]]
+  z_vals: [0.1, 1.0]
+  b: 1e-100
+  grid_max_A: 20.0 # max for liquid asset grid 
+  grid_max_WE: 70.0 # max for wealth (market resources grid)
+  grid_size_W: 300 # size of wealth grid
+  grid_max_H: 50.0
+  grid_size: 300 # size of liquid asset grid (also used for size of H grid by default)
+  grid_size_H: 300
+  gamma_c: 3
+  chi: 0
+  tau: 0.12
+  K: 1.3
+  tol_bel: 1E-03
+  M_bar: 1.1
+  max_iter: 60
+  theta: 1.3498
+  t0: 20
+  root_eps: 1E-1
+  stat: False
+
+fella:
+  r: 0.0346
+  r_H: 0
+  beta: 0.93
+  delta: 0
+  Pi:
+    - [0.99, 0.01, 0]
+    - [0.01, 0.98, 0.01]
+    - [0, 0.09, 0.91]
+  z_vals: [0.2, 0.526, 4.66]
+  b: 1e-100
+  grid_max_A: 30.0
+  grid_max_H: 5  
+  grid_size: 1000 
+  grid_size_H: 7.0
+  gamma_1: 0
+  xi: 0
+  kappa: 0.077
+  phi: 0.09
+  theta: 0.77
+
