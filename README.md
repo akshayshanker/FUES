@@ -34,7 +34,7 @@ The derivative of time t policy function can be calculated using the implicit fu
 
 `FUES` detects jumps in the the second policy, policy_2_hat. 
 
-It is also possible to set `endog_mbar = False` and set `m_bar` = $\bar{L}$ where $\bar{L}$ is the maximum possible gradient of the policy function. 
+It is also possible to set `endog_mbar = False` and set `m_bar` = $\bar{L}$ where $\bar{L}$ is the maximum possible gradient of the policy function in a smooth region.
 
  **_NOTE:_** Recall jumps occur at points where the agent switches their stochastic sequence of future discrete choices (SFDC). Given a SFDC, the consumer problem is smooth and concave $\Rightarrow$ policy functions condtioned on a SFDCs will have bounded MPCs; the slope of any smooth section of the policty function is bounded by $\bar{L}<\infty$. 
 
