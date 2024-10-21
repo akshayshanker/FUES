@@ -26,7 +26,7 @@ In the above:
 - `m_bar` is the maximum possible gradient of the policy function
 - `endog_mbar` is a boolean indicating whether the cut off gradient used by FUES is endogenously determined using dela
 
-The derivative of time t policy function can be calculated using the implicit function theorem and the Euler equation (see Section 2.1.4 of the latest working paper).  
+The derivative of time t policy function can be calculated using the implicit function theorem and the Euler equation (see Appendix A of the latest working paper).  
 
 It is also possible to set endog_mbar = False and set m_bar = \bar{L} where \bar{L} is the maximum possible gradient of the policy function. 
 
