@@ -28,9 +28,11 @@ In the above:
 
 The derivative of time t policy function can be calculated using the implicit function theorem and the Euler equation (see Appendix A of the latest working paper).  
 
-It is also possible to set endog_mbar = False and set m_bar = \bar{L} where \bar{L} is the maximum possible gradient of the policy function. 
+It is also possible to set endog_mbar = False and set m_bar = $\bar{L}$ where $\bar{L}$ is the maximum possible gradient of the policy function. 
 
-When m_bar is False, dela is not used and the cut off gradient is set to m_bar (pass in a dummy array for dela).
+**_NOTE:_** Recall that given a stochastic sequence of discrete choices, policy functions will have bounded MPCs: $\bar{L}<\infty$. 
+
+When `m_bar` is False, dela is not used and the cut off gradient is set to m_bar (pass in a dummy array for dela).
 
 Note: FUES detects jumps in the the second policy, policy_2_hat. 
 
