@@ -36,7 +36,7 @@ The derivative of time t policy function can be calculated using the implicit fu
 
 It is also possible to set `endog_mbar = False` and set `m_bar` = $\bar{L}$ where $\bar{L}$ is the maximum possible gradient of the policy function. 
 
- **_NOTE:_** Recall that given a stochastic sequence of future discrete choices, the consumer problem is smooth and concave $\Rightarrow$ policy functions will have bounded MPCs: the slope of any smooth section of the policty function is bounded by $\bar{L}<\infty$. 
+ **_NOTE:_** Recall jumps occur at points where the agent switches their stochastic sequence of future discrete choices (SFDC). Given a SFDC, the consumer problem is smooth and concave $\Rightarrow$ policy functions condtioned on a SFDCs will have bounded MPCs; the slope of any smooth section of the policty function is bounded by $\bar{L}<\infty$. 
 
 When `m_bar` is False, `dela` is not used and the cut off gradient is set to m_bar (pass in a dummy array for dela).
 
