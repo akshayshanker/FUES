@@ -64,7 +64,7 @@ Consumption policy function generated using Ishkakov et al (2017) params and no 
 
 Upper envelope generation using FUES and Ishkakov et al (2017) params (age 17):
 
-![ret_vf_aprime_all_17](https://user-images.githubusercontent.com/8477783/216878574-7d240142-8e47-49e4-a0d6-98b6f460710c.png)
+![ret_vf_aprime_all_17](/results/plots/retirement/ret_vf_aprime_all_17_3000_sigma0.png)
 
 Upper envelope and policy functions for Ishkakov et al (2017) params and smoothing param = 0.05:
 
