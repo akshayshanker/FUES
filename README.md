@@ -8,6 +8,14 @@ You can find the latest version of the paper [here](docs/FUES_EGM_21102024.pdf).
 
 The slides have a nice picture explaining FUES [here](docs/slides_05022023.pdf).
 
+## Key Idea
+
+In a dynamic stochastic optimization problem, the agent chooses a policy $c$ and discrete choice $d$ each period to maximize:
+
+$$ u(c) + \beta*mathbb{E}V_{t}(f(x,c)}$$
+
+where $x$ is the state today, $u$ is the utility function and $f$ is a transition function. 
+
 ## Example use of FUES
 
 Suppose we have the following arrays: an unrefined endogenous grid `x_hat`, the value correspondence on the unrefined grid `v_hat` 
