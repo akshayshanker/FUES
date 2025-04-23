@@ -22,4 +22,7 @@ dependencies = [
 
 [project.urls]
 "Source" = "https://github.com/akshayshanker/FUES"
-"Bug Tracker" = "https://github.com/akshayshanker/FUES/issues" 
+"Bug Tracker" = "https://github.com/akshayshanker/FUES/issues"
+
+[tool.setuptools]
+packages = ["FUES"] 
