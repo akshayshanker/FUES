@@ -26,6 +26,11 @@ import matplotlib.lines as mlines
 
 # Import local modules
 import os,sys 
+# Ensure project root is on sys.path so that `import examples` works when this
+# script is executed from the *scripts/* directory.
+PROJECT_ROOT = os.path.dirname(os.path.dirname(__file__))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
 #cwd = os.getcwd()
 #sys.path.append('..')
 #os.chdir(cwd)
@@ -677,16 +682,21 @@ if __name__ == "__main__":
     _ = iter_bell(cp, method='DCEGM')
     _, _, _, _, c_refined_DCEGM, _, time_end_DCEGM = iter_bell(cp, method='DCEGM')
 
+    # precompile numba functions
+    _ = iter_bell(cp, method='CONSAV')
+    _, _, _, _, c_refined_CONSAV, _, time_end_CONSAV = iter_bell(cp, method='CONSAV')
+
     Euler_error_RFC = euler(cp, c_refined_RFC)
     Euler_error_FUES = euler(cp, c_refined_FUES)
     Euler_error_DCEGM = euler(cp, c_refined_DCEGM)
-
+    Euler_error_CONSAV = euler(cp, c_refined_CONSAV)
     print(
         "| Method | Euler Error    | Avg. upper env. time(ms) |\n"
         "|--------|----------------|--------------------------|\n"
         f"| RFC    | {Euler_error_RFC: <14.6f} | {time_end_RFC[0]*1000: <24.6f} |\n"
         f"| FUES   | {Euler_error_FUES: <14.6f} | {time_end_FUES[0]*1000: <24.6f} |\n"
         f"| DCEGM  | {Euler_error_DCEGM: <14.6f} | {time_end_DCEGM[0]*1000: <24.6f} |\n"
+        f"| CONSAV | {Euler_error_CONSAV: <14.6f} | {time_end_CONSAV[0]*1000: <24.6f} |\n"
         "------------------------------------------------------\n"
     )
 

@@ -22,6 +22,7 @@ from FUES.RFC_simple import rfc
 from FUES.DCEGM import dcegm
 
 from FUES.math_funcs import interp_as
+from helpers.egm_upper_envelope import EGM_UE as egm_ue_global
 
 
 
@@ -191,50 +192,48 @@ def Operator_Factory(cp):
     T = cp.T
     padding_mbar = cp.padding_mbar
 
-    def EGM_UE(endog_grid,\
-                        vf_work_t_inv,
-                        sigma_work_t_inv,
-                        asset_grid_A,
-                        del_a_unrefined,
-                        m_bar=2,
-                        method = 'DCEGM', padding_mbar = 0):
-        
-        if method == 'FUES':
-            
-            egrid1, vf_clean, a_prime_clean, sigma_clean, dela_clean = FUES(
-                endog_grid, vf_work_t_inv, asset_grid_A,sigma_work_t_inv, del_a_unrefined, m_bar=1.01, endog_mbar = True,LB = 3, padding_mbar=padding_mbar)
-            #print(egrid1)
-            
-        if method == 'DCEGM':
-            a_prime_clean, egrid1,sigma_clean, vf_clean,dela_clean = dcegm(sigma_work_t_inv,del_a_unrefined,vf_work_t_inv, asset_grid_A,endog_grid)
+    def EGM_UE(endog_grid,
+                vf_work_t_inv,
+                v_nxt_raw,
+                sigma_work_t_inv,
+                asset_grid_A,
+                del_a_unrefined,
+                m_bar=2,
+                method='DCEGM', padding_mbar=0):
+        """Call the shared `helpers.egm_upper_envelope.EGM_UE` façade.
 
-        if method == 'RFC':
-            #Generate inputs for RFC
-            grad = cp.du(sigma_work_t_inv)
-            xr = np.array([endog_grid]).T
-            vfr =  np.array([vf_work_t_inv]).T
-            gradr = np.array([grad]).T
-            pr =  np.array([asset_grid_A]).T
-            mbar = 1.1
-            radius = 0.5
-            
-            #run rfc_vectorized
-            sub_points, roofRfc, close_ponts = rfc(xr,gradr,vfr,pr,mbar,radius, 40)
-    
-    
-            mask = np.ones(endog_grid.shape[0] ,dtype=bool)
-            mask[sub_points] = False
-            egrid1 = endog_grid[mask]
-            vf_clean = vfr[mask][:,0]
-            sigma_clean = sigma_work_t_inv[mask]
-            a_prime_clean = asset_grid_A[mask]
-            #get del_a array
-            dela_clean = 1- del_a_unrefined[mask]
+        We pass the minimal set of arguments and translate back to the
+        tuple expected by the rest of the retirement solver.
+        """
 
-            #print(vf_clean.shape)
+        refined, _, _ = egm_ue_global(
+            endog_grid,                # x_dcsn_hat
+            vf_work_t_inv,             # qf_hat
+            v_nxt_raw,             # v_nxt_raw (unused for FUES/DCEGM/RFC)
+            sigma_work_t_inv,          # c_hat
+            asset_grid_A,              # a_hat
+            asset_grid_A,              # w_grid (evaluation grid)
+            du,                        # uc_func_partial
+            {"func": u, "args": ()}, # u_func placeholder
+            ue_method=method.upper(),
+            m_bar=m_bar,
+            lb=3,
+            rfc_radius=0.75,
+            rfc_n_iter=40,
+        )
 
+        m_ref = refined["m"]
+        v_ref = refined["v"]
+        c_ref = refined["c"]
+        a_ref = refined["a"]
 
-        return egrid1, vf_clean, sigma_clean, a_prime_clean, dela_clean
+        # numerical derivative of a'(m) wrt m (finite diff)
+        if len(m_ref) > 1:
+            del_a_ref = np.gradient(a_ref, m_ref)
+        else:
+            del_a_ref = np.zeros_like(a_ref)
+
+        return m_ref, v_ref, c_ref, a_ref, del_a_ref
 
     @njit
     def retiree_solver(sigma_prime_ret,
@@ -417,10 +416,11 @@ def Operator_Factory(cp):
         # remove sub-optimal points using FUES
         time_start_fues = time.time()
         egrid1, vf_clean, sigma_clean, a_prime_clean, dela_clean = EGM_UE(
-            endog_grid, vf_work_t_inv, sigma_work_t_inv, asset_grid_A, del_a_unrefined, m_bar=1.01, method= method, padding_mbar=padding_mbar)
+            endog_grid, vf_work_t_inv,beta * VF_prime_work, sigma_work_t_inv, asset_grid_A, del_a_unrefined, m_bar=1.01, method= method, padding_mbar=padding_mbar)
         time_end_fues = time.time()
 
         # interpolate on even start of period t asset grid for worker
+        
         vf_work_t = interp_as(egrid1, vf_clean, asset_grid_wealth)
         sigma_work_t = interp_as(egrid1, sigma_clean, asset_grid_wealth)
         dela_work_t = interp_as(egrid1, dela_clean, asset_grid_wealth)
