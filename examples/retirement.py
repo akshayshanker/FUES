@@ -22,7 +22,7 @@ from FUES.RFC_simple import rfc
 from FUES.DCEGM import dcegm
 
 from FUES.math_funcs import interp_as
-from helpers.egm_upper_envelope import EGM_UE as egm_ue_global
+from helpers.ue import EGM_UE as egm_ue_global
 
 
 
@@ -222,10 +222,10 @@ def Operator_Factory(cp):
             rfc_n_iter=40,
         )
 
-        m_ref = refined["m"]
-        v_ref = refined["v"]
-        c_ref = refined["c"]
-        a_ref = refined["a"]
+        m_ref = refined["x_dcsn_ref"]
+        v_ref = refined["v_dcsn_ref"]
+        c_ref = refined["kappa_ref"]
+        a_ref = refined["x_cntn_ref"]
 
         # numerical derivative of a'(m) wrt m (finite diff)
         if len(m_ref) > 1:
@@ -416,11 +416,17 @@ def Operator_Factory(cp):
         # remove sub-optimal points using FUES
         time_start_fues = time.time()
         egrid1, vf_clean, sigma_clean, a_prime_clean, dela_clean = EGM_UE(
-            endog_grid, vf_work_t_inv,beta * VF_prime_work, sigma_work_t_inv, asset_grid_A, del_a_unrefined, m_bar=1.01, method= method, padding_mbar=padding_mbar)
+            endog_grid, vf_work_t_inv,beta * VF_prime_work- delta, sigma_work_t_inv, asset_grid_A, del_a_unrefined, m_bar=1.01, method= method, padding_mbar=padding_mbar)
         time_end_fues = time.time()
 
         # interpolate on even start of period t asset grid for worker
+
+        #if method != 'CONSAV':
         
+        #    vf_work_t = vf_clean
+        #    sigma_work_t = sigma_clean
+        #    dela_work_t = dela_clean
+        #else:
         vf_work_t = interp_as(egrid1, vf_clean, asset_grid_wealth)
         sigma_work_t = interp_as(egrid1, sigma_clean, asset_grid_wealth)
         dela_work_t = interp_as(egrid1, dela_clean, asset_grid_wealth)
@@ -531,9 +537,9 @@ def Operator_Factory(cp):
             next_worker_cons_derivative = worker_cons_derivative
             next_worker_value = worker_value
             next_euler_derivative = euler_derivative
-
-            UE_times[age] = EU_time
-            all_times[age] = total_time
+            if i>0:
+                UE_times[age] = EU_time
+                all_times[age] = total_time
 
         average_times = [np.mean(UE_times), np.mean(all_times)]
 

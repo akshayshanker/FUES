@@ -59,31 +59,95 @@ def available() -> list[str]:
 from FUES.math_funcs import interp_as  # noqa: E402  (after np import)
 
 
+def EGM_UE(
+    x_dcsn_hat: np.ndarray,
+    qf_hat: np.ndarray,
+    v_cntn_hat: np.ndarray,
+    kappa_hat: np.ndarray,
+    X_cntn: np.ndarray,
+    X_dcsn: Optional[np.ndarray],
+    uc_func_partial: Callable,
+    u_func: Callable,
+    ue_method: str = "FUES",
+    m_bar: float = 1.2,
+    lb: int = 3,
+    rfc_radius: float = 0.75,
+    rfc_n_iter: int = 20,
+) -> Tuple[Dict[str, np.ndarray], Dict[str, np.ndarray], Dict[str, np.ndarray]]:
+    """Universal entry point for all upper-envelope algorithms.
+
+    This is now a *thin* façade: it forwards to a concrete engine
+    registered in ``helpers.ue`` and performs common bookkeeping
+    (raw dict assembly, interpolation onto ``X_dcsn``, timing).
+    The public signature is kept intact for backward compatibility.
+    """
+
+    if X_dcsn is None:
+        raise ValueError("X_dcsn must be provided for interpolation")
+
+    # -------- raw (always reported) -----------------------------------
+    raw = {"x_dcsn_hat": x_dcsn_hat, "qf_hat": qf_hat, "kappa_hat": kappa_hat, "X_cntn": X_cntn}
+
+    # -------- select engine ------------------------------------------
+    engine = get_engine(ue_method)
+    if engine is None:
+        raise ValueError(
+            f"Unknown UE method '{ue_method}'. Available: {', '.join(_ue_mod.available())}"
+        )
+
+    # -------- run -----------------------------------------------------
+    t0 = time.time()
+
+    refined = engine(
+        x_dcsn_hat=x_dcsn_hat,
+        qf_hat=qf_hat,
+        kappa_hat=kappa_hat,
+        X_cntn=X_cntn,
+        v_cntn_hat=v_cntn_hat,
+        X_dcsn=X_dcsn,
+        uc_func_partial=uc_func_partial,
+        u_func=u_func,
+        m_bar=m_bar,
+        lb=lb,
+        rfc_radius=rfc_radius,
+        rfc_n_iter=rfc_n_iter,
+    )
+
+    ue_time = time.time() - t0
+
+    # -------- interpolation -----------------------------------------
+    interpolated = fill_interpolated(refined, X_dcsn, uc_func_partial)
+    interpolated["ue_time"] = ue_time
+
+    return refined, raw, interpolated
+
+
+
 def fill_interpolated(
     refined: Dict[str, np.ndarray],
-    w_grid: np.ndarray,
+    X_dcsn: np.ndarray,
     uc_func_partial: Callable[[np.ndarray], np.ndarray],
 ) -> Dict[str, np.ndarray]:
-    """Interpolate (m,v,c,a) onto ``w_grid`` and recompute λ.
+    """Interpolate (m,v,kappa,X_cntn) onto ``X_dcsn`` and recompute λ.
 
-    Returns a dict with keys ``m, v, c, a, lambda`` (mirroring *refined*)
+    Returns a dict with keys ``m, v, kappa, X_cntn, lambda`` (mirroring *refined*)
     plus does *not* time anything.
     """
 
     if refined is None or len(refined.get("m", [])) < 2:
         # Not enough points – return zeros so caller can decide what to do
-        out = {k: np.zeros_like(w_grid) for k in ("m", "c", "v", "a", "lambda")}
-        out["m"] = w_grid
+        out = {k: np.zeros_like(X_dcsn) for k in ("m", "kappa", "v", "X_cntn", "lambda")}
+        out["m"] = X_dcsn
         return out
 
     m_ref = refined["m"]
     out = {
-        "m": w_grid,
-        "c": interp_as(m_ref, refined["c"], w_grid, extrap=True),
-        "v": interp_as(m_ref, refined["v"], w_grid, extrap=True),
-        "a": interp_as(m_ref, refined["a"], w_grid, extrap=True),
+        "m": X_dcsn,
+        "kappa": interp_as(m_ref, refined["kappa"], X_dcsn, extrap=True),
+        "v": interp_as(m_ref, refined["v"], X_dcsn, extrap=True),
+        "X_cntn": interp_as(m_ref, refined["X_cntn"], X_dcsn, extrap=True),
     }
-    out["lambda"] = uc_func_partial(out["c"])
+    out["lambda"] = uc_func_partial(out["kappa"])
     return out
 
 
@@ -96,9 +160,11 @@ def fill_interpolated(
 def _fues_engine(
     x_dcsn_hat: np.ndarray,
     qf_hat: np.ndarray,
-    c: np.ndarray,
-    a: np.ndarray,
+    kappa_hat: np.ndarray,
+    X_cntn: np.ndarray,
     *,
+    v_cntn: Optional[np.ndarray] = None,
+    X_dcsn: Optional[np.ndarray] = None,
     uc_func_partial: Callable[[np.ndarray], np.ndarray],
     m_bar: float = 1.2,
     lb: int = 3,
@@ -119,16 +185,16 @@ def _fues_engine(
     # Guard against lb being a list (edge-case seen in original code)
     lb_int = int(lb[0]) if isinstance(lb, (list, tuple)) else int(lb)
 
-    m_ref, v_ref, c_ref, a_ref, _ = fues_alg(
-        x_dcsn_hat, qf_hat, c, a, a, m_bar=m_bar, LB=lb_int
+    x_dcsn_ref, qf_ref, kappa_ref, x_cntn_ref, _ = fues_alg(
+        x_dcsn_hat, qf_hat, kappa_hat, X_cntn, X_cntn, m_bar=m_bar, LB=lb_int
     )
 
     return {
-        "m": m_ref,
-        "v": v_ref,
-        "c": c_ref,
-        "a": a_ref,
-        "lambda": uc_func_partial(c_ref),
+        "x_dcsn_ref": x_dcsn_ref,
+        "v_dcsn_ref": qf_ref,
+        "kappa_ref": kappa_ref,
+        "x_cntn_ref": x_cntn_ref,
+        "lambda": uc_func_partial(kappa_ref),
     }
 
 
@@ -136,9 +202,11 @@ def _fues_engine(
 def _dcegm_engine(
     x_dcsn_hat: np.ndarray,
     qf_hat: np.ndarray,
-    c: np.ndarray,
-    a: np.ndarray,
+    kappa_hat: np.ndarray,
+    X_cntn: np.ndarray,
     *,
+    v_cntn: Optional[np.ndarray] = None,
+    X_dcsn: Optional[np.ndarray] = None,
     uc_func_partial: Callable[[np.ndarray], np.ndarray],
     **kwargs: Any,
 ) -> Dict[str, np.ndarray]:
@@ -149,14 +217,14 @@ def _dcegm_engine(
     except ImportError as err:
         raise ImportError("DCEGM algorithm not importable") from err
 
-    a_ref, m_ref, c_ref, v_ref, _ = dcegm(c, c, qf_hat, a, x_dcsn_hat)
+    x_cntn_ref, x_dcsn_ref, kappa_ref, qf_ref, _ = dcegm(kappa_hat, kappa_hat, qf_hat, X_cntn, x_dcsn_hat)
 
     return {
-        "m": m_ref,
-        "v": v_ref,
-        "c": c_ref,
-        "a": a_ref,
-        "lambda": uc_func_partial(c_ref),
+        "x_dcsn_ref": x_dcsn_ref,
+        "v_dcsn_ref": qf_ref,
+        "kappa_ref": kappa_ref,
+        "x_cntn_ref": x_cntn_ref,
+        "lambda_ref": uc_func_partial(kappa_ref),
     }
 
 
@@ -164,9 +232,11 @@ def _dcegm_engine(
 def _rfc_engine(
     x_dcsn_hat: np.ndarray,
     qf_hat: np.ndarray,
-    c: np.ndarray,
-    a: np.ndarray,
+    kappa_hat: np.ndarray,
+    X_cntn: np.ndarray,
     *,
+    v_cntn: Optional[np.ndarray] = None,
+    X_dcsn: Optional[np.ndarray] = None,
     uc_func_partial: Callable[[np.ndarray], np.ndarray],
     m_bar: float = 1.2,
     rfc_radius: float = 0.75,
@@ -180,25 +250,25 @@ def _rfc_engine(
     except ImportError as err:
         raise ImportError("RFC algorithm not importable") from err
 
-    lambda_egm = uc_func_partial(c)
+    lambda_egm = uc_func_partial(kappa_hat)
 
     xr = np.array([x_dcsn_hat]).T
-    vfr = np.array([qf_hat]).T
+    qfr = np.array([qf_hat]).T
     gradr = np.array([lambda_egm]).T
-    pr = np.array([a]).T
+    pr = np.array([X_cntn]).T
 
-    sub_points, _, _ = rfc(xr, gradr, vfr, pr, m_bar, rfc_radius, rfc_n_iter)
+    sub_points, _, _ = rfc(xr, gradr, qfr, pr, m_bar, rfc_radius, rfc_n_iter)
 
     mask = np.ones(len(x_dcsn_hat), dtype=bool)
     if len(sub_points):  # noqa: WPS505 (explicit)
         mask[sub_points] = False
 
     return {
-        "m": x_dcsn_hat[mask],
-        "v": qf_hat[mask],
-        "c": c[mask],
-        "a": a[mask],
-        "lambda": lambda_egm[mask],
+        "x_dcsn_ref": x_dcsn_hat[mask],
+        "v_dcsn_ref": qf_hat[mask],
+        "kappa_ref": kappa_hat[mask],
+        "x_cntn_ref": X_cntn[mask],
+        "lambda_ref": lambda_egm[mask],
     }
 
 
@@ -210,8 +280,8 @@ def _rfc_engine(
 def _simple_upper_envelope(
     x_dcsn_hat: np.ndarray,
     qf_hat: np.ndarray,
-    c: np.ndarray,
-    a: np.ndarray,
+    kappa_hat: np.ndarray,
+    X_cntn: np.ndarray,
     uc_func_partial: Callable[[np.ndarray], np.ndarray],
 ) -> Dict[str, np.ndarray]:
     """Very light monotonic-filter (identical to old implementation)."""
@@ -219,33 +289,33 @@ def _simple_upper_envelope(
     # sort by x if needed
     if not np.all(np.diff(x_dcsn_hat) > 0):
         idx = np.argsort(x_dcsn_hat)
-        x_dcsn_hat, qf_hat, c, a = (
+        x_dcsn_hat, qf_hat, kappa, X_cntn = (
             x_dcsn_hat[idx],
             qf_hat[idx],
-            c[idx],
-            a[idx],
+            kappa[idx],
+            X_cntn[idx],
         )
 
     # already monotone?
-    if np.all(np.diff(c) >= 0):
-        lam = uc_func_partial(c)
+    if np.all(np.diff(kappa) >= 0):
+        lam = uc_func_partial(kappa)
         return {
             "m": x_dcsn_hat,
             "v": qf_hat,
-            "c": c,
-            "a": a,
+            "kappa_ref": kappa_hat,
+            "X_cntn": X_cntn,
             "lambda": lam,
         }
 
     # keep only strictly increasing c segments
-    mask = np.append(True, np.diff(c) > 0)
-    lam = uc_func_partial(c[mask])
+    mask = np.append(True, np.diff(kappa) > 0)
+    lam = uc_func_partial(kappa[mask])
     return {
-        "m": x_dcsn_hat[mask],
-        "v": qf_hat[mask],
-        "c": c[mask],
-        "a": a[mask],
-        "lambda": lam,
+        "x_dcsn_ref": x_dcsn_hat[mask],
+        "v_dcsn_ref": qf_hat[mask],
+        "kappa_ref": kappa_hat[mask],
+        "x_cntn_ref": X_cntn[mask],
+        "lambda_ref": lam,
     }
 
 
@@ -253,23 +323,23 @@ def _simple_upper_envelope(
 def _simple_engine(
     x_dcsn_hat: np.ndarray,
     qf_hat: np.ndarray,
-    c: np.ndarray,
-    a: np.ndarray,
+    kappa: np.ndarray,
+    X_cntn: np.ndarray,
     *,
     uc_func_partial: Callable[[np.ndarray], np.ndarray],
     **kwargs: Any,
 ) -> Dict[str, np.ndarray]:
-    return _simple_upper_envelope(x_dcsn_hat, qf_hat, c, a, uc_func_partial)
+    return _simple_upper_envelope(x_dcsn_hat, qf_hat, kappa, X_cntn, uc_func_partial)
 
 
 @register("CONSAV")
 def _consav_engine(
     x_dcsn_hat: np.ndarray,
     qf_hat: np.ndarray,
-    c: np.ndarray,
-    a: np.ndarray,
-    *,
-    w_grid: np.ndarray,
+    kappa_hat: np.ndarray,
+    X_cntn: np.ndarray,
+    v_cntn_hat: np.ndarray,
+    X_dcsn: np.ndarray,
     uc_func_partial: Callable[[np.ndarray], np.ndarray],
     u_func: Dict[str, Any],
     use_inv_w: bool = False,
@@ -279,9 +349,9 @@ def _consav_engine(
 
     Parameters
     ----------
-    x_dcsn_hat, qf_hat, c, a : raw EGM outputs
-    w_grid : evaluation grid (Nm, strictly increasing)
-    uc_func_partial : marginal utility λ(c)
+    x_dcsn_hat, qf_hat, kappa, X_cntn : raw EGM outputs
+    X_dcsn : evaluation grid (Nm, strictly increasing)
+    uc_func_partial : marginal utility λ(kappa)
     u_func : dict with keys ``func`` (njitted utility) and ``args``.
     use_inv_w : see Consav documentation
     """
@@ -301,15 +371,19 @@ def _consav_engine(
         env_cache[key] = env
 
     # allocate outputs
-    c_ast = np.empty_like(w_grid)
-    v_ast = np.empty_like(w_grid)
+    kappa_pol = np.empty_like(X_dcsn)
+    v_dcsn = np.empty_like(X_dcsn)
 
-    env(a, x_dcsn_hat, c, qf_hat, w_grid, c_ast, v_ast, *u_func["args"])
+    env(X_cntn, x_dcsn_hat, kappa_hat, v_cntn_hat, X_dcsn, kappa_pol, v_dcsn, *u_func["args"])
 
-    a_ast = np.maximum(w_grid - c_ast, 0.0)
-    lam = uc_func_partial(c_ast)
+    X_cntn_pol = np.maximum(X_dcsn - kappa_pol, 0.0)
+    lambda_dcsn = uc_func_partial(kappa_pol)
 
-    return {"m": w_grid, "v": v_ast, "c": c_ast, "a": a_ast, "lambda": lam}
+    return {"x_dcsn_ref": X_dcsn,
+            "v_dcsn_ref": v_dcsn,
+            "kappa_ref": kappa_pol,
+            "x_cntn_ref": X_cntn_pol,
+            "lambda_ref": lambda_dcsn}
 
 
 # ------------------------------------------------------------------
