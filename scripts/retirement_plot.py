@@ -26,6 +26,11 @@ import matplotlib.lines as mlines
 
 # Import local modules
 import os,sys 
+# Ensure project root is on sys.path so that `import examples` works when this
+# script is executed from the *scripts/* directory.
+PROJECT_ROOT = os.path.dirname(os.path.dirname(__file__))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
 #cwd = os.getcwd()
 #sys.path.append('..')
 #os.chdir(cwd)
@@ -486,9 +491,11 @@ def test_Timings(grid_sizes, delta_values,n =3):
             best_time_RFC = float('inf')
             best_time_FUES = float('inf')
             best_time_DCEGM = float('inf')
+            best_time_CONSAV = float('inf')
             best_error_RFC = float('inf')
             best_error_FUES = float('inf')
             best_error_DCEGM = float('inf')
+            best_error_CONSAV = float('inf')
 
             for _ in range(n):  # Run each test n times and take the best
                 # Test RFC
@@ -511,37 +518,46 @@ def test_Timings(grid_sizes, delta_values,n =3):
                 )
                 time_end_DCEGM = np.mean(iter_time_age[0])
                 Euler_error_DCEGM = euler(cp, c_refined_DCEGM)
+                
+                # Test CONSAV
+                _, _, _, _, c_refined_CONSAV, _, iter_time_age = iter_bell(
+                    cp, method='CONSAV'
+                )
+                time_end_CONSAV = np.mean(iter_time_age[0])
+                Euler_error_CONSAV = euler(cp, c_refined_CONSAV)
 
                 # Take the best of 3 runs for timings
                 best_time_RFC = min(best_time_RFC, time_end_RFC)
                 best_time_FUES = min(best_time_FUES, time_end_FUES)
                 best_time_DCEGM = min(best_time_DCEGM, time_end_DCEGM)
+                best_time_CONSAV = min(best_time_CONSAV, time_end_CONSAV)
 
                 # Take the best of 3 runs for errors
                 best_error_RFC = min(best_error_RFC, Euler_error_RFC)
                 best_error_FUES = min(best_error_FUES, Euler_error_FUES)
                 best_error_DCEGM = min(best_error_DCEGM, Euler_error_DCEGM)
+                best_error_CONSAV = min(best_error_CONSAV, Euler_error_CONSAV)
 
             # Store the best results for the LaTeX tables
             latex_errors_data.append([
                 g_size_baseline, delta, best_error_RFC,
-                best_error_FUES, best_error_DCEGM
+                best_error_FUES, best_error_DCEGM, best_error_CONSAV
             ])
             latex_timings_data.append([
                 g_size_baseline, delta, best_time_RFC * 1000,
-                best_time_FUES * 1000, best_time_DCEGM * 1000
+                best_time_FUES * 1000, best_time_DCEGM * 1000, best_time_CONSAV * 1000
             ])
 
             # Print results for current grid size and delta
             print(
                 f'Euler errors for grid size {g_size_baseline}, delta {delta}: '
                 f'RFC: {best_error_RFC:.6f}, FUES: {best_error_FUES:.6f}, '
-                f'DCEGM: {best_error_DCEGM:.6f}'
+                f'DCEGM: {best_error_DCEGM:.6f}, CONSAV: {best_error_CONSAV:.6f}'
             )
             print(
                 f'Timings for grid size {g_size_baseline}, delta {delta}: '
                 f'RFC: {best_time_RFC:.6f}, FUES: {best_time_FUES:.6f}, '
-                f'DCEGM: {best_time_DCEGM:.6f}'
+                f'DCEGM: {best_time_DCEGM:.6f}, CONSAV: {best_time_CONSAV:.6f}'
             )
 
     # Generate LaTeX tables 
@@ -551,11 +567,11 @@ def test_Timings(grid_sizes, delta_values,n =3):
 
 def generate_latex_table(data, errors, table_type, caption):
     """
-    Generates a LaTeX table with performance (RFC, FUES, DCEGM) and Euler errors.
+    Generates a LaTeX table with performance (RFC, FUES, DCEGM, CONSAV) and Euler errors.
 
     Parameters:
     data : list of lists
-        Data for RFC, FUES, DCEGM timings.
+        Data for RFC, FUES, DCEGM, CONSAV timings.
     errors : list of lists
         Data for corresponding Euler errors.
     table_type : str
@@ -568,14 +584,14 @@ def generate_latex_table(data, errors, table_type, caption):
         \\begin{{table}}[htbp]
         \\centering
         \\small
-        \\begin{{tabular}}{{ccccc|ccc}}
+        \\begin{{tabular}}{{cccccc|cccc}}
         \\toprule
         \\multirow{{2}}{{*}}{{\\textit{{Grid Size}}}} & 
         \\multirow{{2}}{{*}}{{\\textit{{Delta}}}} & 
-        \\multicolumn{{3}}{{c}}{{\\textbf{{Timing (Seconds)}}}} & 
-        \\multicolumn{{3}}{{c}}{{\\textbf{{Euler Error (Log10)}}}} \\\\
-        & & \\textbf{{RFC}} & \\textbf{{FUES}} & \\textbf{{DCEGM}} & 
-        \\textbf{{RFC}} & \\textbf{{FUES}} & \\textbf{{DCEGM}} \\\\
+        \\multicolumn{{4}}{{c}}{{\\textbf{{Timing (Seconds)}}}} & 
+        \\multicolumn{{4}}{{c}}{{\\textbf{{Euler Error (Log10)}}}} \\\\
+        & & \\textbf{{RFC}} & \\textbf{{FUES}} & \\textbf{{DCEGM}} & \\textbf{{CONSAV}} & 
+        \\textbf{{RFC}} & \\textbf{{FUES}} & \\textbf{{DCEGM}} & \\textbf{{CONSAV}} \\\\
         \\midrule
         """
 
@@ -597,11 +613,25 @@ def generate_latex_table(data, errors, table_type, caption):
         for i, row in enumerate(filtered_data):
             if i < len(filtered_errors):
                 error_row = filtered_errors[i]
+                
+                # Explicitly map data indices to ensure correct order
+                delta = row[1]
+                rfc_time = row[2]
+                fues_time = row[3]
+                dcegm_time = row[4]
+                consav_time = row[5]
+                
+                rfc_error = error_row[2]
+                fues_error = error_row[3]
+                dcegm_error = error_row[4]
+                consav_error = error_row[5]
+                
                 row_str = (
-                    f"& {row[1]:.2f} & {row[2]:.3f} & {row[3]:.3f} & "
-                    f"{row[4]:.3f} & {error_row[2]:.3f} & "
-                    f"{error_row[3]:.3f} & {error_row[4]:.3f} \\\\\n"
+                    f"& {delta:.2f} & {rfc_time:.3f} & {fues_time:.3f} & "
+                    f"{dcegm_time:.3f} & {consav_time:.3f} & {rfc_error:.3f} & "
+                    f"{fues_error:.3f} & {dcegm_error:.3f} & {consav_error:.3f} \\\\\n"
                 )
+                
                 if i == 0:
                     latex_code += row_str
                 else:
@@ -623,7 +653,7 @@ def generate_latex_table(data, errors, table_type, caption):
         \\end{{table}}
         """
 
-    results_dir = os.path.join("..", "results")
+    results_dir = os.path.join("results")
     os.makedirs(results_dir, exist_ok=True)
 
     file_path = os.path.join(results_dir, f"retirement_{table_type}.tex")
@@ -638,7 +668,7 @@ if __name__ == "__main__":
     grid_sizes = [500, 1000, 2000, 3000]  # Test different grid sizes
     delta_values = [0.25, 0.5, 1, 1.5, 2]  # Test different delta values
     egrid_plot_age = 17
-    run_performance_tests = False
+    run_performance_tests = True
 
     # Test performance of different methods for RetirementModel across grid sizes
     if run_performance_tests:
@@ -677,17 +707,22 @@ if __name__ == "__main__":
     _ = iter_bell(cp, method='DCEGM')
     _, _, _, _, c_refined_DCEGM, _, time_end_DCEGM = iter_bell(cp, method='DCEGM')
 
+    # precompile numba functions
+    _ = iter_bell(cp, method='CONSAV')
+    _, _, _, _, c_refined_CONSAV, _, time_end_CONSAV = iter_bell(cp, method='CONSAV')
+
     Euler_error_RFC = euler(cp, c_refined_RFC)
     Euler_error_FUES = euler(cp, c_refined_FUES)
     Euler_error_DCEGM = euler(cp, c_refined_DCEGM)
-
+    Euler_error_CONSAV = euler(cp, c_refined_CONSAV)
     print(
-        "| Method | Euler Error    | Avg. upper env. time(ms) |\n"
-        "|--------|----------------|--------------------------|\n"
-        f"| RFC    | {Euler_error_RFC: <14.6f} | {time_end_RFC[0]*1000: <24.6f} |\n"
-        f"| FUES   | {Euler_error_FUES: <14.6f} | {time_end_FUES[0]*1000: <24.6f} |\n"
-        f"| DCEGM  | {Euler_error_DCEGM: <14.6f} | {time_end_DCEGM[0]*1000: <24.6f} |\n"
-        "------------------------------------------------------\n"
+        "| Method | Euler Error    | Avg. upper env. time(ms) | Total solution time(ms) |\n"
+        "|--------|----------------|--------------------------|-------------------------|\n"
+        f"| RFC    | {Euler_error_RFC: <14.6f} | {time_end_RFC[0]*1000: <24.6f} | {time_end_RFC[1]*1000: <23.6f} |\n"
+        f"| FUES   | {Euler_error_FUES: <14.6f} | {time_end_FUES[0]*1000: <24.6f} | {time_end_FUES[1]*1000: <23.6f} |\n"
+        f"| DCEGM  | {Euler_error_DCEGM: <14.6f} | {time_end_DCEGM[0]*1000: <24.6f} | {time_end_DCEGM[1]*1000: <23.6f} |\n"
+        f"| CONSAV | {Euler_error_CONSAV: <14.6f} | {time_end_CONSAV[0]*1000: <24.6f} | {time_end_CONSAV[1]*1000: <23.6f} |\n"
+        "---------------------------------------------------------------------------------\n"
     )
 
     # 2. Plot and save value and policy on ref/unref. EGM grids
