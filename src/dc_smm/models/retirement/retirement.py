@@ -16,13 +16,11 @@ Todo
 import numpy as np
 import time
 from numba import njit
+import matplotlib.pyplot as plt
 
-from FUES.FUES import fues.kernels
-from FUES.RFC_simple import rfc
-from FUES.DCEGM import dcegm
 
-from FUES.math_funcs import interp_as
-from uenvelope import EGM_UE as egm_ue_global
+from dc_smm.fues.helpers.math_funcs import interp_as
+from dc_smm.uenvelope import EGM_UE as egm_ue_global
 
 
 

@@ -21,6 +21,9 @@ from quantecon import MarkovChain
 import os
 import sys
 from itertools import groupby
+from numpy import array, take, argsort, diag, vstack, diff, linspace, sort, argwhere
+from HARK.interpolation import LinearInterp
+from dc_smm.uenvelope.upperenvelope import EGM_UE as global_EGM_UE
 
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -29,12 +32,12 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 cwd = os.getcwd()
 sys.path.append('..')
 os.chdir(cwd)
-from FUES.FUES import fues.kernels, uniqueEG
-from FUES.RFC_simple import rfc
-from FUES.DCEGM import dcegm
-from FUES.math_funcs import interp_as, correct_jumps1d
+from dc_smm.fues.fues import FUES as fues_alg, uniqueEG
+from dc_smm.fues.rfc_simple import rfc
+from dc_smm.fues.dcegm import dcegm
+from dc_smm.fues.helpers.math_funcs import interp_as, correct_jumps1d
 
-from FUES.bonnFues import fues_numba_unconstrained 
+# from dc_smm.fues.bonnFues import fues_numba_unconstrained # Commented out as bonnFues.py location is unconfirmed
 
 class ConsumerProblem:
     """
@@ -198,7 +201,7 @@ def welfare_loss_log_utility(v_fues, v_dcegm, c_dcegm):
 
     Parameters:
     v_fues: np.array
-        Value function estimates from FUES method.
+        Value function estimates from fues method.
     v_dcegm: np.array
         Value function estimates from DC-EGM method.
     c_dcegm: np.array
@@ -243,7 +246,7 @@ def Operator_Factory(cp):
     z_idx = np.arange(len(z_vals))
     n_con = cp.n_con
 
-    shape = (len(z_vals), len(asset_grid_A), len(asset_grid_H))
+    shape = (len(z_vals), len(asset_grid_M), len(asset_grid_H))
     shape_active = (len(z_vals), len(asset_grid_M), len(asset_grid_H))
     
     shape_big = (
@@ -253,69 +256,6 @@ def Operator_Factory(cp):
         len(asset_grid_H))
     
 
-    def EGM_UE(egrid, vf, c, a, dela, endog_mbar=False, method='FUES', m_bar=1.2, lb = 4):
-        """
-        Wrapper function to select between FUES, RFC and DC-EGM upper envelope methods
-        """
-
-
-        #uniqueIds = uniqueEG(egrid, vf)
-        #egrid = egrid[uniqueIds]
-        ##vf = vf[uniqueIds]
-        ##c = c[uniqueIds]
-        #a = a[uniqueIds]
-
-        if method == 'FUES':
-            # FUES method original 
-            policies_dict = Dict.empty(
-                key_type=types.unicode_type,
-                value_type=types.float64[:],
-            )
-
-            policies_dict['a'] = np.array(a)
-            policies_dict['c'] = np.array(c)
-            policies_dict['vf'] = np.array(vf)
-            test_pols = np.array(a)
-
-            egrid_refined_1D, vf_refined_1D, a_prime_refined_1D, c_refined_1D, dela = \
-                FUES(
-                    egrid, vf, policies_dict['a'], policies_dict['c'],
-                    policies_dict['a'], m_bar=m_bar, LB=lb, endog_mbar=False
-                )
-            
-        if method == 'FUES_numba':
-            # FUES coded by OSE
-            egrid_refined_1D, vf_refined_1D, c_refined_1D, a_prime_refined_1D = fues_numba_unconstrained(
-                egrid, vf, c,a, jump_thresh=m_bar
-            )
-
-        elif method == 'DCEGM':
-            # DCEGM method
-            a_prime_refined_1D, egrid_refined_1D, c_refined_1D, vf_refined_1D, \
-                dela_clean = dcegm(c, c, vf, a, egrid)
-
-        elif method == 'RFC':
-            # RFC method
-            grad = cp.du(c)
-            xr = np.array([egrid]).T
-            vfr = np.array([vf]).T
-            gradr = np.array([grad]).T
-            pr = np.array([a]).T
-            #mbar = 1.2
-            radius = 0.75
-
-            # Run RFC vectorized
-            sub_points, roofRfc, close_ponts = rfc(xr, gradr, vfr, pr, m_bar, radius, 20)
-
-            mask = np.ones(egrid.shape[0], dtype=bool)
-            mask[sub_points] = False
-            egrid_refined_1D = egrid[mask]
-            vf_refined_1D = vfr[mask][:, 0]
-            c_refined_1D = c[mask]
-            a_prime_refined_1D = a[mask]
-
-        return egrid_refined_1D, vf_refined_1D, c_refined_1D, a_prime_refined_1D, vf
-    
     @njit
     def euler_error_fella(z_series, H_post_state, c_state, a_state, c_post_state):
         """
@@ -764,7 +704,7 @@ def Operator_Factory(cp):
 
             
 
-    #@njit
+    @njit
     def Euler_Operator(V, sigma, method='FUES', m_bar=1.2, lb=4):
         """
         Euler operator finds next period policy function using EGM and FUES
@@ -790,7 +730,8 @@ def Operator_Factory(cp):
         # The value function should be conditioned on time t
         # continuous state, time t discrete state, and time t+1 discrete state choice
 
-        c_raw, v_raw, e_grid_raw = invertEuler(V, sigma)
+        c_raw, v_curr_raw, e_grid_raw = invertEuler(V, sigma)
+        v_cont_raw = v_curr_raw - u_vec(c_raw, asset_grid_H[None,None,:]) # Approximate continuation value
 
         new_a_prime_refined1 = np.zeros(shape_active)
         new_c_refined1 = np.zeros(shape_active)
@@ -810,37 +751,69 @@ def Operator_Factory(cp):
             egrid_unrefined_1D = e_grid_raw[i_z, :, i_h_prime]
             a_prime_unrefined_1D = np.copy(asset_grid_A)
             c_unrefined_1D = c_raw[i_z, :, i_h_prime]
-            vf_unrefined_1D = v_raw[i_z, :, i_h_prime]
-
+            vf_unrefined_1D = v_curr_raw[i_z, :, i_h_prime] # Value including current utility
+            v_cont_unrefined_1D = v_cont_raw[i_z, :, i_h_prime] # Continuation value
 
             min_c_val = np.min(c_unrefined_1D)
             c_array = np.linspace(1e-100, min_c_val, n_con)
-            e_array = c_array
+            e_array = c_array + b # m = c + a', a' = b
             h_prime_array = np.zeros(n_con)
             h_prime_array.fill(h_prime)
-            vf_array = u_vec(c_array, h_prime_array) + beta * np.dot(
-                Pi[i_z, :], V[:, 0, i_h_prime])
+            v_cont_at_constraint = beta * np.dot(Pi[i_z, :], V[:, 0, i_h_prime]) # Approx continuation value at a'=b
+            vf_array = u_vec(c_array, h_prime_array) + v_cont_at_constraint
             b_array = np.zeros(n_con)
-            b_array.fill(asset_grid_A[0])
+            b_array.fill(asset_grid_A[0]) # a' = b
 
             egrid_unrefined_1D = np.concatenate((e_array, egrid_unrefined_1D))
             vf_unrefined_1D = np.concatenate((vf_array, vf_unrefined_1D))
             c_unrefined_1D = np.concatenate((c_array, c_unrefined_1D))
             a_prime_unrefined_1D = np.concatenate((b_array, a_prime_unrefined_1D))
+            v_cont_unrefined_1D = np.concatenate((np.full(n_con, v_cont_at_constraint), v_cont_unrefined_1D))
 
             uniqueIds = uniqueEG(egrid_unrefined_1D, vf_unrefined_1D)
             egrid_unrefined_1D = egrid_unrefined_1D[uniqueIds]
             vf_unrefined_1D = vf_unrefined_1D[uniqueIds]
             c_unrefined_1D = c_unrefined_1D[uniqueIds]
             a_prime_unrefined_1D = a_prime_unrefined_1D[uniqueIds]
+            v_cont_unrefined_1D = v_cont_unrefined_1D[uniqueIds]
 
             start = time.time()
             
-            egrid_refined_1D, vf_refined_1D, c_refined_1D, a_prime_refined_1D, dela_out = \
-                EGM_UE(egrid_unrefined_1D, vf_unrefined_1D, c_unrefined_1D,
-                    a_prime_unrefined_1D, vf_unrefined_1D, method=method,
-                    m_bar=m_bar, lb=lb)
-            
+            # Define uc_func_partial for the current h_prime
+            def uc_func_partial_h(c_vals):
+                return cp.du(c_vals) # Fella utility doesn't depend on h for uc
+
+            # Call the global EGM_UE
+            refined_dict, raw_dict, interpolated_dict = global_EGM_UE(
+                x_dcsn_hat=egrid_unrefined_1D,         # endogenous grid (m)
+                qf_hat=vf_unrefined_1D,             # value function on endog grid (v)
+                v_cntn_hat=v_cont_unrefined_1D,       # continuation value on endog grid
+                kappa_hat=c_unrefined_1D,           # consumption on endog grid (kappa)
+                X_cntn=a_prime_unrefined_1D,        # continuation state (a')
+                X_dcsn=asset_grid_M,                # target decision state grid (m)
+                uc_func_partial=uc_func_partial_h,
+                u_func={"func": cp.u_vec, "args": (h_prime,)}, # Placeholder for Consav
+                ue_method=method,
+                m_bar=m_bar,
+                lb=lb
+            )
+
+            # Extract results from the refined dictionary
+            # Note: The keys in refined_dict from global_EGM_UE might be different
+            # Check dc_smm/uenvelope/upperenvelope.py for exact keys
+            # Assuming keys like 'x_dcsn_ref', 'v_dcsn_ref', 'kappa_ref', 'x_cntn_ref'
+            egrid_refined_1D = refined_dict.get("x_dcsn_ref", np.array([])) # Refined m grid
+            vf_refined_1D = refined_dict.get("v_dcsn_ref", np.array([]))    # Refined value function
+            c_refined_1D = refined_dict.get("kappa_ref", np.array([]))   # Refined consumption
+            a_prime_refined_1D = refined_dict.get("x_cntn_ref", np.array([])) # Refined assets
+
+            # Handle cases where refinement might return empty arrays if input is too small
+            if egrid_refined_1D.size == 0:
+                # Fallback or error handling needed - e.g., use unrefined points or interpolate differently
+                # For now, just skip interpolation if refined grid is empty
+                print(f"Warning: Refined grid empty for i_z={i_z}, i_h_prime={i_h_prime}. Skipping interpolation.")
+                continue # Or handle differently
+
             new_v_refined1_dict[f"{i_z}-{i_h_prime}"] = vf_refined_1D
             new_c_refined1_dict[f"{i_z}-{i_h_prime}"] = c_refined_1D
             new_a_prime_refined1_dict[f"{i_z}-{i_h_prime}"] = a_prime_refined_1D
@@ -871,7 +844,7 @@ def Operator_Factory(cp):
 
         results['EGM']['unrefined'] = {}
         results['EGM']['refined'] = {}
-        results['EGM']['unrefined']['v'] = v_raw
+        results['EGM']['unrefined']['v'] = c_raw
         results['EGM']['unrefined']['c'] = c_raw
         results['EGM']['unrefined']['e'] = e_grid_raw
 

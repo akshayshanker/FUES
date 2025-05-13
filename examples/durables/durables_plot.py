@@ -20,6 +20,7 @@ from mpi4py import MPI
 import os
 import sys
 import dill as pickle
+import matplotlib.pyplot as plt
 
 # Import local modules
 cwd = os.getcwd()
@@ -27,7 +28,7 @@ sys.path.append('..')
 os.chdir(cwd)
 from examples.durables.durables import ConsumerProblem, Operator_Factory
 from examples.durables.plot import plot_pols, plot_grids
-from FUES.math_funcs import f, interp_as
+from dc_smm.fues.helpers.math_funcs import f, interp_as
 
 def euler_housing(results, cp):
     """

@@ -3,11 +3,11 @@ requires = ["setuptools>=61", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "FUES"
+name = "dc-smm"
 version = "0.1.0"
 description = "Fast Upper Envelope Scan (Shanker & Dobrescu, 2023)."
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.11"
 
 # Minimal hard runtime deps
 dependencies = [
@@ -24,5 +24,6 @@ dependencies = [
 "Source" = "https://github.com/akshayshanker/FUES"
 "Bug Tracker" = "https://github.com/akshayshanker/FUES/issues"
 
-[tool.setuptools]
-packages = ["FUES"] 
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["dc_smm*"]       # pick up dc_smm and all its sub-packages 

@@ -24,10 +24,10 @@ import os, sys
 cwd = os.getcwd()
 sys.path.append('..')
 os.chdir(cwd)
-from FUES.FUES import fues.kernels, uniqueEG
-from FUES.RFC_simple import rfc
-from FUES.DCEGM import dcegm
-from FUES.math_funcs import interp_as, rootsearch, correct_jumps1d
+from dc_smm.fues.fues import FUES as fues_alg, uniqueEG
+from dc_smm.fues.rfc_simple import rfc
+from dc_smm.fues.dcegm import dcegm
+from dc_smm.fues.helpers.math_funcs import interp_as, rootsearch, correct_jumps1d
 
 class ConsumerProblem:
     """

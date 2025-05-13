@@ -26,35 +26,51 @@ import logging
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
-# Add modcraft root to path
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../")))
+# -----------------------------------------------------------------------------
+# Canonical imports (DynX ≥ 1.6.12)
+# -----------------------------------------------------------------------------
 
-# Import from ModCraft
-from src.stagecraft import Stage
-from src.stagecraft.config_loader import initialize_model_Circuit, compile_all_stages
-from src.heptapod_b.io.yaml_loader import load_config
-from src.heptapod_b.core.api import initialize_model
-from src.heptapod_b.num.generate import compile_num as generate_numerical_model
-
-# Import from dynx_runner
-from dynx_runner import CircuitRunner, RunRecorder, mpi_map
-
-# Import housing model utilities
-from models.housing.whisperer import (
-    build_operators,
-    solve_stage,
-    run_time_iteration
+# Core graph / StageCraft
+from dynx.stagecraft import Stage
+from dynx.stagecraft.config_loader import (
+    initialize_model_Circuit,
+    compile_all_stages,
 )
 
-# Import the plotting module
-from models.housing.plots import plot_egm_grids
+# Heptapod-B functional layer
+from dynx.heptapodx.io.yaml_loader import load_config
+from dynx.heptapodx.core.api import initialize_model
+from dynx.heptapodx.num.generate import compile_num as generate_numerical_model
 
-# Import the new Euler error function
-from models.housing.euler_error import euler_error_metric
+# Runner utilities
+from dynx.runner import CircuitRunner, RunRecorder, mpi_map
+
+# Local "solver/whisperer" helpers that live inside this example package
+try:
+    from housing_renting.whisperer import (
+        build_operators,
+        solve_stage,
+        run_time_iteration,
+    )
+except ImportError:
+    # Lightweight stubs so the script continues to import even when the
+    # real implementation is unavailable (e.g. during documentation builds).
+    def build_operators(*args, **kwargs):
+        raise ImportError("housing_renting.whisperer not available")
+
+    def solve_stage(*args, **kwargs):
+        raise ImportError("housing_renting.whisperer not available")
+
+    def run_time_iteration(*args, **kwargs):
+        raise ImportError("housing_renting.whisperer not available")
+
+# Plotting helpers and error metrics (also local to this example)
+from housing_renting.helpers.plots import plot_egm_grids, plot_dcsn_policy
+from housing_renting.helpers.euler_error import euler_error_metric
 
 # Add fallback for FUES if not installed
 try:
-    from FUES.math_funcs import mask_jumps
+    from dc_smm.fues.helpers.math_funcs import mask_jumps
 except ImportError:
     # Fallback function if FUES is not installed
     def mask_jumps(y, threshold=0.02):
@@ -405,7 +421,7 @@ def generate_plots(model, method, image_dir):
         Directory to save the output images
     """
     # Import plotting functions
-    from models.housing.plots import plot_egm_grids, plot_dcsn_policy
+    from housing_renting.helpers.plots import plot_egm_grids, plot_dcsn_policy
     
     # Base directory for this method
     method_dir = os.path.join(image_dir, method)

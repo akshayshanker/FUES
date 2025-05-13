@@ -24,38 +24,42 @@ import copy
 import seaborn as sns
 from matplotlib.ticker import FormatStrFormatter
 
-# Add modcraft root to path
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../")))
-
 # Import from ModCraft
-from src.stagecraft import Stage
-from src.stagecraft.config_loader import initialize_model_Circuit, compile_all_stages
-from src.heptapod_b.io.yaml_loader import load_config
-from src.heptapod_b.core.api import initialize_model
-from src.heptapod_b.num.generate import compile_num as generate_numerical_model
-
-# Update imports
-from housing_renting.egm_upper_envelope import EGM_UE
+from dynx.stagecraft import Stage
+from dynx.stagecraft.config_loader import (
+    initialize_model_Circuit,
+    compile_all_stages,
+)
+from dynx.heptapodx.io.yaml_loader import load_config
+from dynx.heptapodx.core.api import initialize_model
+from dynx.heptapodx.num.generate import compile_num as generate_numerical_model
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 
-repo_root = os.path.abspath(os.path.join(current_dir, '..', '..', '..'))
-sys.path.insert(0, repo_root)
-
-
 # Import housing model
-from models.housing.whisperer import (
-    build_operators,
-    solve_stage,
-    run_time_iteration,
+try:
+    from .whisperer import (
+        build_operators,
+        solve_stage,
+        run_time_iteration,
+    )
+    # Import plotting helpers and error metrics (also local to this example)
+    from .helpers.plots import generate_plots
+except ImportError:
+    # Lightweight stubs so the script continues to import even when the
+    # real implementation is unavailable (e.g. during documentation builds).
+    def build_operators(*args, **kwargs):
+        raise ImportError("housing_renting.whisperer not available")
 
-)
-from circuit_runner_solving import generate_plots
+    def solve_stage(*args, **kwargs):
+        raise ImportError("housing_renting.whisperer not available")
 
-    
+    def run_time_iteration(*args, **kwargs):
+        raise ImportError("housing_renting.whisperer not available")
 
-
-
+    def generate_plots(*args, **kwargs):
+        # Basic stub or raise error
+        print("[Warning] generate_plots stub called - housing_renting.helpers not available")
 
 def load_configs():
     """Load all configuration files."""

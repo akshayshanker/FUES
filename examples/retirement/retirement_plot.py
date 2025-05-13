@@ -34,10 +34,10 @@ if PROJECT_ROOT not in sys.path:
 #cwd = os.getcwd()
 #sys.path.append('..')
 #os.chdir(cwd)
-from FUES.FUES import fues.kernels
-from models.retirement.retirement import Operator_Factory, RetirementModel, euler
+from dc_smm.fues.fues import FUES as fues_alg
+from dc_smm.models.retirement.retirement import Operator_Factory, RetirementModel, euler
 
-def plot_egrids(age, e_grid, vf_work, c_worker, del_a, g_size, tag = 'sigma0'):
+def plot_egrids(age, e_grid, vf_work, c_worker, del_a, g_size, cp, tag = 'sigma0'):
     """ 
 
     Plot unrefined vs refined endogenous grid for age. 
@@ -58,6 +58,10 @@ def plot_egrids(age, e_grid, vf_work, c_worker, del_a, g_size, tag = 'sigma0'):
         Dictionary of unrefined derivative of policy function for worker by age
     g_size : int
         Grid size for the model for labeling.
+    cp : RetirementModel
+        RetirementModel instance
+    tag : str, optional
+        Tag for labeling, default is 'sigma0'.
      
     Returns 
     -------
@@ -76,7 +80,7 @@ def plot_egrids(age, e_grid, vf_work, c_worker, del_a, g_size, tag = 'sigma0'):
 
     # 2. Generate refined grid, value function and policy using FUES
     x_clean, vf_clean, c_clean, a_prime_clean, del_a_clean \
-        = FUES(x, vf, c, a_prime,del_a, 0.8)
+        = fues_alg(x, vf, c, a_prime,del_a, 0.8)
 
     # 3. make plots  left 
     pl.close()
@@ -167,7 +171,7 @@ def plot_egrids(age, e_grid, vf_work, c_worker, del_a, g_size, tag = 'sigma0'):
 
     return None
 
-def plot_cons_pol(sigma_work, ages = [17,10,0]):
+def plot_cons_pol(sigma_work, cp, ages = [17,10,0]):
 
     """
     Plot consumption policy for difference ages.
@@ -176,6 +180,8 @@ def plot_cons_pol(sigma_work, ages = [17,10,0]):
     ----------
     sigma_work : dict
         Dictionary of consumption policy functions by age
+    cp : RetirementModel
+        RetirementModel instance
     ages : list
         List of ages to plot consumption policy for
     
@@ -225,7 +231,7 @@ def plot_cons_pol(sigma_work, ages = [17,10,0]):
     return None
 
 def plot_dcegm_cf(
-    age, g_size, e_grid, vf_work, c_worker, dela_worker, a_prime, 
+    age, g_size, e_grid, vf_work, c_worker, dela_worker, a_prime, cp, 
     tag='sigma05', plot=True
 ):
     """
@@ -249,6 +255,8 @@ def plot_dcegm_cf(
         Dictionary of unrefined derivative of policy function by age.
     a_prime : str
         Taste shock (sigma) for labeling.
+    cp : RetirementModel
+        RetirementModel instance
     tag : str, optional
         Tag for labeling, default is 'sigma05'.
     plot : bool, optional
@@ -261,7 +269,7 @@ def plot_dcegm_cf(
     dela = dela_worker[age]
     time_start_dcegm = time.time()
 
-    x_clean, vf_clean, c_clean, a_prime_clean, dela_clean = FUES(
+    x_clean, vf_clean, c_clean, a_prime_clean, dela_clean = fues_alg(
         x, vf, c, a_prime, dela, m_bar=1, endog_mbar=True
     )
 
@@ -728,15 +736,15 @@ if __name__ == "__main__":
     # 2. Plot and save value and policy on ref/unref. EGM grids
     plot_egrids(
         egrid_plot_age, e_grid_worker_unref, vf_work_unref, c_worker_unref,
-        dela_unrefined, g_size_baseline, tag='sigma0'
+        dela_unrefined, g_size_baseline, cp, tag='sigma0'
     )
 
     # 3. Plot consumption function for worker, before next period's work decision
-    plot_cons_pol(c_refined_FUES)
+    plot_cons_pol(c_refined_FUES, cp)
 
     # 4. Plot comparison with DC-EGM
     v_upper, v1_env, vf_interp_fues, a_interp_fues, m_upper, a1_env = \
         plot_dcegm_cf(
             egrid_plot_age, g_size_baseline, e_grid_worker_unref, vf_work_unref,
-            c_worker_unref, dela_unrefined, cp.asset_grid_A, tag='sigma0', plot=True
+            c_worker_unref, dela_unrefined, cp.asset_grid_A, cp, tag='sigma0', plot=True
         )

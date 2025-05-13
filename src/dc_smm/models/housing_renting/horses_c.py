@@ -2,7 +2,7 @@ import numpy as np
 import time  # Add import for timing
 from .horses_common import _safe_interp, egm_preprocess # Use relative import
 from numba import njit
-from housing_renting.egm_upper_envelope import EGM_UE
+from dc_smm.uenvelope.upperenvelope import EGM_UE
 from src.heptapod_b.num.compile import compile_numba_function
 from typing import Dict, Callable
 

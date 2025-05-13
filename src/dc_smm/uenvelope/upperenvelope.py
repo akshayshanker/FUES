@@ -56,7 +56,7 @@ def available() -> list[str]:
 # ---------------------------------------------------------------------
 #  Common post-processing helpers
 # ---------------------------------------------------------------------
-from FUES.math_funcs import interp_as  # noqa: E402  (after np import)
+from dc_smm.fues.helpers import interp_as  # noqa: E402  (after np import)
 
 
 def EGM_UE(
@@ -92,7 +92,7 @@ def EGM_UE(
     engine = get_engine(ue_method)
     if engine is None:
         raise ValueError(
-            f"Unknown UE method '{ue_method}'. Available: {', '.join(_ue_mod.available())}"
+            f"Unknown UE method '{ue_method}'. Available: {', '.join(available())}"
         )
 
     # -------- run -----------------------------------------------------
@@ -178,7 +178,7 @@ def _fues_engine(
     """
 
     try:
-        from FUES.FUES import fues.kernels as fues_alg  # noqa: WPS433  (runtime import)
+        from dc_smm.fues.fues import FUES as fues_alg  # noqa: WPS433  (runtime import)
     except ImportError as err:
         raise ImportError("FUES algorithm not importable") from err
 
@@ -213,7 +213,7 @@ def _dcegm_engine(
     """Wrapper around Iskhakov-et-al DCEGM."""
 
     try:
-        from FUES.DCEGM import dcegm  # noqa: WPS433
+        from dc_smm.fues.dcegm import dcegm  # noqa: WPS433
     except ImportError as err:
         raise ImportError("DCEGM algorithm not importable") from err
 
@@ -246,7 +246,7 @@ def _rfc_engine(
     """Fast RFC wrapper (1-D case)."""
 
     try:
-        from FUES.RFC_simple import rfc  # noqa: WPS433
+        from dc_smm.fues.rfc_simple import rfc  # noqa: WPS433
     except ImportError as err:
         raise ImportError("RFC algorithm not importable") from err
 
