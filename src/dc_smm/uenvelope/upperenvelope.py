@@ -374,7 +374,7 @@ def _consav_engine(
     kappa_pol = np.empty_like(X_dcsn)
     v_dcsn = np.empty_like(X_dcsn)
 
-    env(X_cntn, x_dcsn_hat, kappa_hat, v_cntn_hat, X_dcsn, kappa_pol, v_dcsn, *u_func["args"])
+    env(X_cntn, x_dcsn_hat, kappa_hat, v_cntn_hat, X_dcsn, kappa_pol, v_dcsn, u_func["args"])
 
     X_cntn_pol = np.maximum(X_dcsn - kappa_pol, 0.0)
     lambda_dcsn = uc_func_partial(kappa_pol)

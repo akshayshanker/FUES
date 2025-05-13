@@ -1,9 +1,10 @@
 import numpy as np
 import time  # Add import for timing
-from .horses_common import _safe_interp, egm_preprocess # Use relative import
+from dc_smm.models.housing_renting.horses_common import _safe_interp, egm_preprocess # Use relative import
 from numba import njit
 from dc_smm.uenvelope.upperenvelope import EGM_UE
-from src.heptapod_b.num.compile import compile_numba_function
+from dc_smm.fues.helpers import interp_as
+from dynx.heptapodx.num.compile import compile_numba_function
 from typing import Dict, Callable
 
 
@@ -221,34 +222,36 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
 
             H_val = H_nxt_grid[i_h] * thorn
             
- 
+   
             # Get upper envelope solution and timing
-            refined, raw, interp = EGM_UE(
+            refined, _, _ = EGM_UE(
                 m_egm_unique, vlu_v_egm_unique,v_nxt_raw, c_egm_unique, a_nxt_grid_unique,
                 w_grid, partial_uc, u_func={"func": utility_func, "args": H_val},
                 ue_method=ue_method, m_bar=m_bar, lb=lb,
                 rfc_radius=rfc_radius, rfc_n_iter=rfc_n_iter
             )
             
-            # Unpack the results
-            m_refined = refined.get("m", np.empty(0))
-            v_refined = refined.get("v", np.empty(0))
-            c_refined = refined.get("c", np.empty(0))
-            a_refined = refined.get("a", np.empty(0))
+            # Unpack the results from the refined dictionary, aligning with retirement.py
+            # Prefer *_ref keys, fallback to non-suffixed for broader compatibility (e.g., SIMPLE engine)
+            m_refined = refined.get("x_dcsn_ref", refined.get("m", np.empty(0)))
+            v_refined = refined.get("v_dcsn_ref", refined.get("v", np.empty(0)))
+            c_refined = refined.get("kappa_ref", refined.get("c", np.empty(0))) # kappa_ref for consumption
+            a_refined = refined.get("x_cntn_ref", refined.get("a", np.empty(0))) # x_cntn_ref for next period assets
+            lambda_refined = refined.get("lambda_ref", refined.get("lambda", np.empty(0)))
+
+            c_inter = interp_as(m_refined, c_refined, w_grid, extrap=True)
+            a_inter = interp_as(m_refined, a_refined, w_grid, extrap=True)
+            v_inter = interp_as(m_refined, v_refined, w_grid, extrap=True)
+            #lambda_inter = interp_as(m_refined, lambda_refined, w_grid, extrap=True)
+            ue_time = refined.get("ue_time", 0.0)
             
-            c_inter = interp["c"]
-            #print(c_inter)
-            v_inter = interp["v"]
-            a_inter = interp["a"]
-            ue_time = interp["ue_time"]
-            
-            # Store refined grids (after upper envelope)
-            refined_grids['e'][grid_key] = m_refined
-            refined_grids['v'][grid_key] = v_refined
-            refined_grids['c'][grid_key] = c_refined
-            refined_grids['a'][grid_key] = a_refined
-            if "lambda" in refined:
-                refined_grids['lambda'][grid_key] = refined["lambda"]
+            # Store refined grids (after upper envelope) using consistently retrieved variables
+            refined_grids['e'][grid_key] = m_refined.copy() # cash-on-hand / endogenous grid
+            refined_grids['v'][grid_key] = v_refined.copy() # value function
+            refined_grids['c'][grid_key] = c_refined.copy() # consumption policy
+            refined_grids['a'][grid_key] = a_refined.copy() # asset policy
+            if lambda_refined.size > 0: # Only store if lambda was actually refined and returned
+                refined_grids['lambda'][grid_key] = lambda_refined.copy()
             
             # Track upper envelope time
             total_ue_time += ue_time

@@ -5,20 +5,22 @@ This package provides implementations of the Housing model with discrete choice
 using the StageCraft and Heptapod-B architecture.
 """
 
-from .horses_h import (
+# Absolute imports for modules from the main package
+from dc_smm.models.housing_renting.horses_h import (
     F_shocks_dcsn_to_arvl,
     F_h_cntn_to_dcsn
 )
-from .horses_c import (
+from dc_smm.models.housing_renting.horses_c import (
     F_ownc_cntn_to_dcsn,
     F_ownc_dcsn_to_cntn
 )
-from .horses_common import F_id
+from dc_smm.models.housing_renting.horses_common import F_id
 
-from .horses_t import (
+from dc_smm.models.housing_renting.horses_t import (
     F_t_cntn_to_dcsn
 )
 
+# Relative import for local module
 from .whisperer import (
     build_operators,
     solve_stage,

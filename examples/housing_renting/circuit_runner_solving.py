@@ -45,36 +45,18 @@ from dynx.heptapodx.num.generate import compile_num as generate_numerical_model
 # Runner utilities
 from dynx.runner import CircuitRunner, RunRecorder, mpi_map
 
-# Local "solver/whisperer" helpers that live inside this example package
-try:
-    from housing_renting.whisperer import (
-        build_operators,
-        solve_stage,
-        run_time_iteration,
-    )
-except ImportError:
-    # Lightweight stubs so the script continues to import even when the
-    # real implementation is unavailable (e.g. during documentation builds).
-    def build_operators(*args, **kwargs):
-        raise ImportError("housing_renting.whisperer not available")
-
-    def solve_stage(*args, **kwargs):
-        raise ImportError("housing_renting.whisperer not available")
-
-    def run_time_iteration(*args, **kwargs):
-        raise ImportError("housing_renting.whisperer not available")
+# plotting module
+from .helpers.plots import generate_plots
 
 # Plotting helpers and error metrics (also local to this example)
-from housing_renting.helpers.plots import plot_egm_grids, plot_dcsn_policy
-from housing_renting.helpers.euler_error import euler_error_metric
+from .helpers.plots import plot_egm_grids, plot_dcsn_policy
+from .helpers.euler_error import euler_error_metric
 
-# Add fallback for FUES if not installed
-try:
-    from dc_smm.fues.helpers.math_funcs import mask_jumps
-except ImportError:
-    # Fallback function if FUES is not installed
-    def mask_jumps(y, threshold=0.02):
-        return y
+from .whisperer import (
+    build_operators,
+    solve_stage,
+    run_time_iteration,
+)
 
 # Configure logging
 logging.basicConfig(
@@ -407,63 +389,7 @@ def format_stage_metrics(results_df):
     return "\n".join(tables)
 
 
-def generate_plots(model, method, image_dir):
-    """
-    Generate both EGM grid plots and policy function plots for a model using a specific method.
-    
-    Parameters
-    ----------
-    model : ModelCircuit
-        Solved model circuit
-    method : str
-        Upper envelope method used (FUES, DCEGM, etc.)
-    image_dir : str
-        Directory to save the output images
-    """
-    # Import plotting functions
-    from housing_renting.helpers.plots import plot_egm_grids, plot_dcsn_policy
-    
-    # Base directory for this method
-    method_dir = os.path.join(image_dir, method)
-    
-    # Create directories for different plot types
-    egm_dir = os.path.join(method_dir, "egm_plots")
-    policy_dir = os.path.join(method_dir, "policy_plots")
-    os.makedirs(egm_dir, exist_ok=True)
-    os.makedirs(policy_dir, exist_ok=True)
-    
-    # Generate EGM grid plots
-    print(f"\nGenerating EGM grid plots for {method}...")
-    
-    # Get the first period for EGM plots
-    first_period = model.get_period(0)
-    
-    # For the owner consumption stage
-    ownc_stage = first_period.get_stage("OWNC")
-    
-    # Generate plots for a specific housing and income state
-    H_grid = ownc_stage.dcsn.grid.H_nxt
-    
-    # Select 3 housing values spread across the grid
-    H_indices = [0, len(H_grid) // 2, len(H_grid) - 1]  # Low, middle, and high housing values
-    y_idx = 0  # First income state
-    
-    # Plot EGM grid for three different housing values
-    for H_idx in H_indices:
-        plot_egm_grids(first_period, H_idx, y_idx, method, egm_dir)
-    
-    print(f"EGM grid plots for {method} saved to {egm_dir}")
-    
-    # Generate policy function plots
-    print(f"\nGenerating policy function plots for {method}...")
-    
-    # Always use period 0 as requested
-    period_to_plot = model.get_period(0)
-    print(f"Plotting period 0 policies for {method}...")
-    
-    # Plot policy functions
-    plot_dcsn_policy(period_to_plot, policy_dir)
-    print(f"Policy function plots for {method} saved to {policy_dir}")
+
 
 
 def main(argv=None):

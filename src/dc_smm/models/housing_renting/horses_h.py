@@ -1,7 +1,7 @@
 import numpy as np
 from scipy.interpolate import interp1d
 from numba import njit
-from .horses_common import _safe_interp, housing_choice_solver, interp_as
+from dc_smm.models.housing_renting.horses_common import _safe_interp, housing_choice_solver, interp_as
 
 def F_shocks_dcsn_to_arvl(mover):
     """Create operator for shock integration in backward step.

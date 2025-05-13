@@ -37,29 +37,14 @@ from dynx.heptapodx.num.generate import compile_num as generate_numerical_model
 current_dir = os.path.dirname(os.path.abspath(__file__))
 
 # Import housing model
-try:
-    from .whisperer import (
-        build_operators,
-        solve_stage,
-        run_time_iteration,
-    )
-    # Import plotting helpers and error metrics (also local to this example)
-    from .helpers.plots import generate_plots
-except ImportError:
-    # Lightweight stubs so the script continues to import even when the
-    # real implementation is unavailable (e.g. during documentation builds).
-    def build_operators(*args, **kwargs):
-        raise ImportError("housing_renting.whisperer not available")
 
-    def solve_stage(*args, **kwargs):
-        raise ImportError("housing_renting.whisperer not available")
-
-    def run_time_iteration(*args, **kwargs):
-        raise ImportError("housing_renting.whisperer not available")
-
-    def generate_plots(*args, **kwargs):
-        # Basic stub or raise error
-        print("[Warning] generate_plots stub called - housing_renting.helpers not available")
+from .whisperer import (
+    build_operators,
+    solve_stage,
+    run_time_iteration,
+)
+# Import plotting helpers and error metrics (also local to this example)
+from .helpers.plots import generate_plots
 
 def load_configs():
     """Load all configuration files."""

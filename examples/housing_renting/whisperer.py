@@ -21,10 +21,10 @@ import copy
 import time  # Add time module for timing measurements
 
 # Import operator factories directly from their modules
-from .horses_h import F_shocks_dcsn_to_arvl, F_h_cntn_to_dcsn
-from .horses_c import F_ownc_cntn_to_dcsn, F_ownc_dcsn_to_cntn
-from .horses_common import F_id
-from .horses_t import F_t_cntn_to_dcsn
+from dc_smm.models.housing_renting.horses_h import F_shocks_dcsn_to_arvl, F_h_cntn_to_dcsn
+from dc_smm.models.housing_renting.horses_c import F_ownc_cntn_to_dcsn, F_ownc_dcsn_to_cntn
+from dc_smm.models.housing_renting.horses_common import F_id
+from dc_smm.models.housing_renting.horses_t import F_t_cntn_to_dcsn
 
 def build_operators(stage):
     """Build operator mappings for a given stage.
