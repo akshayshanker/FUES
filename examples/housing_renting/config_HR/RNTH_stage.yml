@@ -1,0 +1,195 @@
+# Renter Housing Choice Stage [RNTH] Configuration
+# =================================================
+# This configuration implements the housing service choice stage for renters
+# Based on the housing-renting model with discrete choice
+
+# Stage definition
+# -----------------
+stage:
+  name: "RenterHousingChoice"
+  is_portable: true
+  method: "discrete_choice"  # Discrete choice over rental services
+  kind: "sequential"  # Stage kind (sequential vs branching)
+
+  #################
+  # 1) Model-Level
+  #################
+  parameters:
+    r: ["r"]                  # Interest rate from master
+    Pr: ["Pr"]              # Rental price per unit of housing service from master
+    
+  settings:
+    tol: ["tol"]                # Convergence tolerance from master
+    max_iter: ["max_iter"]      # Maximum iterations from master
+    
+    # Grid parameters
+    w_min: ["w_min"]            # From master
+    w_max: ["w_max"]            # From master
+    w_points: ["w_points"]      # From master
+    
+    S_min: ["S_min"]            # From master
+    S_max: ["S_max"]            # From master
+    S_points: ["S_points"]      # From master
+
+  methods:
+    optimization: "discrete_choice"
+    simulation: "Histogram"
+    integration_method: "discretize"
+    compilation: 'eval'             
+    default_grid: 'linspace'        
+
+  ###################
+  # 2) .math Section
+  ###################
+  math:
+    functions:
+      # Transition functions
+      g_av:
+        expr: "w_out = w; y_out = y"
+        description: "Identity mapping from arrival to decision (no state change)"
+      
+      g_ve: ["rental_payment"]    # Rental payment from master
+      
+      # Utility function not needed here as we only pass values to the next stage
+      
+      # Rental payment budget mapping
+      rental_payment:
+        expr: "S = S; y = y; w_rent = w - P_r*S"
+        description: "Cash‑on‑hand after paying rent"
+      
+    constraints:
+      budget_constraint:
+        expr: "P_r*S <= w"
+        description: "Cannot rent more than affordable"
+        
+      non_negative_wealth:
+        expr: "w_rent >= 0"
+        description: "Cash-on-hand must be non-negative after rental payment"
+
+    state_space:
+      arvl:
+        description: "Arrival perch state space (cash-on-hand, income)"
+        dimensions: ["w", "y"]
+        methods:
+          interp: Linear
+        settings:
+          w_min: ["w_min"]
+          w_max: ["w_max"]
+          w_points: ["w_points"]
+          y_points: 10
+        grid:
+          w:
+            type: "linspace"
+            min: ["w_min"]
+            max: ["w_max"]
+            points: ["w_points"]
+          y:
+            type: "int_range"
+            start: 0
+            stop: 2
+      dcsn:
+        description: "Decision perch state space (cash-on-hand, income)"
+        dimensions: ["w", "y"]
+        methods:
+          interp: Linear
+        settings:
+          w_min: ["w_min"]
+          w_max: ["w_max"]
+          w_points: ["w_points"]
+          y_points: 2
+        grid:
+          w:
+            type: "linspace"
+            min: ["w_min"]
+            max: ["w_max"]
+            points: ["w_points"]
+          y:
+            type: "int_range"
+            start: 0
+            stop: 2
+      
+      cntn:
+        description: "Continuation perch state space (rental services, income, cash-on-hand)"
+        dimensions: ["w_rent","S", "y"]
+        methods:
+          interp: Linear
+        settings:
+          S_points: ["S_points"]
+          y_points: 10
+          w_min: ["w_min"]
+          w_max: ["w_max"]
+          w_points: ["w_points"]
+        grid:
+          S:
+            type: "linspace"
+            min: ["S_min"]
+            max: ["S_max"]
+            points: ["S_points"]
+          y:
+            type: "int_range"
+            start: 0
+            stop: 2
+          w_rent:
+            type: "linspace"
+            min: ["w_min"]
+            max: ["w_max"]
+            points: ["w_points"]
+    shocks:
+      income_shock:
+        description: "Income shock with explicit Markov process from Fella"
+        methods:
+          method: "manual"  # Use explicit Markov process
+          shock_method: "discretemarkov"
+        parameters:
+          transition_matrix: ["Pi"]  # Use transition matrix from master config
+          values: ["z_vals"]         # Use shock values from master config
+      
+
+# Movers section
+movers:
+  # Arrival to Decision (Identity mapping)
+  arvl_to_dcsn:
+    type: "forward"
+    source: "arvl"
+    target: "dcsn"
+    functions:
+      - g_av
+    operator:
+      method: simulation
+    description: "Arrival->Decision (Identity mapping)"
+    inherit_parameters: true
+    inherit_settings: true
+    methods:
+      simulation
+  
+  # Decision to Continuation (Rental services choice with budget constraint)
+  dcsn_to_cntn:
+    type: "forward"
+    source: "dcsn"
+    target: "cntn"
+    functions:
+      - g_ve
+    operator:
+      method: discrete_choice
+    description: "Decision->Continuation with rental services choice"
+    inherit_parameters: true
+    inherit_settings: true
+    methods:
+      simulation
+
+
+
+  # Continuation to Decision (Backward step)
+  cntn_to_dcsn:
+    type: "backward"
+    source: "cntn"
+    target: "dcsn"
+    operator:
+      method: discrete_choice
+    description: "Continuation->Decision backwards using discrete choice"
+    inherit_parameters: true
+    inherit_settings: true
+    methods:
+      discrete_choice
+    shocks:
+      - income_shock

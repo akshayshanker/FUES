@@ -1,0 +1,251 @@
+# Housing Choice Model with Renting - Master Configuration
+# =================================================
+# This configuration combines all five stages of the housing-renting model
+# with discrete choice, following the structure in housing_renting.md
+
+name: "HousingMaster"
+description: "Infinite horizon housing choice model with renting option and discrete housing grid"
+version: "1.6.3"
+
+# Reference to separate connections file
+connections_file: "connections.yml"
+
+# Model type and horizon specification
+# Note: In future versions, we will support infinite horizon with reusable stages
+model_type: "finite_horizon"  # Options: finite_horizon, infinite_horizon
+horizon: 5                    # Number of periods to create (for finite horizon)
+
+# Global parameters shared across all stages - Updated with Fella parameters
+parameters:
+  beta: 0.93            # Discount factor
+  r: 0.0346             # Interest rate
+  r_H: 0.0              # Housing return
+  gamma_1: 0.0          # FELLA parameter
+  xi: 0.0               # FELLA parameter
+  alpha: 0.77           # Consumption weight in utility (theta in Fella)
+  theta: 0.77           # Same as alpha, kept for consistency with Fella
+  gamma: 2.0            # CRRA coefficient (risk aversion parameter)
+  rho: 0.58              # Elasticity of substitution between consumption and housing
+  kappa: 0.077          # Housing service scaling factor
+  iota: 0.01           # Housing service constant
+  phi: 0.09            # Transaction cost for housing adjustment (Fella phi)
+  delta: 0.0            # Depreciation rate
+  b: 1e-100             # Borrowing constraint
+  Pr: 0.05              # Rental price
+  thorn: 0.9            # Fella's thorn parameter
+  
+  # Income shock parameters - Explicit Markov process from Fella
+  # Transition matrix for Markov process
+  Pi:
+    - [0.8, 0.1, 0.1]
+    - [0.05, 0.9, 0.05]
+    - [0.45, 0.1, 0.45]
+  z_vals: [0.1, 1.1526, 4.167]  # Shock values
+  #z_vals: [1]
+  #Pi:
+  #  - [1]
+  #z_vals: [0.25, 0.45, 0.70, 1.0, 1.40, 2.0, 3.0]
+  # Create a transition matrix with high persistence
+  # Diagonal elements have highest probability
+  #Pi:
+  #Pi:
+  #  - [0.80, 0.18, 0.02, 0.00, 0.00, 0.00, 0.00]  # Lowest income
+  #  - [0.10, 0.70, 0.15, 0.05, 0.00, 0.00, 0.00]
+  #  - [0.02, 0.15, 0.65, 0.15, 0.03, 0.00, 0.00]
+  #  - [0.00, 0.05, 0.15, 0.60, 0.15, 0.05, 0.00]  # Middle income
+  #  - [0.00, 0.00, 0.03, 0.15, 0.65, 0.15, 0.02]
+  #  - [0.00, 0.00, 0.00, 0.05, 0.15, 0.70, 0.10]
+  #  - [0.00, 0.00, 0.00, 0.00, 0.02, 0.18, 0.80]
+    
+  
+# Global settings shared across all stages
+settings:
+  tol: 1.0e-6           # Convergence tolerance
+  max_iter: 1000        # Maximum iterations
+  
+  # Grid parameters - Updated from Fella
+  a_min: 0.01           # Minimum asset value
+  a_max: 30.0           # Maximum asset value (Fella's grid_max_A)
+  a_points: 2000        # Number of asset grid points (Fella's grid_size)
+  
+  H_min: 0.0            # Minimum housing value
+  H_max: 5.0            # Maximum housing value (Fella's grid_max_H)
+  H_points: 10           # Number of housing grid points (Fella's grid_size_H)
+  S_min: 0.0            # Minimum housing value
+  S_max: 5.0            # Maximum housing value (Fella's grid_max_H)
+  S_points: 10           # Number of housing grid points (Fella's grid_size_H)
+  
+  w_min: 0.01           # Minimum cash-on-hand
+  w_max: 40.0           # Maximum cash-on-hand (increased to accommodate shock values)
+  w_points: 2000        # Number of cash-on-hand grid points
+  
+  a_nxt_min: 0.01       # Minimum next-period asset value
+  a_nxt_max: 30.0       # Maximum next-period asset value (matches a_max)
+  a_nxt_points: 2000    # Number of next-period asset grid points
+  
+  # Income shock discretization - Now explicitly using Fella's values
+  y_points: 3           # Number of shock grid points (length of z_vals)
+  y_stop: 2 
+  m_bar: 2.1           # Upper envelope parameter for FUES
+  lb: 10                 # Look-back parameter for FUES
+  rfc_radius: 0.75
+  rfc_n_iter: 20
+  n_constraint_points: 100
+
+###################
+# 2) .math Section
+###################
+math:
+  functions_CRRA:
+    # Generic utility and marginal utility functions (shared across stages)
+    owner_utility:
+      expr: "((c**alpha * (kappa*(H_nxt+iota))**(1-alpha))**(1-gamma) - 1)/(1-gamma)"
+      description: "Cobb–Douglas aggregator nested in CRRA utility for owners"
+
+    renter_utility:
+      expr: "((c**alpha * (kappa*(S+iota))**(1-alpha))**(1-gamma) - 1)/(1-gamma)"
+      description: "Cobb–Douglas aggregator nested in CRRA utility for renters"
+
+    marginal_utility:
+      expr: "alpha * (c**alpha * (kappa*(S+iota))**(1-alpha))**(1-gamma) / c"
+      description: "Marginal utility for Cobb–Douglas nested in CRRA"
+
+    owner_marginal_utility:
+      expr: "alpha * (c**alpha * (kappa*(H_nxt+iota))**(1-alpha))**(1-gamma) / c"
+      description: "Marginal utility for Cobb–Douglas nested in CRRA for owners"
+
+    inv_marginal_utility:
+      expr: "(lambda_e/(alpha*(kappa*(H_nxt+iota))**((1-alpha)*(1-gamma))))**(1/(alpha*(1-gamma)-1))"
+      description: "Inverse marginal utility under Cobb–Douglas/CRRA"
+
+    # Joint utility and marginal utility helpers
+    owner_util_mutil:
+      u_val: "((c**alpha * (kappa*(H_nxt+iota))**(1-alpha))**(1-gamma) - 1)/(1-gamma)"
+      uc_val: "alpha * (c**alpha * (kappa*(H_nxt+iota))**(1-alpha))**(1-gamma) / c"
+      description: "Returns Cobb–Douglas/CRRA utility and marginal utility for owners"
+
+    renter_util_mutil:
+      u_val: "((c**alpha * (kappa*(S+iota))**(1-alpha))**(1-gamma) - 1)/(1-gamma)"
+      uc_val: "alpha * (c**alpha * (kappa*(S+iota))**(1-alpha))**(1-gamma) / c"
+      description: "Returns Cobb–Douglas/CRRA utility and marginal utility for renters"
+    
+    # Override functions from master with local modifications
+    uc_func:
+      inherit: "uc_general"                   # Inherit but override expression
+      expr: "alpha * (c**alpha * (kappa*(H_nxt+iota))**(1-alpha))**(1-gamma) / c"
+      description: "Modified Cobb–Douglas/CRRA marginal utility"
+    
+    # Functions that build on master patterns
+    egm_consumption:
+      inherit: "egm_consumption"              # Inherit but override expression
+      expr: "(lambda_v/(alpha*(kappa*(H_nxt+iota))**((1-alpha)*(1-gamma))))**(1/(alpha*(1-gamma)-1))"
+      description: "EGM consumption formula for Cobb–Douglas/CRRA"
+    
+    # Purely local functions (no inheritance)
+    u_func:
+      expr: "((c**alpha * (kappa*(H_nxt+iota))**(1-alpha))**(1-gamma) - 1)/(1-gamma)"
+      description: "Stage-specific Cobb–Douglas/CRRA utility"
+    
+    # Complex operations
+    egm_operations:
+      c_egm: "(lambda_e/(alpha*(kappa*(H_nxt+iota))**((1-alpha)*(1-gamma))))**(1/(alpha*(1-gamma)-1))"
+      m_egm: "c_egm + a_nxt"
+      lambda_v_egm: "alpha * (c_egm**alpha * (kappa*(H_nxt+iota))**(1-alpha))**(1-gamma) / c_egm"
+      vlu_v_egm: "((c_egm**alpha * (kappa*(H_nxt+iota))**(1-alpha))**(1-gamma) - 1)/(1-gamma) + beta*vlu_e"
+      description: "EGM operations with Cobb–Douglas/CRRA"
+      compilation: "eval"
+    
+    rental_payment:
+        expr: "S = S; y = y; w_rent = w - P_r*S"
+        description: "Cash‑on‑hand after paying rent"
+  
+  functions:
+    # Generic utility and marginal utility functions (shared across stages)
+    owner_utility:
+      expr: "alpha*np.log(c) + (1-alpha)*np.log(kappa*(H_nxt+iota))"
+      description: "Utility function for owners"
+
+    renter_utility:
+      expr: "alpha*np.log(c) + (1-alpha)*np.log(kappa*(S+iota))"
+      description: "Utility function for renters"
+
+    marginal_utility:
+      expr: "alpha/(c + 1e-10) + S*0"
+      description: "Marginal utility of consumption with numerical stability"
+    
+    owner_marginal_utility:
+      expr: "alpha/(c + 1e-10) + H_nxt*0"
+      description: "Marginal utility of consumption with numerical stability"
+
+    inv_marginal_utility:
+      expr: "alpha/lambda_e + H_nxt*0"
+      description: "Inverse marginal utility (EGM consumption function)"
+
+    # Joint utility and marginal utility helpers
+    owner_util_mutil:
+      u_val: "alpha*np.log(c) + (1-alpha)*np.log(kappa*(H_nxt+iota))"
+      uc_val: "alpha/(c + 1e-10)"
+      description: "Returns both utility and marginal utility for owners"
+
+    renter_util_mutil:
+      u_val: "alpha*np.log(c) + (1-alpha)*np.log(kappa*(S+iota))"
+      uc_val: "alpha/(c + 1e-10)"
+      description: "Returns both utility and marginal utility for renters"
+    
+    # Override functions from master with local modifications
+    uc_func:
+      inherit: "uc_general"                   # Inherit but override expression
+      expr: "alpha/(c + 1e-10) +H_nxt*0"               # Override with local modification
+      description: "Modified marginal utility with numerical stability"
+    
+    # Functions that build on master patterns
+    egm_consumption:
+      inherit: "egm_consumption"              # Inherit but override expression
+      expr: "alpha/(beta*lambda_v) + H_nxt*0"           # Adapt to local variable names
+      description: "Adapted EGM consumption formula for local variables"
+    
+    # Purely local functions (no inheritance)
+    u_func:
+      expr: "alpha*np.log(c) + (1-alpha)*np.log(kappa*(H_nxt+iota))"
+      description: "Stage-specific utility function for housing"
+      compilation: "numba"
+    
+    # Complex operations
+    egm_operations:
+      c_egm: "alpha/(beta*lambda_e)"          # Uses pattern from egm_consumption
+      m_egm: "c_egm + a_nxt"
+      lambda_v_egm: "alpha/c_egm"
+      vlu_v_egm: "alpha*np.log(c_egm) + (1-alpha)*np.log(kappa*(H_nxt+iota)) + beta*vlu_e"
+      description: "Stage-specific EGM operations"
+      compilation: "eval"
+
+
+# Global methods
+methods:
+  optimization: "EGM"
+  simulation: "Histogram"
+  integration_method: "discretize"
+  shock_method: "markov"  # Changed to Markov since we're using explicit transition matrix
+  compilation: 'eval'
+  default_grid: 'linspace'
+  upper_envelope: "FUES"
+
+# dont need to import 
+imports:
+  - file: "OWNH_stage.yml"
+    stage_name: "OwnerHousingChoice"
+    alias: "OWNH"
+  - file: "OWNC_stage.yml"
+    stage_name: "OwnerConsumptionChoice"
+    alias: "OWNC"
+  - file: "RNTH_stage.yml"
+    stage_name: "RenterHousingChoice"
+    alias: "RNTH"
+  - file: "RNTC_stage.yml"
+    stage_name: "RenterConsumptionChoice"
+    alias: "RNTC"
+  - file: "TENU_stage.yml"
+    stage_name: "TenureChoice"
+    alias: "TENU"
+    
+  

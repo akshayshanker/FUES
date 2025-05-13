@@ -14,7 +14,7 @@ from FUES.math_funcs import interp_as, correct_jumps1d
 
 # Try to import optional packages for upper envelope methods
 try:
-    from .fues import FUES as fues_algorithm
+    from .fues import fues.kernels as fues_algorithm
     fues_available = True
 except ImportError:
     fues_available = False

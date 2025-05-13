@@ -1,0 +1,118 @@
+# Housing Model Connections Configuration
+# ========================================
+# This file defines all connections between stages in the housing rental model,
+# separating connection topology from stage definitions
+
+# Intra-period connections
+intra_period:
+  # FORWARD CONNECTIONS
+  # Tenure choice connections
+  - source: "TENU"  # Tenure choice own path to Owner Housing
+    target: "OWNH"
+    branch_key: "own_path"
+    direction: "forward"
+    source_perch_attr: "cntn_own"
+    target_perch_attr: "arvl"
+    periods: "all"  # Apply to all periods
+    mapping:
+      a: "a"
+      y: "y"
+      H: "H"
+  
+  - source: "TENU"  # Tenure choice rent path to Renter Housing
+    target: "RNTH"
+    branch_key: "rent_path"
+    direction: "forward"
+    source_perch_attr: "cntn_rent"
+    target_perch_attr: "arvl"
+    periods: "all"  # Apply to all periods
+    mapping:
+      w: "w"
+      y: "y"
+  
+  - source: "OWNH"  # Owner Housing to Owner Consumption
+    target: "OWNC"
+    branch_key: "owner_path"
+    direction: "forward"
+    source_perch_attr: "cntn"
+    target_perch_attr: "arvl"
+    periods: "all"  # Apply to all periods
+    mapping:
+      H_nxt: "H_nxt"
+      y: "y"
+      w_own: "w"
+  
+  - source: "RNTH"  # Renter Housing to Renter Consumption
+    target: "RNTC"
+    branch_key: "renter_path"
+    direction: "forward"
+    source_perch_attr: "cntn"
+    target_perch_attr: "arvl"
+    periods: "all"  # Apply to all periods
+    mapping:
+      S: "S"
+      y: "y"
+      w_rent: "w"
+  
+  # BACKWARD CONNECTIONS
+  # Backward connection: owner_housing -> tenure_choice
+  - source: "OWNH"
+    target: "TENU"
+    branch_key: "from_owner_housing"
+    direction: "backward"
+    source_perch_attr: "arvl"
+    target_perch_attr: "cntn"
+    periods: "all"
+  
+  # Backward connection: renter_housing -> tenure_choice
+  - source: "RNTH"
+    target: "TENU"
+    branch_key: "from_renter_housing"
+    direction: "backward"
+    source_perch_attr: "arvl"
+    target_perch_attr: "cntn"
+    periods: "all"
+  
+  # Backward connection: owner_consumption -> owner_housing
+  - source: "OWNC"
+    target: "OWNH"
+    direction: "backward"
+    source_perch_attr: "arvl"
+    target_perch_attr: "cntn"
+    periods: "all"
+  
+  # Backward connection: renter_consumption -> renter_housing
+  - source: "RNTC"
+    target: "RNTH"
+    direction: "backward"
+    source_perch_attr: "arvl"
+    target_perch_attr: "cntn"
+    periods: "all"
+
+# Inter-period connections
+inter_period:
+  - source: "OWNC"  # Owner Consumption to next-period Tenure Choice
+    target: "TENU"
+    direction: "forward" #this is the default
+    branch_key: "from_owner"
+    source_perch_attr: "cntn"
+    target_perch_attr: "arvl"
+    source_periods: [0, 1,2,3,4,5,6,7,8,9]  # Explicit period indices for source. 0 is the initial period. 
+    target_periods: [1, 2,3,4,5,6,7,8,9,10]  # Explicit period indices for target
+    mapping:
+      a_nxt: "a"
+      H_nxt: "H"
+      y: "y_pre"
+  
+  - source: "RNTC"  # Renter Consumption to next-period Tenure Choice
+    target: "TENU"
+    direction: "forwaard" #this is the default
+    branch_key: "from_renter"
+    source_perch_attr: "cntn"
+    target_perch_attr: "arvl"
+    source_periods: [0, 1,2,3,4,5,6,7,8,9]  # Explicit period indices for source. 0 is the initial period. 
+    target_periods: [1, 2,3,4,5,6,7,8,9,10]  # Explicit period indices for target
+    mapping:
+      a_nxt: "a"
+      y: "y_pre"
+      H: 0  # Fixed at zero since renters don't own housing 

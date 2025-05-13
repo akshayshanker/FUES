@@ -29,7 +29,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 cwd = os.getcwd()
 sys.path.append('..')
 os.chdir(cwd)
-from FUES.FUES import FUES, uniqueEG
+from FUES.FUES import fues.kernels, uniqueEG
 from FUES.RFC_simple import rfc
 from FUES.DCEGM import dcegm
 from FUES.math_funcs import interp_as, correct_jumps1d

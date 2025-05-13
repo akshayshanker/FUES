@@ -1,0 +1,271 @@
+# Tenure Choice Stage [TENU] Configuration
+# =================================================
+# This configuration implements the tenure choice between renting and owning
+# Based on the housing-renting model with discrete choice
+
+# Stage definition
+# -----------------
+stage:
+  name: "TenureChoice"
+  is_portable: true
+  method: "discrete_choice"  # Discrete choice between renting and owning
+  kind: "branching"  # Stage kind (branching for own vs rent paths)
+
+  #################
+  # 1) Model-Level
+  #################
+  parameters:
+    beta: ["beta"]            # Discount factor from master
+    r: ["r"]                  # Interest rate from master
+    
+  settings:
+    tol: ["tol"]                # Convergence tolerance from master
+    max_iter: ["max_iter"]      # Maximum iterations from master
+    
+    # Grid parameters for state variables
+    a_min: ["a_min"]            # From master
+    a_max: ["a_max"]            # From master
+    a_points: ["a_points"]      # From master
+    
+    H_min: ["H_min"]            # From master
+    H_max: ["H_max"]            # From master
+    H_points: ["H_points"]      # From master
+    
+    w_min: ["w_min"]            # From master
+    w_max: ["w_max"]            # From master
+    w_points: ["w_points"]      # From master
+    
+    # Income shock parameters
+    sigma_y: ["sigma_y"]        # From master
+    mu_y: ["mu_y"]              # From master
+    N_shock: ["N_shock"]        # From master
+    width: ["width"]            # From master
+
+  methods:
+    optimization: "discrete_choice"
+    simulation: "Histogram"
+    integration_method: "discretize"
+    shock_method: "normal"
+    compilation: 'eval'             
+    default_grid: 'linspace'        
+
+  ###################
+  # 2) .math Section
+  ###################
+  math:
+    functions:
+      # Transition functions for arrival to decision
+      g_av:
+        expr: "a_out = a; H_out = H; y_out = f_y"
+        description: "Maps arrival state to decision state with income realization"
+
+      # Transition functions for decision to continuation (own path)
+      g_ve_own:
+        expr: "a_out = a; y_out = y; H_out = H"
+        description: "Identity mapping for own path"
+      
+      # Transition functions for decision to continuation (rent path)
+      g_ve_rent:
+        expr: "w_out = (1+r)*a + H; y_out = y"
+        description: "Maps to rental path by liquidating housing"
+      
+    shocks:
+      income_shock:
+        description: "Income shock with explicit Markov process from Fella"
+        methods:
+          method: "manual"  # Use explicit Markov process
+          shock_method: "discretemarkov"
+        parameters:
+          transition_matrix: ["Pi"]  # Use transition matrix from master config
+          values: ["z_vals"]         # Use shock values from master config
+
+    state_space:
+      arvl:
+        description: "Arrival perch state space (assets, housing, pre-shock income)"
+        dimensions: ["a", "H", "y_pre"]
+        methods:
+          interp: Linear
+        settings:
+          a_min: ["a_min"]
+          a_max: ["a_max"]
+          a_points: ["a_points"]
+          H_points: ["H_points"]
+          y_points: 10
+        grid:
+          a:
+            type: "linspace"
+            min: ["a_min"]
+            max: ["a_max"]
+            points: ["a_points"]
+          H:
+            type: "linspace"
+            min: ["H_min"]
+            max: ["H_max"]
+            points: ["H_points"]
+          y_pre:
+            type: "int_range"
+            start: 0
+            stop: 2
+      
+      dcsn:
+        description: "Decision perch state space (assets, housing, post-shock income)"
+        dimensions: ["a", "H", "y"]
+        methods:
+          interp: Linear
+        settings:
+          a_min: ["a_min"]
+          a_max: ["a_max"]
+          a_points: ["a_points"]
+          H_points: ["H_points"]
+          y_stop: 2
+          H_min: ["H_min"]
+          H_max: ["H_max"]
+        grid:
+          a:
+            type: "linspace"
+            min: ["a_min"]
+            max: ["a_max"]
+            points: ["a_points"]
+          H:
+            type: "linspace"
+            min: ["H_min"]
+            max: ["H_max"]
+            points: ["H_points"]
+          y:
+            type: "int_range"
+            start: 0
+            stop: 2
+      
+      cntn_own:
+        description: "Continuation perch state space for owner path"
+        dimensions: ["a", "H", "y"]
+        methods:
+          interp: Linear
+        settings:
+          a_min: ["a_min"]
+          a_max: ["a_max"]
+          a_points: ["a_points"]
+          H_points: ["H_points"]
+          y_stop: 2
+          H_min: ["H_min"]
+          H_max: ["H_max"]
+        grid:
+          a:
+            type: "linspace"
+            min: ["a_min"]
+            max: ["a_max"]
+            points: ["a_points"]
+          y:
+            type: "int_range"
+            start: 0
+            stop: 2
+          H:
+            type: "linspace"
+            min: ["H_min"]
+            max: ["H_max"]
+            points: ["H_points"]
+      
+      cntn_rent:
+        description: "Continuation perch state space for renter path"
+        dimensions: ["w", "y"]
+        methods:
+          interp: Linear
+        settings:
+          w_min: ["w_min"]
+          w_max: ["w_max"]
+          w_points: ["w_points"]
+          y_stop: 2
+        grid:
+          w:
+            type: "linspace"
+            min: ["w_min"]
+            max: ["w_max"]
+            points: ["w_points"]
+          y:
+            type: "int_range"
+            start: 0
+            stop: 2
+
+# Movers section
+movers:
+  # Arrival to Decision (Income shock realization)
+  arvl_to_dcsn:
+    type: "forward"
+    source: "arvl"
+    target: "dcsn"
+    functions:
+      - g_av
+      - f_y
+    operator:
+      method: simulation
+    shocks:
+      - income_shock
+    description: "Arrival->Decision with income shock realization"
+    inherit_parameters: true
+    inherit_settings: true
+    methods:
+      simulation
+  
+  # Decision to Continuation (Own path)
+  dcsn_to_cntn_own:
+    type: "forward"
+    source: "dcsn"
+    target: "cntn_own"
+    functions:
+      - g_ve_own
+    operator:
+      method: simulation
+    description: "Decision->Continuation (Own path)"
+    inherit_parameters: true
+    inherit_settings: true
+    methods:
+      simulation
+    path: "own"  # Branch identifier
+  
+  # Decision to Continuation (Rent path)
+  dcsn_to_cntn_rent:
+    type: "forward"
+    source: "dcsn"
+    target: "cntn_rent"
+    functions:
+      - g_ve_rent
+    operator:
+      method: simulation
+    description: "Decision->Continuation (Rent path)"
+    inherit_parameters: true
+    inherit_settings: true
+    methods:
+      simulation
+    path: "rent"  # Branch identifier
+
+  # Continuation to Decision (Backward, combining own and rent paths)
+  cntn_to_dcsn:
+    type: "backward"
+    source: ["cntn_own", "cntn_rent"]
+    target: "dcsn"
+    operator:
+      method: discrete_choice
+    description: "Continuation->Decision backwards using discrete choice between paths"
+    inherit_parameters: true
+    inherit_settings: true
+    methods:
+      discrete_choice
+    required_grids:
+      - cntn_rent
+      - cntn_own
+  
+  # Decision to Arrival (Backward, integration over income shock)
+  dcsn_to_arvl:
+    type: "backward"
+    source: "dcsn"
+    target: "arvl"
+    operator:
+      method: integration
+    shocks:
+      - income_shock
+    description: "Decision->Arrival backwards with integration over income shocks"
+    inherit_parameters: true
+    inherit_settings: true
+    methods:
+      integration 
+  

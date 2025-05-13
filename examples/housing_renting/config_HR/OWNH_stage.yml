@@ -1,0 +1,256 @@
+# Home-Owner Housing Choice Stage [OWNH] Configuration
+# =================================================
+# This configuration implements the housing stock choice stage for home owners
+# Based on the housing-renting model with discrete choice
+
+# Stage definition
+# -----------------
+stage:
+  name: "OwnerHousingChoice"
+  is_portable: true
+  method: "discrete_choice"  # Discrete choice over housing
+  kind: "sequential"  # Stage kind (sequential vs branching)
+
+  #################
+  # 1) Model-Level
+  #################
+  parameters:
+    beta: ["beta"]            # Discount factor from master
+    r: ["r"]                  # Interest rate from master
+    phi: ["phi"]              # Transaction cost from master (renamed from tau to phi)
+    r_H: ["r_H"]              # Housing return from master
+    delta: ["delta"]          # Depreciation rate from master
+    gamma_1: ["gamma_1"]      # Fella parameter from master
+    xi: ["xi"]                # Fella parameter from master
+    theta: ["theta"]          # Consumption weight from master
+    kappa: ["kappa"]          # Housing scaling factor from master
+    iota: ["iota"]            # Housing constant from master
+    rho: ["rho"]              # Elasticity of substitution between consumption and housing
+    gamma: ["gamma"]          # CRRA coefficient (risk aversion parameter)
+    Pr: ["Pr"]                # Rental price from master
+    
+  settings:
+    tol: ["tol"]                # Convergence tolerance from master
+    max_iter: ["max_iter"]      # Maximum iterations from master
+    
+    # Grid parameters
+    a_min: ["a_min"]            # From master
+    a_max: ["a_max"]            # From master
+    a_points: ["a_points"]      # From master
+    
+    H_min: ["H_min"]            # From master
+    H_max: ["H_max"]            # From master
+    H_points: ["H_points"]      # From master
+
+    y_points: ["y_points"]      # From master
+    
+    w_min: ["w_min"]            # From master
+    w_max: ["w_max"]            # From master
+    w_points: ["w_points"]      # From master
+
+  methods:
+    optimization: "discrete_choice"
+    simulation: "Histogram"
+    integration_method: "discretize"
+    compilation: 'eval'             
+    default_grid: 'linspace'
+    upper_envelope: ["upper_envelope"]        
+
+  ###################
+  # 2) .math Section
+  ###################
+  math:
+    functions:
+      # Transition functions
+      g_av:
+        expr: "a_out = a; H_out = H; y_out = f_y"
+        description: "Arrival to decision with income shock realization"
+      
+      g_ve:
+        expr: "H_nxt = H_nxt; y = y; w_own = (1+r)*a + y + (H - (1+phi*(H_nxt!=H))*H_nxt)"
+        description: "Cash‑on‑hand after potentially adjusting housing stock with fixed cost"
+      
+      g_ve_h_ind:
+        expr: "H_nxt_ind = H_ind"
+        description: "Identity mapping from decision to continuation"
+      
+      
+    constraints:              # how this works is a little vague at the moment
+      non_negative_wealth:
+        expr: "w_own >= 0"
+        description: "Cash-on-hand must be non-negative after housing choice"
+
+    shocks:
+      income_shock:
+        description: "Income shock with explicit Markov process from Fella"
+        methods:
+          method: "manual"  # Use explicit Markov process
+          shock_method: "discretemarkov"
+        parameters:
+          transition_matrix: ["Pi"]  # Use transition matrix from master config
+          values: ["z_vals"]         # Use shock values from master config
+
+
+    state_space:
+      arvl:
+        description: "Arrival perch state space (assets, housing, previous-shock)"
+        dimensions: ["a", "H", "y_pre"]
+        methods:
+          interp: Linear
+        settings:
+          a_min: "a_min"
+          a_max: "a_max"
+          a_points: "a_points"
+          H_points: "H_points"
+          y_points: "y_points"
+          y_stop: "y_stop"
+        grid:
+          a:
+            type: "linspace"
+            min: "a_min"
+            max: "a_max"
+            points: "a_points"
+          y_pre:
+            type: "int_range"
+            start: 0
+            stop: 2
+          H:
+            type: "linspace"
+            min: "H_min"
+            max: "H_max"
+            points: "H_points"
+      
+      dcsn:
+        description: "Decision perch state space (assets, housing, current-shock)"
+        dimensions: ["a", "H", "y"]
+        methods:
+          interp: Linear
+        settings:
+          a_min: "a_min"
+          a_max: "a_max"
+          a_points: "a_points"
+          H_points: "H_points"
+          y_points: "y_points"
+          y_stop: "y_stop"
+        grid:
+          a:
+            type: "linspace"
+            min: "a_min"
+            max: "a_max"
+            points: "a_points"
+          y:
+            type: "int_range"
+            start: 0
+            stop: 2
+          H:
+            type: "linspace"
+            min: "H_min"
+            max: "H_max"
+            points: "H_points"
+      
+      cntn:
+        description: "Continuation perch state space (next-period housing, current-shock, cash-on-hand)"
+        dimensions: ["w_own","H_nxt", "y"]
+        methods:
+          interp: Linear
+        settings:
+          H_points: "H_points"
+          y_points: "y_points"
+          w_min: "w_min"
+          w_max: "w_max"
+          w_points: "w_points"
+          y_stop: "y_stop"
+        grid:
+          H_nxt:
+            type: "linspace"
+            min: "H_min"
+            max: "H_max"
+            points: "H_points"
+          y:
+            type: "int_range"
+            start: 0
+            stop: 2
+          w_own:
+            type: "linspace"
+            min: "w_min"
+            max: "w_max"
+            points: "w_points"
+
+# Movers section
+movers:
+  # Arrival to Decision (Identity mapping)
+  arvl_to_dcsn:
+    type: "forward"
+    source: "arvl"
+    target: "dcsn"
+    functions:
+      - g_av
+    operator:
+      method: simulation # this does not do anything yet 
+    shocks:
+      - income_shock  
+    description: "Arrival->Decision with income shock realization (conditions on previous shock)"
+    inherit_parameters: true
+    inherit_settings: true
+    methods:
+      simulation
+    required_grids:
+      - arvl
+      - dcsn
+  
+  # Decision to Continuation (Housing choice with budget constraint)
+  dcsn_to_cntn:
+    type: "forward"
+    source: "dcsn"
+    target: "cntn"
+    functions:
+      - g_ve
+    operator:
+      method: discrete_choice
+    description: "Decision->Continuation with housing choice"
+    inherit_parameters: true
+    inherit_settings: true
+    methods:
+      simulation
+    required_grids:
+      - cntn
+      - dcsn
+    shocks:
+      - income_shock
+
+  # Continuation to Decision (Backward step)
+  cntn_to_dcsn:
+    type: "backward"
+    source: "cntn"
+    target: "dcsn"
+    operator:
+      method: discrete_choice
+    description: "Continuation->Decision backwards using discrete choice"
+    inherit_parameters: true
+    inherit_settings: true
+    methods:
+      discrete_choice
+    required_grids:
+      - cntn
+      - dcsn
+    shocks:
+      - income_shock
+  
+  dcsn_to_arvl:
+    type: "backward"
+    source: "dcsn"
+    target: "arvl"
+    functions:
+      - g_av
+    operator:
+      method: integration
+    shocks:
+      - income_shock
+    description: "Decision->Arrival with income shock integration (properly conditions on y_pre)"
+    inherit_parameters: true
+    inherit_settings: true
+    methods:
+      integration
+    required_grids:
+      - arvl
+      - dcsn
