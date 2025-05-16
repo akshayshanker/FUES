@@ -4,7 +4,7 @@ Housing model with renting using CircuitRunner.
 
 This script loads, initializes, and solves the housing model with renting
 using the StageCraft and Heptapod-B architecture, but leverages the 
-CircuitRunner from dynx_runner for parameter sweeping and metrics collection.
+unified CircuitRunner and sampler utilities (DynX v1.6.12).
 
 Usage:
     python circuit_runner_solving.py [--periods N]
@@ -43,20 +43,49 @@ from dynx.heptapodx.core.api import initialize_model
 from dynx.heptapodx.num.generate import compile_num as generate_numerical_model
 
 # Runner utilities
-from dynx.runner import CircuitRunner, RunRecorder, mpi_map
+from dynx.runner import CircuitRunner, mpi_map
+from dynx.runner.sampler import FixedSampler, build_design
 
-# plotting module
-from .helpers.plots import generate_plots
+try:
+    # Plotting helpers and error metrics (local to this example)
+    from .helpers.plots import generate_plots
+    from .helpers.plots import plot_egm_grids, plot_dcsn_policy
+    from .helpers.euler_error import euler_error_metric
 
-# Plotting helpers and error metrics (also local to this example)
-from .helpers.plots import plot_egm_grids, plot_dcsn_policy
-from .helpers.euler_error import euler_error_metric
-
-from .whisperer import (
-    build_operators,
-    solve_stage,
-    run_time_iteration,
-)
+    from .whisperer import (
+        build_operators,
+        solve_stage,
+        run_time_iteration,
+    )
+except ImportError:
+    # Stub functions for docs build or when the heavy deps aren't present
+    def generate_plots(model, method, output_dir):
+        """Print a message when plotting is unavailable."""
+        print(f"Plotting unavailable: {method} for {output_dir}")
+    
+    def plot_egm_grids(model, vf, c, m, method, stage_name):
+        """Stub for plot_egm_grids function."""
+        pass
+    
+    def plot_dcsn_policy(model, policies, periods=None, stage_names=None):
+        """Stub for plot_dcsn_policy function."""
+        pass
+    
+    def euler_error_metric(model):
+        """Stub for metric calculation."""
+        return 0.0
+    
+    def build_operators(stage):
+        """Stub for operator builder."""
+        pass
+    
+    def solve_stage(stage, max_iter=None, tol=None, verbose=False):
+        """Stub for stage solver."""
+        return True
+    
+    def run_time_iteration(model_circuit, n_periods=None, verbose=False, verbose_timings=False, recorder=None):
+        """Stub for time iteration."""
+        return True
 
 # Configure logging
 logging.basicConfig(
@@ -98,17 +127,17 @@ def load_configs():
     }
 
 
-def initialize_housing_model(epochs_cfgs, stage_cfgs, conn_cfg, n_periods=3):
+def initialize_housing_model(master_config, stage_configs, connections_config, n_periods=3):
     """
     Initialize a housing model circuit with the specified configuration.
     
     Parameters
     ----------
-    epochs_cfgs : dict
-        Epoch-level configuration
-    stage_cfgs : dict
+    master_config : dict
+        Master configuration
+    stage_configs : dict
         Stage-level configurations
-    conn_cfg : dict
+    connections_config : dict
         Connection configuration
     n_periods : int, optional
         Number of periods in the model
@@ -119,9 +148,9 @@ def initialize_housing_model(epochs_cfgs, stage_cfgs, conn_cfg, n_periods=3):
         Initialized model circuit
     """
     # Deep copy configs to avoid modifying originals
-    master_config = copy.deepcopy(epochs_cfgs.get("master", {}))
-    stage_configs = copy.deepcopy(stage_cfgs)
-    connections_config = copy.deepcopy(conn_cfg)
+    master_config = copy.deepcopy(master_config)
+    stage_configs = copy.deepcopy(stage_configs)
+    connections_config = copy.deepcopy(connections_config)
     
     # Set the number of periods in the master config
     master_config["periods"] = n_periods
@@ -389,9 +418,6 @@ def format_stage_metrics(results_df):
     return "\n".join(tables)
 
 
-
-
-
 def main(argv=None):
     """Main driver function."""
     # Parse command line arguments
@@ -409,6 +435,22 @@ def main(argv=None):
     # Load configurations
     configs = load_configs()
     
+    # Create the unified base configuration for CircuitRunner
+    base_cfg = {
+        "master": configs["master"],
+        "stages": {
+            "OWNH": configs["ownh"],
+            "OWNC": configs["ownc"],
+            "RNTH": configs["renth"],
+            "RNTC": configs["rentc"],
+            "TENU": configs["tenu"],
+        },
+        "connections": configs["connections"],
+    }
+    
+    # Define parameter paths
+    param_paths = ["master.methods.upper_envelope"]
+    
     # Define the solver function inline
     def solver(model_circuit, recorder=None):
         # Set terminal flags for last period's consumption stages
@@ -421,38 +463,16 @@ def main(argv=None):
                                               verbose_timings=args.verbose, recorder=recorder)
         return model_circuit
     
-    # Set up parameter specifications directly
-    param_specs = {
-        "master.methods.upper_envelope": (
-            "FUES",  # Min value 
-            "DCEGM",  # Max value
-            lambda n: None # Sample function
-        )
-    }
-    
-    # Set up metric functions
-    metric_fns = {
-        "euler_error": metric_function,
-    }
-    
-    # Create CircuitRunner with the simplified model initialization function
+    # Create CircuitRunner with the new interface
     runner = CircuitRunner(
-        epochs_cfgs={"master": configs["master"]},
-        stage_cfgs={
-            "OWNH": configs["ownh"],
-            "OWNC": configs["ownc"],
-            "RNTH": configs["renth"],
-            "RNTC": configs["rentc"],
-            "TENU": configs["tenu"]
-        },
-        conn_cfg=configs["connections"],
-        param_specs=param_specs,
-        model_factory=lambda epochs_cfgs, stage_cfgs, conn_cfg: initialize_housing_model(
-            epochs_cfgs, stage_cfgs, conn_cfg, n_periods=args.periods
+        base_cfg=base_cfg,
+        param_paths=param_paths,
+        model_factory=lambda cfg: initialize_housing_model(
+            cfg["master"], cfg["stages"], cfg["connections"], n_periods=args.periods
         ),
         solver=solver,
-        metric_fns=metric_fns,
-        cache=True
+        metric_fns={"euler_error": metric_function},
+        cache=True,
     )
     
     # Create directory for images
@@ -463,17 +483,14 @@ def main(argv=None):
     print("\nRunning parameter sweep with CircuitRunner...")
     start_time = time.time()
     
-    # Create parameter vectors based on command line arguments
+    # Use sampler utilities to build the parameter design
     if args.ue_method == "ALL":
-        # Run all methods
-        xs = np.array([
-            ["FUES"],
-            ["CONSAV"],
-            ["DCEGM"]
-        ])
+        methods = ["FUES", "CONSAV", "DCEGM"]
     else:
-        # Run only the specified method
-        xs = np.array([[args.ue_method]])
+        methods = [args.ue_method]
+
+    samplers = [FixedSampler(np.array([[m] for m in methods], dtype=object))]
+    Xs, _ = build_design(param_paths, samplers, Ns=[None], meta={}, seed=0)
     
     # Suppress matplotlib warnings
     import warnings
@@ -481,20 +498,9 @@ def main(argv=None):
                           message="set_ticklabels() should only be used with")
     
     # Run models with selected methods and get the full metrics
-    results = mpi_map(runner, xs, mpi=False, return_models=True)
-    
-    # Unpack the results - with return_models=True, mpi_map returns a tuple (df, models)
-    if isinstance(results, tuple) and len(results) == 2:
-        results_df, models = results
-    else:
-        results_df = results
-        models = None
-    
-    # Double-check that results_df is a DataFrame and not a tuple
-    if isinstance(results_df, tuple):
-        print("Warning: results_df is still a tuple after unpacking. Fixing...")
-        if len(results_df) > 0:
-            results_df = results_df[0]  # Get the first element if it's still a tuple
+    results_df, models = mpi_map(runner, Xs, mpi=False, return_models=True)
+
+
     
     # End of parameter sweep timing
     end_time = time.time()
@@ -525,8 +531,17 @@ def main(argv=None):
                 # Continue without interrupting the rest of the script
     
     print("\nDone.")
-    return 0
+    # Return the actual data instead of 0 for debugging
+    return {
+        'results_df': results_df,
+        'models': models,
+        'period_timings': [row.get('period_timings', []) for _, row in results_df.iterrows()],
+        'stage_timings': [row.get('stage_timings', []) for _, row in results_df.iterrows()]
+    }
 
 
 if __name__ == "__main__":
-    results = main() 
+    # Fix argument parsing for Cursor debugger
+    import sys
+    #sys.argv = ["circuit_runner_solving.py", "--periods", "4", "--ue-method", "FUES", "--verbose"]
+    debug_results = main() 

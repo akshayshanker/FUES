@@ -118,6 +118,7 @@ def EGM_UE(
     # -------- interpolation -----------------------------------------
     interpolated = fill_interpolated(refined, X_dcsn, uc_func_partial)
     interpolated["ue_time"] = ue_time
+    refined["ue_time"] = ue_time
 
     return refined, raw, interpolated
 
