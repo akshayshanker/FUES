@@ -11,16 +11,20 @@ requires-python = ">=3.11"
 
 # Minimal hard runtime deps
 dependencies = [
-    "numpy>=1.23",
-    "numba>=0.56",
-    "dill>=0.3.6",
-    "quantecon>=0.7.2",
-    "econ-ark>=0.15.1",
-    "interpolation>=0.5.2",
-    "pykdtree>=1.3.12",
-    "dynx>=1.6.12",
-    "scipy",
-    "tabulate",
+  "numpy>=1.23",
+  "numba",
+  "dill>=0.3.6",
+  "quantecon>=0.7.2",
+  "econ-ark",
+  "interpolation>=0.5.2",
+  "pykdtree>=1.3.12",
+  # ── dynx straight from GitHub ──
+  "dynx @ git+https://github.com/akshayshanker/dynx.git@main",  # pin branch/tag/commit as needed
+  "scipy",
+  "tabulate",
+  "pyDOE",
+  "ConSav",
+  "EconModel"
 ]
 
 [project.urls]
