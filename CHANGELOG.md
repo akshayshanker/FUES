@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 
 * Clean up dependencies with DynX remote packages
 * Add `dynx-runner` as a hard dependency
+* Added comparison to CONSAV
 
 
 
