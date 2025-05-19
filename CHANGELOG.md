@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+
+
+## [0.2.0dev1] - 2025-05-22 – MPI Parameter Sweep
+
+* Clean up no pickling of model classes
+* Convenience scripts for running MPI parameter sweeps for housing renting model
+
+
 ## [0.2.0dev0] - 2025-05-21 – Enhanced Parameter Sweep and UE Timing Metrics
 
 * Clean up dependencies with DynX remote packages

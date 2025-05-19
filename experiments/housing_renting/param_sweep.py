@@ -3,25 +3,29 @@
 housing_renting_experiment.py
 =============================
 
-Runs the housing-with-renting model over a 5 × 5 uniform grid of
-(`policy.beta`, `utility.gamma`) values and all three upper-envelope
-methods (`FUES`, `CONSAV`, `DCEGM`).  Metrics are averaged per method
-and printed at the end.
+Generic parameter sweep for the housing-with-renting model.
+All model parameters are provided through `--param` (list or range
+syntax) and one or more upper-envelope methods are selected with
+`--ue-method / --ue-methods`.  Metrics are averaged per method and
+printed at the end.
 
 Requires DynX ≥ 1.6.12.
 """
 
-from __future__ import annotations
+
 
 import os
 import time
 import copy
 import argparse
 import logging
+import sys
+import functools
+import operator
 from pathlib import Path
 from typing import Any
 import datetime
-
+import re
 import numpy as np
 import pandas as pd
 from dynx.runner import CircuitRunner, mpi_map
@@ -67,13 +71,16 @@ def solver(model_circuit: Any, *, recorder=None):
 # ---------------------------------------------------------------------
 def main(argv=None) -> None:
     parser = argparse.ArgumentParser(description="Housing model with CircuitRunner")
-    parser.add_argument(
-        "--ue-method",
-        type=str,
-        choices=["FUES", "CONSAV", "DCEGM", "ALL"],
-        default="ALL",
-        help="Upper-envelope method to use",
-    )
+
+    # -----------------------------------------------------------------
+    # Parallel execution
+    # -----------------------------------------------------------------
+    parser.add_argument("--use-mpi",  action="store_true",
+                        help="Run the sweep with MPI (mpi4py)")
+    parser.add_argument("--n-procs",  type=int, default=None,
+                        help="Hint for the number of MPI ranks; "
+                             "only informative – `mpiexec` still controls "
+                             "the actual process count.")
     parser.add_argument(
         "--periods",
         type=int,
@@ -86,6 +93,33 @@ def main(argv=None) -> None:
         default=None,
         help="Output file for results (CSV)",
     )
+
+    # ------------------------------------------------------------
+    # Upper-envelope method(s)
+    #   • --ue-methods  FUES,CONSAV
+    #   • --ue-method   FUES   --ue-method CONSAV
+    # ------------------------------------------------------------
+    parser.add_argument("--ue-methods", type=str, default=None,
+                        help="Comma-separated list of UE methods (FUES,CONSAV,DCEGM)")
+    parser.add_argument("--ue-method",  action="append", dest="ue_methods_list",
+                        default=[],
+                        help="Repeatable flag to specify UE method(s)")
+
+    # ------------------------------------------------------------
+    # Generic extra parameters
+    # ------------------------------------------------------------
+    parser.add_argument(
+        "--param",
+        action="append",
+        default=[],
+        metavar="PATH=VALS|min:max:N",
+        help=(
+            "Add a parameter to the sweep. Either give an explicit list "
+            "(`…=0.1,0.2,0.3`) or a range `…=min:max:N` which expands to "
+            "N equally spaced points.  Repeat --param for multiple entries."
+        ),
+    )
+
     args = parser.parse_args(argv)
 
     cfgs = load_configs()  # helper from previous script
@@ -103,46 +137,78 @@ def main(argv=None) -> None:
         "connections": cfgs["connections"],
     }
 
-    param_paths = [
-        "master.methods.upper_envelope",  # categorical
-        "master.parameters.beta",         # numeric
-        "master.parameters.gamma",        # numeric
-    ]
+    # -----------------------------------------------------------------
+    # Build dictionary   path → [values …]   (only from --param now)
+    # -----------------------------------------------------------------
+    param_vals_map: dict[str, list] = {}
 
-    # ---- build design ------------------------------------------------
-    beta_vals = np.linspace(0.90, 0.99, 2).round(4).tolist()
-    gamma_vals = np.linspace(1.5, 5.0, 2).round(3).tolist()
+    def _num_or_str(s: str):
+        try:
+            return float(s)
+        except ValueError:
+            return s
 
-    # Decide which methods to run, based on CLI flag
+    range_pat = re.compile(r"^([^:]+):([^:]+):([^:]+)$")
+
+    for spec in args.param:
+        if "=" not in spec:
+            raise ValueError(f"Malformed --param '{spec}'. Expected PATH=…")
+        path, rhs = spec.split("=", 1)
+        path = path.strip()
+
+        # range syntax PATH=min:max:N
+        m = range_pat.match(rhs)
+        if m:
+            lo, hi, n = float(m.group(1)), float(m.group(2)), int(m.group(3))
+            vals = np.linspace(lo, hi, n).tolist()
+        else:
+            # list syntax PATH=v1,v2,…
+            vals = [_num_or_str(v) for v in rhs.split(",") if v.strip()]
+            if not vals:
+                raise ValueError(f"No values supplied for --param '{spec}'.")
+
+        param_vals_map[path] = vals
+
+    # Final list of parameter paths (upper-envelope + whatever user supplied)
+    # -----------------------------------------------------------------
+    #  UE-method CLI handling  (unchanged)
+    # -----------------------------------------------------------------
+    _cli_methods = (
+        args.ue_methods.split(",") if args.ue_methods else []
+    ) + (args.ue_methods_list or [])
+    _cli_methods = [m.strip().upper() for m in _cli_methods if m.strip()]
+
     methods = (
-        ["FUES", "CONSAV", "DCEGM"]    # --ue-method ALL
-        if args.ue_method == "ALL"
-        else [args.ue_method]          # --ue-method FUES  (or CONSAV, DCEGM)
+        ["FUES", "CONSAV", "DCEGM"]        # default set
+        if not _cli_methods or "ALL" in _cli_methods
+        else sorted(set(_cli_methods))
     )
 
-    # Build a properly shaped array with placeholders for other parameters
-    rows = np.full((len(methods), 3), np.nan, dtype=object)
-    rows[:, 0] = methods    # First column = method names (cols 1-2 left as NaN)
 
-    samplers = [
-        FixedSampler(rows),                  # provides categorical column
-        FullGridSampler({
-            "master.parameters.beta": beta_vals,
-            "master.parameters.gamma": gamma_vals,
-        }),
-    ]
-    Ns = [None, None]  # Fixed rows + full grid
+    # -----------------------------------------------------------------
+    #  Build a single Cartesian grid = methods  ×  every --param
+    # -----------------------------------------------------------------
+    param_vals_map_full = {
+            "master.methods.upper_envelope": methods,   # e.g. ['FUES']
+            **param_vals_map,                          # β, γ, …
+                }
 
+    #print(param_vals_map_full)
+
+    samplers    = [FullGridSampler(param_vals_map_full)]
+    Ns          = [None]                 # placeholder required by build_design
+    param_paths = list(param_vals_map_full)
+
+    # meta tells build_design which paths are numeric vs categorical
     meta = {
-        # only the chosen methods
-        "master.methods.upper_envelope": {"enum": methods},
-        "master.parameters.beta":  {"values": beta_vals},
-        "master.parameters.gamma": {"values": gamma_vals},
     }
-
+    
+    print(meta)
     xs, _ = build_design(param_paths, samplers, Ns, meta, seed=0)
-    expected_rows = len(methods) * len(beta_vals) * len(gamma_vals)
     log.info("Design matrix built: %s rows", xs.shape[0])
+
+
+
 
     # ---- create runner ----------------------------------------------
     runner = CircuitRunner(
@@ -157,12 +223,40 @@ def main(argv=None) -> None:
     )
 
     # ---- run sweep ---------------------------------------------------
-    print(f"\nRunning parameter sweep with {len(methods)} method(s): {', '.join(methods)}")
-    print(f"Grid: {len(beta_vals)}×{len(gamma_vals)} (beta × gamma) = {expected_rows} combinations")
-    print(f"Total runs: {xs.shape[0]}")
+    print(f"\nRunning parameter sweep with {len(methods)} method(s): "
+          f"{', '.join(methods)}")
+    if param_vals_map:
+        dims = ", ".join(f"{Path(p).name}:{len(v)}"
+                         for p, v in param_vals_map.items())
+        print(f"Grid dims : {dims}")
+    print(f"Total runs : {xs.shape[0]}")
+    print(f"MPI active : {args.use_mpi}")
+    
+    if args.use_mpi and args.n_procs:
+        if xs.shape[0] != args.n_procs:
+            log.error(
+                "Number of parameter draws (%d) must equal --n-procs (%d) "
+                "when --use-mpi is specified!",
+                xs.shape[0], args.n_procs
+            )
+            sys.exit(1)
     
     tic = time.time()
-    df, models = mpi_map(runner, xs, mpi=False, return_models=True)
+    if args.use_mpi:
+        from mpi4py import MPI
+        comm = MPI.COMM_WORLD
+    else:
+        comm = None
+    result = mpi_map(runner, xs,
+                         mpi=args.use_mpi,
+                         comm=comm,
+                         return_models=True)
+
+    if comm.Get_rank() == 0:                        # only master has something
+        df, models = result              # <- safe to unpack
+        # … continue with tables / plots / file output …
+    else:
+        return                            # or just pass
     toc = time.time()
     log.info("Sweep finished in %.1f s", toc - tic)
 
@@ -223,14 +317,14 @@ def main(argv=None) -> None:
     print(tabulate(agg, headers="keys", tablefmt="grid", showindex=False))
     print("=" * 80)
 
+    
+
     result_metrics = {
         "summary": agg,
         "detailed": df,
         "models": models,
         "parameters": {
             "methods": methods,
-            "beta_vals": beta_vals,
-            "gamma_vals": gamma_vals,
             "periods": args.periods
         }
     }
@@ -247,6 +341,23 @@ def main(argv=None) -> None:
     # Save full results to CSV
     df.to_csv(output_file, index=False)
     print(f"\nDetailed results saved to '{output_file}'")
+
+    # ------------------------------------------------------------------
+    # Save LaTeX summary table in the *same* folder as the CSV
+    # ------------------------------------------------------------------
+    out_path  = Path(output_file).expanduser().resolve()
+    tex_file  = out_path.with_suffix(".tex")          # same name, .tex extension
+
+    # pandas ≥ 1.3 lets you write a nicely formatted tabularx-friendly table
+    agg.to_latex(
+        tex_file,
+        index=False,
+        caption="Performance summary by upper–envelope method",
+        label="tab:fues_summary",
+        column_format="l" + "r" * (agg.shape[1] - 1)  # left-align 1st, right others
+    )
+
+    print(f"LaTeX summary saved to '{tex_file}'")
     
     return {
         "summary": result_metrics,
@@ -254,8 +365,6 @@ def main(argv=None) -> None:
         "models": models,
         "parameters": {
             "methods": methods,
-            "beta_vals": beta_vals,
-            "gamma_vals": gamma_vals,
             "periods": args.periods
         }
     }
