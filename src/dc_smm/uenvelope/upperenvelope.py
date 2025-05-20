@@ -74,6 +74,7 @@ def EGM_UE(
     lb: int = 3,
     rfc_radius: float = 0.75,
     rfc_n_iter: int = 20,
+    interpolate: bool = False,
 ) -> Tuple[Dict[str, np.ndarray], Dict[str, np.ndarray], Dict[str, np.ndarray]]:
     """Universal entry point for all upper-envelope algorithms.
 
@@ -117,7 +118,12 @@ def EGM_UE(
     ue_time = time.time() - t0
 
     # -------- interpolation -----------------------------------------
-    interpolated = fill_interpolated(refined, X_dcsn, uc_func_partial)
+    if interpolate:
+        interpolated = fill_interpolated(refined, X_dcsn, uc_func_partial)
+    else:
+        interpolated = {}
+
+
     interpolated["ue_time"] = ue_time
     refined["ue_time"] = ue_time
 
@@ -196,7 +202,7 @@ def _fues_engine(
         "v_dcsn_ref": qf_ref,
         "kappa_ref": kappa_ref,
         "x_cntn_ref": x_cntn_ref,
-        "lambda": uc_func_partial(kappa_ref),
+        "lambda_ref": uc_func_partial(kappa_ref),
     }
 
 
@@ -312,7 +318,7 @@ def _fues2dev_engine(
         "v_dcsn_ref": qf_ref,
         "kappa_ref": kappa_ref,
         "x_cntn_ref": x_cntn_ref,
-        "lambda": uc_func_partial(kappa_ref),
+        "lambda_ref": uc_func_partial(kappa_ref),
     }
 
 
@@ -355,7 +361,7 @@ def _fues2dev3_engine(
         "v_dcsn_ref": qf_ref,
         "kappa_ref": kappa_ref,
         "x_cntn_ref": x_cntn_ref,
-        "lambda": uc_func_partial(kappa_ref),
+        "lambda_ref": uc_func_partial(kappa_ref),
     }
 
 

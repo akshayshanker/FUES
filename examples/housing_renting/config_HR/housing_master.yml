@@ -13,7 +13,7 @@ connections_file: "connections.yml"
 # Model type and horizon specification
 # Note: In future versions, we will support infinite horizon with reusable stages
 model_type: "finite_horizon"  # Options: finite_horizon, infinite_horizon
-horizon: 5                    # Number of periods to create (for finite horizon)
+horizon: 20                    # Number of periods to create (for finite horizon)
 
 # Global parameters shared across all stages - Updated with Fella parameters
 parameters:
@@ -66,14 +66,14 @@ settings:
   # Grid parameters - Updated from Fella
   a_min: 0.01           # Minimum asset value
   a_max: 30.0           # Maximum asset value (Fella's grid_max_A)
-  a_points: 2000        # Number of asset grid points (Fella's grid_size)
+  a_points: 4000        # Number of asset grid points (Fella's grid_size)
   
   H_min: 0.0            # Minimum housing value
   H_max: 5.0            # Maximum housing value (Fella's grid_max_H)
-  H_points: 10           # Number of housing grid points (Fella's grid_size_H)
+  H_points: 15           # Number of housing grid points (Fella's grid_size_H)
   S_min: 0.0            # Minimum housing value
   S_max: 5.0            # Maximum housing value (Fella's grid_max_H)
-  S_points: 10           # Number of housing grid points (Fella's grid_size_H)
+  S_points: 15           # Number of housing grid points (Fella's grid_size_H)
   
   w_min: 0.01           # Minimum cash-on-hand
   w_max: 40.0           # Maximum cash-on-hand (increased to accommodate shock values)
@@ -81,16 +81,16 @@ settings:
   
   a_nxt_min: 0.01       # Minimum next-period asset value
   a_nxt_max: 30.0       # Maximum next-period asset value (matches a_max)
-  a_nxt_points: 2000    # Number of next-period asset grid points
+  a_nxt_points: 4000    # Number of next-period asset grid points
   
   # Income shock discretization - Now explicitly using Fella's values
   y_points: 3           # Number of shock grid points (length of z_vals)
   y_stop: 2 
-  m_bar: 1.8           # Upper envelope parameter for FUES
-  lb: 20                 # Look-back parameter for FUES
+  m_bar: 1.0001           # Upper envelope parameter for FUES
+  lb: 40                 # Look-back parameter for FUES
   rfc_radius: 0.75
   rfc_n_iter: 20
-  n_constraint_points: 10
+  n_constraint_points: 100
 
 ###################
 # 2) .math Section

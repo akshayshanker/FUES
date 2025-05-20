@@ -1,63 +1,14 @@
 import numpy as np
 import time  # Add import for timing
-from dc_smm.models.housing_renting.horses_common import _safe_interp, egm_preprocess # Use relative import
+from dc_smm.models.housing_renting.horses_common import (
+    _safe_interp, egm_preprocess
+)  # Use relative import
 from numba import njit
 from dc_smm.uenvelope.upperenvelope import EGM_UE
 from dc_smm.fues.helpers import interp_as
-from dynx.heptapodx.num.compile import compile_numba_function
 from typing import Dict, Callable
 
 
-@njit
-def interp_extrapolate_jumps(x_src: np.ndarray,
-                             y_src: np.ndarray,
-                             x_tgt: np.ndarray,
-                             jump_slope_thresh: float = 1e2) -> np.ndarray:
-    """
-    Hybrid interpolation with flat extrapolation outside [x_src[0], x_src[-1]].
-
-    • |Δy/Δx| ≤ thresh  → linear.
-    • |Δy/Δx| > thresh  → extrapolate from previous segment (or hold if j==0).
-    • x < x_src[0]      → y = y_src[0]  (flat left extrapolation).
-    • x ≥ x_src[-1]     → y = y_src[-1] (flat right extrapolation).
-    """
-    y_tgt = np.empty_like(x_tgt)
-    j = 0
-    for i, x in enumerate(x_tgt):
-
-        # ----- flat extrapolation on the left -----------------------
-        #if x <= x_src[0]:
-        #    y_tgt[i] = y_src[0]
-        #    continue
-
-        # move bracketing index
-        while j + 1 < x_src.size and x_src[j + 1] <= x:
-            j += 1
-
-        # ----- flat extrapolation on the right ---------------------
-        if j + 1 == x_src.size:
-            y_tgt[i] = y_src[-1]
-            continue
-
-        # ----- inside domain ---------------------------------------
-        dx = x_src[j + 1] - x_src[j]
-        dy = y_src[j + 1] - y_src[j]
-        slope = abs(dy) / dx
-
-        if slope > jump_slope_thresh and j > 0:
-            # extrapolate from previous branch
-            dx_prev = x - x_src[j]
-            slope_prev = (y_src[j] - y_src[j - 1]) / (x_src[j] - x_src[j - 1])
-            y_tgt[i] = y_src[j] + slope_prev * dx_prev
-        elif slope > jump_slope_thresh and j == 0:
-            # no previous point: fall back to flat hold
-            y_tgt[i] = y_src[j]
-        else:
-            # linear interpolation
-            t = (x - x_src[j]) / dx
-            y_tgt[i] = (1.0 - t) * y_src[j] + t * y_src[j + 1]
-
-    return y_tgt
 
 # --- Operator Factory for OWNC Consumption Choice ---
 def F_ownc_cntn_to_dcsn(mover):
@@ -88,7 +39,9 @@ def F_ownc_cntn_to_dcsn(mover):
         if method.upper() == "EGM":
             if lambda_cntn is None:
                 raise ValueError("lambda_cntn is required for EGM method.")
-            policy, vlu_dcsn, lambda_dcsn, ue_time_avg, egm_grids, policy_a = _solve_egm_loop(vlu_cntn, lambda_cntn, model)
+            policy, vlu_dcsn, lambda_dcsn, ue_time_avg, egm_grids, policy_a = (
+                _solve_egm_loop(vlu_cntn, lambda_cntn, model)
+            )
             # Include UE timing in the result
             timing_info = {
                 "ue_time_avg": ue_time_avg,
@@ -116,7 +69,9 @@ def F_ownc_cntn_to_dcsn(mover):
                 "timing": timing_info
             }
         else:
-            raise ValueError(f"Unknown solution method: {method}. Choose 'EGM' or 'VFI'.")
+            raise ValueError(
+                f"Unknown solution method: {method}. Choose 'EGM' or 'VFI'."
+            )
     
     return operator
 
@@ -173,7 +128,6 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
     Rfree = model.param.r + 1
     
     # Get settings using attribute-style access
-    settings = model.settings
     ue_method = model.methods["upper_envelope"]
     m_bar = model.settings_dict["m_bar"]
     lb = model.settings_dict["lb"]
@@ -185,10 +139,10 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
     n_H = vlu_cntn.shape[1]
     n_y = vlu_cntn.shape[2]
 
-    policy = np.zeros((n_w, n_H, n_y))
-    policy_a = np.zeros((n_w, n_H, n_y))
-    vlu_dcsn = np.zeros((n_w, n_H, n_y))
-    lambda_dcsn = np.zeros((n_w, n_H, n_y))
+    policy = np.empty((n_w, n_H, n_y))
+    policy_a = np.empty((n_w, n_H, n_y))
+    vlu_dcsn = np.empty((n_w, n_H, n_y))
+    lambda_dcsn = np.empty((n_w, n_H, n_y))
     
     # Track total UE time and count for averaging
     total_ue_time = 0.0
@@ -212,6 +166,7 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
 
     q_inv_func = compiled_funcs.inv_marginal_utility
     g_ve_h_ind = compiled_funcs.g_ve_h_ind
+    
     h_nxt_ind_array = g_ve_h_ind(H_ind = np.arange(n_H))
 
     if "RNT" in model.stage_name:
@@ -229,26 +184,58 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
         # add any extra constants referenced in expr_str
     }
     utility_func = build_njit_utility(expr_str, param_vals)
+
+    # ------------------------------------------------------------------
+    #  Vectorised pre-computation of c_egm for ALL (w,h,y) points
+    # ------------------------------------------------------------------
+    # 1.  Scale λ once
+    lam_scaled = beta * lambda_cntn * Rfree                     # shape (n_w,n_H_total,n_y)
+
+    # 2.  Map continuous-grid H-indices to decision-grid indices (renters need this)
+    lam_sel = np.take(lam_scaled, h_nxt_ind_array, axis=1)      # → (n_w,n_H,n_y)
+    vlu_sel = np.take(vlu_cntn , h_nxt_ind_array, axis=1)       # same mapping for value
+
+    # 3.  Broadcast housing values (after thorn) to (1,n_H,1)
+    H_bcast = (H_nxt_grid * thorn)[None, :, None]
+
+    # 4.  Evaluate inverse Euler in one NumPy call (NumPy broadcasts internally).
+    #     Use the pure-Python NumPy version behind the numba function via `.py_func`.
+    # Obtain a broadcasting-friendly version of the inverse-utility.
+    # If the stored function is a Numba dispatcher it *does* have .py_func;
+    # otherwise it is already a plain Python/Numpy function.
+    inv_mu = getattr(compiled_funcs.inv_marginal_utility, "py_func", 
+                     compiled_funcs.inv_marginal_utility)
+
+    # Evaluate for the whole (w,h,y) cube in one shot.  This relies on the
+    # function being written with NumPy ufuncs so it automatically
+    # broadcasts `lam_sel` (n_w,n_H,n_y) with `H_bcast` (1,n_H,1).
+    # If the function is purely scalar we could fall back to
+    # `np.vectorize`, but most models already express it in NumPy algebra.
+    c_egm_all = inv_mu(lam_sel, H_bcast)
+
+    interpf = lambda x, y: interp_as(x, y, w_grid, extrap=True)
+
     for i_y in range(n_y):
         for i_h in range(n_H):
 
-            i_h_nxt_ind = h_nxt_ind_array[i_h]
-            lambda_e = lambda_cntn[:, i_h_nxt_ind, i_y] 
-            vlu_e = vlu_cntn[:, i_h_nxt_ind, i_y]
-        
-            # Note even for renting, q_inc_func uses housing grid 
-            c_egm = q_inv_func(lambda_e=beta * lambda_e * Rfree, H_nxt=H_nxt_grid[i_h]*thorn)
+            # Slice the pre-computed λ, v and c cubes – no recomputation inside the loop
+            #lambda_e = lam_sel[:, i_h, i_y]
+            vlu_e    = vlu_sel[:, i_h, i_y]
+            c_egm    = c_egm_all[:, i_h, i_y]
+            H_val    = H_nxt_grid[i_h] * thorn
             m_egm = c_egm + a_nxt_grid
-            u_params = {"c": c_egm, "H_nxt": H_nxt_grid[i_h]*thorn}
+            u_params = {"c": c_egm, "H_nxt": H_val}
             vlu_v_egm = compiled_funcs.u_func(**u_params) + beta * vlu_e
             v_nxt_raw = beta * vlu_e
 
             # Process the EGM solution to ensure grid uniqueness
             if ue_method != "CONSAV":
-                m_egm_unique, vlu_v_egm_unique, c_egm_unique, a_nxt_grid_unique = egm_preprocess(
-                    m_egm, vlu_v_egm, c_egm, a_nxt_grid, beta, 
-                    compiled_funcs.u_func, vlu_e, n_con=n_con,
-                    h_nxt=H_nxt_grid[i_h]*thorn
+                m_egm_unique, vlu_v_egm_unique, c_egm_unique, a_nxt_grid_unique = (
+                    egm_preprocess(
+                        m_egm, vlu_v_egm, c_egm, a_nxt_grid, beta, 
+                        compiled_funcs.u_func, vlu_e, n_con=n_con,
+                        h_nxt=H_nxt_grid[i_h]*thorn
+                    )
                 )
                 #print("not CONSAV")
             else:
@@ -259,98 +246,64 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
 
             # Store unrefined grids (before upper envelope)
             grid_key = f"{i_y}-{i_h}"
-            unrefined_grids['e'][grid_key] = m_egm_unique.copy()
-            unrefined_grids['v'][grid_key] = vlu_v_egm_unique.copy()
-            unrefined_grids['c'][grid_key] = c_egm_unique.copy()
-            unrefined_grids['a'][grid_key] = a_nxt_grid_unique.copy()
-
+            unrefined_grids['e'][grid_key] = m_egm_unique
+            unrefined_grids['v'][grid_key] = vlu_v_egm_unique
+            unrefined_grids['c'][grid_key] = c_egm_unique
+            unrefined_grids['a'][grid_key] = a_nxt_grid_unique
             def partial_uc(c_vals):
-                return compiled_funcs.uc_func(**{"c": c_vals, "H_nxt": H_nxt_grid[i_h]*thorn})
-                
-            
-
-            H_val = H_nxt_grid[i_h] * thorn
-            
+                return compiled_funcs.uc_func(**{
+                    "c": c_vals, 
+                    "H_nxt": H_nxt_grid[i_h]*thorn
+                })
    
             # Get upper envelope solution and timing
             refined, _, _ = EGM_UE(
-                m_egm_unique, vlu_v_egm_unique,v_nxt_raw, c_egm_unique, a_nxt_grid_unique,
-                w_grid, partial_uc, u_func={"func": utility_func, "args": H_val},
+                m_egm_unique, vlu_v_egm_unique, v_nxt_raw, c_egm_unique, 
+                a_nxt_grid_unique, w_grid, partial_uc, 
+                u_func={"func": utility_func, "args": H_val},
                 ue_method=ue_method, m_bar=m_bar, lb=lb,
                 rfc_radius=rfc_radius, rfc_n_iter=rfc_n_iter
             )
             
-            # Unpack the results from the refined dictionary, aligning with retirement.py
-            # Prefer *_ref keys, fallback to non-suffixed for broader compatibility (e.g., SIMPLE engine)
-            m_refined = refined.get("x_dcsn_ref", refined.get("m", np.empty(0)))
-            v_refined = refined.get("v_dcsn_ref", refined.get("v", np.empty(0)))
-            c_refined = refined.get("kappa_ref", refined.get("c", np.empty(0))) # kappa_ref for consumption
-            a_refined = refined.get("x_cntn_ref", refined.get("a", np.empty(0))) # x_cntn_ref for next period assets
-            lambda_refined = refined.get("lambda_ref", refined.get("lambda", np.empty(0)))
+            # Unpack the results from the refined dictionary
+            # Prefer *_ref keys, fallback to non-suffixed for broader compatibility
+            m_refined = refined["x_dcsn_ref"]
+            v_refined = refined["v_dcsn_ref"]
+            c_refined = refined["kappa_ref"] # kappa_ref for consumption
+            a_refined = refined["x_cntn_ref"] # x_cntn_ref for next period assets
+            
+            lambda_refined = refined["lambda_ref"]
 
             if ue_method != "CONSAV":
-                v_inter = interp_as(m_refined, v_refined, w_grid, extrap=True)
+                
+                vlu_dcsn[:, i_h, i_y] = interpf(m_refined, v_refined)
+                policy[:, i_h, i_y]   = interpf(m_refined, c_refined)
+                #policy_a[:, i_h, i_y] = interpf(a_refined)
+                lambda_dcsn[:, i_h, i_y] = compiled_funcs.uc_func(**{
+                    "c": policy[:, i_h, i_y], 
+                    "H_nxt": H_nxt_grid[i_h]
+                })
 
-                # --- policies: step across jumps, linear inside branches -------
-                #c_inter = interp_extrapolate_jumps(m_refined, c_refined, w_grid,
-                #                                jump_slope_thresh=1000.011)  # tune if needed
-                #a_inter = interp_extrapolate_jumps(m_refined, a_refined, w_grid,
-                #                                jump_slope_thresh=1000.011)
-                c_inter = interp_as(m_refined, c_refined, w_grid, extrap=True)
-                a_inter = interp_as(m_refined, a_refined, w_grid, extrap=True)
             else:
-                c_inter = c_refined
-                a_inter = a_refined
-                v_inter = v_refined
-            #lambda_inter = interp_as(m_refined, lambda_refined, w_grid, extrap=True)
+                vlu_dcsn[:, i_h, i_y] = v_refined
+                policy[:, i_h, i_y] = c_refined
+                policy_a[:, i_h, i_y] = a_refined
+                lambda_dcsn[:, i_h, i_y] = lambda_refined
+
             ue_time = refined.get("ue_time", 0.0)
             
-            # Store refined grids (after upper envelope) using consistently retrieved variables
-            refined_grids['e'][grid_key] = m_refined.copy() # cash-on-hand / endogenous grid
-            refined_grids['v'][grid_key] = v_refined.copy() # value function
-            refined_grids['c'][grid_key] = c_refined.copy() # consumption policy
-            refined_grids['a'][grid_key] = a_refined.copy() # asset policy
-            if lambda_refined.size > 0: # Only store if lambda was actually refined and returned
-                refined_grids['lambda'][grid_key] = lambda_refined.copy()
-            
+            # Store refined grids (after upper envelope) 
+            # using consistently retrieved variables
+            refined_grids['e'][grid_key] = m_refined # cash-on-hand / endogenous grid
+            refined_grids['v'][grid_key] = v_refined # value function
+            refined_grids['c'][grid_key] = c_refined # consumption policy
+            refined_grids['a'][grid_key] = a_refined # asset policy
+            refined_grids['lambda'][grid_key] = lambda_refined
+                            
             # Track upper envelope time
             total_ue_time += ue_time
             ue_count += 1
-
-            if len(m_refined) < 2 and ue_method != "CONSAV":
-                policy[:, i_h, i_y] = 0.95 * w_grid
-                vlu_dcsn[:, i_h, i_y] = compiled_funcs.u_func(**{"c": policy[:, i_h, i_y], "H_nxt": H_nxt_grid[i_h]})
-                lambda_dcsn[:, i_h, i_y] = compiled_funcs.uc_func(**{"c": policy[:, i_h, i_y], "H_nxt": H_nxt_grid[i_h]})
-                #policy_a[:, i_h, i_y] = a_refined
-            else:
-                policy[:, i_h, i_y] = c_inter
-                vlu_dcsn[:, i_h, i_y] = v_inter
-                lambda_dcsn[:, i_h, i_y] = compiled_funcs.uc_func(**{"c": c_inter, "H_nxt": H_nxt_grid[i_h]})
-                policy_a[:, i_h, i_y] = a_inter
-
-                policy[:, i_h, i_y] = np.minimum(policy[:, i_h, i_y], w_grid)
-                policy[:, i_h, i_y] = np.maximum(policy[:, i_h, i_y], 1e-10)
-
                 
-                #low_cash = (m_refined[0] > 0) & (w_grid < m_refined[0])
-                #if np.any(low_cash):
-                #    min_c_non_low = np.min(policy[~low_cash, i_h, i_y]) if np.any(~low_cash) else 1e-6
-                #    policy[low_cash, i_h, i_y] =w_grid[low_cash]
-                    #policy[low_cash, i_h, i_y] = np.maximum(policy[low_cash, i_h, i_y], 1e-10)
-                    
-                #    # Fix: Calculate policy_a individually for each low cash point
-                #    for i_w in np.where(low_cash)[0]:
-                #        w = w_grid[i_w]
-                #        c = policy[i_w, i_h, i_y]
-                #        policy_a[i_w, i_h, i_y] = max(w - c,1e-10)  # Ensure non-negative assets
-
-                #    for i_w, w in enumerate(w_grid):
-                #        if low_cash[i_w]:
-                #            u_params = {"c": policy[i_w, i_h, i_y], "H_nxt": H_nxt_grid[i_h]}
-                #            vlu_dcsn[i_w, i_h, i_y] = compiled_funcs.u_func(**u_params)
-                #            lambda_dcsn[i_w, i_h, i_y] = compiled_funcs.uc_func(**u_params)
-                 
-    
     # Calculate average UE time
     avg_ue_time = total_ue_time / max(ue_count, 1)
     
@@ -368,7 +321,10 @@ def _solve_vfi_loop(vlu_cntn, model):
     try:
         from quantecon.optimize.scalar_maximization import brent_max
     except ImportError:
-        raise ImportError("brent_max not found for VFI. Please install quantecon: pip install quantecon")
+        raise ImportError(
+            "brent_max not found for VFI. Please install quantecon: "
+            "pip install quantecon"
+        )
 
     # Use grid proxies for direct grid access
     w_grid = model.num.state_space.dcsn.grid.w
@@ -412,9 +368,17 @@ def _solve_vfi_loop(vlu_cntn, model):
                     lower_brent = lower_bound_a
                     upper_brent = upper_bound_a
                     try:
-                        a_nxt_opt, v_opt, _ = brent_max(bellman_objective, lower_brent, upper_brent, xtol=1e-6)
+                        a_nxt_opt, v_opt, _ = brent_max(
+                            bellman_objective, 
+                            lower_brent, 
+                            upper_brent, 
+                            xtol=1e-6
+                        )
                     except ValueError:
-                        print(f"Warning: brent_max failed at w={w_val}, h={i_h}, y={i_y}. Using endpoint.")
+                        print(
+                            f"Warning: brent_max failed at w={w_val}, "
+                            f"h={i_h}, y={i_y}. Using endpoint."
+                        )
                         val_at_lower = bellman_objective(lower_brent)
                         val_at_upper = bellman_objective(upper_brent)
                         if val_at_lower >= val_at_upper:
@@ -426,7 +390,10 @@ def _solve_vfi_loop(vlu_cntn, model):
                 
                 c_opt = w_val - a_nxt_opt
                 c_opt = max(c_opt, 1e-12)
-                lambda_opt = compiled_funcs.uc_func(**{"c": c_opt, "H_nxt": H_nxt_grid[i_h]})
+                lambda_opt = compiled_funcs.uc_func(**{
+                    "c": c_opt, 
+                    "H_nxt": H_nxt_grid[i_h]
+                })
 
                 policy[i_w, i_h, i_y] = c_opt
                 vlu_dcsn[i_w, i_h, i_y] = v_opt

@@ -46,7 +46,7 @@ def f(x):
     return x * np.cos(x-4)
 
 
-@njit
+@njit(cache=True)
 def interp_as(xp, yp, x, extrap=False):
     """Function  interpolates 1D
     with linear extraplolation

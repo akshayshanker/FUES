@@ -331,7 +331,7 @@ def format_period_metrics(results_df):
 
 def format_stage_metrics(results_df):
     """
-    Format stage-by-stage metrics into a table.
+    Format average stage metrics by method, grouped by stage name.
     
     Parameters
     ----------
@@ -341,18 +341,20 @@ def format_stage_metrics(results_df):
     Returns
     -------
     str
-        Formatted table string for each method
+        Formatted table of average stage timings by method
     """
     # Ensure tabulate module is available
     try:
         import tabulate
+        import pandas as pd
+        from collections import defaultdict
     except ImportError:
         return "Error: tabulate module not available. Install with 'pip install tabulate'"
         
-    tables = []
+    method_tables = []
     
     for i, row in results_df.iterrows():
-        method = row.get("master.operator.upper_envelope", "Unknown")
+        method = row.get("master.methods.upper_envelope", "Unknown")
         stage_timings = row.get("stage_timings", [])
         
         # Handle case where stage_timings might be a string representation of a list
@@ -370,51 +372,66 @@ def format_stage_metrics(results_df):
                     stage_timings = []
         
         if not stage_timings:
-            tables.append(f"\n{method} - No stage timing data available")
+            method_tables.append(f"\n{method} - No stage timing data available")
             continue
-            
-        # Create stage data table - focus on slowest stages
-        stage_data = []
         
-        # Sort stages by total time (descending)
-        try:
-            sorted_stages = sorted(stage_timings, key=lambda x: x.get("total_time", 0), reverse=True)[:5]  # Top 5 slowest
+        # Filter out terminal stages and group by stage name
+        stage_groups = defaultdict(list)
+        
+        for stage_info in stage_timings:
+            stage_name = stage_info.get("stage_name", "Unknown")
+            is_terminal = stage_info.get("is_terminal", False)
             
-            for stage in sorted_stages:
-                stage_name = stage.get("stage_name", "Unknown")
-                is_terminal = stage.get("is_terminal", False)
-                total_time = stage.get("total_time", 0.0)
-                cntn_to_dcsn_time = stage.get("cntn_to_dcsn_time", 0.0)
-                dcsn_to_arvl_time = stage.get("dcsn_to_arvl_time", 0.0)
-                ue_time = stage.get("ue_time", 0.0)
+            # Skip terminal stages
+            if is_terminal:
+                continue
                 
-                # Calculate UE percentage for non-terminal stages
-                ue_percent = (ue_time / total_time * 100) if not is_terminal and total_time > 0 else 0.0
+            # Add to the appropriate group
+            stage_groups[stage_name].append(stage_info)
+        
+        # Calculate averages for each stage
+        avg_data = []
+        
+        for stage_name, stage_list in stage_groups.items():
+            if not stage_list:
+                continue
                 
-                stage_data.append([
-                    stage_name,
-                    "Yes" if is_terminal else "No",
-                    f"{total_time:.4f}s",
-                    f"{cntn_to_dcsn_time:.4f}s",
-                    f"{dcsn_to_arvl_time:.4f}s",
-                    f"{ue_time:.4f}s" if not is_terminal else "N/A",
-                    f"{ue_percent:.2f}%" if not is_terminal else "N/A"
-                ])
-        except Exception as e:
-            tables.append(f"\n{method} - Error processing stage timings: {e}")
-            continue
+            # Calculate averages
+            avg_total = sum(s.get("total_time", 0.0) for s in stage_list) / len(stage_list)
+            avg_cntn_to_dcsn = sum(s.get("cntn_to_dcsn_time", 0.0) for s in stage_list) / len(stage_list)
+            avg_dcsn_to_arvl = sum(s.get("dcsn_to_arvl_time", 0.0) for s in stage_list) / len(stage_list)
+            avg_ue = sum(s.get("ue_time", 0.0) for s in stage_list) / len(stage_list)
+            
+            # Calculate UE percentage
+            ue_percent = (avg_ue / avg_total * 100) if avg_total > 0 else 0.0
+            
+            # Count how many instances of this stage we averaged
+            count = len(stage_list)
+            
+            avg_data.append([
+                stage_name,
+                count,
+                f"{avg_total:.4f}s",
+                f"{avg_cntn_to_dcsn:.4f}s",
+                f"{avg_dcsn_to_arvl:.4f}s",
+                f"{avg_ue:.4f}s",
+                f"{ue_percent:.2f}%"
+            ])
+        
+        # Sort by average total time (descending)
+        avg_data.sort(key=lambda x: float(x[2][:-1]), reverse=True)
         
         # Create table
-        headers = ["Stage", "Terminal", "Total Time", "cntn→dcsn", "dcsn→arvl", "UE Time", "UE Percent"]
-        table = f"\n{method} - Top 5 Slowest Stages:\n" + tabulate.tabulate(
-            stage_data,
+        headers = ["Stage", "Count", "Avg Total", "Avg cntn→dcsn", "Avg dcsn→arvl", "Avg UE Time", "UE Percent"]
+        table = f"\n{method} - Average Stage Timings (Non-terminal only):\n" + tabulate.tabulate(
+            avg_data,
             headers=headers,
             tablefmt="grid"
         )
         
-        tables.append(table)
+        method_tables.append(table)
     
-    return "\n".join(tables)
+    return "\n".join(method_tables)
 
 
 def main(argv=None):
@@ -538,7 +555,7 @@ def main(argv=None):
     print("\nMetrics Summary:")
     print(format_metrics_table(results_df))
     #print(format_period_metrics(results_df))
-    #print(format_stage_metrics(results_df))
+    print(format_stage_metrics(results_df))
     
     # Generate plots if requested or if plot flag is set
     if args.plot or (not args.no_plots and models is not None):

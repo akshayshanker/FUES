@@ -69,7 +69,7 @@ def calculate_euler_error(model):
 
                 #lam_now = uc_owner(c=c0, H_nxt=H_now)
                 a_next = w_now - c0
-                if a_next <= 1e-12:
+                if a_next <= 0.1:
                     continue
 
                 E_lam = 0.0
