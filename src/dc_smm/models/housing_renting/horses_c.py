@@ -6,6 +6,7 @@ from dc_smm.models.housing_renting.horses_common import (
 from numba import njit
 from dc_smm.uenvelope.upperenvelope import EGM_UE
 from dc_smm.fues.helpers import interp_as
+from dynx.heptapodx.num.compile import compile_numba_function
 from typing import Dict, Callable
 
 
