@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Single-core (non-MPI) demo sweep for the housing-renting model
+# Single-core sweep for the housing-renting model
 # ------------------------------------------------------------------
 set -euo pipefail
 
@@ -7,29 +7,44 @@ set -euo pipefail
 # Resolve project root (= one directory above this script)
 # ------------------------------------------------------------------
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-
-# Add repo root to PYTHONPATH so "examples.…" imports work everywhere
 export PYTHONPATH="${ROOT_DIR}:${PYTHONPATH:-}"
 
-# (Optional) load the Python module on NCI – comment out if you activate
-# your own venv.  Remove or change the version if needed.
+# Load Python (no MPI module needed)
 module load python3/3.12.1 2>/dev/null || true
 
 # ------------------------------------------------------------------
-# Path to the Python driver & output location
+# Paths
 # ------------------------------------------------------------------
 PY_SCRIPT="${ROOT_DIR}/experiments/housing_renting/param_sweep.py"
 OUT_DIR="${ROOT_DIR}/results"
-OUT_FILE="${OUT_DIR}/single_core.csv"
+OUT_FILE="${OUT_DIR}/single_core_sweep.csv"
 mkdir -p "${OUT_DIR}"
 
+# ---- parameter grid -------------------------------------------------
+BETA_MIN=0.91
+BETA_MAX=0.99
+BETA_N=2
+
+GAMMA_MIN=1.5
+GAMMA_MAX=6.0
+GAMMA_N=2
+
+UE_METHODS="FUES,CONSAV"          # edit as needed
+
+# (optional) echo how many runs we expect
+IFS=',' read -r -a METHOD_ARR <<< "$UE_METHODS"
+METHODS_N=${#METHOD_ARR[@]}
+TOTAL_RUNS=$(( METHODS_N * BETA_N * GAMMA_N ))
+echo "Will run ${TOTAL_RUNS} parameter points on a single process."
+
 # ------------------------------------------------------------------
-# Launch the sweep (no --use-mpi ⇒ single process)
-# Extra CLI flags handed to this wrapper are forwarded.
+# Launch (serial)
 # ------------------------------------------------------------------
-python3 "${PY_SCRIPT}" \
-    --param master.parameters.beta=0.95:0.99:2 \
-    --param master.parameters.gamma=2.5:5.0:2 \
-    --ue-method FUES \
-    --output "${OUT_FILE}" \
-    "$@" 
+python3 "$PY_SCRIPT" \
+    --param master.parameters.beta="${BETA_MIN}:${BETA_MAX}:${BETA_N}" \
+    --param master.parameters.gamma="${GAMMA_MIN}:${GAMMA_MAX}:${GAMMA_N}" \
+    --ue-methods "$UE_METHODS" \
+    --output "$OUT_FILE" \
+    "$@"
+
+echo "Detailed results written to ${OUT_FILE}"

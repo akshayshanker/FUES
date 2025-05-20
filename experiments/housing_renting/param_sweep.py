@@ -252,7 +252,7 @@ def main(argv=None) -> None:
                          comm=comm,
                          return_models=True)
 
-    if comm.Get_rank() == 0:                        # only master has something
+    if args.use_mpi and comm.Get_rank() == 0 or not args.use_mpi:                        # only master has something
         df, models = result              # <- safe to unpack
         # … continue with tables / plots / file output …
     else:

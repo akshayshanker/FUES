@@ -20,8 +20,9 @@ wrapper below).
 """
 from __future__ import annotations
 
-from typing import Callable, Dict, Any, Protocol
+from typing import Callable, Dict, Any, Protocol, Optional, Tuple
 import time
+from numba import njit
 
 import numpy as np
 
@@ -199,6 +200,7 @@ def _fues_engine(
     }
 
 
+
 @register("DCEGM")
 def _dcegm_engine(
     x_dcsn_hat: np.ndarray,
@@ -270,6 +272,90 @@ def _rfc_engine(
         "kappa_ref": kappa_hat[mask],
         "x_cntn_ref": X_cntn[mask],
         "lambda_ref": lambda_egm[mask],
+    }
+
+
+@register("FUES2DEV")
+def _fues2dev_engine(
+    x_dcsn_hat: np.ndarray,
+    qf_hat: np.ndarray,
+    kappa_hat: np.ndarray,
+    X_cntn: np.ndarray,
+    *,
+    v_cntn: Optional[np.ndarray] = None,
+    X_dcsn: Optional[np.ndarray] = None,
+    uc_func_partial: Callable[[np.ndarray], np.ndarray],
+    m_bar: float = 1.2,
+    lb: int = 3,
+    **kwargs: Any,
+) -> Dict[str, np.ndarray]:
+    """Wrapper around optimized `FUES2DEV` implementation.
+
+    An optimized version with pre-allocated scratch buffers and true circular buffer.
+    Uses the same interface as the original FUES implementation.
+    """
+
+    try:
+        from dc_smm.fues.fues_2dev1 import FUES as fues2dev_alg  # noqa: WPS433  (runtime import)
+    except ImportError as err:
+        raise ImportError("FUES2DEV algorithm not importable") from err
+
+    # Guard against lb being a list (edge-case seen in original code)
+    lb_int = int(lb[0]) if isinstance(lb, (list, tuple)) else int(lb)
+
+    x_dcsn_ref, qf_ref, kappa_ref, x_cntn_ref, _ = fues2dev_alg(
+        x_dcsn_hat, qf_hat, kappa_hat, X_cntn, X_cntn, m_bar=m_bar, LB=lb_int
+    )
+
+    return {
+        "x_dcsn_ref": x_dcsn_ref,
+        "v_dcsn_ref": qf_ref,
+        "kappa_ref": kappa_ref,
+        "x_cntn_ref": x_cntn_ref,
+        "lambda": uc_func_partial(kappa_ref),
+    }
+
+
+@register("FUES2DEV3")
+def _fues2dev3_engine(
+    x_dcsn_hat: np.ndarray,
+    qf_hat: np.ndarray,
+    kappa_hat: np.ndarray,
+    X_cntn: np.ndarray,
+    *,
+    v_cntn: Optional[np.ndarray] = None,
+    X_dcsn: Optional[np.ndarray] = None,
+    uc_func_partial: Callable[[np.ndarray], np.ndarray],
+    m_bar: float = 1.2,
+    lb: int = 3,
+    **kwargs: Any,
+) -> Dict[str, np.ndarray]:
+    """Wrapper around optimized `FUES2DEV3` implementation.
+
+    An optimized version with pre-allocated scratch buffers, true circular buffer,
+    and improved left turn interpolation.
+    Uses the same interface as the original FUES implementation.
+    """
+
+    try:
+        from dc_smm.fues.fues_2dev3 import FUES as fues2dev3_alg  # noqa: WPS433  (runtime import)
+        from dc_smm.fues.helpers import correct_jumps1d
+    except ImportError as err:
+        raise ImportError("FUES2DEV3 algorithm not importable") from err
+
+    # Guard against lb being a list (edge-case seen in original code)
+    lb_int = int(lb[0]) if isinstance(lb, (list, tuple)) else int(lb)
+
+    x_dcsn_ref, qf_ref, kappa_ref, x_cntn_ref, _ = fues2dev3_alg(
+        x_dcsn_hat, qf_hat, kappa_hat, X_cntn, X_cntn, m_bar=m_bar, LB=lb_int
+    )
+
+    return {
+        "x_dcsn_ref": x_dcsn_ref,
+        "v_dcsn_ref": qf_ref,
+        "kappa_ref": kappa_ref,
+        "x_cntn_ref": x_cntn_ref,
+        "lambda": uc_func_partial(kappa_ref),
     }
 
 

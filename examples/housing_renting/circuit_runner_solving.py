@@ -425,8 +425,8 @@ def main(argv=None):
     parser.add_argument("--periods", type=int, default=3, help="Number of periods to simulate")
     parser.add_argument("--verbose", action="store_true", help="Print verbose output")
     parser.add_argument("--no-plots", action="store_true", help="Skip generating plots")
-    parser.add_argument("--ue-method", type=str, choices=["FUES", "CONSAV", "DCEGM", "ALL"], 
-                       default="ALL", help="Upper envelope method to use")
+    parser.add_argument("--ue-method", type=str, default="ALL",
+                       help="Upper envelope method(s) to use. Can be 'ALL', a single method name, or a comma-separated list/tuple: e.g., 'FUES,CONSAV' or '(FUES, DCEGM)'")
     parser.add_argument("--plot", action="store_true", help="Generate plots")
     if argv is None:
         argv = sys.argv[1:]
@@ -484,13 +484,38 @@ def main(argv=None):
     start_time = time.time()
     
     # Use sampler utilities to build the parameter design
+    VALID_METHODS = {"FUES", "FUES2DEV", "FUES2DEV3", "CONSAV", "DCEGM"}
+    
     if args.ue_method == "ALL":
-        methods = ["FUES", "CONSAV", "DCEGM"]
+        methods = ["FUES", "FUES2DEV", "FUES2DEV3", "CONSAV", "DCEGM"]
     else:
-        methods = [args.ue_method]
+        # Try to parse as tuple/list using ast.literal_eval
+        try:
+            import ast
+            parsed = ast.literal_eval(args.ue_method)
+            if isinstance(parsed, (list, tuple)):
+                methods = [m.strip().upper() for m in parsed]
+            else:
+                methods = [args.ue_method.strip().upper()]
+        except (ValueError, SyntaxError):
+            # Fall back to comma-separated parsing
+            methods = [m.strip().upper() for m in args.ue_method.split(',') if m.strip()]
+        
+        # Validate methods
+        unknown_methods = [m for m in methods if m not in VALID_METHODS]
+        if unknown_methods:
+            raise ValueError(f"Unknown method(s): {', '.join(unknown_methods)}. "
+                             f"Valid methods are: {', '.join(VALID_METHODS)}")
+        
+        # Deduplicate while preserving order
+        methods = [m for m in dict.fromkeys(methods)]
 
     samplers = [FixedSampler(np.array([[m] for m in methods], dtype=object))]
     Xs, _ = build_design(param_paths, samplers, Ns=[None], meta={}, seed=0)
+    print("Xs shape =", Xs.shape, "first row =", Xs[0])
+    print("cache =", runner.cache)
+    print("calling mpi_map ...")
+
     
     # Suppress matplotlib warnings
     import warnings
@@ -498,7 +523,7 @@ def main(argv=None):
                           message="set_ticklabels() should only be used with")
     
     # Run models with selected methods and get the full metrics
-    results_df, models = mpi_map(runner, Xs, mpi=False, return_models=True)
+    results_df, models = mpi_map(runner, Xs, mpi=False, comm= None, return_models=True)
 
 
     
@@ -513,8 +538,8 @@ def main(argv=None):
     # Format and display metrics tables
     print("\nMetrics Summary:")
     print(format_metrics_table(results_df))
-    print(format_period_metrics(results_df))
-    print(format_stage_metrics(results_df))
+    #print(format_period_metrics(results_df))
+    #print(format_stage_metrics(results_df))
     
     # Generate plots if requested or if plot flag is set
     if args.plot or (not args.no_plots and models is not None):

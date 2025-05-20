@@ -1,6 +1,6 @@
 """Fast upper-envelope algorithms."""
 from .fues import FUES 
-from .fues_opt import FUES as FUES_opt
+from .fues_2dev1 import FUES as FUES_opt
 from .dcegm import dcegm
 from .rfc_simple import rfc
 from .helpers import interp_as, upper_envelope   # re-export

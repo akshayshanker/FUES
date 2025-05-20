@@ -8,7 +8,56 @@ from dynx.heptapodx.num.compile import compile_numba_function
 from typing import Dict, Callable
 
 
+@njit
+def interp_extrapolate_jumps(x_src: np.ndarray,
+                             y_src: np.ndarray,
+                             x_tgt: np.ndarray,
+                             jump_slope_thresh: float = 1e2) -> np.ndarray:
+    """
+    Hybrid interpolation with flat extrapolation outside [x_src[0], x_src[-1]].
 
+    • |Δy/Δx| ≤ thresh  → linear.
+    • |Δy/Δx| > thresh  → extrapolate from previous segment (or hold if j==0).
+    • x < x_src[0]      → y = y_src[0]  (flat left extrapolation).
+    • x ≥ x_src[-1]     → y = y_src[-1] (flat right extrapolation).
+    """
+    y_tgt = np.empty_like(x_tgt)
+    j = 0
+    for i, x in enumerate(x_tgt):
+
+        # ----- flat extrapolation on the left -----------------------
+        #if x <= x_src[0]:
+        #    y_tgt[i] = y_src[0]
+        #    continue
+
+        # move bracketing index
+        while j + 1 < x_src.size and x_src[j + 1] <= x:
+            j += 1
+
+        # ----- flat extrapolation on the right ---------------------
+        if j + 1 == x_src.size:
+            y_tgt[i] = y_src[-1]
+            continue
+
+        # ----- inside domain ---------------------------------------
+        dx = x_src[j + 1] - x_src[j]
+        dy = y_src[j + 1] - y_src[j]
+        slope = abs(dy) / dx
+
+        if slope > jump_slope_thresh and j > 0:
+            # extrapolate from previous branch
+            dx_prev = x - x_src[j]
+            slope_prev = (y_src[j] - y_src[j - 1]) / (x_src[j] - x_src[j - 1])
+            y_tgt[i] = y_src[j] + slope_prev * dx_prev
+        elif slope > jump_slope_thresh and j == 0:
+            # no previous point: fall back to flat hold
+            y_tgt[i] = y_src[j]
+        else:
+            # linear interpolation
+            t = (x - x_src[j]) / dx
+            y_tgt[i] = (1.0 - t) * y_src[j] + t * y_src[j + 1]
+
+    return y_tgt
 
 # --- Operator Factory for OWNC Consumption Choice ---
 def F_ownc_cntn_to_dcsn(mover):
@@ -239,9 +288,18 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
             a_refined = refined.get("x_cntn_ref", refined.get("a", np.empty(0))) # x_cntn_ref for next period assets
             lambda_refined = refined.get("lambda_ref", refined.get("lambda", np.empty(0)))
 
-            c_inter = interp_as(m_refined, c_refined, w_grid, extrap=True)
-            a_inter = interp_as(m_refined, a_refined, w_grid, extrap=True)
-            v_inter = interp_as(m_refined, v_refined, w_grid, extrap=True)
+            if ue_method != "CONSAV":
+                v_inter = interp_as(m_refined, v_refined, w_grid, extrap=True)
+
+                # --- policies: step across jumps, linear inside branches -------
+                c_inter = interp_extrapolate_jumps(m_refined, c_refined, w_grid,
+                                                jump_slope_thresh=1000.011)  # tune if needed
+                a_inter = interp_extrapolate_jumps(m_refined, a_refined, w_grid,
+                                                jump_slope_thresh=1000.011)
+            else:
+                c_inter = c_refined
+                a_inter = a_refined
+                v_inter = v_refined
             #lambda_inter = interp_as(m_refined, lambda_refined, w_grid, extrap=True)
             ue_time = refined.get("ue_time", 0.0)
             
@@ -271,8 +329,8 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
                 policy[:, i_h, i_y] = np.minimum(policy[:, i_h, i_y], w_grid)
                 policy[:, i_h, i_y] = np.maximum(policy[:, i_h, i_y], 1e-10)
 
-                """
-                low_cash = w_grid < m_refined[0] and m_refined[0] > 0
+                
+                low_cash = (m_refined[0] > 0) & (w_grid < m_refined[0])
                 if np.any(low_cash):
                     min_c_non_low = np.min(policy[~low_cash, i_h, i_y]) if np.any(~low_cash) else 1e-6
                     policy[low_cash, i_h, i_y] = np.minimum(0.97 * w_grid[low_cash], min_c_non_low * 0.99)
@@ -289,7 +347,7 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
                             u_params = {"c": policy[i_w, i_h, i_y], "H_nxt": H_nxt_grid[i_h]}
                             vlu_dcsn[i_w, i_h, i_y] = compiled_funcs.u_func(**u_params)
                             lambda_dcsn[i_w, i_h, i_y] = compiled_funcs.uc_func(**u_params)
-                """ 
+                 
     
     # Calculate average UE time
     avg_ue_time = total_ue_time / max(ue_count, 1)
