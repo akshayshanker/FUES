@@ -86,7 +86,7 @@ settings:
   # Income shock discretization - Now explicitly using Fella's values
   y_points: 3           # Number of shock grid points (length of z_vals)
   y_stop: 2 
-  m_bar: 1.1           # Upper envelope parameter for FUES
+  m_bar: 1.8           # Upper envelope parameter for FUES
   lb: 20                 # Look-back parameter for FUES
   rfc_radius: 0.75
   rfc_n_iter: 20
@@ -218,6 +218,10 @@ math:
       vlu_v_egm: "alpha*np.log(c_egm) + (1-alpha)*np.log(kappa*(H_nxt+iota)) + beta*vlu_e"
       description: "Stage-specific EGM operations"
       compilation: "eval"
+    
+    rental_payment:
+        expr: "S = S; y = y; w_rent = w - P_r*S"
+        description: "Cash‑on‑hand after paying rent"
 
 
 # Global methods

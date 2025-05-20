@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.0dev2] - 2025-05-22 – MPI Parameter Sweep
+
+* Fix dumb plotting errors in housing_renting example plots. 
+* Convenience scripts for running MPI parameter sweeps for housing renting model
 
 
 ## [0.2.0dev1] - 2025-05-22 – MPI Parameter Sweep

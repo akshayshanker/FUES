@@ -80,8 +80,6 @@ stage:
         expr: "w = w; H=H; y=y"
         description: "Identity mapping from arrival to decision (no state change)"
       
-      # EGM operations from master
-      egm_operations: ["owner_egm_operations"]
 
       # Budget mapping from decision perch to continuation perch
       g_ve:
@@ -92,14 +90,6 @@ stage:
         expr: "H_nxt_ind = H_ind"
         description: "Identity mapping from housing choice to housing index"
 
-      # Stage‑specific EGM helper operations (owner path)
-      owner_egm_operations:  # SHOULD WE CALL THESE BY THEIR OPERATOR NAMES?
-        c_egm: "alpha/(beta*lambda_e)"
-        m_egm: "c_egm + a_nxt"
-        lambda_v_egm: "alpha/c_egm"
-        vlu_v_egm: "alpha*log(c_egm) + (1-alpha)*log(kappa*(H_nxt+iota)) + beta*vlu_e"
-        description: "Owner‑specific EGM convenience expressions"
-        compilation: "eval"
 
     constraints:
       budget:

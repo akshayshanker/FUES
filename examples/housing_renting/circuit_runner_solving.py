@@ -163,7 +163,6 @@ def initialize_housing_model(master_config, stage_configs, connections_config, n
     )
     
     compile_all_stages(model_circuit)
-    print("test")
     return model_circuit
 
 

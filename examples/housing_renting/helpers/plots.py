@@ -24,7 +24,7 @@ def generate_plots(model, method, image_dir):
     os.makedirs(policy_dir, exist_ok=True)
     
     # Generate EGM grid plots
-    print(f"\nGenerating EGM grid plots for {method}...")
+    #print(f"\nGenerating EGM grid plots for {method}...")
     
     # Get the first period for EGM plots
     first_period = model.get_period(0)
@@ -43,26 +43,26 @@ def generate_plots(model, method, image_dir):
     for H_idx in H_indices:
         plot_egm_grids(first_period, H_idx, y_idx, method, egm_dir)
     
-    print(f"EGM grid plots for {method} saved to {egm_dir}")
+    #print(f"EGM grid plots for {method} saved to {egm_dir}")
     
     # Generate policy function plots
-    print(f"\nGenerating policy function plots for {method}...")
+    #print(f"\nGenerating policy function plots for {method}...")
     
     # Always use period 0 as requested
     period_to_plot = model.get_period(0)
-    print(f"Plotting period 0 policies for {method}...")
+    #print(f"Plotting period 0 policies for {method}...")
     
     # Plot policy functions
     plot_dcsn_policy(period_to_plot, policy_dir)
-    print(f"Policy function plots for {method} saved to {policy_dir}")
+    #print(f"Policy function plots for {method} saved to {policy_dir}")
 
 def plot_dcsn_policy(first_period, image_dir):
     """Plot policy functions for the renting model.
     
     Parameters
     ----------
-    all_stages : list
-        List of stage dictionaries for each period
+    first_period : Period
+        Period object containing stage data
     image_dir : str
         Directory to save the output images
     """
@@ -71,10 +71,13 @@ def plot_dcsn_policy(first_period, image_dir):
     # 2. Housing choice policies
     # 3. Tenure choice policies
     
-    # Get the latest stage
-    #latest_stage = all_stages[-1]
     import matplotlib.pyplot as plt
     import os
+    import matplotlib.ticker as mticker
+    from matplotlib.colors import TABLEAU_COLORS
+
+    # Use a color cycle from Tableau colors
+    color_cycle = list(TABLEAU_COLORS.values())[:3]  # Get first three colors
 
     tenu_stage = first_period.get_stage("TENU")
     ownh_stage = first_period.get_stage("OWNH") 
@@ -96,13 +99,10 @@ def plot_dcsn_policy(first_period, image_dir):
     else:
         H_indices = list(range(len(H_nxt_grid)))  # Use all available indices
         
-    # Colors for different housing values
-    colors = ['blue', 'green', 'red']
-    
     # Plot consumption policy for different housing values
     for i, H_idx in enumerate(H_indices):
         h_val = H_nxt_grid[H_idx]
-        color = colors[i % len(colors)]
+        color = color_cycle[i % len(color_cycle)]
         owner_consumption = ownc_stage.dcsn.sol["policy"][:, H_idx, y_idx]
         ax1[0].plot(w_grid, owner_consumption, color=color, linestyle='-', 
                    label=f"Housing={h_val:.2f}")
@@ -128,7 +128,7 @@ def plot_dcsn_policy(first_period, image_dir):
     # Plot consumption policy for different rental service values
     for i, S_idx in enumerate(S_indices):
         s_val = S_grid[S_idx]
-        color = colors[i % len(colors)]
+        color = color_cycle[i % len(color_cycle)]
         renter_consumption = rntc_stage.dcsn.sol["policy"][:, S_idx, y_idx]
         ax1[1].plot(w_grid_rent, renter_consumption, color=color, linestyle='-', 
                    label=f"Services={s_val:.2f}")
@@ -148,13 +148,10 @@ def plot_dcsn_policy(first_period, image_dir):
     
     plt.tight_layout()
     fig1.savefig(os.path.join(image_dir, "consumption_policies.png"))
-    print(f"Consumption policies plot saved to {os.path.join(image_dir, 'consumption_policies.png')}")
+    #print(f"Consumption policies plot saved to {os.path.join(image_dir, 'consumption_policies.png')}")
     
     # 2. Housing choice policies plot
     fig2, ax2 = plt.subplots(1, 2, figsize=(12, 6))
-    
-    # Define colors for consistent styling
-    colors = ['blue', 'green', 'red']
     
     # Owner housing policy - plot for different housing values
     a_grid = ownh_stage.dcsn.grid.a
@@ -170,7 +167,7 @@ def plot_dcsn_policy(first_period, image_dir):
         # Plot housing policy for different current housing values
         for i, H_idx in enumerate(H_indices):
             h_val = H_grid[H_idx]
-            color = colors[i % len(colors)]
+            color = color_cycle[i % len(color_cycle)]
             
             H_policy_idx = ownh_stage.dcsn.sol["H_policy"][:, H_idx, y_idx]
             H_nxt_grid = ownh_stage.cntn.grid.H_nxt
@@ -199,7 +196,7 @@ def plot_dcsn_policy(first_period, image_dir):
         # Plot rental service policy for different income levels
         for i, y_idx in enumerate(y_indices):
             y_val = y_grid[y_idx]
-            color = colors[i % len(colors)]
+            color = color_cycle[i % len(color_cycle)]
             
             S_policy_idx = rnth_stage.dcsn.sol["S_policy"][:, y_idx]
             S_grid = rnth_stage.cntn.grid.S
@@ -216,7 +213,7 @@ def plot_dcsn_policy(first_period, image_dir):
     
     plt.tight_layout()
     fig2.savefig(os.path.join(image_dir, "housing_policies.png"))
-    print(f"Housing policies plot saved to {os.path.join(image_dir, 'housing_policies.png')}")
+    #print(f"Housing policies plot saved to {os.path.join(image_dir, 'housing_policies.png')}")
     
     # 3. Tenure choice plot
     fig3, ax3 = plt.subplots(figsize=(10, 6))
@@ -235,7 +232,7 @@ def plot_dcsn_policy(first_period, image_dir):
         # Plot tenure choice for different housing values
         for i, H_idx in enumerate(H_indices):
             h_val = H_grid[H_idx]
-            color = colors[i % len(colors)]
+            color = color_cycle[i % len(color_cycle)]
             
             tenure_policy = tenu_stage.dcsn.sol["tenure_policy"][:, H_idx, y_idx]
             
@@ -246,14 +243,17 @@ def plot_dcsn_policy(first_period, image_dir):
         ax3.set_title("Tenure Choice Policy by Housing Value (0 = Rent, 1 = Own)")
         ax3.set_xlabel("Assets (a)")
         ax3.set_ylabel("Tenure Choice")
+        
+        # Set fixed ticks for y-axis with proper labels
         ax3.set_yticks([0, 1])
         ax3.set_yticklabels(["Rent", "Own"])
+        
         ax3.legend()
         ax3.grid(True)
     
     plt.tight_layout()
     fig3.savefig(os.path.join(image_dir, "tenure_policy.png"))
-    print(f"Tenure policy plot saved to {os.path.join(image_dir, 'tenure_policy.png')}")
+    #print(f"Tenure policy plot saved to {os.path.join(image_dir, 'tenure_policy.png')}")
     
     # Close all figures
     plt.close('all')
@@ -283,7 +283,11 @@ def plot_endogenous_grids(first_period, image_dir):
     import matplotlib.pyplot as plt
     import seaborn as sns
     import numpy as np
-    from matplotlib.ticker import FormatStrFormatter
+    import matplotlib.ticker as mticker
+    from matplotlib.colors import TABLEAU_COLORS
+    
+    # Use a color cycle from Tableau colors
+    color_cycle = list(TABLEAU_COLORS.values())[:3]  # Get first three colors
     
     # Set seaborn style
     sns.set(style="white", rc={"font.size": 11, "axes.titlesize": 11, "axes.labelsize": 11})
@@ -291,16 +295,14 @@ def plot_endogenous_grids(first_period, image_dir):
     # 1. Plot unrefined vs refined grids for owner consumption
     fig1, axes1 = plt.subplots(1, 2, figsize=(12, 6))
     
-    # Colors for different housing values
-    colors = ['blue', 'green', 'red']
-    
     # Set common styling for both subplots
     for ax in axes1:
         ax.set_xlabel('Cash-on-Hand (w)', fontsize=11)
         ax.spines['right'].set_visible(False)
         ax.spines['top'].set_visible(False)
         ax.grid(True)
-        ax.yaxis.set_major_formatter(FormatStrFormatter("%.2f"))
+        # Use a proper formatter instead of manually setting tick labels
+        ax.yaxis.set_major_formatter(mticker.FormatStrFormatter("%.2f"))
     
     # Left plot: Value function
     axes1[0].set_ylabel('Value Function', fontsize=11)
@@ -323,7 +325,7 @@ def plot_endogenous_grids(first_period, image_dir):
     # Plot owner consumption grids
     for i, H_idx in enumerate(H_indices):
         h_val = H_nxt_grid[H_idx]
-        color = colors[i % len(colors)]
+        color = color_cycle[i % len(color_cycle)]
         grid_key = f"{y_idx}-{H_idx}"
         
         # Check if this grid key exists
@@ -375,7 +377,7 @@ def plot_endogenous_grids(first_period, image_dir):
     
     plt.tight_layout()
     fig1.savefig(os.path.join(image_dir, "ownc_endogenous_grids.png"))
-    print(f"Owner consumption endogenous grids plot saved to {os.path.join(image_dir, 'ownc_endogenous_grids.png')}")
+    #print(f"Owner consumption endogenous grids plot saved to {os.path.join(image_dir, 'ownc_endogenous_grids.png')}")
     
     # 2. Plot unrefined vs refined grids for renter consumption
     fig2, axes2 = plt.subplots(1, 2, figsize=(12, 6))
@@ -386,7 +388,8 @@ def plot_endogenous_grids(first_period, image_dir):
         ax.spines['right'].set_visible(False)
         ax.spines['top'].set_visible(False)
         ax.grid(True)
-        ax.yaxis.set_major_formatter(FormatStrFormatter("%.2f"))
+        # Use a proper formatter instead of manually setting tick labels
+        ax.yaxis.set_major_formatter(mticker.FormatStrFormatter("%.2f"))
     
     # Left plot: Value function
     axes2[0].set_ylabel('Value Function', fontsize=11)
@@ -409,7 +412,7 @@ def plot_endogenous_grids(first_period, image_dir):
     # Plot renter consumption grids
     for i, S_idx in enumerate(S_indices):
         s_val = S_grid[S_idx]
-        color = colors[i % len(colors)]
+        color = color_cycle[i % len(color_cycle)]
         grid_key = f"{y_idx}-{S_idx}"
         
         # Check if this grid key exists
@@ -461,7 +464,7 @@ def plot_endogenous_grids(first_period, image_dir):
     
     plt.tight_layout()
     fig2.savefig(os.path.join(image_dir, "rntc_endogenous_grids.png"))
-    print(f"Renter consumption endogenous grids plot saved to {os.path.join(image_dir, 'rntc_endogenous_grids.png')}")
+    #print(f"Renter consumption endogenous grids plot saved to {os.path.join(image_dir, 'rntc_endogenous_grids.png')}")
     
     # Close all figures
     plt.close('all') 
@@ -486,7 +489,8 @@ def plot_egm_grids(period, H_idx, y_idx, method, image_dir):
     import matplotlib.pyplot as plt
     import seaborn as sns
     import numpy as np
-    from matplotlib.ticker import FormatStrFormatter, MaxNLocator
+    import matplotlib.ticker as mticker
+    from matplotlib.colors import TABLEAU_COLORS
     import os
     
     # Get the owner consumption stage from the period
@@ -494,14 +498,14 @@ def plot_egm_grids(period, H_idx, y_idx, method, image_dir):
     
     # Check if EGM grids are available
     if "EGM" not in ownc_stage.dcsn.sol:
-        print(f"EGM grid data not available for period {period.time_index}. Skipping plot.")
+        #print(f"EGM grid data not available for period {period.time_index}. Skipping plot.")
         return
     
     # Extract grid data
     grid_key = f"{y_idx}-{H_idx}"
     
     if grid_key not in ownc_stage.dcsn.sol["EGM"]["unrefined"]["e"]:
-        print(f"Grid key {grid_key} not found in EGM data. Available keys: {list(ownc_stage.dcsn.sol['EGM']['unrefined']['e'].keys())}")
+        #print(f"Grid key {grid_key} not found in EGM data. Available keys: {list(ownc_stage.dcsn.sol['EGM']['unrefined']['e'].keys())}")
         return
     
     # Unrefined grids
@@ -568,7 +572,14 @@ def plot_egm_grids(period, H_idx, y_idx, method, image_dir):
     ax[0].spines['bottom'].set_visible(False)
     ax[0].legend(frameon=False, prop={'size': 10})
     ax[0].grid(True)
-    ax[0].yaxis.set_major_locator(MaxNLocator(6))
+    
+    # Use MaxNLocator to set a fixed number of ticks
+    ax[0].yaxis.set_major_locator(mticker.MaxNLocator(6))
+    ax[0].xaxis.set_major_locator(mticker.MaxNLocator(6))
+    
+    # Set formatters after setting locators
+    ax[0].yaxis.set_major_formatter(mticker.FormatStrFormatter("%.3f"))
+    ax[0].xaxis.set_major_formatter(mticker.FormatStrFormatter("%.0f"))
     
     # Plot housing choice
     ax[1].scatter(
@@ -598,19 +609,14 @@ def plot_egm_grids(period, H_idx, y_idx, method, image_dir):
     ax[1].spines['left'].set_visible(False)
     ax[1].spines['bottom'].set_visible(False)
     ax[1].grid(True)
-    ax[1].yaxis.set_major_locator(MaxNLocator(6))
     
-    # Format tick labels
-    ax[0].set_yticklabels(ax[0].get_yticks(), size=9)
-    ax[0].set_xticklabels(ax[0].get_xticks(), size=9)
-    ax[1].set_yticklabels(ax[1].get_yticks(), size=9)
-    ax[1].set_xticklabels(ax[1].get_xticks(), size=9)
+    # Use MaxNLocator to set a fixed number of ticks
+    ax[1].yaxis.set_major_locator(mticker.MaxNLocator(6))
+    ax[1].xaxis.set_major_locator(mticker.MaxNLocator(6))
     
-    # Format tick values
-    ax[0].yaxis.set_major_formatter(FormatStrFormatter("%.3f"))
-    ax[0].xaxis.set_major_formatter(FormatStrFormatter("%.0f"))
-    ax[1].yaxis.set_major_formatter(FormatStrFormatter("%.0f"))
-    ax[1].xaxis.set_major_formatter(FormatStrFormatter("%.0f"))
+    # Set formatters after setting locators
+    ax[1].yaxis.set_major_formatter(mticker.FormatStrFormatter("%.0f"))
+    ax[1].xaxis.set_major_formatter(mticker.FormatStrFormatter("%.0f"))
     
     # Add title with method, housing value, and income index
     fig.suptitle(f"{method} Upper Envelope: H={h_value:.2f}, Income Index={y_value}", fontsize=12)
@@ -621,7 +627,7 @@ def plot_egm_grids(period, H_idx, y_idx, method, image_dir):
     # Save figure
     filename = f"egm_grid_H{H_idx}_y{y_idx}_period{period.time_index}_{method}.png"
     fig.savefig(os.path.join(image_dir, filename))
-    print(f"EGM grid plot saved to {os.path.join(image_dir, filename)}")
+    #print(f"EGM grid plot saved to {os.path.join(image_dir, filename)}")
     
     # Close figure
     plt.close(fig)
@@ -662,13 +668,19 @@ def plot_egm_grids(period, H_idx, y_idx, method, image_dir):
     ax2.legend(frameon=False, prop={'size': 11})
     ax2.grid(True)
     
+    # Use locators before formatters to ensure fixed number of ticks
+    ax2.xaxis.set_major_locator(mticker.MaxNLocator(6))
+    ax2.yaxis.set_major_locator(mticker.MaxNLocator(6))
+    ax2.xaxis.set_major_formatter(mticker.FormatStrFormatter("%.1f"))
+    ax2.yaxis.set_major_formatter(mticker.FormatStrFormatter("%.1f"))
+    
     # Add title with method, housing value, and income index
     ax2.set_title(f"{method} Upper Envelope: H={h_value:.2f}, Income Index={y_value}", fontsize=12)
     
     # Save figure
     filename2 = f"egm_grid_he_space_H{H_idx}_y{y_idx}_period{period.time_index}_{method}.png"
     fig2.savefig(os.path.join(image_dir, filename2))
-    print(f"EGM grid h-e space plot saved to {os.path.join(image_dir, filename2)}")
+    #print(f"EGM grid h-e space plot saved to {os.path.join(image_dir, filename2)}")
     
     # Close figure
     plt.close(fig2)

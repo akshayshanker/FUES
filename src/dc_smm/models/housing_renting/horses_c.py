@@ -292,10 +292,12 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
                 v_inter = interp_as(m_refined, v_refined, w_grid, extrap=True)
 
                 # --- policies: step across jumps, linear inside branches -------
-                c_inter = interp_extrapolate_jumps(m_refined, c_refined, w_grid,
-                                                jump_slope_thresh=1000.011)  # tune if needed
-                a_inter = interp_extrapolate_jumps(m_refined, a_refined, w_grid,
-                                                jump_slope_thresh=1000.011)
+                #c_inter = interp_extrapolate_jumps(m_refined, c_refined, w_grid,
+                #                                jump_slope_thresh=1000.011)  # tune if needed
+                #a_inter = interp_extrapolate_jumps(m_refined, a_refined, w_grid,
+                #                                jump_slope_thresh=1000.011)
+                c_inter = interp_as(m_refined, c_refined, w_grid, extrap=True)
+                a_inter = interp_as(m_refined, a_refined, w_grid, extrap=True)
             else:
                 c_inter = c_refined
                 a_inter = a_refined
@@ -330,23 +332,23 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
                 policy[:, i_h, i_y] = np.maximum(policy[:, i_h, i_y], 1e-10)
 
                 
-                low_cash = (m_refined[0] > 0) & (w_grid < m_refined[0])
-                if np.any(low_cash):
-                    min_c_non_low = np.min(policy[~low_cash, i_h, i_y]) if np.any(~low_cash) else 1e-6
-                    policy[low_cash, i_h, i_y] = np.minimum(0.97 * w_grid[low_cash], min_c_non_low * 0.99)
-                    policy[low_cash, i_h, i_y] = np.maximum(policy[low_cash, i_h, i_y], 1e-10)
+                #low_cash = (m_refined[0] > 0) & (w_grid < m_refined[0])
+                #if np.any(low_cash):
+                #    min_c_non_low = np.min(policy[~low_cash, i_h, i_y]) if np.any(~low_cash) else 1e-6
+                #    policy[low_cash, i_h, i_y] =w_grid[low_cash]
+                    #policy[low_cash, i_h, i_y] = np.maximum(policy[low_cash, i_h, i_y], 1e-10)
                     
-                    # Fix: Calculate policy_a individually for each low cash point
-                    for i_w in np.where(low_cash)[0]:
-                        w = w_grid[i_w]
-                        c = policy[i_w, i_h, i_y]
-                        policy_a[i_w, i_h, i_y] = max(w - c, 0.0)  # Ensure non-negative assets
+                #    # Fix: Calculate policy_a individually for each low cash point
+                #    for i_w in np.where(low_cash)[0]:
+                #        w = w_grid[i_w]
+                #        c = policy[i_w, i_h, i_y]
+                #        policy_a[i_w, i_h, i_y] = max(w - c,1e-10)  # Ensure non-negative assets
 
-                    for i_w, w in enumerate(w_grid):
-                        if low_cash[i_w]:
-                            u_params = {"c": policy[i_w, i_h, i_y], "H_nxt": H_nxt_grid[i_h]}
-                            vlu_dcsn[i_w, i_h, i_y] = compiled_funcs.u_func(**u_params)
-                            lambda_dcsn[i_w, i_h, i_y] = compiled_funcs.uc_func(**u_params)
+                #    for i_w, w in enumerate(w_grid):
+                #        if low_cash[i_w]:
+                #            u_params = {"c": policy[i_w, i_h, i_y], "H_nxt": H_nxt_grid[i_h]}
+                #            vlu_dcsn[i_w, i_h, i_y] = compiled_funcs.u_func(**u_params)
+                #            lambda_dcsn[i_w, i_h, i_y] = compiled_funcs.uc_func(**u_params)
                  
     
     # Calculate average UE time

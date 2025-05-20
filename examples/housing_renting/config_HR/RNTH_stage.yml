@@ -49,13 +49,7 @@ stage:
         description: "Identity mapping from arrival to decision (no state change)"
       
       g_ve: ["rental_payment"]    # Rental payment from master
-      
-      # Utility function not needed here as we only pass values to the next stage
-      
-      # Rental payment budget mapping
-      rental_payment:
-        expr: "S = S; y = y; w_rent = w - P_r*S"
-        description: "Cash‑on‑hand after paying rent"
+            
       
     constraints:
       budget_constraint:
