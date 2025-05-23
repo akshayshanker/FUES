@@ -24,6 +24,7 @@ stage:
     r_H: ["r_H"]              # Housing return from master
     phi: ["phi"]              # Transaction cost from master
     delta: ["delta"]          # Depreciation rate from master
+    delta_pb: ["delta_pb"]    # Present-bias weight from master
     gamma_1: ["gamma_1"]      # Fella parameter
     xi: ["xi"]                # Fella parameter
     m_bar: ["m_bar"]          # Upper envelope parameter for FUES

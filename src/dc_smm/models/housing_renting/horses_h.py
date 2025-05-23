@@ -1,7 +1,6 @@
 import numpy as np
-from scipy.interpolate import interp1d
 from numba import njit
-from dc_smm.models.housing_renting.horses_common import _safe_interp, housing_choice_solver, interp_as
+from dc_smm.models.housing_renting.horses_common import interp_as
 
 def F_shocks_dcsn_to_arvl(mover):
     """Create operator for shock integration in backward step.
@@ -51,7 +50,87 @@ def F_shocks_dcsn_to_arvl(mover):
     return operator
 
 @njit
-def renter_housing_choice_solver(w_grid, S_grid, y_grid, w_rent_grid, vlu_cntn, lambda_cntn, Pr, shock_grid):
+def housing_choice_solver_owner(resource_grid, h_grid, h_next_grid, w_grid, Q_cntn, v_cntn, lambda_cntn, tau, min_wealth):
+    """
+    Jitted function to solve the housing choice problem following Fella implementation.
+    
+    Parameters
+    ----------
+    resource_grid : 2D array (n_a, n_h)
+        Resources available at each (a,h) combination
+    h_grid : 1D array
+        Housing grid (current period)
+    h_next_grid : 1D array
+        Next-period housing choice grid
+    w_grid : 1D array
+        Wealth grid for interpolation
+    value_grids : list of 1D arrays
+        List of value function grids for each housing choice option
+    lambda_grids : list of 1D arrays
+        List of lambda function grids for each housing choice option
+    tau : float
+        Transaction cost parameter
+    min_wealth : float
+        Minimum wealth value
+    
+    Returns
+    -------
+    tuple
+    """
+    # Get dimensions
+    n_a, n_h = resource_grid.shape
+    n_h_next = len(h_next_grid)
+    
+    # Output arrays
+    best_Q = np.full((n_a, n_h), -np.inf)
+    best_lambda = np.zeros((n_a, n_h))
+    best_indices = np.zeros((n_a, n_h), dtype=np.int32)
+    best_v = np.zeros((n_a, n_h))
+    
+    # Loop over all states
+    for i_a in range(n_a):
+        for i_h in range(n_h):
+            # Current resource and housing values
+            resource = resource_grid[i_a, i_h]
+            h_current = h_grid[i_h]
+            
+            best_lambda[i_a, i_h] = 0
+            best_v[i_a, i_h]      = -np.inf
+            best_indices[i_a, i_h]= 0
+
+            # Try each housing choice option
+            for i_h_next in range(n_h_next):
+                h_next = h_next_grid[i_h_next]
+                
+                # Calculate transaction cost
+                chi = 0 if h_current == h_next else 1
+                trans_cost = chi * tau * np.abs(h_next)
+                
+                # Calculate wealth
+                w_dscn_val = resource + chi * (h_current - h_next) - trans_cost
+                
+                # Skip if wealth is below minimum
+                if w_dscn_val < min_wealth:
+                    continue
+                
+                # Get value and lambda through interpolation
+                # Using the value grid for this housing choice
+                #v_vals = Q_cntn[:,i_h_next]
+                #l_vals = lambda_grids[:,i_h_next]
+
+                maximand = interp_as(w_grid, Q_cntn[:,i_h_next], np.array([w_dscn_val]))[0]
+
+                # Update best choice if this is better
+                if maximand > best_Q[i_a, i_h]:
+                    best_Q[i_a, i_h] = maximand
+                    best_lambda[i_a, i_h] = interp_as(w_grid, lambda_cntn[:,i_h_next], np.array([w_dscn_val]))[0]
+                    best_v[i_a, i_h] = interp_as(w_grid, v_cntn[:,i_h_next], np.array([w_dscn_val]))[0]
+                    best_indices[i_a, i_h] = i_h_next
+    
+    return best_Q, best_v, best_lambda, best_indices 
+
+@njit
+def housing_choice_solver_renter(w_grid, S_grid, y_grid, w_rent_grid, q_cntn, vlu_cntn, lambda_cntn, Pr, shock_grid):
     """
     Jitted function to solve the renter housing choice problem.
     
@@ -64,7 +143,7 @@ def renter_housing_choice_solver(w_grid, S_grid, y_grid, w_rent_grid, vlu_cntn, 
     y_grid : 1D array
         Income shock grid indices
     w_rent_grid : 1D array
-        Post-rental wealth grid for interpolation
+        Post-decision wealth grid for interpolation
     vlu_cntn : 3D array (n_w_rent, n_S, n_y)
         Value function grid for continuation
     lambda_cntn : 3D array (n_w_rent, n_S, n_y)
@@ -77,7 +156,7 @@ def renter_housing_choice_solver(w_grid, S_grid, y_grid, w_rent_grid, vlu_cntn, 
     Returns
     -------
     tuple
-        (vlu_dcsn, lambda_dcsn, S_policy) arrays
+        (q_dcsn, vlu_dcsn, lambda_dcsn, S_policy) arrays
     """
     # Get dimensions
     n_w = len(w_grid)
@@ -86,6 +165,7 @@ def renter_housing_choice_solver(w_grid, S_grid, y_grid, w_rent_grid, vlu_cntn, 
     
     # Initialize output arrays
     vlu_dcsn = np.zeros((n_w, n_y))
+    q_dcsn = np.zeros((n_w, n_y))
     lambda_dcsn = np.zeros((n_w, n_y))
     S_policy = np.zeros((n_w, n_y), dtype=np.int32)
     
@@ -98,9 +178,10 @@ def renter_housing_choice_solver(w_grid, S_grid, y_grid, w_rent_grid, vlu_cntn, 
             w_dcsn_val = w_grid[i_w]
             
             # Initialize best values
-            best_value = -np.inf
-            best_lambda = 0.0
-            best_S_idx = 0
+            best_q = -np.inf
+            best_lambda = 0
+            best_S_idx = 0 
+            best_v = -np.inf
             
             # Try each rental service level
             for i_S in range(n_S):
@@ -115,55 +196,29 @@ def renter_housing_choice_solver(w_grid, S_grid, y_grid, w_rent_grid, vlu_cntn, 
                 
                 # Linear interpolation for value and lambda
                 # Handle boundary cases first
-                if w_cntn_val <= w_rent_grid[0]:
-                    vlu = vlu_cntn[0, i_S, i_y]
-                    lambda_val = lambda_cntn[0, i_S, i_y]
-                elif w_cntn_val >= w_rent_grid[-1]:
-                    vlu = vlu_cntn[-1, i_S, i_y]
-                    lambda_val = lambda_cntn[-1, i_S, i_y]
-                else:
-                    # Find position using binary search
-                    left = 0
-                    right = len(w_rent_grid) - 1
-                    
-                    while right - left > 1:
-                        mid = (left + right) // 2
-                        if w_rent_grid[mid] <= w_cntn_val:
-                            left = mid
-                        else:
-                            right = mid
-                    
-                    # Linear interpolation
-                    x_left = w_rent_grid[left]
-                    x_right = w_rent_grid[right]
-                    v_left = vlu_cntn[left, i_S, i_y]
-                    v_right = vlu_cntn[right, i_S, i_y]
-                    
-                    l_left = lambda_cntn[left, i_S, i_y]
-                    l_right = lambda_cntn[right, i_S, i_y]
-                    
-                    t = (w_cntn_val - x_left) / (x_right - x_left)
-                    vlu = v_left + t * (v_right - v_left)
-                    lambda_val = l_left + t * (l_right - l_left)
+                maximand = interp_as(w_rent_grid, q_cntn[:, i_S, i_y], np.array([w_cntn_val]))[0]
                 
                 # Update best choice if this is better
-                if vlu > best_value:
-                    best_value = vlu
-                    best_lambda = lambda_val
+                if maximand > best_q:
+                    best_q = maximand
+                    best_lambda = interp_as(w_rent_grid, lambda_cntn[:, i_S, i_y], np.array([w_cntn_val]))[0]
+                    best_v = interp_as(w_rent_grid, vlu_cntn[:, i_S, i_y], np.array([w_cntn_val]))[0]
                     best_S_idx = i_S
             
             # Store results
-            vlu_dcsn[i_w, i_y] = best_value
+            q_dcsn[i_w, i_y] = best_q
             lambda_dcsn[i_w, i_y] = best_lambda
             S_policy[i_w, i_y] = best_S_idx
+            vlu_dcsn[i_w, i_y] = best_v
     
-    return vlu_dcsn, lambda_dcsn, S_policy
+    return q_dcsn, vlu_dcsn, lambda_dcsn, S_policy
 
-def F_h_cntn_to_dcsn(mover):
+def F_h_cntn_to_dcsn_owner(mover):
     """Create operator for housing choice (for both owners and renters).
     
     Implements discrete housing choice through vectorized enumeration.
     Detects whether it's being called for owner or renter based on stage name.
+    Maximises present-biased payoff `Q_dcsn`; forwards lifetime `vlu`.
     
     Parameters
     ----------
@@ -213,73 +268,107 @@ def F_h_cntn_to_dcsn(mover):
     def operator(perch_data):
         vlu_cntn = perch_data["vlu"] 
         lambda_cntn = perch_data["lambda"]
+        Q_cntn = perch_data["Q"]   # objective
         
-        if is_renter:
-            # Use numba-optimized renter housing choice solver
-            vlu_dcsn, lambda_dcsn, S_policy = renter_housing_choice_solver(
-                w_grid, S_grid, y_grid, w_rent_grid, 
-                vlu_cntn, lambda_cntn, Pr, shock_grid
+
+        # Original owner housing choice implementation
+        n_a = len(a_grid)
+        n_H = len(H_grid)
+        n_y = len(y_grid)
+        n_H_nxt = len(H_nxt_grid)
+        
+        # Initialize output arrays
+        vlu_dcsn = np.zeros((n_a, n_H, n_y))
+        Q_dcsn = np.zeros((n_a, n_H, n_y))
+        lambda_dcsn = np.zeros((n_a, n_H, n_y))
+        H_policy = np.zeros((n_a, n_H, n_y), dtype=int)
+        
+        # Create resources matrix: (a,h) -> resources
+        a_mesh, H_mesh = np.meshgrid(a_grid, H_grid, indexing='ij')
+        
+        # Solve for each income state
+        for i_y, y_val in enumerate(shock_grid):
+            # Calculate resources for all asset-housing combinations
+            resources_liquid = (1 + r) * a_mesh + y_val
+            
+            Q_dcsn_sl, v_dcsn_sl, lambda_dcsn_sl, idx_sl = housing_choice_solver_owner(
+                resources_liquid, H_grid, H_nxt_grid, 
+                w_grid, Q_cntn[:,:,i_y],vlu_cntn[:,:,i_y], lambda_cntn[:,:,i_y], 
+                tau, w_grid[0]
             )
             
-            return {
-                "vlu": vlu_dcsn,
-                "lambda": lambda_dcsn,
-                "S_policy": S_policy
-            }
+            # Store results for this income state
+            lambda_dcsn[:, :, i_y] = lambda_dcsn_sl
+            H_policy[:, :, i_y] = idx_sl
+            Q_dcsn[:, :, i_y] = Q_dcsn_sl
+            vlu_dcsn[:, :, i_y] = v_dcsn_sl
             
-        else:
-            # Original owner housing choice implementation
-            n_a = len(a_grid)
-            n_H = len(H_grid)
-            n_y = len(y_grid)
-            n_H_nxt = len(H_nxt_grid)
-            
-            # Store the raw values for each housing choice and income level
-            value_grids = []
-            lambda_grids = []
-            
-            for i_h_nxt in range(n_H_nxt):
-                value_grids.append(w_grid)
-                lambda_grids.append(w_grid)
-                
-            # Initialize output arrays
-            vlu_dcsn = np.zeros((n_a, n_H, n_y))
-            lambda_dcsn = np.zeros((n_a, n_H, n_y))
-            H_policy = np.zeros((n_a, n_H, n_y), dtype=int)
-            
-            # Create resources matrix: (a,h) -> resources
-            a_mesh, H_mesh = np.meshgrid(a_grid, H_grid, indexing='ij')
-            
-            # Solve for each income state
-            #$print(y_grid)
-            for i_y, y_val in enumerate(shock_grid):
-                # Calculate resources for all asset-housing combinations
-                resources_liquid = (1 + r) * a_mesh + y_val
-                
-                # Prepare value grids for current income state
-                curr_value_grids = []
-                curr_lambda_grids = []
-                #print(y_grid)
-                for i_h_nxt in range(n_H_nxt):
-                    curr_value_grids.append(vlu_cntn[:, i_h_nxt, i_y])
-                    curr_lambda_grids.append(lambda_cntn[:, i_h_nxt, i_y])
-                
-                # Call jitted solver using Fella-style approach
-                best_values, best_lambdas, best_indices = housing_choice_solver(
-                    resources_liquid, H_grid, H_nxt_grid, 
-                    w_grid, curr_value_grids, curr_lambda_grids, 
-                    tau, w_grid[0]
-                )
-                
-                # Store results for this income state
-                vlu_dcsn[:, :, i_y] = best_values
-                lambda_dcsn[:, :, i_y] = best_lambdas
-                H_policy[:, :, i_y] = best_indices
-            
-            return {
-                "vlu": vlu_dcsn,
-                "lambda": lambda_dcsn,
-                "H_policy": H_policy
-            }
+        return {
+            "Q": Q_dcsn,
+            "vlu": vlu_dcsn,
+            "lambda": lambda_dcsn,
+            "H_policy": H_policy
+        }
+    
+    return operator
+
+def F_h_cntn_to_dcsn_renter(mover):
+    """Create operator for housing choice (for both owners and renters).
+    
+    Implements discrete housing choice through vectorized enumeration.
+    Detects whether it's being called for owner or renter based on stage name.
+    Maximises present-biased payoff `Q_dcsn`; forwards lifetime `vlu`.
+    
+    Parameters
+    ----------
+    mover : Mover
+        The cntn_to_dcsn mover with self-contained model
+        
+    Returns
+    -------
+    callable
+        The operator function that transforms cntn perch data to dcsn perch data
+    """
+    # Extract model
+    model = mover.model
+    # Get income shock information
+    shock_info = model.num.shocks.income_shock
+    shock_grid = shock_info.process.values
+    
+    # Determine if this is owner or renter housing stage
+    # Check mover.stage_name which should be prefixed with the stage type
+    is_renter = "RNTH" in mover.stage_name
+    
+    # Get grid data using grid proxies
+    # Renter housing choice grids
+    w_grid = model.num.state_space.dcsn.grids.w
+    y_grid = model.num.state_space.dcsn.grids.y
+    w_rent_grid = model.num.state_space.cntn.grids.w_rent  # Cash-on-hand after rental choice
+    S_grid = model.num.state_space.cntn.grids.S  # Rental services grid
+    
+    # Get parameters
+    params = model.param
+    Pr = params.Pr  # Rental price per unit
+
+    
+    def operator(perch_data):
+        vlu_cntn = perch_data["vlu"] 
+        lambda_cntn = perch_data["lambda"]
+        Q_cntn = perch_data["Q"]   # objective
+        
+        # Use numba-optimized renter housing choice solver
+        Q_dcsn, vlu_dcsn, lambda_dcsn, S_policy = housing_choice_solver_renter(
+            w_grid, S_grid, y_grid, w_rent_grid, 
+            Q_cntn, vlu_cntn, lambda_cntn, Pr, shock_grid
+        )
+        
+        return {
+            "Q": Q_dcsn,
+            "vlu": vlu_dcsn,
+            "lambda": lambda_dcsn,
+            "S_policy": S_policy
+        }
+        
+
     
     return operator 

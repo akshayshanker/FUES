@@ -1,13 +1,11 @@
 import numpy as np
 import time  # Add import for timing
 from dc_smm.models.housing_renting.horses_common import (
-    _safe_interp, egm_preprocess
+    _safe_interp, egm_preprocess, build_njit_utility, piecewise_gradient
 )  # Use relative import
 from numba import njit
 from dc_smm.uenvelope.upperenvelope import EGM_UE
 from dc_smm.fues.helpers import interp_as
-from dynx.heptapodx.num.compile import compile_numba_function
-from typing import Dict, Callable
 
 
 
@@ -40,7 +38,7 @@ def F_ownc_cntn_to_dcsn(mover):
         if method.upper() == "EGM":
             if lambda_cntn is None:
                 raise ValueError("lambda_cntn is required for EGM method.")
-            policy, vlu_dcsn, lambda_dcsn, ue_time_avg, egm_grids, policy_a = (
+            policy, vlu_dcsn, lambda_dcsn, ue_time_avg, egm_grids, policy_a, Q_dcsn = (
                 _solve_egm_loop(vlu_cntn, lambda_cntn, model)
             )
             # Include UE timing in the result
@@ -54,6 +52,7 @@ def F_ownc_cntn_to_dcsn(mover):
                 "policy_a": policy_a,
                 "vlu": vlu_dcsn,
                 "lambda": lambda_dcsn,
+                "Q": Q_dcsn,
                 "timing": timing_info,
                 "EGM": egm_grids  # Store both unrefined and refined grids
             }
@@ -77,43 +76,6 @@ def F_ownc_cntn_to_dcsn(mover):
     return operator
 
 
-def build_njit_utility(
-    expr: str,
-    params: Dict[str, float],
-    h_placeholder: str = "H_nxt",
-) -> Callable[[float, float], float]:
-    """
-    Compile a two-argument utility u(c, H) that is Numba nopython.
-
-    Parameters
-    ----------
-    expr : str
-        Raw expression, e.g. "alpha*np.log(c)+(1-alpha)*np.log(kappa*(H_nxt+iota))"
-    params : dict
-        Literal parameter values referenced in *expr* (alpha, kappa, …).
-    h_placeholder : str, optional
-        Token for housing inside *expr* (default "H_nxt").
-
-    Returns
-    -------
-    callable
-        nopython-compiled function u(c, H) → float
-    """
-
-    # 1.  replace the placeholder with a run-time variable name 'H'
-    #patched = expr.replace(h_placeholder, "H")
-    patched = expr.replace(h_placeholder, "H")
-
-    # 2.  build source code for a pure Python function
-    func_src = "def _u(c, H):\n    return " + patched
-
-    # 3.  execute in a tiny namespace containing numpy and constants
-    ns = {"np": np, **params}
-    exec(func_src, ns)          # defines _u in ns
-    py_func = ns["_u"]
-
-    # 4.  JIT-compile to nopython; result takes (c, H) positional args
-    return njit(py_func)
 
 # --- Private Solver Loop Helpers ---
 def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
@@ -126,6 +88,7 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
     # Get functions and parameters
     compiled_funcs = model.num.functions
     beta = model.param.beta
+    delta = model.param.delta_pb      # NEW
     Rfree = model.param.r + 1
     
     # Get settings using attribute-style access
@@ -143,6 +106,7 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
     policy = np.empty((n_w, n_H, n_y))
     policy_a = np.empty((n_w, n_H, n_y))
     vlu_dcsn = np.empty((n_w, n_H, n_y))
+    Q_dcsn = np.empty((n_w, n_H, n_y))
     lambda_dcsn = np.empty((n_w, n_H, n_y))
     
     # Track total UE time and count for averaging
@@ -152,14 +116,14 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
     # Store the unrefined and refined grids
     unrefined_grids = {
         'e': {},    # Endogenous grid points (cash-on-hand)
-        'v': {},    # Value function
+        'Q': {},    # Value function
         'c': {},    # Consumption policy
         'a': {}     # Asset policy
     }
     
     refined_grids = {
         'e': {},    # Refined endogenous grid points
-        'v': {},    # Refined value function
+        'Q': {},    # Refined value function
         'c': {},    # Refined consumption policy
         'a': {},    # Refined asset policy
         'lambda': {} # Refined marginal utility
@@ -190,7 +154,7 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
     #  Vectorised pre-computation of c_egm for ALL (w,h,y) points
     # ------------------------------------------------------------------
     # 1.  Scale λ once
-    lam_scaled = beta * lambda_cntn * Rfree                     # shape (n_w,n_H_total,n_y)
+    lam_scaled = beta * delta * lambda_cntn * Rfree                     # shape (n_w,n_H_total,n_y)
 
     # 2.  Map continuous-grid H-indices to decision-grid indices (renters need this)
     lam_sel = np.take(lam_scaled, h_nxt_ind_array, axis=1)      # → (n_w,n_H,n_y)
@@ -226,14 +190,14 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
             H_val    = H_nxt_grid[i_h] * thorn
             m_egm = c_egm + a_nxt_grid
             u_params = {"c": c_egm, "H_nxt": H_val}
-            vlu_v_egm = compiled_funcs.u_func(**u_params) + beta * vlu_e
-            v_nxt_raw = beta * vlu_e
+            q_egm = compiled_funcs.u_func(**u_params) + delta*beta * vlu_e
+            q_nxt_raw = delta*beta * vlu_e
 
             # Process the EGM solution to ensure grid uniqueness
             if ue_method != "CONSAV":
                 m_egm_unique, vlu_v_egm_unique, c_egm_unique, a_nxt_grid_unique = (
                     egm_preprocess(
-                        m_egm, vlu_v_egm, c_egm, a_nxt_grid, beta, 
+                        m_egm, q_egm, c_egm, a_nxt_grid, beta, 
                         compiled_funcs.u_func, vlu_e, n_con=n_con,
                         h_nxt=H_nxt_grid[i_h]*thorn
                     )
@@ -241,14 +205,14 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
                 #print("not CONSAV")
             else:
                 m_egm_unique = m_egm
-                vlu_v_egm_unique = vlu_v_egm
+                vlu_v_egm_unique = q_egm
                 c_egm_unique = c_egm
                 a_nxt_grid_unique = a_nxt_grid
 
             # Store unrefined grids (before upper envelope)
             grid_key = f"{i_y}-{i_h}"
             unrefined_grids['e'][grid_key] = m_egm_unique
-            unrefined_grids['v'][grid_key] = vlu_v_egm_unique
+            unrefined_grids['Q'][grid_key] = vlu_v_egm_unique
             unrefined_grids['c'][grid_key] = c_egm_unique
             unrefined_grids['a'][grid_key] = a_nxt_grid_unique
             def partial_uc(c_vals):
@@ -256,10 +220,13 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
                     "c": c_vals, 
                     "H_nxt": H_nxt_grid[i_h]*thorn
                 })
+
    
+            
+
             # Get upper envelope solution and timing
             refined, _, _ = EGM_UE(
-                m_egm_unique, vlu_v_egm_unique, v_nxt_raw, c_egm_unique, 
+                m_egm_unique, vlu_v_egm_unique, q_nxt_raw, c_egm_unique, 
                 a_nxt_grid_unique, w_grid, partial_uc, 
                 u_func={"func": utility_func, "args": H_val},
                 ue_method=ue_method, m_bar=m_bar, lb=lb,
@@ -269,7 +236,7 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
             # Unpack the results from the refined dictionary
             # Prefer *_ref keys, fallback to non-suffixed for broader compatibility
             m_refined = refined["x_dcsn_ref"]
-            v_refined = refined["v_dcsn_ref"]
+            q_refined = refined["v_dcsn_ref"]
             c_refined = refined["kappa_ref"] # kappa_ref for consumption
             a_refined = refined["x_cntn_ref"] # x_cntn_ref for next period assets
             
@@ -277,26 +244,49 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
 
             if ue_method != "CONSAV":
                 
-                vlu_dcsn[:, i_h, i_y] = interpf(m_refined, v_refined)
+                Q_dcsn[:, i_h, i_y] = interpf(m_refined, q_refined)
                 policy[:, i_h, i_y]   = interpf(m_refined, c_refined)
-                #policy_a[:, i_h, i_y] = interpf(a_refined)
-                lambda_dcsn[:, i_h, i_y] = compiled_funcs.uc_func(**{
-                    "c": policy[:, i_h, i_y], 
-                    "H_nxt": H_nxt_grid[i_h]
-                })
+
+                
+                # Calculate decision objective Q_dcsn for present-biased utility
+                #uc_today = compiled_funcs.uc_func(**{
+                #    "c": policy[:, i_h, i_y],
+                #    "H_nxt": H_nxt_grid[i_h]
+                #})
+                #c_prime = piecewise_gradient(policy[:, i_h, i_y], w_grid, m_bar=m_bar)
+                #lambda_dcsn[:, i_h, i_y] = (uc_today + (1-delta)*c_prime*uc_today) /delta
+                #vlu_dcsn[:, i_h, i_y] = (Q_dcsn[:, i_h, i_y] + u_func(c=policy[:, i_h, i_y], H_nxt=H_val))/delta
 
             else:
-                vlu_dcsn[:, i_h, i_y] = v_refined
+                Q_dcsn[:, i_h, i_y] = q_refined
                 policy[:, i_h, i_y] = c_refined
                 policy_a[:, i_h, i_y] = a_refined
                 lambda_dcsn[:, i_h, i_y] = lambda_refined
+
+            
+            policy[policy<0] = 1e-10
+
+                
+            # Calculate decision objective Q_dcsn for present-biased utility
+            uc_today = compiled_funcs.uc_func(**{
+                "c": policy[:, i_h, i_y],
+                "H_nxt": H_val
+            })
+
+            c_prime = piecewise_gradient(policy[:, i_h, i_y], w_grid, m_bar=m_bar)
+            #print(c_prime)
+            #print(policy[:, i_h, i_y])
+            lambda_dcsn[:, i_h, i_y] = (uc_today + (1-delta)*c_prime*uc_today) /delta
+            vlu_dcsn[:, i_h, i_y] = (Q_dcsn[:, i_h, i_y] - (1-delta)*compiled_funcs.u_func(c=policy[:, i_h, i_y], H_nxt=H_val))/delta
+
+            #lambda_dcsn[lambda_dcsn<0] = 1e-10
 
             ue_time = refined.get("ue_time", 0.0)
             
             # Store refined grids (after upper envelope) 
             # using consistently retrieved variables
             refined_grids['e'][grid_key] = m_refined # cash-on-hand / endogenous grid
-            refined_grids['v'][grid_key] = v_refined # value function
+            refined_grids['Q'][grid_key] = q_refined # value function
             refined_grids['c'][grid_key] = c_refined # consumption policy
             refined_grids['a'][grid_key] = a_refined # asset policy
             refined_grids['lambda'][grid_key] = lambda_refined
@@ -314,7 +304,7 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
         'refined': refined_grids
     }
     
-    return policy, vlu_dcsn, lambda_dcsn, avg_ue_time, egm_grids, policy_a
+    return policy, vlu_dcsn, lambda_dcsn, avg_ue_time, egm_grids, policy_a, Q_dcsn
 
 def _solve_vfi_loop(vlu_cntn, model):
     """Solves the consumption problem using the VFI loop with brent_max."""

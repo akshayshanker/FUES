@@ -20,6 +20,7 @@ stage:
     phi: ["phi"]              # Transaction cost from master (renamed from tau to phi)
     r_H: ["r_H"]              # Housing return from master
     delta: ["delta"]          # Depreciation rate from master
+    delta_pb: ["delta_pb"]    # Present-bias weight from master
     gamma_1: ["gamma_1"]      # Fella parameter from master
     xi: ["xi"]                # Fella parameter from master
     theta: ["theta"]          # Consumption weight from master

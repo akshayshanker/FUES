@@ -232,6 +232,7 @@ def main(argv=None):
     image_dir = create_image_dir()
     
     # Initialize model
+    #print("periods", args.periods)
     model_circuit = create_multi_period_model(n_periods=args.periods)
 
     # ------------------------------------------------------------------
@@ -255,21 +256,33 @@ def main(argv=None):
                     print(f"Warning: {stage_name}.cntn_to_dcsn has no model")
 
     # Solve the multi-period model - set verbose to True for detailed output
-    all_stages_solved = run_time_iteration(model_circuit, verbose=False)
+    all_stages_solved = run_time_iteration(model_circuit, n_periods=3, verbose=True)
 
-    # Generate and save plots
-    print("\nGenerating plots...")
-    
-    # Main policy plots from the model
-    generate_plots(model_circuit, args.ue_method, image_dir)
+    # ------------------------------------------------------------------
+    # Optional: customise axis limits here.  Each key → (xmin,xmax,ymin,ymax)
+    #   cons_owner, cons_renter, owner_housing, tenure,
+    #   egm_value,  egm_assets
+    # Leave dict empty to keep defaults.
+    # ------------------------------------------------------------------
+
+    BOUNDS = {
+        # example:
+        # "cons_owner" : (0, 20, 0, 15),
+         "egm_value"  : (18, 22, 2.8, 3.2),
+         "egm_assets" : (18, 22, 12, 16)
+    }
+
+    # Main policy & EGM plots
+    generate_plots(model_circuit, args.ue_method, image_dir,
+                   plot_period=1, bounds=BOUNDS)
 
 if __name__ == "__main__":
 
     # Pretend the script was called from the shell
                    # run it
-    main(["--periods", "3", "--ue-method", "CONSAV", "--plot"])
-    main(["--periods", "3", "--ue-method", "FUES", "--plot"])
-    main(["--periods", "3", "--ue-method", "DCEGM", "--plot"])
+    main(["--periods", "1", "--ue-method", "CONSAV", "--plot"])
+    main(["--periods", "1", "--ue-method", "FUES", "--plot"])
+    main(["--periods", "1", "--ue-method", "DCEGM", "--plot"])
 
     print("Done.")
     

@@ -1,7 +1,75 @@
 import numpy as np
 from scipy.interpolate import interp1d
-from numba import njit, prange
+from numba import njit
+from numba.typed import Dict    
+from typing import Callable   # NEW  – remove if unused        # NEW
 import time
+
+
+
+@njit
+def piecewise_gradient(f, x, m_bar, eps=1e-12):
+    """
+    Finite differences that
+      • never straddle jumps  |f[i+1]-f[i]| > c_bar
+      • enforce g[i]  > 0  (monotone, strictly)
+
+    Parameters
+    ----------
+    f      : 1-D ndarray, function values on a strictly-increasing grid
+    x      : 1-D ndarray, same length as f
+    c_bar  : float, threshold to flag a jump in *function* space
+    eps    : float, fallback slope if NO positive neighbour exists
+
+    Returns
+    -------
+    g      : 1-D ndarray, positive slope at each x[i]
+    """
+    n = len(x)
+    g_raw = np.empty(n)
+
+    # ---- pass 1: local finite differences, set NaN where invalid ----
+    for i in range(n):
+        left_ok  = (i > 0)   and (np.abs(f[i]   - f[i-1]) <= m_bar)
+        right_ok = (i < n-1) and (np.abs(f[i+1] - f[i]  ) <= m_bar)
+
+        if left_ok and right_ok:
+            g_raw[i] = (f[i+1] - f[i-1]) / (x[i+1] - x[i-1])
+        elif right_ok:
+            g_raw[i] = (f[i+1] - f[i])   / (x[i+1] - x[i])
+        elif left_ok:
+            g_raw[i] = (f[i]   - f[i-1]) / (x[i]   - x[i-1])
+        else:                       # isolated jump
+            g_raw[i] = np.nan       # mark as invalid
+
+        # mark non-positive slopes as invalid
+        if not np.isnan(g_raw[i]) and g_raw[i] <= 0.0:
+            g_raw[i] = np.nan
+
+    # ---- pass 2: replace NaNs with nearest positive neighbour ----
+    g = np.empty(n)
+    for i in range(n):
+        if not np.isnan(g_raw[i]):          # already positive
+            g[i] = g_raw[i]
+            continue
+
+        # search outward for nearest positive slope
+        offset = 1
+        replacement_found = False
+        while not replacement_found and (i-offset >= 0 or i+offset < n):
+            if i - offset >= 0 and not np.isnan(g_raw[i - offset]):
+                g[i] = g_raw[i - offset]
+                replacement_found = True
+            elif i + offset < n and not np.isnan(g_raw[i + offset]):
+                g[i] = g_raw[i + offset]
+                replacement_found = True
+            offset += 1
+
+        # ultimate fallback
+        if not replacement_found:
+            g[i] = eps
+
+    return g
 
 def uniqueEG(grid: np.ndarray, values: np.ndarray) -> np.ndarray:
     """Return a Boolean mask that keeps the *highest-value* entry for each
@@ -80,7 +148,7 @@ def F_id(mover):
     return operator
 
 @njit
-def interp_as(x_points, y_points, x_query, extrap=True):
+def interp_as(x_points, y_points, x_query, extrap=False):
     """Fast interpolation for array queries with optional extrapolation.
     
     This is a jitted version of the interpolation function used in the Fella model.
@@ -187,7 +255,7 @@ def fast_vectorized_interpolation(values_grid, policies_grid, wealth_grid, valid
     y_max = policies_grid[-1]
     
     # Process each point in parallel
-    for i in prange(n_a):
+    for i in range(n_a):
         for j in range(n_h):
             if valid_mask[i, j]:
                 valid_count += 1
@@ -227,110 +295,6 @@ def fast_vectorized_interpolation(values_grid, policies_grid, wealth_grid, valid
     
     return output, valid_count 
 
-@njit
-def housing_choice_solver(resource_grid, h_grid, h_next_grid, w_grid, value_grids, lambda_grids, tau, min_wealth):
-    """
-    Jitted function to solve the housing choice problem following Fella implementation.
-    
-    Parameters
-    ----------
-    resource_grid : 2D array (n_a, n_h)
-        Resources available at each (a,h) combination
-    h_grid : 1D array
-        Housing grid (current period)
-    h_next_grid : 1D array
-        Next-period housing choice grid
-    w_grid : 1D array
-        Wealth grid for interpolation
-    value_grids : list of 1D arrays
-        List of value function grids for each housing choice option
-    lambda_grids : list of 1D arrays
-        List of lambda function grids for each housing choice option
-    tau : float
-        Transaction cost parameter
-    min_wealth : float
-        Minimum wealth value
-    
-    Returns
-    -------
-    tuple
-        (best_values, best_lambdas, best_indices) arrays
-    """
-    # Get dimensions
-    n_a, n_h = resource_grid.shape
-    n_h_next = len(h_next_grid)
-    
-    # Output arrays
-    best_values = np.full((n_a, n_h), -np.inf)
-    best_lambdas = np.zeros((n_a, n_h))
-    best_indices = np.zeros((n_a, n_h), dtype=np.int32)
-    
-    # Loop over all states
-    for i_a in range(n_a):
-        for i_h in range(n_h):
-            # Current resource and housing values
-            resource = resource_grid[i_a, i_h]
-            h_current = h_grid[i_h]
-            
-            # Try each housing choice option
-            for i_h_next in range(n_h_next):
-                h_next = h_next_grid[i_h_next]
-                
-                # Calculate transaction cost
-                chi = 0 if h_current == h_next else 1
-                trans_cost = chi * tau * np.abs(h_next)
-                
-                # Calculate wealth
-                w_dscn_val = resource + chi * (h_current - h_next) - trans_cost
-                
-                # Skip if wealth is below minimum
-                if w_dscn_val < min_wealth:
-                    continue
-                
-                # Get value and lambda through interpolation
-                # Using the value grid for this housing choice
-                v_vals = value_grids[i_h_next]
-                l_vals = lambda_grids[i_h_next]
-                
-                # Linear interpolation
-                if w_dscn_val <= w_grid[0]:
-                    value = v_vals[0]
-                    lambda_val = l_vals[0]
-                elif w_dscn_val >= w_grid[-1]:
-                    value = v_vals[-1]
-                    lambda_val = l_vals[-1]
-                else:
-                    # Find position using binary search
-                    left = 0
-                    right = len(w_grid) - 1
-                    
-                    while right - left > 1:
-                        mid = (left + right) // 2
-                        if w_grid[mid] <= w_dscn_val:
-                            left = mid
-                        else:
-                            right = mid
-                    
-                    # Interpolate
-                    x_left = w_grid[left]
-                    x_right = w_grid[right]
-                    v_left = v_vals[left]
-                    v_right = v_vals[right]
-                    
-                    l_left = l_vals[left]
-                    l_right = l_vals[right]
-                    
-                    t = (w_dscn_val - x_left) / (x_right - x_left)
-                    value = v_left + t * (v_right - v_left)
-                    lambda_val = l_left + t * (l_right - l_left)
-                
-                # Update best choice if this is better
-                if value > best_values[i_a, i_h]:
-                    best_values[i_a, i_h] = value
-                    best_lambdas[i_a, i_h] = lambda_val
-                    best_indices[i_a, i_h] = i_h_next
-    
-    return best_values, best_lambdas, best_indices 
 
 def egm_preprocess(egrid, vf, c, a, beta, u_func, vf_next, Pi=None, i_z=None, i_h_prime=None, n_con=10, h_nxt=None):
     """
@@ -429,3 +393,42 @@ def egm_preprocess(egrid, vf, c, a, beta, u_func, vf_next, Pi=None, i_z=None, i_
     #a_unique = a_unique[sort_indices]
     
     return egrid_unique, vf_unique, c_unique, a_unique
+
+
+def build_njit_utility(
+    expr: str,
+    params: Dict[str, float],
+    h_placeholder: str = "H_nxt",
+) -> Callable[[float, float], float]:
+    """
+    Compile a two-argument utility u(c, H) that is Numba nopython.
+
+    Parameters
+    ----------
+    expr : str
+        Raw expression, e.g. "alpha*np.log(c)+(1-alpha)*np.log(kappa*(H_nxt+iota))"
+    params : dict
+        Literal parameter values referenced in *expr* (alpha, kappa, …).
+    h_placeholder : str, optional
+        Token for housing inside *expr* (default "H_nxt").
+
+    Returns
+    -------
+    callable
+        nopython-compiled function u(c, H) → float
+    """
+
+    # 1.  replace the placeholder with a run-time variable name 'H'
+    #patched = expr.replace(h_placeholder, "H")
+    patched = expr.replace(h_placeholder, "H")
+
+    # 2.  build source code for a pure Python function
+    func_src = "def _u(c, H):\n    return " + patched
+
+    # 3.  execute in a tiny namespace containing numpy and constants
+    ns = {"np": np, **params}
+    exec(func_src, ns)          # defines _u in ns
+    py_func = ns["_u"]
+
+    # 4.  JIT-compile to nopython; result takes (c, H) positional args
+    return njit(py_func)

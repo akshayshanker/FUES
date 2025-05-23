@@ -1,4 +1,4 @@
-def generate_plots(model, method, image_dir):
+def generate_plots(model, method, image_dir, plot_period=0, bounds=None):
     """
     Generate both EGM grid plots and policy function plots for a model using a specific method.
     
@@ -10,6 +10,10 @@ def generate_plots(model, method, image_dir):
         Upper envelope method used (FUES, DCEGM, etc.)
     image_dir : str
         Directory to save the output images
+    plot_period : int
+        Period to plot policy functions for
+    bounds : dict
+        Dictionary containing bounds for plots
     """
     # Import plotting functions
     import os
@@ -27,7 +31,7 @@ def generate_plots(model, method, image_dir):
     #print(f"\nGenerating EGM grid plots for {method}...")
     
     # Get the first period for EGM plots
-    first_period = model.get_period(0)
+    first_period = model.get_period(plot_period)
     
     # For the owner consumption stage
     ownc_stage = first_period.get_stage("OWNC")
@@ -41,7 +45,7 @@ def generate_plots(model, method, image_dir):
     
     # Plot EGM grid for three different housing values
     for H_idx in H_indices:
-        plot_egm_grids(first_period, H_idx, y_idx, method, egm_dir)
+        plot_egm_grids(first_period, H_idx, y_idx, method, egm_dir, bounds)
     
     #print(f"EGM grid plots for {method} saved to {egm_dir}")
     
@@ -49,14 +53,14 @@ def generate_plots(model, method, image_dir):
     #print(f"\nGenerating policy function plots for {method}...")
     
     # Always use period 0 as requested
-    period_to_plot = model.get_period(0)
+    period_to_plot = model.get_period(plot_period)
     #print(f"Plotting period 0 policies for {method}...")
     
     # Plot policy functions
-    plot_dcsn_policy(period_to_plot, policy_dir)
+    plot_dcsn_policy(period_to_plot, policy_dir, bounds)
     #print(f"Policy function plots for {method} saved to {policy_dir}")
 
-def plot_dcsn_policy(first_period, image_dir):
+def plot_dcsn_policy(first_period, image_dir, bounds=None):
     """Plot policy functions for the renting model.
     
     Parameters
@@ -65,6 +69,8 @@ def plot_dcsn_policy(first_period, image_dir):
         Period object containing stage data
     image_dir : str
         Directory to save the output images
+    bounds : dict
+        Dictionary containing bounds for plots
     """
     # We'll create three plots:
     # 1. Consumption policies for owners and renters
@@ -75,6 +81,9 @@ def plot_dcsn_policy(first_period, image_dir):
     import os
     import matplotlib.ticker as mticker
     from matplotlib.colors import TABLEAU_COLORS
+
+    if bounds is None:
+        bounds = {}
 
     # Use a color cycle from Tableau colors
     color_cycle = list(TABLEAU_COLORS.values())[:3]  # Get first three colors
@@ -141,10 +150,14 @@ def plot_dcsn_policy(first_period, image_dir):
     ax1[1].legend()
     ax1[1].grid(True)
 
-    ax1[0].set_xlim([0, 15])
-    ax1[1].set_xlim([0, 15])
-    ax1[0].set_ylim([0, 10])
-    ax1[1].set_ylim([0, 10])
+    # Allow user-specified axis limits via bounds dict
+    # keys: 'cons_owner', 'cons_renter' each → (xmin,xmax,ymin,ymax)
+    if "cons_owner" in bounds:
+        xmin,xmax,ymin,ymax = bounds["cons_owner"]
+        ax1[0].set_xlim([xmin,xmax]); ax1[0].set_ylim([ymin,ymax])
+    if "cons_renter" in bounds:
+        xmin,xmax,ymin,ymax = bounds["cons_renter"]
+        ax1[1].set_xlim([xmin,xmax]); ax1[1].set_ylim([ymin,ymax])
     
     plt.tight_layout()
     fig1.savefig(os.path.join(image_dir, "consumption_policies.png"))
@@ -211,6 +224,11 @@ def plot_dcsn_policy(first_period, image_dir):
         ax2[1].legend()
         ax2[1].grid(True)
     
+    # Owner housing limits
+    if "owner_housing" in bounds:
+        xmin,xmax,ymin,ymax = bounds["owner_housing"]
+        ax2[0].set_xlim([xmin,xmax]); ax2[0].set_ylim([ymin,ymax])
+    
     plt.tight_layout()
     fig2.savefig(os.path.join(image_dir, "housing_policies.png"))
     #print(f"Housing policies plot saved to {os.path.join(image_dir, 'housing_policies.png')}")
@@ -250,6 +268,11 @@ def plot_dcsn_policy(first_period, image_dir):
         
         ax3.legend()
         ax3.grid(True)
+    
+    # Tenure plot limits
+    if "tenure" in bounds:
+        xmin,xmax,ymin,ymax = bounds["tenure"]
+        ax3.set_xlim([xmin,xmax]); ax3.set_ylim([ymin,ymax])
     
     plt.tight_layout()
     fig3.savefig(os.path.join(image_dir, "tenure_policy.png"))
@@ -333,7 +356,7 @@ def plot_endogenous_grids(first_period, image_dir):
             # Unrefined grids (empty circles)
             axes1[0].scatter(
                 ownc_stage.dcsn.sol["EGM"]["unrefined"]["e"][grid_key],
-                ownc_stage.dcsn.sol["EGM"]["unrefined"]["v"][grid_key],
+                ownc_stage.dcsn.sol["EGM"]["unrefined"]["Q"][grid_key],
                 edgecolors=color, facecolors='none', s=30, label=f"Unrefined H={h_val:.2f}"
             )
             axes1[1].scatter(
@@ -345,7 +368,7 @@ def plot_endogenous_grids(first_period, image_dir):
             # Refined grids (filled markers)
             axes1[0].plot(
                 ownc_stage.dcsn.sol["EGM"]["refined"]["e"][grid_key],
-                ownc_stage.dcsn.sol["EGM"]["refined"]["v"][grid_key],
+                ownc_stage.dcsn.sol["EGM"]["refined"]["Q"][grid_key],
                 color='black', label=f"Refined H={h_val:.2f}"
             )
             axes1[1].plot(
@@ -420,7 +443,7 @@ def plot_endogenous_grids(first_period, image_dir):
             # Unrefined grids (empty circles)
             axes2[0].scatter(
                 rntc_stage.dcsn.sol["EGM"]["unrefined"]["e"][grid_key],
-                rntc_stage.dcsn.sol["EGM"]["unrefined"]["v"][grid_key],
+                rntc_stage.dcsn.sol["EGM"]["unrefined"]["Q"][grid_key],
                 edgecolors=color, facecolors='none', s=30, label=f"Unrefined S={s_val:.2f}"
             )
             axes2[1].scatter(
@@ -432,7 +455,7 @@ def plot_endogenous_grids(first_period, image_dir):
             # Refined grids (filled markers)
             axes2[0].scatter(
                 rntc_stage.dcsn.sol["EGM"]["refined"]["e"][grid_key],
-                rntc_stage.dcsn.sol["EGM"]["refined"]["v"][grid_key],
+                rntc_stage.dcsn.sol["EGM"]["refined"]["Q"][grid_key],
                 color=color, marker='x', s=30, label=f"Refined S={s_val:.2f}"
             )
             axes2[1].scatter(
@@ -469,7 +492,7 @@ def plot_endogenous_grids(first_period, image_dir):
     # Close all figures
     plt.close('all') 
 
-def plot_egm_grids(period, H_idx, y_idx, method, image_dir):
+def plot_egm_grids(period, H_idx, y_idx, method, image_dir, bounds=None):
     """
     Plot endogenous grids before and after upper envelope refinement in the style of example_egm_plot.py.
     
@@ -485,6 +508,8 @@ def plot_egm_grids(period, H_idx, y_idx, method, image_dir):
         Upper envelope method used (FUES, DCEGM, etc.)
     image_dir : str
         Directory to save the output images
+    bounds : dict
+        Dictionary containing bounds for plots
     """
     import matplotlib.pyplot as plt
     import seaborn as sns
@@ -493,6 +518,9 @@ def plot_egm_grids(period, H_idx, y_idx, method, image_dir):
     from matplotlib.colors import TABLEAU_COLORS
     import os
     
+    if bounds is None:
+        bounds = {}
+
     # Get the owner consumption stage from the period
     ownc_stage = period.get_stage("OWNC")
     
@@ -510,14 +538,14 @@ def plot_egm_grids(period, H_idx, y_idx, method, image_dir):
     
     # Unrefined grids
     e_grid_unrefined = ownc_stage.dcsn.sol["EGM"]["unrefined"]["e"][grid_key]
-    vf_unrefined = ownc_stage.dcsn.sol["EGM"]["unrefined"]["v"][grid_key]
+    vf_unrefined = ownc_stage.dcsn.sol["EGM"]["unrefined"]["Q"][grid_key]
     c_unrefined = ownc_stage.dcsn.sol["EGM"]["unrefined"]["c"][grid_key]
     a_unrefined = ownc_stage.dcsn.sol["EGM"]["unrefined"]["a"][grid_key]
     h_unrefined = np.ones_like(e_grid_unrefined) * ownc_stage.dcsn.grid.H_nxt[H_idx]
     
     # Refined grids
     e_grid_refined = ownc_stage.dcsn.sol["EGM"]["refined"]["e"][grid_key]
-    vf_refined = ownc_stage.dcsn.sol["EGM"]["refined"]["v"][grid_key]
+    vf_refined = ownc_stage.dcsn.sol["EGM"]["refined"]["Q"][grid_key]
     c_refined = ownc_stage.dcsn.sol["EGM"]["refined"]["c"][grid_key]
     a_refined = ownc_stage.dcsn.sol["EGM"]["refined"]["a"][grid_key]
     h_refined = np.ones_like(e_grid_refined) * ownc_stage.dcsn.grid.H_nxt[H_idx]
@@ -563,6 +591,11 @@ def plot_egm_grids(period, H_idx, y_idx, method, image_dir):
         label='Value function'
     )
     
+    # Apply custom bounds for value panel
+    if "egm_value" in bounds:
+        xmin,xmax,ymin,ymax = bounds["egm_value"]
+        ax[0].set_xlim([xmin,xmax]); ax[0].set_ylim([ymin,ymax])
+    
     # Formatting for value function plot
     ax[0].set_ylabel('Value', fontsize=11)
     ax[0].set_xlabel(r'Total wealth at time $t$', fontsize=11)
@@ -600,6 +633,11 @@ def plot_egm_grids(period, H_idx, y_idx, method, image_dir):
         linewidth=0.75,
         label=f'{method} optimal points'
     )
+    
+    # Apply custom bounds for housing choice panel
+    if "egm_assets" in bounds:
+        xmin,xmax,ymin,ymax = bounds["egm_assets"]
+        ax[1].set_xlim([xmin,xmax]); ax[1].set_ylim([ymin,ymax])
     
     # Formatting for housing choice plot
     ax[1].set_ylabel(r'Housing assets at time $t+1$', fontsize=11)

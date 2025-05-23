@@ -29,7 +29,8 @@ parameters:
   kappa: 0.077          # Housing service scaling factor
   iota: 0.01           # Housing service constant
   phi: 0.09            # Transaction cost for housing adjustment (Fella phi)
-  delta: 0.0            # Depreciation rate
+  delta: 1            # Depreciation
+  delta_pb: 0.61            # Laibson discounting
   b: 1e-100             # Borrowing constraint
   Pr: 0.05              # Rental price
   thorn: 0.9            # Fella's thorn parameter
@@ -77,7 +78,7 @@ settings:
   
   w_min: 0.01           # Minimum cash-on-hand
   w_max: 40.0           # Maximum cash-on-hand (increased to accommodate shock values)
-  w_points: 2000        # Number of cash-on-hand grid points
+  w_points: 4000        # Number of cash-on-hand grid points
   
   a_nxt_min: 0.01       # Minimum next-period asset value
   a_nxt_max: 30.0       # Maximum next-period asset value (matches a_max)
@@ -86,7 +87,7 @@ settings:
   # Income shock discretization - Now explicitly using Fella's values
   y_points: 3           # Number of shock grid points (length of z_vals)
   y_stop: 2 
-  m_bar: 1.0001           # Upper envelope parameter for FUES
+  m_bar: 1.2001           # Upper envelope parameter for FUES
   lb: 40                 # Look-back parameter for FUES
   rfc_radius: 0.75
   rfc_n_iter: 20
@@ -162,11 +163,11 @@ math:
   functions:
     # Generic utility and marginal utility functions (shared across stages)
     owner_utility:
-      expr: "alpha*np.log(c) + (1-alpha)*np.log(kappa*(H_nxt+iota))"
+      expr: "alpha*np.log(np.maximum(c, 1e-10)) + (1-alpha)*np.log(kappa*(H_nxt+iota))"
       description: "Utility function for owners"
 
     renter_utility:
-      expr: "alpha*np.log(c) + (1-alpha)*np.log(kappa*(S+iota))"
+      expr: "alpha*np.log(np.maximum(c, 1e-10)) + (1-alpha)*np.log(kappa*(S+iota))"
       description: "Utility function for renters"
 
     marginal_utility:

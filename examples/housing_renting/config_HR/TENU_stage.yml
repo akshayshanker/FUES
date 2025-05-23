@@ -17,6 +17,7 @@ stage:
   parameters:
     beta: ["beta"]            # Discount factor from master
     r: ["r"]                  # Interest rate from master
+    delta_pb: ["delta_pb"]    # Present-bias weight from master
     
   settings:
     tol: ["tol"]                # Convergence tolerance from master

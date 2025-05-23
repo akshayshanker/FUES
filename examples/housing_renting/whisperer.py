@@ -21,7 +21,7 @@ import copy
 import time  # Add time module for timing measurements
 
 # Import operator factories directly from their modules
-from dc_smm.models.housing_renting.horses_h import F_shocks_dcsn_to_arvl, F_h_cntn_to_dcsn
+from dc_smm.models.housing_renting.horses_h import F_shocks_dcsn_to_arvl, F_h_cntn_to_dcsn_owner, F_h_cntn_to_dcsn_renter
 from dc_smm.models.housing_renting.horses_c import F_ownc_cntn_to_dcsn, F_ownc_dcsn_to_cntn
 from dc_smm.models.housing_renting.horses_common import F_id
 from dc_smm.models.housing_renting.horses_t import F_t_cntn_to_dcsn
@@ -45,7 +45,7 @@ def build_operators(stage):
     # Check stage type to determine which operators to use
     if "OWNH" in stage.name:
         # Owner housing choice stage
-        operators["cntn_to_dcsn"] = F_h_cntn_to_dcsn(stage.cntn_to_dcsn)
+        operators["cntn_to_dcsn"] = F_h_cntn_to_dcsn_owner(stage.cntn_to_dcsn)
         operators["dcsn_to_arvl"] = F_id(stage.dcsn_to_arvl)
 
     elif "OWNC" in stage.name:
@@ -55,7 +55,7 @@ def build_operators(stage):
 
     elif "RNTH" in stage.name:
         # Renter housing choice stage
-        operators["cntn_to_dcsn"] = F_h_cntn_to_dcsn(stage.cntn_to_dcsn)
+        operators["cntn_to_dcsn"] = F_h_cntn_to_dcsn_renter(stage.cntn_to_dcsn)
         operators["dcsn_to_arvl"] = F_id(stage.dcsn_to_arvl)
 
     elif "RNTC" in stage.name:
@@ -225,10 +225,14 @@ def initialize_terminal_values(stage, verbose=False):
                     vlu_cntn[i_a, i_h, i_y] = u_func(c=a_val, H_nxt=h_val)
                     lambda_cntn[i_a, i_h, i_y] = uc_func(c=a_val, H_nxt=h_val)
         
+        # Terminal: Q = v because V_e = 0
+        Q_cntn = vlu_cntn.copy()
+        
         # Attach to continuation perch
         stage.cntn.sol = {
             "vlu": vlu_cntn,
-            "lambda": lambda_cntn
+            "lambda": lambda_cntn,
+            "Q": Q_cntn
         }
     
     elif "RNTC" in stage.name:
@@ -256,10 +260,14 @@ def initialize_terminal_values(stage, verbose=False):
                     vlu_cntn[i_a, i_s, i_y] = u_func(c=a_val, S=s_val)
                     lambda_cntn[i_a, i_s, i_y] = uc_func(c=a_val, S=s_val)
         
+        # Terminal: Q = v because V_e = 0
+        Q_cntn = vlu_cntn.copy()
+        
         # Attach to continuation perch
         stage.cntn.sol = {
             "vlu": vlu_cntn,
-            "lambda": lambda_cntn
+            "lambda": lambda_cntn,
+            "Q": Q_cntn
         }
     
     elif "OWNH" in stage.name:
@@ -286,10 +294,14 @@ def initialize_terminal_values(stage, verbose=False):
                     vlu_cntn[i_w, i_h, i_y] = u_func(c=w_val, H_nxt=h_val)
                     lambda_cntn[i_w, i_h, i_y] = uc_func(c=w_val, H_nxt=h_val)
         
+        # Terminal: Q = v because V_e = 0
+        Q_cntn = vlu_cntn.copy()
+        
         # Attach to continuation perch
         stage.cntn.sol = {
             "vlu": vlu_cntn,
-            "lambda": lambda_cntn
+            "lambda": lambda_cntn,
+            "Q": Q_cntn
         }
     
     elif "RNTH" in stage.name:
@@ -316,10 +328,14 @@ def initialize_terminal_values(stage, verbose=False):
                     vlu_cntn[i_w, i_s, i_y] = u_func(c=w_val, S=s_val + 0.5)
                     lambda_cntn[i_w, i_s, i_y] = uc_func(c=w_val, S=s_val + 0.5)
         
+        # Terminal: Q = v because V_e = 0
+        Q_cntn = vlu_cntn.copy()
+        
         # Attach to continuation perch
         stage.cntn.sol = {
             "vlu": vlu_cntn,
-            "lambda": lambda_cntn
+            "lambda": lambda_cntn,
+            "Q": Q_cntn
         }
     
     elif "TENU" in stage.name:
@@ -357,10 +373,14 @@ def initialize_terminal_values(stage, verbose=False):
                         vlu_own[i_a, i_h, i_y] = u_func(c=a_val, H_nxt=h_val)
                         lambda_own[i_a, i_h, i_y] = uc_func(c=a_val, H_nxt=h_val)
             
+            # Terminal: Q = v because V_e = 0
+            Q_own = vlu_own.copy()
+            
             # Attach to owner branch
             stage.cntn.sol["from_owner"] = {
                 "vlu": vlu_own,
-                "lambda": lambda_own
+                "lambda": lambda_own,
+                "Q": Q_own
             }
         
         if "from_renter" not in stage.cntn.sol:
@@ -385,10 +405,14 @@ def initialize_terminal_values(stage, verbose=False):
                     vlu_rent[i_w, i_y] = u_func(c=w_val, S=0.1)  # Minimal rental housing
                     lambda_rent[i_w, i_y] = uc_func(c=w_val, S=0.1)
             
+            # Terminal: Q = v because V_e = 0
+            Q_rent = vlu_rent.copy()
+            
             # Attach to renter branch
             stage.cntn.sol["from_renter"] = {
                 "vlu": vlu_rent,
-                "lambda": lambda_rent
+                "lambda": lambda_rent,
+                "Q": Q_rent
             }
 
 def run_time_iteration(model_circuit, n_periods=None, verbose=False,verbose_timings =False, recorder=None):
