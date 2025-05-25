@@ -84,6 +84,7 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
     a_nxt_grid = model.num.state_space.cntn.grids.a_nxt
     H_nxt_grid = model.num.state_space.cntn.grids.H_nxt
     w_grid = model.num.state_space.dcsn.grids.w
+    c_max = model.settings_dict["c_max"]
     
     # Get functions and parameters
     compiled_funcs = model.num.functions
@@ -197,9 +198,9 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
             if ue_method != "CONSAV":
                 m_egm_unique, vlu_v_egm_unique, c_egm_unique, a_nxt_grid_unique = (
                     egm_preprocess(
-                        m_egm, q_egm, c_egm, a_nxt_grid, beta, 
-                        compiled_funcs.u_func, vlu_e, n_con=n_con,
-                        h_nxt=H_nxt_grid[i_h]*thorn
+                        m_egm, q_egm, c_egm, a_nxt_grid, delta*beta, 
+                        utility_func, vlu_e, m_bar = m_bar, n_con=n_con,
+                        c_max=c_max, h_nxt=H_val
                     )
                 )
                 #print("not CONSAV")

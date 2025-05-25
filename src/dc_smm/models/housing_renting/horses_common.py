@@ -296,103 +296,140 @@ def fast_vectorized_interpolation(values_grid, policies_grid, wealth_grid, valid
     return output, valid_count 
 
 
-def egm_preprocess(egrid, vf, c, a, beta, u_func, vf_next, Pi=None, i_z=None, i_h_prime=None, n_con=10, h_nxt=None):
+@njit
+def _egm_preprocess_core(e_old, vf_old, c_old, a_old,
+                         vf_next,              # 1-D, same length as old grids
+                         beta, u_func,         # u_func must be @njit-able
+                         m_bar,                # jump threshold
+                         n_con,                # # constraint nodes
+                         c_max, h_nxt):               # upper end of [c*, c_max]
     """
-    Preprocess endogenous grid and associated values following the approach in fella.py.
-    
-    This function:
-    1. Adds constraint points at the borrowing constraint with small consumption values
-    2. Concatenates them with the main EGM solution
-    3. Ensures uniqueness in the grid
-    
-    Parameters
-    ----------
-    egrid : ndarray
-        Endogenous grid (cash-on-hand)
-    vf : ndarray
-        Value function values
-    c : ndarray
-        Consumption policy values
-    a : ndarray
-        Asset policy values
-    beta : float
-        Discount factor
-    u_func : callable
-        Utility function that takes consumption and housing as arguments
-    vf_next : ndarray or float
-        Value function for next period or continuation value at constraint
-    Pi : ndarray, optional
-        Transition matrix for income shocks, for computing expectations
-    i_z : int, optional
-        Current income state index
-    i_h_prime : int, optional
-        Housing choice state index
-    n_con : int, optional
-        Number of constraint points to add, default 10
-    h_nxt : float, optional
-        Housing value for current iteration
-    
-    Returns
-    -------
-    tuple
-        (egrid_cleaned, vf_cleaned, c_cleaned, a_cleaned)
+    Returns new (e,vf,c,a) with
+
+        • n_con borrowing-constraint points, plus
+        • n_con points on every 'big' jump in a (|Δa| > m_bar),
+
+    all prepended in one shot.  No np.concatenate used.
     """
-    # Find minimum consumption in current solution
-    min_c_val = np.min(c) 
-    c_array = np.linspace(1e-100, min_c_val, n_con)
-    e_array = c_array  # For constraint points, c = m (no savings)
-    
-    # Generate utility values for constraint points
-    # Simple approach: just calculate utility directly for constraint points
-    # We're using the constraint points at the borrowing limit
-    #vf_array = np.zeros(n_con)
-    #for i in range(n_con):
-        # Use the provided housing value (could come from the outer loop in horses_c.py)
-        # Default to 0.0 only if no h_nxt is provided
-    h_val = 0.0 if h_nxt is None else h_nxt
-    
-    vf_array = u_func(**{"c": c_array, "H_nxt": h_val}) + beta * vf_next[0]
-    
-    # Asset policy at constraint is minimum asset value
-    b_array = np.zeros(n_con)
-    b_array.fill(a[0])  # Using first value of asset grid as borrowing constraint
 
-    # Pre-allocate once and write by slice → ~2× faster than four separate
-    # np.concatenate calls and avoids the temporary tuple objects.
-    n_old = egrid.size
-    n_new = n_con + n_old
+    # ---- 0.   basic sizes --------------------------------------------------
+    n_old   = e_old.size
+    base  = a_old[1:] - a_old[:-1]
+    diff  = e_old[1:] - e_old[:-1]
 
-    egrid_concat = np.empty(n_new, dtype=egrid.dtype)
-    egrid_concat[:n_con] = e_array
-    egrid_concat[n_con:] = egrid
+    # relative gap |Δa| / |a_{t}|   (robust to a_{t}=0)
+    rel_gap = np.empty_like(diff)
+    for i in range(diff.size):
+        b = base[i]
+        rel_gap[i] = np.abs(diff[i] / b) if b != 0.0 else np.inf
+    jumps  = rel_gap > 2          # m_bar is now a relative threshold
+    j_idx  = np.where(jumps)[0]
+    j_idx   = np.where(jumps)[0]          # jump i  ⇒  segment between i and i+1
+    n_jump  = j_idx.size
+    n_add   = n_con + n_jump * n_con      # total new nodes
+    n_total = n_old + n_add
 
-    vf_concat = np.empty(n_new, dtype=vf.dtype)
-    vf_concat[:n_con] = vf_array
-    vf_concat[n_con:] = vf
+    #print(j_idx)
+    print(beta)
+    # ---- 1.   allocate output containers ----------------------------------
+    e_new  = np.empty(n_total, dtype=e_old.dtype)
+    vf_new = np.empty(n_total, dtype=vf_old.dtype)
+    c_new  = np.empty(n_total, dtype=c_old.dtype)
+    a_new  = np.empty(n_total, dtype=a_old.dtype)
 
-    c_concat = np.empty(n_new, dtype=c.dtype)
-    c_concat[:n_con] = c_array
-    c_concat[n_con:] = c
+    p = 0   # write pointer into the new arrays
+    # -----------------------------------------------------------------------
+    # 2.  Borrowing-constraint segment  (always first)
+    # -----------------------------------------------------------------------
+    min_c  = np.min(c_old)
+    c_con = np.linspace(1e-100, min_c, n_con).astype(c_old.dtype)
+    e_con  = c_con                        # m = c at the constraint
+    vf_con = u_func(c_con, h_nxt) + beta * vf_next[0]
+    a_con  = np.empty_like(c_con)
+    a_con.fill(a_old[0])                  # borrowing limit
 
-    a_concat = np.empty(n_new, dtype=a.dtype)
-    a_concat[:n_con] = b_array
-    a_concat[n_con:] = a
+    e_new[p:p+n_con]  = e_con
+    vf_new[p:p+n_con] = vf_con
+    c_new[p:p+n_con]  = c_con
+    a_new[p:p+n_con]  = a_con
+    p += n_con
 
-    # Ensure uniqueness in grid
-    uniqueIds = uniqueEG(egrid_concat, vf_concat)
-    egrid_unique = egrid_concat[uniqueIds]
-    vf_unique = vf_concat[uniqueIds]
-    c_unique = c_concat[uniqueIds]
-    a_unique = a_concat[uniqueIds]
-    
-    # Sort by grid values to ensure monotonicity
-    #sort_indices = np.argsort(egrid_unique)
-    #egrid_unique = egrid_unique[sort_indices]
-    #vf_unique = vf_unique[sort_indices]
-    #c_unique = c_unique[sort_indices] 
-    #a_unique = a_unique[sort_indices]
-    
-    return egrid_unique, vf_unique, c_unique, a_unique
+    # -----------------------------------------------------------------------
+    # 3.  Jump segments
+    # -----------------------------------------------------------------------
+    for k in j_idx:                       # jump between k and k+1
+        a_star = a_old[k]
+        c_star = c_old[k]
+        e_star = e_old[k]
+
+        c_seg = np.linspace(c_star, c_star+1, n_con).astype(c_old.dtype)
+        m_seg = a_star + c_seg
+
+        vf_seg = u_func(c_seg, h_nxt) + beta * vf_next[k]
+
+        e_new[p:p+n_con]  = m_seg
+        vf_new[p:p+n_con] = vf_seg
+        c_new[p:p+n_con]  = c_seg
+        a_new[p:p+n_con]  = a_star
+        p += n_con
+
+    # -----------------------------------------------------------------------
+    # 4.  Copy the original solution after all extras
+    # -----------------------------------------------------------------------
+    e_new[n_add:]  = e_old
+    vf_new[n_add:] = vf_old
+    c_new[n_add:]  = c_old
+    a_new[n_add:]  = a_old
+
+    return e_new, vf_new, c_new, a_new
+
+def egm_preprocess(egrid, vf, c, a,
+                   beta, u_func, vf_next,
+                   m_bar,
+                   n_con=10,
+                   c_max=None,
+                   h_nxt=None,
+                   **kwargs):
+    """
+    Wrapper that
+
+      • calls the @njit core above,
+      • removes duplicates with uniqueEG,
+      • returns cleaned arrays (same order as before).
+
+    Any extra kwargs are ignored so you can keep the
+    original signature (Pi, i_z, i_h_prime, h_nxt, …).
+    """
+
+    # choose a default c_max if the caller doesn’t specify one
+    if c_max is None:
+        c_max = 1.05 * np.max(c)          # 5 % above current max consumption
+
+
+    #  (If you still need monotone sorting, re-enable the block below)
+    #sort_idx = np.argsort(egrid)
+    #egrid, vf,vf_next, c, a = (arr[sort_idx] for arr in (egrid, vf, vf_next,c, a))
+
+
+    # ---- run the fast core -------------------------------------------------
+    e_cat, vf_cat, c_cat, a_cat = _egm_preprocess_core(
+        egrid, vf, c, a,
+        vf_next, beta, u_func,
+        m_bar, n_con, c_max, h_nxt)
+
+    # ---- uniqueness & (optional) sorting -----------------------------------
+    unique_ids = uniqueEG(e_cat, vf_cat)
+
+    e_out  = e_cat[unique_ids]
+    vf_out = vf_cat[unique_ids]
+    c_out  = c_cat[unique_ids]
+    a_out  = a_cat[unique_ids]
+
+    #  (If you still need monotone sorting, re-enable the block below)
+    # sort_idx = np.argsort(e_out)
+    # e_out, vf_out, c_out, a_out = (arr[sort_idx] for arr in (e_out, vf_out, c_out, a_out))
+
+    return e_out, vf_out, c_out, a_out
 
 
 def build_njit_utility(

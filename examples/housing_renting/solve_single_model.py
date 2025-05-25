@@ -268,8 +268,8 @@ def main(argv=None):
     BOUNDS = {
         # example:
         # "cons_owner" : (0, 20, 0, 15),
-         "egm_value"  : (18, 22, 2.8, 3.2),
-         "egm_assets" : (18, 22, 12, 16)
+         "egm_value"  : (20, 21, 3.1, 3.25),
+         "egm_assets" : (20, 21, 13, 14.5)
     }
 
     # Main policy & EGM plots
@@ -282,7 +282,7 @@ if __name__ == "__main__":
                    # run it
     main(["--periods", "1", "--ue-method", "CONSAV", "--plot"])
     main(["--periods", "1", "--ue-method", "FUES", "--plot"])
-    main(["--periods", "1", "--ue-method", "DCEGM", "--plot"])
+    #Qmain(["--periods", "1", "--ue-method", "DCEGM", "--plot"])
 
     print("Done.")
     
