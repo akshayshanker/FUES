@@ -6,9 +6,94 @@ from typing import Callable   # NEW  – remove if unused        # NEW
 import time
 
 
+@njit
+def piecewise_gradient_3rd(f, x, m_bar, eps=0.9):
+    """
+    Third-order finite differences that
+      • never straddle jumps  |Δf/Δx| > m_bar
+      • enforce strictly-positive slopes
+
+    Parameters
+    ----------
+    f, x : 1-D ndarrays (same length, x strictly increasing)
+    m_bar: float   – jump threshold in *slope* space
+    eps   : float  – fallback slope if no positive neighbour exists
+
+    Returns
+    -------
+    g : 1-D ndarray, positive slope at each x[i]
+    """
+    n = len(x)
+    g_raw = np.empty(n)
+
+    def smooth(i, j):
+        """True if segment [i,j] is smooth (no jump)."""
+        df = f[j] - f[i]
+        dx = x[j] - x[i]
+        return np.abs(df / dx) <= m_bar
+
+    # ---- pass 1 : compute local derivatives or set NaN -------------
+    for i in range(n):
+        # indices we *might* use for the 5-point stencil
+        i_m2, i_m1, i_p1, i_p2 = i - 2, i - 1, i + 1, i + 2
+
+        # check which neighbours are inside the array and smooth
+        have_m2 = (i_m2 >= 0)   and smooth(i_m2, i_m1)
+        have_m1 = (i_m1 >= 0)   and smooth(i_m1, i)
+        have_p1 = (i_p1 < n)    and smooth(i, i_p1)
+        have_p2 = (i_p2 < n)    and smooth(i_p1, i_p2)
+
+        if have_m2 and have_m1 and have_p1 and have_p2:
+            # ---- 5-point Richardson (O(h^3)) -----------------------
+            h1  = x[i_p1] - x[i_m1]
+            D1  = (f[i_p1] - f[i_m1]) / h1
+
+            h2  = x[i_p2] - x[i_m2]
+            D2  = (f[i_p2] - f[i_m2]) / h2
+
+            g_raw[i] = (4.0 * D1 - D2) / 3.0
+        elif have_m1 and have_p1:
+            # ---- 3-point centred (O(h^2)) --------------------------
+            g_raw[i] = (f[i_p1] - f[i_m1]) / (x[i_p1] - x[i_m1])
+        elif have_p1:
+            # ---- 2-point forward  (O(h)) ---------------------------
+            g_raw[i] = (f[i_p1] - f[i]) / (x[i_p1] - x[i])
+        elif have_m1:
+            # ---- 2-point backward (O(h)) ---------------------------
+            g_raw[i] = (f[i] - f[i_m1]) / (x[i] - x[i_m1])
+        else:
+            g_raw[i] = np.nan
+
+        # mark non-positive slopes as invalid
+        if not np.isnan(g_raw[i]) and g_raw[i] <= 0.0:
+            g_raw[i] = np.nan
+
+    # ---- pass 2 : fill NaNs with nearest positive neighbour --------
+    g = np.empty(n)
+    for i in range(n):
+        if not np.isnan(g_raw[i]):
+            g[i] = g_raw[i]
+            continue
+
+        # search outward
+        offset = 1
+        found  = False
+        while not found and (i - offset >= 0 or i + offset < n):
+            if i - offset >= 0 and not np.isnan(g_raw[i - offset]):
+                g[i] = g_raw[i - offset]
+                found = True
+            elif i + offset < n and not np.isnan(g_raw[i + offset]):
+                g[i] = g_raw[i + offset]
+                found = True
+            offset += 1
+
+        if not found:          # ultimate fallback
+            g[i] = eps
+
+    return g
 
 @njit
-def piecewise_gradient(f, x, m_bar, eps=1e-12):
+def piecewise_gradient(f, x, m_bar, eps=0.9):
     """
     Finite differences that
       • never straddle jumps  |f[i+1]-f[i]| > c_bar
@@ -30,8 +115,8 @@ def piecewise_gradient(f, x, m_bar, eps=1e-12):
 
     # ---- pass 1: local finite differences, set NaN where invalid ----
     for i in range(n):
-        left_ok  = (i > 0)   and (np.abs(f[i]   - f[i-1]) <= m_bar)
-        right_ok = (i < n-1) and (np.abs(f[i+1] - f[i]  ) <= m_bar)
+        left_ok  = (i > 0)   and (np.abs(f[i]   - f[i-1])/(x[i]   - x[i-1]) <= m_bar)
+        right_ok = (i < n-1) and (np.abs(f[i+1] - f[i]  )/(x[i+1] - x[i]) <= m_bar)
 
         if left_ok and right_ok:
             g_raw[i] = (f[i+1] - f[i-1]) / (x[i+1] - x[i-1])
@@ -314,15 +399,23 @@ def _egm_preprocess_core(e_old, vf_old, c_old, a_old,
 
     # ---- 0.   basic sizes --------------------------------------------------
     n_old   = e_old.size
-    base  = a_old[1:] - a_old[:-1]
-    diff  = e_old[1:] - e_old[:-1]
+    #diff  = a_old[1:] - a_old[:-1]
+    #base  = e_old[1:] - e_old[:-1]
+    diff = e_old[1:] - e_old[:-1]
+    base = a_old[1:] - a_old[:-1]
+
+    del_vf =vf_next[1:] - vf_next[:-1]
 
     # relative gap |Δa| / |a_{t}|   (robust to a_{t}=0)
     rel_gap = np.empty_like(diff)
     for i in range(diff.size):
         b = base[i]
         rel_gap[i] = np.abs(diff[i] / b) if b != 0.0 else np.inf
-    jumps  = rel_gap > 2          # m_bar is now a relative threshold
+    
+    #jumps  = rel_gap > m_bar          # m_bar is now a relative threshold
+    jumps  = diff<0 
+    #del_vf_bool = del_vf<0
+    #jumps = jumps*del_vf_bool
     j_idx  = np.where(jumps)[0]
     j_idx   = np.where(jumps)[0]          # jump i  ⇒  segment between i and i+1
     n_jump  = j_idx.size
@@ -330,7 +423,7 @@ def _egm_preprocess_core(e_old, vf_old, c_old, a_old,
     n_total = n_old + n_add
 
     #print(j_idx)
-    print(beta)
+    #print(beta)
     # ---- 1.   allocate output containers ----------------------------------
     e_new  = np.empty(n_total, dtype=e_old.dtype)
     vf_new = np.empty(n_total, dtype=vf_old.dtype)
@@ -362,7 +455,7 @@ def _egm_preprocess_core(e_old, vf_old, c_old, a_old,
         c_star = c_old[k]
         e_star = e_old[k]
 
-        c_seg = np.linspace(c_star, c_star+1, n_con).astype(c_old.dtype)
+        c_seg = np.linspace(c_star, c_star+2, n_con).astype(c_old.dtype)
         m_seg = a_star + c_seg
 
         vf_seg = u_func(c_seg, h_nxt) + beta * vf_next[k]

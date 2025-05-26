@@ -277,6 +277,58 @@ def plot_dcsn_policy(first_period, image_dir, bounds=None):
     plt.tight_layout()
     fig3.savefig(os.path.join(image_dir, "tenure_policy.png"))
     #print(f"Tenure policy plot saved to {os.path.join(image_dir, 'tenure_policy.png')}")
+
+    # 4. Plot value function
+    fig4, ax4 = plt.subplots(figsize=(10, 6))
+    
+    # Extract value function from OWNC stage
+    if "value_function" in ownc_stage.dcsn.sol:
+        a_grid = ownc_stage.dcsn.grid.w
+        #H_grid = ownc_stage.dcsn.grid.H
+    
+    # Plot value function for different housing values
+    for i, H_idx in enumerate(H_indices):
+        h_val = H_grid[H_idx]
+        color = color_cycle[i % len(color_cycle)]
+        
+        value_function = ownc_stage.dcsn.sol["vlu"][:, H_idx, y_idx]
+
+        # plot
+        ax4.plot(a_grid, value_function, color=color, label=f"Housing={h_val:.2f}")
+        
+    ax4.set_title("Owner Value Function by Housing Value")
+    ax4.set_xlabel("Assets (a)")
+    ax4.set_ylabel("Value Function (V)")
+    ax4.legend()
+    ax4.grid(True)
+
+    #5. Plot Q func
+    fig5, ax5 = plt.subplots(figsize=(10, 6))
+    # Extract Q function from OWNC stage
+    if "Q" in ownc_stage.dcsn.sol:
+        a_grid = ownc_stage.dcsn.grid.w
+        #_grid = ownc_stage.dcsn.grid.H
+        
+    # Plot Q function for different housing values
+    for i, H_idx in enumerate(H_indices):
+        h_val = H_grid[H_idx]
+        color = color_cycle[i % len(color_cycle)]
+        
+        Q_function = ownc_stage.dcsn.sol["Q"][:, H_idx, y_idx]
+        
+        # plot
+        ax5.plot(a_grid, Q_function, color=color, label=f"Housing={h_val:.2f}")
+        
+    ax5.set_title("Owner Q Function by Housing Value")
+    ax5.set_xlabel("Assets (a)")
+    ax5.set_ylabel("Q Function (Q)")
+    ax5.legend()
+    ax5.grid(True)
+
+    fig4.savefig(os.path.join(image_dir, "value_function.png"))
+    fig5.savefig(os.path.join(image_dir, "Q_function.png"))
+        
+    
     
     # Close all figures
     plt.close('all')
@@ -722,4 +774,175 @@ def plot_egm_grids(period, H_idx, y_idx, method, image_dir, bounds=None):
     
     # Close figure
     plt.close(fig2)
+
+def plot_compare_value_Q(model_list, methods, image_dir, plot_period=0, bounds=None):
+    """Create comparison plots of value and Q functions across several methods.
+
+    Parameters
+    ----------
+    model_list : list[ModelCircuit]
+        List of solved model circuits – one per method.
+    methods : list[str]
+        Names of methods in the same order as `model_list` (e.g. ["FUES", "VFI", "DCEGM"]).
+    image_dir : str
+        Directory in which to save the output figures.
+    plot_period : int, optional
+        Model period that should be visualised (default: 0).
+    bounds : dict | None, optional
+        Optional axis‐bounds in the same spirit as the `BOUNDS` dict in ``solve_single_model.py``.
+        Keys accepted: ``value`` and ``Q`` – each mapping to (xmin, xmax, ymin, ymax).
+    """
+    import os
+    import matplotlib.pyplot as plt
+    from matplotlib.colors import TABLEAU_COLORS
+
+    if bounds is None:
+        bounds = {}
+
+    # One colour per housing value, one marker per method
+    colour_cycle = list(TABLEAU_COLORS.values())[:3]
+    marker_cycle = ["o", "s", "^", "D", "x", "*"]
+
+    # Use the first model to extract the housing grid
+    base_period = model_list[0].get_period(plot_period)
+    ownc_base = base_period.get_stage("OWNC")
+    H_grid = ownc_base.dcsn.grid.H_nxt
+    y_idx = 0  # consumption plots already fix this to 0
+
+    # Representative housing indices (low / mid / high)
+    if len(H_grid) >= 5:
+        H_indices = [0, len(H_grid)//2, len(H_grid)-1]
+    else:
+        H_indices = list(range(len(H_grid)))
+
+    # --------------------------------------------------
+    #   1. VALUE FUNCTION COMPARISON
+    # --------------------------------------------------
+    fig_val, ax_val = plt.subplots(figsize=(10, 6))
+
+    for h_pos, H_idx in enumerate(H_indices):
+        colour = colour_cycle[h_pos % len(colour_cycle)]
+        for m_pos, (method, model) in enumerate(zip(methods, model_list)):
+            period = model.get_period(plot_period)
+            ownc = period.get_stage("OWNC")
+            if "vlu" not in ownc.dcsn.sol:
+                continue  # skip silently if value function not available
+            w_grid = ownc.dcsn.grid.w
+            v_func = ownc.dcsn.sol["vlu"][:, H_idx, y_idx]
+            label = f"{method} (H={H_grid[H_idx]:.2f})"
+            ax_val.plot(
+                w_grid,
+                v_func,
+                color=colour,
+                marker=marker_cycle[m_pos % len(marker_cycle)],
+                markevery=max(1, len(w_grid)//15),
+                linewidth=1,
+                label=label
+            )
+
+    ax_val.set_xlabel("Cash-on-Hand (w)")
+    ax_val.set_ylabel("Value Function (V)")
+    ax_val.set_title("Value Function – method comparison")
+    ax_val.grid(True)
+    if "value" in bounds:
+        xmin, xmax, ymin, ymax = bounds["value"]
+        if xmin is not None or xmax is not None:
+            ax_val.set_xlim(left=xmin, right=xmax)
+        if ymin is not None or ymax is not None:
+            ax_val.set_ylim(bottom=ymin, top=ymax)
+    ax_val.legend(fontsize=8, ncol=2)
+
+    fig_val.tight_layout()
+    fig_val.savefig(os.path.join(image_dir, "compare_value_functions.png"))
+
+    # --------------------------------------------------
+    #   2. Q FUNCTION COMPARISON
+    # --------------------------------------------------
+    fig_q, ax_q = plt.subplots(figsize=(10, 6))
+
+    for h_pos, H_idx in enumerate(H_indices):
+        colour = colour_cycle[h_pos % len(colour_cycle)]
+        for m_pos, (method, model) in enumerate(zip(methods, model_list)):
+            period = model.get_period(plot_period)
+            ownc = period.get_stage("OWNC")
+            if "Q" not in ownc.dcsn.sol:
+                continue
+            w_grid = ownc.dcsn.grid.w
+            q_func = ownc.dcsn.sol["Q"][:, H_idx, y_idx]
+            label = f"{method} (H={H_grid[H_idx]:.2f})"
+            ax_q.plot(
+                w_grid,
+                q_func,
+                color=colour,
+                marker=marker_cycle[m_pos % len(marker_cycle)],
+                markevery=max(1, len(w_grid)//15),
+                linewidth=1,
+                label=label
+            )
+
+    ax_q.set_xlabel("Cash-on-Hand (w)")
+    ax_q.set_ylabel("Q Function (Q)")
+    ax_q.set_title("Q Function – method comparison")
+    ax_q.grid(True)
+    if "Q" in bounds:
+        xmin, xmax, ymin, ymax = bounds["Q"]
+        if xmin is not None or xmax is not None:
+            ax_q.set_xlim(left=xmin, right=xmax)
+        if ymin is not None or ymax is not None:
+            ax_q.set_ylim(bottom=ymin, top=ymax)
+    ax_q.legend(fontsize=8, ncol=2)
+
+    fig_q.tight_layout()
+    fig_q.savefig(os.path.join(image_dir, "compare_Q_functions.png"))
+
+    # --------------------------------------------------
+    #   3. VALUE FUNCTION DIFFERENCE PLOT
+    # --------------------------------------------------
+    if len(model_list) > 1:
+        baseline_method = methods[0]
+        fig_diff, ax_diff = plt.subplots(figsize=(10, 6))
+
+        for h_pos, H_idx in enumerate(H_indices):
+            colour = colour_cycle[h_pos % len(colour_cycle)]
+            # Baseline value function
+            v_base = model_list[0].get_period(plot_period).get_stage("OWNC").dcsn.sol["Q"][:, H_idx, y_idx]
+
+            for m_pos, (method, model) in enumerate(zip(methods[1:], model_list[1:]), start=1):
+                v_other = model.get_period(plot_period).get_stage("OWNC").dcsn.sol["Q"][:, H_idx, y_idx]
+                diff_raw = v_other - v_base
+                # Exclude large positive deviations > 1 for cleaner visualisation
+                import numpy as np
+                diff = np.where(np.abs(diff_raw) > 0.55, np.nan, diff_raw)
+                label = f"{method}-{baseline_method} (H={H_grid[H_idx]:.2f})"
+
+                ax_diff.plot(
+                    w_grid,
+                    diff,
+                    color=colour,
+                    marker=marker_cycle[m_pos % len(marker_cycle)],
+                    markevery=max(1, len(w_grid)//15),
+                    linewidth=1,
+                    label=label
+                )
+
+        # zero reference line
+        ax_diff.axhline(0, color="black", linestyle="--", linewidth=0.8)
+
+        ax_diff.set_xlabel("Cash-on-Hand (w)")
+        ax_diff.set_ylabel(f"Δ Q Function (method − {baseline_method})")
+        ax_diff.set_title(f"Q Function Difference: method minus {baseline_method}")
+        ax_diff.grid(True, linestyle=":", linewidth=0.5)
+
+        if "value_diff" in bounds:
+            xmin, xmax, ymin, ymax = bounds["value_diff"]
+            if xmin is not None or xmax is not None:
+                ax_diff.set_xlim(left=xmin, right=xmax)
+            if ymin is not None or ymax is not None:
+                ax_diff.set_ylim(bottom=ymin, top=ymax)
+
+        ax_diff.legend(fontsize=8, ncol=2)
+        fig_diff.tight_layout()
+        fig_diff.savefig(os.path.join(image_dir, "compare_Q_function_differences.png"))
+
+    plt.close("all")
 

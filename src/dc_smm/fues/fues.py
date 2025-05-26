@@ -378,7 +378,7 @@ def _scan(e_grid, vf, a_prime,del_a, m_bar, LB, fwd_scan_do=True, endog_mbar= Tr
                 # gradient joining the i+1 and j, then delete j'th point
 
                 if g_1 > g_j_minus_1 and g_1 >= g_m_vf and g_tilde_a > m_bar:
-                    keep_j_point = False
+                    keep_j_point = True
 
                 if not keep_j_point:
                     pj = np.array([e_grid[j], vf_full[j]])

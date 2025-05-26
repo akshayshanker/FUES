@@ -44,7 +44,18 @@ from .whisperer import (
     run_time_iteration,
 )
 # Import plotting helpers and error metrics (also local to this example)
-from .helpers.plots import generate_plots
+from .helpers.plots import generate_plots, plot_compare_value_Q
+
+# ------------------------------------------------------------------
+# Global axis-bounds for plotting.  Keys → (xmin, xmax, ymin, ymax)
+# Use None to keep default on an individual edge.
+# ------------------------------------------------------------------
+BOUNDS = {
+    # "cons_owner": (0, 20, 0, 15),
+    "egm_value":  (20, 21, 0, 2),
+    "egm_assets": (20, 21, 13, 14.5),
+    "Q":          (None, None, -2, 4),
+}
 
 def load_configs():
     """Load all configuration files."""
@@ -223,7 +234,7 @@ def main(argv=None):
     parser.add_argument("--periods", type=int, default=3, help="Number of periods to simulate")
     parser.add_argument("--plot", action="store_true", help="Generate and save plots")
     parser.add_argument("--no-solve", action="store_true", help="Skip solving (for testing loading only)")
-    parser.add_argument("--ue-method", default="FUES", choices=["FUES", "DCEGM", "RFC","CONSAV", "simple"], help="Upper-envelope cleaning method")
+    parser.add_argument("--ue-method", default="FUES", choices=["FUES", "DCEGM", "RFC","CONSAV","FUES2DEV" ,"simple", "VFI"], help="Upper-envelope cleaning method")
     if argv is None:
         argv = sys.argv[1:]
     args = parser.parse_args(argv)
@@ -251,6 +262,10 @@ def main(argv=None):
                         mover.model.operator = {}
                     # Inject the upper envelope method
                     mover.model.methods["upper_envelope"] = args.ue_method.upper()
+                    if args.ue_method.upper() == "VFI":
+                        mover.model.operator["solution"] = "VFI"
+                    else:
+                        mover.model.operator["solution"] = "EGM"
                     print(f"Set {stage_name}.cntn_to_dcsn.model.methods['upper_envelope'] = {args.ue_method.upper()}")
                 else:
                     print(f"Warning: {stage_name}.cntn_to_dcsn has no model")
@@ -258,31 +273,32 @@ def main(argv=None):
     # Solve the multi-period model - set verbose to True for detailed output
     all_stages_solved = run_time_iteration(model_circuit, n_periods=3, verbose=True)
 
-    # ------------------------------------------------------------------
-    # Optional: customise axis limits here.  Each key → (xmin,xmax,ymin,ymax)
-    #   cons_owner, cons_renter, owner_housing, tenure,
-    #   egm_value,  egm_assets
-    # Leave dict empty to keep defaults.
-    # ------------------------------------------------------------------
-
-    BOUNDS = {
-        # example:
-        # "cons_owner" : (0, 20, 0, 15),
-         "egm_value"  : (20, 21, 3.1, 3.25),
-         "egm_assets" : (20, 21, 13, 14.5)
-    }
-
     # Main policy & EGM plots
     generate_plots(model_circuit, args.ue_method, image_dir,
-                   plot_period=1, bounds=BOUNDS)
+                   plot_period=0, bounds=BOUNDS)
+
+    # Return the solved model circuit so that callers can build composites
+    return model_circuit
 
 if __name__ == "__main__":
 
-    # Pretend the script was called from the shell
-                   # run it
-    main(["--periods", "1", "--ue-method", "CONSAV", "--plot"])
-    main(["--periods", "1", "--ue-method", "FUES", "--plot"])
-    #Qmain(["--periods", "1", "--ue-method", "DCEGM", "--plot"])
+    IMAGE_DIR = create_image_dir()
+
+    # Select the methods you want to compare here.
+    METHODS_TO_RUN = [
+        "FUES2DEV",
+        "VFI",
+        # "DCEGM",  # uncomment when desired
+    ]
+
+    solved_models = []
+
+    for mtd in METHODS_TO_RUN:
+        mdl = main(["--periods", "1", "--ue-method", mtd, "--plot"])
+        solved_models.append(mdl)
+
+    # Combined comparison plot (uses period 1 to match earlier calls)
+    plot_compare_value_Q(solved_models, METHODS_TO_RUN, IMAGE_DIR, plot_period=0, bounds=BOUNDS)
 
     print("Done.")
     

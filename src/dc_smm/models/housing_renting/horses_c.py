@@ -1,13 +1,13 @@
 import numpy as np
 import time  # Add import for timing
 from dc_smm.models.housing_renting.horses_common import (
-    _safe_interp, egm_preprocess, build_njit_utility, piecewise_gradient
+    _safe_interp, egm_preprocess, build_njit_utility, piecewise_gradient, piecewise_gradient_3rd
 )  # Use relative import
 from numba import njit
 from dc_smm.uenvelope.upperenvelope import EGM_UE
 from dc_smm.fues.helpers import interp_as
-
-
+from functools import lru_cache
+from quantecon.optimize.scalar_maximization import brent_max
 
 # --- Operator Factory for OWNC Consumption Choice ---
 def F_ownc_cntn_to_dcsn(mover):
@@ -26,6 +26,7 @@ def F_ownc_cntn_to_dcsn(mover):
     
     # Get solution method from settings
     method = model.operator.get("solution", "EGM")
+    print(method)
     model.stage_name = mover.stage_name
     
     def operator(perch_data):
@@ -57,16 +58,19 @@ def F_ownc_cntn_to_dcsn(mover):
                 "EGM": egm_grids  # Store both unrefined and refined grids
             }
         elif method.upper() == "VFI":
-            policy, vlu_dcsn, lambda_dcsn = _solve_vfi_loop(vlu_cntn, model)
+            policy, vlu_dcsn, lambda_dcsn, ue_time_avg, egm_grids, policy_a, Q_dcsn= _solve_vfi_loop(vlu_cntn, model)
             # No UE time for VFI
             timing_info = {
                 "total_time": time.time() - start_time
             }
             return {
                 "policy": policy,
+                "policy_a": policy_a,
                 "vlu": vlu_dcsn,
                 "lambda": lambda_dcsn,
-                "timing": timing_info
+                "Q": Q_dcsn,
+                "timing": timing_info,
+                "EGM": egm_grids  # Store both unrefined and refined grids
             }
         else:
             raise ValueError(
@@ -277,7 +281,7 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
             c_prime = piecewise_gradient(policy[:, i_h, i_y], w_grid, m_bar=m_bar)
             #print(c_prime)
             #print(policy[:, i_h, i_y])
-            lambda_dcsn[:, i_h, i_y] = (uc_today + (1-delta)*c_prime*uc_today) /delta
+            lambda_dcsn[:, i_h, i_y] = (uc_today - (1-delta)*c_prime*uc_today) /delta
             vlu_dcsn[:, i_h, i_y] = (Q_dcsn[:, i_h, i_y] - (1-delta)*compiled_funcs.u_func(c=policy[:, i_h, i_y], H_nxt=H_val))/delta
 
             #lambda_dcsn[lambda_dcsn<0] = 1e-10
@@ -307,91 +311,249 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
     
     return policy, vlu_dcsn, lambda_dcsn, avg_ue_time, egm_grids, policy_a, Q_dcsn
 
-def _solve_vfi_loop(vlu_cntn, model):
-    """Solves the consumption problem using the VFI loop with brent_max."""
-    # Import brent_max here to avoid import error if VFI is not used
-    try:
-        from quantecon.optimize.scalar_maximization import brent_max
-    except ImportError:
-        raise ImportError(
-            "brent_max not found for VFI. Please install quantecon: "
-            "pip install quantecon"
-        )
 
-    # Use grid proxies for direct grid access
-    w_grid = model.num.state_space.dcsn.grid.w
-    a_nxt_grid = model.num.state_space.cntn.grid.a_nxt
-    H_nxt_grid = model.num.state_space.cntn.grid.H_nxt
+@njit
+def bellman_obj(a_nxt, w_val, H_val, beta, delta,
+                a_grid, V_slice, u_func):
+    c = w_val - a_nxt
+    if c <= 0.0:
+        return -np.inf
+    # ▸ remove arbitrary 0.1 floor
+    # if a_nxt <= 0.1:
+    #     return -np.inf
+    V_nxt = interp_as(a_grid, V_slice, np.array([a_nxt]))[0]
+    return u_func(c, H_val) + beta * delta * V_nxt
+
+@njit
+def _solve_vfi_numba(V_next, w_grid, a_grid, H_grid,
+                     beta, delta, m_bar,
+                     u_func, h_nxt_ind_array, thorn):
+    """
+    Fully-compiled Laibson VFI.
+    Returns:
+        policy_c   : c*(w,h,y)
+        policy_a   : a'*(w,h,y)
+        Q_dcsn     : u(c)+βδV_next
+        V_cntn     : continuation value
+        lambda_cntn: continuation marginal value
+    """
+    n_W  = w_grid.size
+    n_A, n_H, n_Y = V_next.shape
+
+    policy_c   = np.empty((n_W, n_H, n_Y))
+    policy_a   = np.empty_like(policy_c)
+    Q_dcsn     = np.empty_like(policy_c)
+    V_cntn     = np.empty_like(policy_c)
+    lambda_cntn= np.empty_like(policy_c)
     
-    # Get functions and parameters
-    compiled_funcs = model.num.functions
-    beta = model.param.beta
+    #h_nxt_ind_array = g_ve_h_ind(H_ind = np.arange(n_H))
 
-    n_w = len(w_grid)
-    n_H = vlu_cntn.shape[1]
-    n_y = vlu_cntn.shape[2]
+    for h in range(n_H):
+        H_val = H_grid[h]*thorn
+        for y in range(n_Y):
+            h_nxt_ind = h_nxt_ind_array[h]
+            V_slice = V_next[:, h_nxt_ind, y]                # contiguous 1-D
 
-    policy = np.zeros((n_w, n_H, n_y))
-    vlu_dcsn = np.zeros((n_w, n_H, n_y))
-    lambda_dcsn = np.zeros((n_w, n_H, n_y))
-
-    for i_y in range(n_y):
-        for i_h in range(n_H):
-            interp_v_nxt = _safe_interp(a_nxt_grid, vlu_cntn[:, i_h, i_y])
-
-            for i_w, w_val in enumerate(w_grid):
+            for iw in range(n_W):
+                w_val  = w_grid[iw]
+                a_low  = a_grid[0]
+                a_high = min(w_val + 1e-1, a_grid[-1])
                 
-                def bellman_objective(a_nxt_candidate):
-                    c_candidate = w_val - a_nxt_candidate
-                    if c_candidate <= 1e-12:
-                        return -np.inf
-                    u_params = {"c": c_candidate, "H_nxt": H_nxt_grid[i_h]}
-                    u_current = compiled_funcs.u_func(**u_params)
-                    vlu_nxt = interp_v_nxt(a_nxt_candidate)
-                    return u_current + beta * vlu_nxt
 
-                lower_bound_a = a_nxt_grid[0]
-                upper_bound_a = w_val
 
-                if upper_bound_a <= lower_bound_a + 1e-9:
-                    a_nxt_opt = lower_bound_a
-                    v_opt = bellman_objective(a_nxt_opt)
-                else:
-                    lower_brent = lower_bound_a
-                    upper_brent = upper_bound_a
-                    try:
-                        a_nxt_opt, v_opt, _ = brent_max(
-                            bellman_objective, 
-                            lower_brent, 
-                            upper_brent, 
-                            xtol=1e-6
-                        )
-                    except ValueError:
-                        print(
-                            f"Warning: brent_max failed at w={w_val}, "
-                            f"h={i_h}, y={i_y}. Using endpoint."
-                        )
-                        val_at_lower = bellman_objective(lower_brent)
-                        val_at_upper = bellman_objective(upper_brent)
-                        if val_at_lower >= val_at_upper:
-                            a_nxt_opt = lower_brent
-                            v_opt = val_at_lower
-                        else:
-                            a_nxt_opt = upper_brent
-                            v_opt = val_at_upper
+                a_star, Q_star, _ = brent_max(
+                    bellman_obj,
+                    a_low, a_high,
+                    args=(w_val, H_val, beta, delta,
+                          a_grid, V_slice, u_func),
+                    xtol=1e-12
+                )
+                c_star            = w_val - a_star
+
+                if np.isinf(Q_star):
+                    c_star = 1e-10
+                    Q_star = -10
+                    a_star = 1e-10
+
+                policy_c[iw, h, y] = c_star
+                policy_a[iw, h, y] = a_star
+                Q_dcsn[iw, h, y]   = Q_star
+
+  
+
+
+            # ---- continuation value + λ --------------------------------
+            c_prime = piecewise_gradient(policy_c[:, h, y], w_grid, m_bar)
+
+            for iw in range(n_W):
+                c_now  = policy_c[iw, h, y]
+                uc_now = 1/c_now
+                V_cntn[iw, h, y] = (Q_dcsn[iw, h, y]
+                                    - (1.0 - delta)*u_func(c_now, H_val)) / delta
+                lambda_cntn[iw, h, y] = (uc_now +
+                                          (1.0 - delta)*c_prime[iw]*uc_now) / delta
                 
-                c_opt = w_val - a_nxt_opt
-                c_opt = max(c_opt, 1e-12)
-                lambda_opt = compiled_funcs.uc_func(**{
-                    "c": c_opt, 
-                    "H_nxt": H_nxt_grid[i_h]
-                })
+                #print(V_cntn[iw, h, y][np.isinf(V_cntn[iw, h, y])])
 
-                policy[i_w, i_h, i_y] = c_opt
-                vlu_dcsn[i_w, i_h, i_y] = v_opt
-                lambda_dcsn[i_w, i_h, i_y] = lambda_opt
+    return policy_c, policy_a, Q_dcsn, V_cntn, lambda_cntn
 
-    return policy, vlu_dcsn, lambda_dcsn
+from numba import njit, prange
+import numpy as np
+
+# ------------------------------------------------------------------
+# Dense-grid replacement for Brent search
+# ------------------------------------------------------------------
+
+#@njit
+@njit
+def _solve_vfi_numba_grid(V_next, w_grid, a_grid, H_grid,
+                     beta, delta, m_bar,
+                     u_func, h_nxt_ind_array, thorn):
+    """
+    Dense-grid VFI (no Brent).  Exact same I/O shape as original.
+    """
+
+    # ── tuning: number of candidate points for a′ on [a_low, a_high] ──
+    n_grid = 2000          # raise for higher accuracy, lower for speed
+    # ------------------------------------------------------------------
+
+    n_W  = w_grid.size
+    n_A, n_H, n_Y = V_next.shape
+
+    policy_c    = np.empty((n_W, n_H, n_Y))
+    policy_a    = np.empty_like(policy_c)
+    Q_dcsn      = np.empty_like(policy_c)
+    V_cntn      = np.empty_like(policy_c)
+    lambda_cntn = np.empty_like(policy_c)
+
+    step_inv = 1.0 / (n_grid - 1)        # pre-compute to avoid div inside loop
+
+    for h in prange(n_H):
+        H_val     = H_grid[h] * thorn
+        h_nxt_ind = h_nxt_ind_array[h]
+
+        for y in range(n_Y):
+            V_slice = V_next[:, h_nxt_ind, y]      # contiguous 1-D view
+
+            for iw in range(n_W):
+                w_val  = w_grid[iw]
+                a_low  = a_grid[0]
+                a_high = min(w_val - 1e-12, a_grid[-1])   # ensure c > 0
+
+                # handle degenerate case (wealth at borrowing limit)
+                if a_high <= a_low + 1e-14:
+                    a_high = a_low
+
+                best_Q = -1e110
+                best_a = a_low
+
+                # exhaustive search over dense grid
+                for g in range(n_grid):
+                    a_try = a_low + (a_high - a_low) * g * step_inv
+                    Q_try = bellman_obj(                # ← your existing fn
+                        a_try, w_val, H_val,
+                        beta, delta, a_grid, V_slice, u_func
+                    )
+                    if Q_try > best_Q:
+                        best_Q = Q_try
+                        best_a = a_try
+
+                c_star = w_val - best_a
+
+                # guard against inf / nan
+                if np.isinf(best_Q) or c_star <= 0.0:
+                    c_star = 1e-10
+                    best_Q = -1e100
+                    best_a = 1e-10
+
+                policy_c[iw, h, y] = c_star
+                policy_a[iw, h, y] = best_a
+                Q_dcsn[iw, h, y]   = best_Q
+
+            # ---- continuation value + λ --------------------------------
+            c_prime = piecewise_gradient(policy_c[:, h, y], w_grid, m_bar)
+
+            for iw in range(n_W):
+                c_now  = policy_c[iw, h, y]
+                uc_now = 1.0 / c_now
+                V_cntn[iw, h, y] = (Q_dcsn[iw, h, y]
+                                    - (1 - delta)*u_func(c_now, H_val)) / delta
+                lambda_cntn[iw, h, y] = (uc_now +
+                                          (1 - delta)*c_prime[iw]*uc_now) / delta
+
+    return policy_c, policy_a, Q_dcsn, V_cntn, lambda_cntn
+
+
+def _solve_vfi_loop(vlu_cntn, model):
+    """
+    Drop-in replacement that matches the EGM solver’s 7-value return.
+    """
+    # --- grids ---------------------------------------------------
+    w_grid = model.num.state_space.dcsn.grids.w.astype(np.float64)
+    a_grid = model.num.state_space.cntn.grids.a_nxt.astype(np.float64)
+    H_grid = model.num.state_space.cntn.grids.H_nxt.astype(np.float64)
+    if "RNT" in model.stage_name:
+        thorn = model.param.thorn
+    else:
+        thorn = 1
+
+    # --- parameters ---------------------------------------------
+    beta   = float(model.param.beta)
+    delta  = float(model.param.delta_pb)
+    m_bar  = float(model.settings_dict["m_bar"])
+
+    # --- compiled utility functions -----------------------------
+    u_jit  = model.num.functions.u_func       # scalar (c,H) → u
+    uc_jit = model.num.functions.uc_func      # scalar (c,H) → u_c
+
+    # --- contiguous 3-D continuation value array ----------------
+    V_next = np.ascontiguousarray(vlu_cntn, dtype=np.float64)
+
+    expr_str = model.math["functions"]["u_func"]["expr"]
+    param_vals = {
+        "alpha": model.param.alpha,
+        "kappa": model.param.kappa,
+        "iota" : model.param.iota,
+        # add any extra constants referenced in expr_str
+    }
+    utility_func = build_njit_utility(expr_str, param_vals)
+    g_ve_h_ind = model.num.functions.g_ve_h_ind
+    h_nxt_ind_array = g_ve_h_ind(H_ind = np.arange(H_grid.size))
+
+    # --- run kernel ---------------------------------------------
+    policy_c, policy_a, Q_dcsn, V_cntn, lambda_cntn = _solve_vfi_numba(
+        V_next, w_grid, a_grid, H_grid,
+        beta, delta, m_bar,
+        utility_func,h_nxt_ind_array,thorn
+    )
+
+    # The EGM solver returns an average UE time and grid dicts.
+    # For VFI these have no meaning, so we stub them out.
+    avg_ue_time = 0.0
+
+    # fill in empty egm grids as in the egm code so plotter does not error
+    unrefined_grids = {
+        'e': np.empty((0,0,0)),    # Endogenous grid points (cash-on-hand)
+        'Q': np.empty((0,0,0)),    # Value function
+        'c': np.empty((0,0,0)),    # Consumption policy
+        'a': np.empty((0,0,0))     # Asset policy
+    }
+    refined_grids = {
+        'e': np.empty((0,0,0)),    # Refined endogenous grid points
+        'Q': np.empty((0,0,0)),    # Refined value function
+        'c': np.empty((0,0,0)),    # Refined consumption policy
+        'a': np.empty((0,0,0)),    # Refined asset policy
+        'lambda': {} # Refined marginal utility
+    }
+    egm_grids   = {"unrefined": unrefined_grids, "refined": refined_grids}
+
+    return (policy_c,             # same as `policy`
+            V_cntn,               # vlu_dcsn
+            lambda_cntn,          # lambda_dcsn
+            avg_ue_time,
+            egm_grids,
+            policy_a,             # asset policy, matches EGM output
+            Q_dcsn)               # Q_dcsn (decision objective)
 
 # --- End Private Solver Loop Helpers ---
 

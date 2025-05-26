@@ -59,7 +59,7 @@ stage:
     c_max: ["c_max"]
 
   methods:
-    optimization: "EGM"
+    sol_method: ["sol_method"]
     simulation: "Histogram"
     integration_method: "discretize"
     compilation: 'eval'             
@@ -243,7 +243,7 @@ movers:
       - inv_marginal_utility
       - g_ve_h_ind
     operator:
-      solution: EGM         # direct reference to EGM as method
+      solution: ["sol_method"]         # direct reference to EGM as method
       upper_envelope: ue_method  # direct reference to FUES as a method 
     description: "Continuation->Decision backwards using EGM with FUES upper envelope"
     required_grids:
