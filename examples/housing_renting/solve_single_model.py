@@ -52,8 +52,8 @@ from .helpers.plots import generate_plots, plot_compare_value_Q
 # ------------------------------------------------------------------
 BOUNDS = {
     # "cons_owner": (0, 20, 0, 15),
-    "egm_value":  (20, 21, 0, 2),
-    "egm_assets": (20, 21, 13, 14.5),
+    "egm_value":  (19, 21, 1.49, 1.7),
+    "egm_assets": (19, 21, 10, 14.5),
     "Q":          (None, None, -2, 4),
 }
 
@@ -271,7 +271,7 @@ def main(argv=None):
                     print(f"Warning: {stage_name}.cntn_to_dcsn has no model")
 
     # Solve the multi-period model - set verbose to True for detailed output
-    all_stages_solved = run_time_iteration(model_circuit, n_periods=3, verbose=True)
+    all_stages_solved = run_time_iteration(model_circuit, n_periods=10, verbose=True)
 
     # Main policy & EGM plots
     generate_plots(model_circuit, args.ue_method, image_dir,
@@ -294,11 +294,11 @@ if __name__ == "__main__":
     solved_models = []
 
     for mtd in METHODS_TO_RUN:
-        mdl = main(["--periods", "1", "--ue-method", mtd, "--plot"])
+        mdl = main(["--periods", "0", "--ue-method", mtd, "--plot"])
         solved_models.append(mdl)
 
     # Combined comparison plot (uses period 1 to match earlier calls)
-    plot_compare_value_Q(solved_models, METHODS_TO_RUN, IMAGE_DIR, plot_period=0, bounds=BOUNDS)
+    plot_compare_value_Q(solved_models, METHODS_TO_RUN, IMAGE_DIR, plot_period=1, bounds=BOUNDS)
 
     print("Done.")
     

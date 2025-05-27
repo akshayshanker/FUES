@@ -451,14 +451,17 @@ def _egm_preprocess_core(e_old, vf_old, c_old, a_old,
     # 3.  Jump segments
     # -----------------------------------------------------------------------
     for k in j_idx:                       # jump between k and k+1
-        a_star = a_old[k]
-        c_star = c_old[k]
-        e_star = e_old[k]
+        a_star = a_old[k+1]
+        c_star = c_old[k+1]
+        e_star = e_old[k+1]
+        
+        lb_c = max(1e-10,c_star-6)
 
-        c_seg = np.linspace(c_star, c_star+2, n_con).astype(c_old.dtype)
+        c_seg = np.linspace(lb_c, c_star, n_con).astype(c_old.dtype)
+        #a_seg = np.linspace(a_star, a_star+2, n_con).astype(a_old.dtype)
         m_seg = a_star + c_seg
 
-        vf_seg = u_func(c_seg, h_nxt) + beta * vf_next[k]
+        vf_seg = u_func(c_seg, h_nxt) + beta * vf_next[k+1]
 
         e_new[p:p+n_con]  = m_seg
         vf_new[p:p+n_con] = vf_seg

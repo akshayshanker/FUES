@@ -327,8 +327,30 @@ def plot_dcsn_policy(first_period, image_dir, bounds=None):
 
     fig4.savefig(os.path.join(image_dir, "value_function.png"))
     fig5.savefig(os.path.join(image_dir, "Q_function.png"))
-        
-    
+
+    # Plot savings
+    fig6, ax6 = plt.subplots(figsize=(10, 6))
+
+    # No “if 'savings' …” guard here – we compute it ourselves
+    for i, H_idx in enumerate(H_indices):
+        h_val = H_grid[H_idx]
+        color = color_cycle[i % len(color_cycle)]
+
+        w_grid = ownc_stage.dcsn.grid.w          # cash-on-hand grid
+        consumption = ownc_stage.dcsn.sol["policy"][:, H_idx, y_idx]
+        savings = w_grid - consumption           # simple definition
+
+        ax6.plot(w_grid, savings,
+                color=color,
+                label=f"Housing={h_val:.2f}")
+
+    ax6.set_title("Owner Savings")
+    ax6.set_xlabel("Cash-on-Hand (w)")
+    ax6.set_ylabel("Savings (w – c)")
+    ax6.legend()
+    ax6.grid(True)
+
+    fig6.savefig(os.path.join(image_dir, "savings.png"))
     
     # Close all figures
     plt.close('all')
