@@ -25,6 +25,7 @@ from dc_smm.models.housing_renting.horses_h import F_shocks_dcsn_to_arvl, F_h_cn
 from dc_smm.models.housing_renting.horses_c import F_ownc_cntn_to_dcsn, F_ownc_dcsn_to_cntn
 from dc_smm.models.housing_renting.horses_common import F_id
 from dc_smm.models.housing_renting.horses_t import F_t_cntn_to_dcsn
+from helpers.sol import Solution
 
 def build_operators(stage):
     """Build operator mappings for a given stage.
@@ -152,12 +153,19 @@ def solve_stage(stage, max_iter=None, tol=None, verbose=False):
     
     # Extract UE time if available in the result (from EGM computation)
     ue_time = 0
-    if isinstance(dcsn_data, dict) and "timing" in dcsn_data:
-        ue_time = dcsn_data["timing"].get("ue_time_avg", 0)
-    
-    # Store the solution data (excluding timing info)
-    solution_keys = [k for k in dcsn_data.keys() if k != "timing"]
-    stage.dcsn.sol = {k: dcsn_data[k] for k in solution_keys}
+    if isinstance(dcsn_data, Solution):
+        # Handle Solution object
+        if "ue_time_avg" in dcsn_data.timing:
+            ue_time = dcsn_data.timing["ue_time_avg"]
+        stage.dcsn.sol = dcsn_data
+    else:
+        # Legacy dict handling
+        if isinstance(dcsn_data, dict) and "timing" in dcsn_data:
+            ue_time = dcsn_data["timing"].get("ue_time_avg", 0)
+        
+        # Store the solution data (excluding timing info)
+        solution_keys = [k for k in dcsn_data.keys() if k != "timing"]
+        stage.dcsn.sol = {k: dcsn_data[k] for k in solution_keys}
     
     # Step 2: Decision to arrival transformation
     dcsn_to_arvl_start = time.time()
@@ -228,12 +236,12 @@ def initialize_terminal_values(stage, verbose=False):
         # Terminal: Q = v because V_e = 0
         Q_cntn = vlu_cntn.copy()
         
-        # Attach to continuation perch
-        stage.cntn.sol = {
-            "vlu": vlu_cntn,
-            "lambda": lambda_cntn,
-            "Q": Q_cntn
-        }
+        # Attach to continuation perch as Solution object
+        sol = Solution()
+        sol.vlu = vlu_cntn
+        sol.lambda_ = lambda_cntn
+        sol.Q = Q_cntn
+        stage.cntn.sol = sol
     
     elif "RNTC" in stage.name:
         # For renter consumption stage, initialize CRRA utility of consuming assets
@@ -263,12 +271,12 @@ def initialize_terminal_values(stage, verbose=False):
         # Terminal: Q = v because V_e = 0
         Q_cntn = vlu_cntn.copy()
         
-        # Attach to continuation perch
-        stage.cntn.sol = {
-            "vlu": vlu_cntn,
-            "lambda": lambda_cntn,
-            "Q": Q_cntn
-        }
+        # Attach to continuation perch as Solution object
+        sol = Solution()
+        sol.vlu = vlu_cntn
+        sol.lambda_ = lambda_cntn
+        sol.Q = Q_cntn
+        stage.cntn.sol = sol
     
     elif "OWNH" in stage.name:
         # For owner housing stage, initialize placeholder values
@@ -297,12 +305,12 @@ def initialize_terminal_values(stage, verbose=False):
         # Terminal: Q = v because V_e = 0
         Q_cntn = vlu_cntn.copy()
         
-        # Attach to continuation perch
-        stage.cntn.sol = {
-            "vlu": vlu_cntn,
-            "lambda": lambda_cntn,
-            "Q": Q_cntn
-        }
+        # Attach to continuation perch as Solution object
+        sol = Solution()
+        sol.vlu = vlu_cntn
+        sol.lambda_ = lambda_cntn
+        sol.Q = Q_cntn
+        stage.cntn.sol = sol
     
     elif "RNTH" in stage.name:
         # For renter housing stage, initialize placeholder values
@@ -331,12 +339,12 @@ def initialize_terminal_values(stage, verbose=False):
         # Terminal: Q = v because V_e = 0
         Q_cntn = vlu_cntn.copy()
         
-        # Attach to continuation perch
-        stage.cntn.sol = {
-            "vlu": vlu_cntn,
-            "lambda": lambda_cntn,
-            "Q": Q_cntn
-        }
+        # Attach to continuation perch as Solution object
+        sol = Solution()
+        sol.vlu = vlu_cntn
+        sol.lambda_ = lambda_cntn
+        sol.Q = Q_cntn
+        stage.cntn.sol = sol
     
     elif "TENU" in stage.name:
         # For tenure choice stage with branched continuation
@@ -376,12 +384,12 @@ def initialize_terminal_values(stage, verbose=False):
             # Terminal: Q = v because V_e = 0
             Q_own = vlu_own.copy()
             
-            # Attach to owner branch
-            stage.cntn.sol["from_owner"] = {
-                "vlu": vlu_own,
-                "lambda": lambda_own,
-                "Q": Q_own
-            }
+            # Attach to owner branch as Solution object
+            sol_owner = Solution()
+            sol_owner.vlu = vlu_own
+            sol_owner.lambda_ = lambda_own
+            sol_owner.Q = Q_own
+            stage.cntn.sol["from_owner"] = sol_owner
         
         if "from_renter" not in stage.cntn.sol:
             # Initialize renter branch
@@ -408,12 +416,12 @@ def initialize_terminal_values(stage, verbose=False):
             # Terminal: Q = v because V_e = 0
             Q_rent = vlu_rent.copy()
             
-            # Attach to renter branch
-            stage.cntn.sol["from_renter"] = {
-                "vlu": vlu_rent,
-                "lambda": lambda_rent,
-                "Q": Q_rent
-            }
+            # Attach to renter branch as Solution object
+            sol_renter = Solution()
+            sol_renter.vlu = vlu_rent
+            sol_renter.lambda_ = lambda_rent
+            sol_renter.Q = Q_rent
+            stage.cntn.sol["from_renter"] = sol_renter
 
 def run_time_iteration(model_circuit, n_periods=None, verbose=False,verbose_timings =False, recorder=None):
     """Run time iteration by solving all periods in a pre-created model circuit.

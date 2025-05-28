@@ -69,7 +69,7 @@ settings:
   # Grid parameters - Updated from Fella
   a_min: 0.01           # Minimum asset value
   a_max: 30.0           # Maximum asset value (Fella's grid_max_A)
-  a_points: 2000        # Number of asset grid points (Fella's grid_size)
+  a_points: 12000        # Number of asset grid points (Fella's grid_size)
 
   c_max: 30.0           # Maximum consumption
   
@@ -82,21 +82,21 @@ settings:
   
   w_min: 0.01           # Minimum cash-on-hand
   w_max: 40.0           # Maximum cash-on-hand (increased to accommodate shock values)
-  w_points: 2000        # Number of cash-on-hand grid points
+  w_points: 6000        # Number of cash-on-hand grid points
   
   a_nxt_min: 0.01       # Minimum next-period asset value
   a_nxt_max: 30.0       # Maximum next-period asset value (matches a_max)
-  a_nxt_points: 2000    # Number of next-period asset grid points
+  a_nxt_points: 12000    # Number of next-period asset grid points
   
   # Income shock discretization - Now explicitly using Fella's values
   y_points: 3           # Number of shock grid points (length of z_vals)
   y_stop: 2 
-  m_bar: 1.02           # Upper envelope parameter for FUES
+  m_bar: 1.8           # Upper envelope parameter for FUES
   lb: 40                 # Look-back parameter for FUES
   rfc_radius: 0.75
   rfc_n_iter: 20
-  n_constraint_points: 50
-  N_arg_grid_vfi: 5000   # Number of grid points for VFI_GRID
+  n_constraint_points: 2000
+  N_arg_grid_vfi: 2000   # Number of grid points for VFI_GRID
 
 ###################
 # 2) .math Section

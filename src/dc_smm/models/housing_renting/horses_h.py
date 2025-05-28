@@ -1,6 +1,7 @@
 import numpy as np
 from numba import njit
 from dc_smm.models.housing_renting.horses_common import interp_as
+from helpers.sol import Solution
 
 def F_shocks_dcsn_to_arvl(mover):
     """Create operator for shock integration in backward step.
@@ -27,25 +28,42 @@ def F_shocks_dcsn_to_arvl(mover):
         
         Parameters
         ----------
-        perch_data : dict
+        perch_data : dict or Solution
             Decision perch data with value function and marginal value
             
         Returns
         -------
-        dict
+        dict or Solution
             Arrival perch data with integrated value function and marginal value
         """
-        vlu_dcsn = perch_data["vlu"]
-        lambda_dcsn = perch_data["lambda"]
-        
-        # Integrate over income states using einsum (matrix multiplication)
-        vlu_arvl = np.einsum('ahj,ij->ahi', vlu_dcsn, Pi)
-        lambda_arvl = np.einsum('ahj,ij->ahi', lambda_dcsn, Pi)
-        
-        return {
-            "vlu": vlu_arvl,
-            "lambda": lambda_arvl
-        }
+        # Handle both dict and Solution inputs
+        if isinstance(perch_data, Solution):
+            vlu_dcsn = perch_data.vlu
+            lambda_dcsn = perch_data.lambda_
+            
+            # Integrate over income states using einsum (matrix multiplication)
+            vlu_arvl = np.einsum('ahj,ij->ahi', vlu_dcsn, Pi)
+            lambda_arvl = np.einsum('ahj,ij->ahi', lambda_dcsn, Pi)
+            
+            # Create new Solution for output
+            sol = Solution()
+            sol.vlu = vlu_arvl
+            sol.lambda_ = lambda_arvl
+            
+            return sol
+        else:
+            # Legacy dict support
+            vlu_dcsn = perch_data["vlu"]
+            lambda_dcsn = perch_data["lambda_"]
+            
+            # Integrate over income states using einsum (matrix multiplication)
+            vlu_arvl = np.einsum('ahj,ij->ahi', vlu_dcsn, Pi)
+            lambda_arvl = np.einsum('ahj,ij->ahi', lambda_dcsn, Pi)
+            
+            return {
+                "vlu": vlu_arvl,
+                "lambda_": lambda_arvl
+            }
     
     return operator
 
@@ -267,7 +285,7 @@ def F_h_cntn_to_dcsn_owner(mover):
     
     def operator(perch_data):
         vlu_cntn = perch_data["vlu"] 
-        lambda_cntn = perch_data["lambda"]
+        lambda_cntn = perch_data["lambda_"]
         Q_cntn = perch_data["Q"]   # objective
         
 
@@ -303,12 +321,14 @@ def F_h_cntn_to_dcsn_owner(mover):
             Q_dcsn[:, :, i_y] = Q_dcsn_sl
             vlu_dcsn[:, :, i_y] = v_dcsn_sl
             
-        return {
-            "Q": Q_dcsn,
-            "vlu": vlu_dcsn,
-            "lambda": lambda_dcsn,
-            "H_policy": H_policy
-        }
+        # Create Solution object
+        sol = Solution()
+        sol.Q = Q_dcsn
+        sol.vlu = vlu_dcsn
+        sol.lambda_ = lambda_dcsn
+        sol.policy["H"] = H_policy.astype(np.float64)  # Convert to float for typed dict
+        
+        return sol
     
     return operator
 
@@ -353,7 +373,7 @@ def F_h_cntn_to_dcsn_renter(mover):
     
     def operator(perch_data):
         vlu_cntn = perch_data["vlu"] 
-        lambda_cntn = perch_data["lambda"]
+        lambda_cntn = perch_data["lambda_"]
         Q_cntn = perch_data["Q"]   # objective
         
         # Use numba-optimized renter housing choice solver
@@ -362,12 +382,14 @@ def F_h_cntn_to_dcsn_renter(mover):
             Q_cntn, vlu_cntn, lambda_cntn, Pr, shock_grid
         )
         
-        return {
-            "Q": Q_dcsn,
-            "vlu": vlu_dcsn,
-            "lambda": lambda_dcsn,
-            "S_policy": S_policy
-        }
+        # Create Solution object
+        sol = Solution()
+        sol.Q = Q_dcsn
+        sol.vlu = vlu_dcsn
+        sol.lambda_ = lambda_dcsn
+        sol.policy["S"] = S_policy.astype(np.float64)  # Convert to float for typed dict
+        
+        return sol
         
 
     

@@ -8,6 +8,7 @@ from dc_smm.uenvelope.upperenvelope import EGM_UE
 from dc_smm.fues.helpers import interp_as
 from functools import lru_cache
 from quantecon.optimize.scalar_maximization import brent_max
+from helpers.sol import Solution
 
 # --- Operator Factory for OWNC Consumption Choice ---
 def F_ownc_cntn_to_dcsn(mover):
@@ -25,13 +26,13 @@ def F_ownc_cntn_to_dcsn(mover):
     # Get the stage to access perches
     
     # Get solution method from settings
-    method = model.methods.get("solution", "EGM")
+    method = model.methods["solution"]
     print(method)
     model.stage_name = mover.stage_name
     
     def operator(perch_data):
-        vlu_cntn = perch_data["vlu"]
-        lambda_cntn = perch_data.get("lambda") # Lambda might not be needed for VFI
+        vlu_cntn = perch_data.vlu
+        lambda_cntn = perch_data.lambda_
         
         # Track total time for this operation
         start_time = time.time()
@@ -47,31 +48,97 @@ def F_ownc_cntn_to_dcsn(mover):
                 "ue_time_avg": ue_time_avg,
                 "total_time": time.time() - start_time
             }
-            # Return policy, value function, and also store the EGM grids
-            return {
-                "policy": policy,
-                "policy_a": policy_a,
-                "vlu": vlu_dcsn,
-                "lambda": lambda_dcsn,
-                "Q": Q_dcsn,
-                "timing": timing_info,
-                "EGM": egm_grids  # Store both unrefined and refined grids
-            }
-        elif method.upper() == "VFI":
+            
+            # Create Solution object
+            sol = Solution()
+            sol.policy["c"] = policy
+            sol.policy["a"] = policy_a
+            sol.vlu = vlu_dcsn
+            sol.lambda_ = lambda_dcsn
+            sol.Q = Q_dcsn
+            sol.timing = timing_info
+            
+            #for key, arr in egm_grids["unrefined"].items():
+            #    sol.EGM.unrefined[key] = arr
+            #for key, arr in egm_grids["refined"].items():
+            #    sol.EGM.refined[key] = arr
+            
+            # Store EGM grids
+            
+            
+            for key, arr in egm_grids["unrefined"]["e"].items():
+                sol.EGM.unrefined[f"e_{key}"] = arr
+            for key, arr in egm_grids["unrefined"]["Q"].items():
+                sol.EGM.unrefined[f"Q_{key}"] = arr
+            for key, arr in egm_grids["unrefined"]["c"].items():
+                sol.EGM.unrefined[f"c_{key}"] = arr
+            for key, arr in egm_grids["unrefined"]["a"].items():
+                sol.EGM.unrefined[f"a_{key}"] = arr
+            
+            for key, arr in egm_grids["refined"]["e"].items():
+                sol.EGM.refined[f"e_{key}"] = arr
+            for key, arr in egm_grids["refined"]["Q"].items():
+                sol.EGM.refined[f"Q_{key}"] = arr
+            for key, arr in egm_grids["refined"]["c"].items():
+                sol.EGM.refined[f"c_{key}"] = arr
+            for key, arr in egm_grids["refined"]["a"].items():
+                sol.EGM.refined[f"a_{key}"] = arr
+            for key, arr in egm_grids["refined"]["lambda_"].items():
+                sol.EGM.refined[f"lambda_{key}"] = arr
+             
+            
+            return sol
+            
+        elif method.upper() == "VFI" or method.upper() == "VFI_GRID":
             policy, vlu_dcsn, lambda_dcsn, ue_time_avg, egm_grids, policy_a, Q_dcsn= _solve_vfi_loop(vlu_cntn, model)
             # No UE time for VFI
             timing_info = {
                 "total_time": time.time() - start_time
             }
-            return {
-                "policy": policy,
-                "policy_a": policy_a,
-                "vlu": vlu_dcsn,
-                "lambda": lambda_dcsn,
-                "Q": Q_dcsn,
-                "timing": timing_info,
-                "EGM": egm_grids  # Store both unrefined and refined grids
-            }
+            
+            # Create Solution object
+            sol = Solution()
+            sol.policy["c"] = policy
+            sol.policy["a"] = policy_a
+            sol.vlu = vlu_dcsn
+            sol.lambda_ = lambda_dcsn
+            sol.Q = Q_dcsn
+            sol.timing = timing_info
+
+
+            # Store empty EGM grids for VFI (if any)
+            
+            if "e" in egm_grids["unrefined"]:
+                for key, arr in egm_grids["unrefined"]["e"].items():
+                    sol.EGM.unrefined[f"e_{key}"] = arr
+            if "Q" in egm_grids["unrefined"]:
+                for key, arr in egm_grids["unrefined"]["Q"].items():
+                    sol.EGM.unrefined[f"Q_{key}"] = arr
+            if "c" in egm_grids["unrefined"]:
+                for key, arr in egm_grids["unrefined"]["c"].items():
+                    sol.EGM.unrefined[f"c_{key}"] = arr
+            if "a" in egm_grids["unrefined"]:
+                for key, arr in egm_grids["unrefined"]["a"].items():
+                    sol.EGM.unrefined[f"a_{key}"] = arr
+            
+            # Store refined grids for VFI (if any)
+            if "e" in egm_grids["refined"]:
+                for key, arr in egm_grids["refined"]["e"].items():
+                    sol.EGM.refined[f"e_{key}"] = arr
+            if "Q" in egm_grids["refined"]:
+                for key, arr in egm_grids["refined"]["Q"].items():
+                    sol.EGM.refined[f"Q_{key}"] = arr
+            if "c" in egm_grids["refined"]:
+                for key, arr in egm_grids["refined"]["c"].items():
+                    sol.EGM.refined[f"c_{key}"] = arr
+            if "a" in egm_grids["refined"]:
+                for key, arr in egm_grids["refined"]["a"].items():
+                    sol.EGM.refined[f"a_{key}"] = arr
+            if "lambda_" in egm_grids["refined"]:
+                for key, arr in egm_grids["refined"]["lambda_"].items():
+                    sol.EGM.refined[f"lambda_{key}"] = arr
+            
+            return sol
         else:
             raise ValueError(
                 f"Unknown solution method: {method}. Choose 'EGM' or 'VFI'."
@@ -119,20 +186,10 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
     ue_count = 0
 
     # Store the unrefined and refined grids
-    unrefined_grids = {
-        'e': {},    # Endogenous grid points (cash-on-hand)
-        'Q': {},    # Value function
-        'c': {},    # Consumption policy
-        'a': {}     # Asset policy
-    }
-    
-    refined_grids = {
-        'e': {},    # Refined endogenous grid points
-        'Q': {},    # Refined value function
-        'c': {},    # Refined consumption policy
-        'a': {},    # Refined asset policy
-        'lambda': {} # Refined marginal utility
-    }
+    unrefined_grids = {k: {} for k in ('e','Q','c','a')}
+    refined_grids   = {k: {} for k in ('e','Q','c','a','lambda_')}
+    egm_grids       = {"unrefined": unrefined_grids,
+                    "refined":   refined_grids}
 
     q_inv_func = compiled_funcs.inv_marginal_utility
     g_ve_h_ind = compiled_funcs.g_ve_h_ind
@@ -278,7 +335,7 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
                 "H_nxt": H_val
             })
 
-            c_prime = piecewise_gradient(policy[:, i_h, i_y], w_grid, m_bar=m_bar)
+            c_prime = piecewise_gradient_3rd(policy[:, i_h, i_y], w_grid, m_bar=m_bar)
             #print(c_prime)
             #print(policy[:, i_h, i_y])
             lambda_dcsn[:, i_h, i_y] = (uc_today - (1-delta)*c_prime*uc_today) /delta
@@ -294,7 +351,7 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
             refined_grids['Q'][grid_key] = q_refined # value function
             refined_grids['c'][grid_key] = c_refined # consumption policy
             refined_grids['a'][grid_key] = a_refined # asset policy
-            refined_grids['lambda'][grid_key] = lambda_refined
+            refined_grids['lambda_'][grid_key] = lambda_refined
                             
             # Track upper envelope time
             total_ue_time += ue_time
@@ -390,7 +447,7 @@ def _solve_vfi_numba(V_next, w_grid, a_grid, H_grid,
                 uc_now = 1/c_now
                 V_cntn[iw, h, y] = (Q_dcsn[iw, h, y]
                                     - (1.0 - delta)*u_func(c_now, H_val)) / delta
-                lambda_cntn[iw, h, y] = (uc_now +
+                lambda_cntn[iw, h, y] = (uc_now -
                                           (1.0 - delta)*c_prime[iw]*uc_now) / delta
                 
                 #print(V_cntn[iw, h, y][np.isinf(V_cntn[iw, h, y])])
@@ -425,6 +482,8 @@ def _solve_vfi_numba_grid(V_next, w_grid, a_grid, H_grid,
     Q_dcsn      = np.empty_like(policy_c)
     V_cntn      = np.empty_like(policy_c)
     lambda_cntn = np.empty_like(policy_c)
+
+    print(n_grid)
 
     step_inv = 1.0 / (n_grid - 1)        # pre-compute to avoid div inside loop
 
@@ -478,7 +537,7 @@ def _solve_vfi_numba_grid(V_next, w_grid, a_grid, H_grid,
                 uc_now = 1.0 / c_now
                 V_cntn[iw, h, y] = (Q_dcsn[iw, h, y]
                                     - (1 - delta)*u_func(c_now, H_val)) / delta
-                lambda_cntn[iw, h, y] = (uc_now +
+                lambda_cntn[iw, h, y] = (uc_now -
                                           (1 - delta)*c_prime[iw]*uc_now) / delta
 
     return policy_c, policy_a, Q_dcsn, V_cntn, lambda_cntn
@@ -486,7 +545,7 @@ def _solve_vfi_numba_grid(V_next, w_grid, a_grid, H_grid,
 
 def _solve_vfi_loop(vlu_cntn, model):
     """
-    Drop-in replacement that matches the EGM solver’s 7-value return.
+    Drop-in replacement that matches the EGM solver's 7-value return.
     """
     # --- grids ---------------------------------------------------
     w_grid = model.num.state_space.dcsn.grids.w.astype(np.float64)
@@ -540,19 +599,8 @@ def _solve_vfi_loop(vlu_cntn, model):
     avg_ue_time = 0.0
 
     # fill in empty egm grids as in the egm code so plotter does not error
-    unrefined_grids = {
-        'e': np.empty((0,0,0)),    # Endogenous grid points (cash-on-hand)
-        'Q': np.empty((0,0,0)),    # Value function
-        'c': np.empty((0,0,0)),    # Consumption policy
-        'a': np.empty((0,0,0))     # Asset policy
-    }
-    refined_grids = {
-        'e': np.empty((0,0,0)),    # Refined endogenous grid points
-        'Q': np.empty((0,0,0)),    # Refined value function
-        'c': np.empty((0,0,0)),    # Refined consumption policy
-        'a': np.empty((0,0,0)),    # Refined asset policy
-        'lambda': {} # Refined marginal utility
-    }
+    unrefined_grids = {k: {} for k in ('e', 'Q', 'c', 'a')}
+    refined_grids   = {k: {} for k in ('e', 'Q', 'c', 'a', 'lambda_')}
     egm_grids   = {"unrefined": unrefined_grids, "refined": refined_grids}
 
     return (policy_c,             # same as `policy`

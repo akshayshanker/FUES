@@ -1,5 +1,6 @@
 import numpy as np
 from scipy.interpolate import RegularGridInterpolator, interp1d
+from helpers.sol import Solution
 
 def F_t_cntn_to_dcsn(mover):
     """Create operator for tenure choice (TENU) continuation to decision.
@@ -66,12 +67,12 @@ def F_t_cntn_to_dcsn(mover):
         
         # Get values for the owner path (already on correct grid)
         vlu_own = own_data["vlu"]     # Shape: (n_a, n_H, n_y)
-        lambda_own = own_data["lambda"]  # Shape: (n_a, n_H, n_y)
+        lambda_own = own_data["lambda_"]  # Shape: (n_a, n_H, n_y)
         Qlu_own = own_data["Q"]      # NEW
         
         # Get rent path data
         vlu_rent_raw = rent_data["vlu"]       # Shape: (n_w, n_y)
-        lambda_rent_raw = rent_data["lambda"]  # Shape: (n_w, n_y)
+        lambda_rent_raw = rent_data["lambda_"]  # Shape: (n_w, n_y)
         Qlu_rent_raw = rent_data["Q"]   # NEW
         
         # Initialize result arrays
@@ -124,10 +125,12 @@ def F_t_cntn_to_dcsn(mover):
             vlu_dcsn[:, :, i_y] = np.where(own_is_better, vlu_own_2d, vlu_rent_2d)
             lambda_dcsn[:, :, i_y] = np.where(own_is_better, lambda_own_2d, lambda_rent_2d)
         
-        return {
-            "vlu": vlu_dcsn,
-            "lambda": lambda_dcsn,
-            "tenure_policy": policy_tenu
-        }
+        # Create Solution object
+        sol = Solution()
+        sol.vlu = vlu_dcsn
+        sol.lambda_ = lambda_dcsn
+        sol.policy["tenure"] = policy_tenu
+        
+        return sol
     
     return operator

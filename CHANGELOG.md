@@ -2,6 +2,29 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.0dev3] - 2025-05-22 – Solution Container Refactor
+
+### Added
+* New `Solution` container class in `helpers.sol` for storing stage solutions
+* Numba-compatible solution storage with support for arbitrary-dimensional arrays
+* Dual access pattern (attribute and dictionary-style) for all solution fields
+* Support for nested policy dictionaries and EGM layer storage
+* Save/load functionality using NPZ + JSON format
+* Comprehensive unit tests for the Solution container
+
+### Changed
+* **Breaking**: `perch.sol` is now an instance of `helpers.sol.Solution`. Old code using dictionary syntax continues to work, but the object is no longer a plain dict.
+* Updated all solver operators (`horses_c.py`, `horses_h.py`, `horses_t.py`) to return Solution objects
+* Modified `whisperer.py` to handle both Solution objects and legacy dictionaries
+* Updated plotting utilities with helper function to access both Solution and dict formats
+* Refactored EGM grid storage to use nested structure (unrefined/refined/interpolated layers)
+
+### Migration Notes
+* Existing code accessing `stage.dcsn.sol["policy"]` should now use `stage.dcsn.sol.policy["c"]` for consumption policy
+* Housing/service policies are now accessed as `sol.policy["H"]` and `sol.policy["S"]` respectively
+* EGM grids are accessed via `sol.EGM.refined.e` instead of `sol["EGM"]["refined"]["e"]`
+* The Solution object can be converted to/from plain dicts using `as_dict()` and `from_dict()` methods
+
 ## [0.2.0dev2] - 2025-05-22 – MPI Parameter Sweep
 
 * Fix dumb plotting errors in housing_renting example plots. 

@@ -262,20 +262,24 @@ def main(argv=None):
                         mover.model.operator = {}
                     # Inject the upper envelope method
                     mover.model.methods["upper_envelope"] = args.ue_method.upper()
-                    if args.ue_method.upper() == "VFI" or args.ue_method.upper() == "VFI_GRID":
+                    #print(args.ue_method.upper())
+                    if args.ue_method.upper() == "VFI":
                         mover.model.methods["solution"] = "VFI"
+                    elif args.ue_method.upper() == "VFI_GRID":
+                         mover.model.methods["solution"] = "VFI_GRID"
                     else:
                         mover.model.methods["solution"] = "EGM"
                     print(f"Set {stage_name}.cntn_to_dcsn.model.methods['upper_envelope'] = {args.ue_method.upper()}")
+                    #print(mover.model.methods["solution"])
                 else:
                     print(f"Warning: {stage_name}.cntn_to_dcsn has no model")
 
     # Solve the multi-period model - set verbose to True for detailed output
-    all_stages_solved = run_time_iteration(model_circuit, n_periods=10, verbose=True)
+    all_stages_solved = run_time_iteration(model_circuit, n_periods=3, verbose=True)
 
     # Main policy & EGM plots
     generate_plots(model_circuit, args.ue_method, image_dir,
-                   plot_period=0, bounds=BOUNDS)
+                   plot_period=0, bounds=BOUNDS, save_dir=image_dir)
 
     # Return the solved model circuit so that callers can build composites
     return model_circuit
