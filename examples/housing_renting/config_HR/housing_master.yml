@@ -34,6 +34,7 @@ parameters:
   b: 1e-100             # Borrowing constraint
   Pr: 0.05              # Rental price
   thorn: 0.9            # Fella's thorn parameter
+  
 
   
   # Income shock parameters - Explicit Markov process from Fella
@@ -95,6 +96,7 @@ settings:
   rfc_radius: 0.75
   rfc_n_iter: 20
   n_constraint_points: 50
+  N_arg_grid_vfi: 5000   # Number of grid points for VFI_GRID
 
 ###################
 # 2) .math Section

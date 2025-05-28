@@ -25,7 +25,7 @@ def F_ownc_cntn_to_dcsn(mover):
     # Get the stage to access perches
     
     # Get solution method from settings
-    method = model.operator.get("solution", "EGM")
+    method = model.methods.get("solution", "EGM")
     print(method)
     model.stage_name = mover.stage_name
     
@@ -407,14 +407,14 @@ import numpy as np
 #@njit
 @njit
 def _solve_vfi_numba_grid(V_next, w_grid, a_grid, H_grid,
-                     beta, delta, m_bar,
-                     u_func, h_nxt_ind_array, thorn):
+                        beta, delta, m_bar,
+                        u_func, h_nxt_ind_array, thorn, n_grid = 2000):
     """
     Dense-grid VFI (no Brent).  Exact same I/O shape as original.
     """
 
     # ── tuning: number of candidate points for a′ on [a_low, a_high] ──
-    n_grid = 2000          # raise for higher accuracy, lower for speed
+    n_grid = n_grid          # raise for higher accuracy, lower for speed
     # ------------------------------------------------------------------
 
     n_W  = w_grid.size
@@ -501,6 +501,7 @@ def _solve_vfi_loop(vlu_cntn, model):
     beta   = float(model.param.beta)
     delta  = float(model.param.delta_pb)
     m_bar  = float(model.settings_dict["m_bar"])
+    N_arg_grid_vfi = model.settings_dict["N_arg_grid_vfi"]
 
     # --- compiled utility functions -----------------------------
     u_jit  = model.num.functions.u_func       # scalar (c,H) → u
@@ -521,11 +522,18 @@ def _solve_vfi_loop(vlu_cntn, model):
     h_nxt_ind_array = g_ve_h_ind(H_ind = np.arange(H_grid.size))
 
     # --- run kernel ---------------------------------------------
-    policy_c, policy_a, Q_dcsn, V_cntn, lambda_cntn = _solve_vfi_numba(
-        V_next, w_grid, a_grid, H_grid,
-        beta, delta, m_bar,
-        utility_func,h_nxt_ind_array,thorn
-    )
+    if model.methods["solution"] == "VFI":
+        policy_c, policy_a, Q_dcsn, V_cntn, lambda_cntn = _solve_vfi_numba(
+            V_next, w_grid, a_grid, H_grid,
+            beta, delta, m_bar,
+            utility_func,h_nxt_ind_array,thorn
+        )
+    if model.methods["solution"] == "VFI_GRID":
+        policy_c, policy_a, Q_dcsn, V_cntn, lambda_cntn = _solve_vfi_numba_grid(
+            V_next, w_grid, a_grid, H_grid,
+            beta, delta, m_bar,
+            utility_func,h_nxt_ind_array,thorn, n_grid = N_arg_grid_vfi
+        )
 
     # The EGM solver returns an average UE time and grid dicts.
     # For VFI these have no meaning, so we stub them out.

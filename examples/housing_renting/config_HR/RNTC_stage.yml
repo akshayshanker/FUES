@@ -57,6 +57,7 @@ stage:
     rfc_n_iter: ["rfc_n_iter"]
     n_constraint_points: ["n_constraint_points"]
     c_max: ["c_max"]
+    N_arg_grid_vfi: ["N_arg_grid_vfi"]
 
   methods:
     sol_method: ["sol_method"]

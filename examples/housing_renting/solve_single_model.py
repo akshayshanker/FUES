@@ -234,7 +234,7 @@ def main(argv=None):
     parser.add_argument("--periods", type=int, default=3, help="Number of periods to simulate")
     parser.add_argument("--plot", action="store_true", help="Generate and save plots")
     parser.add_argument("--no-solve", action="store_true", help="Skip solving (for testing loading only)")
-    parser.add_argument("--ue-method", default="FUES", choices=["FUES", "DCEGM", "RFC","CONSAV","FUES2DEV" ,"simple", "VFI"], help="Upper-envelope cleaning method")
+    parser.add_argument("--ue-method", default="FUES", choices=["FUES", "DCEGM", "RFC","CONSAV","FUES2DEV" ,"simple", "VFI", "VFI_GRID"], help="Upper-envelope cleaning method")
     if argv is None:
         argv = sys.argv[1:]
     args = parser.parse_args(argv)
@@ -248,7 +248,7 @@ def main(argv=None):
 
     # ------------------------------------------------------------------
     # Inject chosen upper-envelope method into operator settings of each
-    # stage that uses EGM (typically OWNC, RNTC, etc.).  horses_c.py reads
+    # stage that uses EGM (typically OWNC, RNTC, etc.).  horses_c.py readsgrid
     # the setting from model.operator.get("upper_envelope", "FUES")
     # ------------------------------------------------------------------
     for period in model_circuit.periods_list:
@@ -262,10 +262,10 @@ def main(argv=None):
                         mover.model.operator = {}
                     # Inject the upper envelope method
                     mover.model.methods["upper_envelope"] = args.ue_method.upper()
-                    if args.ue_method.upper() == "VFI":
-                        mover.model.operator["solution"] = "VFI"
+                    if args.ue_method.upper() == "VFI" or args.ue_method.upper() == "VFI_GRID":
+                        mover.model.methods["solution"] = "VFI"
                     else:
-                        mover.model.operator["solution"] = "EGM"
+                        mover.model.methods["solution"] = "EGM"
                     print(f"Set {stage_name}.cntn_to_dcsn.model.methods['upper_envelope'] = {args.ue_method.upper()}")
                 else:
                     print(f"Warning: {stage_name}.cntn_to_dcsn has no model")
@@ -286,8 +286,8 @@ if __name__ == "__main__":
 
     # Select the methods you want to compare here.
     METHODS_TO_RUN = [
+        "VFI_GRID",
         "FUES2DEV",
-        "VFI",
         # "DCEGM",  # uncomment when desired
     ]
 
