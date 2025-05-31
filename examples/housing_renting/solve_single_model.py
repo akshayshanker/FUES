@@ -30,6 +30,7 @@ from dynx.stagecraft.config_loader import (
     initialize_model_Circuit,
     compile_all_stages,
 )
+from dynx.stagecraft.saver import save_circuit, load_circuit
 from dynx.heptapodx.io.yaml_loader import load_config
 from dynx.heptapodx.core.api import initialize_model
 from dynx.heptapodx.num.generate import compile_num as generate_numerical_model
@@ -60,7 +61,7 @@ BOUNDS = {
 def load_configs():
     """Load all configuration files."""
     config_dir = os.path.join(os.path.dirname(__file__), "config_HR")
-    master_path = os.path.join(config_dir, "housing_master.yml")
+    master_path = os.path.join(config_dir, "master.yml")
     ownh_path = os.path.join(config_dir, "OWNH_stage.yml") 
     ownc_path = os.path.join(config_dir, "OWNC_stage.yml")
     renth_path = os.path.join(config_dir, "RNTH_stage.yml")
@@ -187,7 +188,9 @@ def create_multi_period_model(n_periods=3, configs=None):
     # Set the number of periods in the master config
     # This is critical to properly create a multi-period model
     master_config = copy.deepcopy(configs["master"])
-    master_config["periods"] = n_periods
+    master_config["horizon"] = n_periods
+
+    configs["master"]["horizon"] = n_periods
     
     # Prepare stages config dictionary with all five stages
     stage_configs = {
@@ -210,7 +213,7 @@ def create_multi_period_model(n_periods=3, configs=None):
 
     print("done")
     
-    return model_circuit
+    return model_circuit, configs
 
 def create_image_dir():
     """Create directory for output images."""
@@ -219,6 +222,14 @@ def create_image_dir():
         print(f"Creating image directory: {image_dir}")
         os.makedirs(image_dir)
     return image_dir
+
+def create_save_dir():
+    """Create directory for output images."""
+    sol_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "solutions"))
+    if not os.path.exists(sol_dir):
+        print(f"Creating solutions directory: {sol_dir}")
+        os.makedirs(sol_dir)
+    return sol_dir
 
 def main(argv=None):
     """Main driver function.
@@ -244,7 +255,7 @@ def main(argv=None):
     
     # Initialize model
     #print("periods", args.periods)
-    model_circuit = create_multi_period_model(n_periods=args.periods)
+    model_circuit, master_config = create_multi_period_model(n_periods=args.periods)
 
     # ------------------------------------------------------------------
     # Inject chosen upper-envelope method into operator settings of each
@@ -275,34 +286,76 @@ def main(argv=None):
                     print(f"Warning: {stage_name}.cntn_to_dcsn has no model")
 
     # Solve the multi-period model - set verbose to True for detailed output
-    all_stages_solved = run_time_iteration(model_circuit, n_periods=3, verbose=True)
+    all_stages_solved = run_time_iteration(model_circuit, n_periods=args.periods, verbose=True)
 
     # Main policy & EGM plots
     generate_plots(model_circuit, args.ue_method, image_dir,
-                   plot_period=0, bounds=BOUNDS, save_dir=image_dir)
+                   plot_period=0, bounds=BOUNDS, save_dir=None)
 
     # Return the solved model circuit so that callers can build composites
-    return model_circuit
+    return model_circuit, master_config
 
 if __name__ == "__main__":
 
     IMAGE_DIR = create_image_dir()
+    SAVE_DIR = create_save_dir()
+    
 
     # Select the methods you want to compare here.
     METHODS_TO_RUN = [
-        "VFI_GRID",
         "FUES2DEV",
+        "DCEGM",
         # "DCEGM",  # uncomment when desired
     ]
 
     solved_models = []
 
+
     for mtd in METHODS_TO_RUN:
-        mdl = main(["--periods", "0", "--ue-method", mtd, "--plot"])
+        mdl, configs = main(["--periods", "3", "--ue-method", mtd, "--plot"])
         solved_models.append(mdl)
 
-    # Combined comparison plot (uses period 1 to match earlier calls)
-    plot_compare_value_Q(solved_models, METHODS_TO_RUN, IMAGE_DIR, plot_period=1, bounds=BOUNDS)
+        # ---- NEW: persist this circuit --------------------------------------
+        # Use the config directory we already know (config_HR) as `config_src`.
+        config_src_dir = os.path.join(current_dir, "config_HR")
+        # cfg_bundle is the dict returned above; unpack wanted entries
+        master_cfg      = configs["master"]
+        stage_cfgs_dict = {k: configs[k] for k in ["tenu", "ownh", "ownc", "renth", "rentc"]}
+        connections_cfg = configs["connections"]
+
+        # need to put in config_src_dir first to ensure edited config files are overwritten!
+        # TODO: needs fix at DYNX saver. 
+        config_sources = [config_src_dir, master_cfg, *stage_cfgs_dict.values(), connections_cfg] 
+        save_path = save_circuit(mdl, SAVE_DIR, config_sources,
+                                model_id=f"{mtd}")
+
+        print(f"Model '{mtd}' saved to: {save_path}")
+        # ---------------------------------------------------------------------
+
+        loaded_circuit = load_circuit(save_path)
+
+        # make a sibling directory called “…/images_loaded/<method>/”
+        loaded_img_dir = os.path.join(
+            os.path.dirname(IMAGE_DIR), "images_loaded", mtd.lower()
+        )
+        os.makedirs(loaded_img_dir, exist_ok=True)
+
+        # regenerate one set of plots from the *loaded* circuit
+        generate_plots(
+            loaded_circuit,
+            mtd,
+            loaded_img_dir,
+            plot_period=0,
+            bounds=BOUNDS,
+            save_dir=None,
+        )
+        print(f"Reloaded circuit plotted to: {loaded_img_dir}")
+    # ---------------------------------------------------------------------
+
 
     print("Done.")
+
+
+    
+
     

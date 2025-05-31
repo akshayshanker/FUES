@@ -1,7 +1,7 @@
 import numpy as np
 from numba import njit
 from dc_smm.models.housing_renting.horses_common import interp_as
-from helpers.sol import Solution
+from dynx.stagecraft.solmaker import Solution
 
 def F_shocks_dcsn_to_arvl(mover):
     """Create operator for shock integration in backward step.

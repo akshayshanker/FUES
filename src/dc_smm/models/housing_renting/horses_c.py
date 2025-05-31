@@ -8,7 +8,7 @@ from dc_smm.uenvelope.upperenvelope import EGM_UE
 from dc_smm.fues.helpers import interp_as
 from functools import lru_cache
 from quantecon.optimize.scalar_maximization import brent_max
-from helpers.sol import Solution
+from dynx.stagecraft.solmaker import Solution
 
 # --- Operator Factory for OWNC Consumption Choice ---
 def F_ownc_cntn_to_dcsn(mover):
@@ -170,6 +170,7 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
     rfc_radius = model.settings_dict["rfc_radius"]
     rfc_n_iter = model.settings_dict["rfc_n_iter"]
     n_con = model.settings_dict["n_constraint_points"]
+    n_con_nxt = model.settings_dict["n_constraint_points_nxt"]
 
     n_w = len(w_grid)
     n_H = vlu_cntn.shape[1]
@@ -261,7 +262,7 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
                     egm_preprocess(
                         m_egm, q_egm, c_egm, a_nxt_grid, delta*beta, 
                         utility_func, vlu_e, m_bar = m_bar, n_con=n_con,
-                        c_max=c_max, h_nxt=H_val
+                        n_con_nxt = n_con_nxt, c_max=c_max, h_nxt=H_val
                     )
                 )
                 #print("not CONSAV")

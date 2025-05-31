@@ -2,7 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
 import seaborn as sns
-from helpers.sol import Solution
+from dynx.stagecraft.solmaker import Solution
 
 def generate_plots(model, method, image_dir, plot_period=0, bounds=None,
                   save_dir=None, load_dir=None):
@@ -36,8 +36,16 @@ def generate_plots(model, method, image_dir, plot_period=0, bounds=None,
     
     # Base directory for this method
     method_dir = os.path.join(image_dir, method)
-    method_dir_load = os.path.join(save_dir, method)
-    method_dir_save = os.path.join(save_dir, method)
+
+    if load_dir is not None:
+        method_dir_load = os.path.join(load_dir, method)
+    else:
+        method_dir_load = None
+
+    if save_dir is not None:
+        method_dir_save = os.path.join(save_dir, method)
+    else:
+        method_dir_save = None
     
     # Create directories for different plot types
     egm_dir = os.path.join(method_dir, "egm_plots")

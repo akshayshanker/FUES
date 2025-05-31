@@ -56,6 +56,7 @@ stage:
     rfc_radius: ["rfc_radius"]
     rfc_n_iter: ["rfc_n_iter"]
     n_constraint_points: ["n_constraint_points"]
+    n_constraint_points_nxt: ["n_constraint_points_nxt"]
     c_max: ["c_max"]
     N_arg_grid_vfi: ["N_arg_grid_vfi"]
 

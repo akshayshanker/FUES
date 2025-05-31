@@ -48,6 +48,7 @@ stage:
     w_min: ["w_min"]            # From master
     w_max: ["w_max"]            # From master
     w_points: ["w_points"]      # From master
+    n_constraint_points_nxt: ["n_constraint_points_nxt"]
 
   methods:
     optimization: "discrete_choice"

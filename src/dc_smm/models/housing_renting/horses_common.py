@@ -387,6 +387,7 @@ def _egm_preprocess_core(e_old, vf_old, c_old, a_old,
                          beta, u_func,         # u_func must be @njit-able
                          m_bar,                # jump threshold
                          n_con,                # # constraint nodes
+                         n_con_nxt,
                          c_max, h_nxt):               # upper end of [c*, c_max]
     """
     Returns new (e,vf,c,a) with
@@ -419,7 +420,7 @@ def _egm_preprocess_core(e_old, vf_old, c_old, a_old,
     j_idx  = np.where(jumps)[0]
     j_idx   = np.where(jumps)[0]          # jump i  ⇒  segment between i and i+1
     n_jump  = j_idx.size
-    n_add   = n_con + n_jump * n_con      # total new nodes
+    n_add   = n_con + n_jump * n_con_nxt      # total new nodes
     n_total = n_old + n_add
 
     #print(j_idx)
@@ -450,41 +451,43 @@ def _egm_preprocess_core(e_old, vf_old, c_old, a_old,
     # -----------------------------------------------------------------------
     # 3.  Jump segments
     # -----------------------------------------------------------------------
-    for k in j_idx:
-        
-        if vf_old[k] < vf_old[k+1]:                       # jump between k and k+1
-            a_star = a_old[k+1]
-            c_star = c_old[k+1]
-            e_star = e_old[k+1]
+
+    if n_con_nxt>0:
+        for k in j_idx:
             
-            lb_c = max(1e-10,c_star-6)
+            if vf_old[k] < vf_old[k+1]:                       # jump between k and k+1
+                a_star = a_old[k+1]
+                c_star = c_old[k+1]
+                e_star = e_old[k+1]
+                
+                lb_c = max(1e-10,c_star-6)
 
-            c_seg = np.linspace(lb_c, c_star, n_con).astype(c_old.dtype)
-            #a_seg = np.linspace(a_star, a_star+2, n_con).astype(a_old.dtype)
-            m_seg = a_star + c_seg
+                c_seg = np.linspace(lb_c, c_star, n_con_nxt).astype(c_old.dtype)
+                #a_seg = np.linspace(a_star, a_star+2, n_con).astype(a_old.dtype)
+                m_seg = a_star + c_seg
 
-            vf_seg = u_func(c_seg, h_nxt) + beta * vf_next[k+1]
+                vf_seg = u_func(c_seg, h_nxt) + beta * vf_next[k+1]
 
-            e_new[p:p+n_con]  = m_seg
-            vf_new[p:p+n_con] = vf_seg
-            c_new[p:p+n_con]  = c_seg
-            a_new[p:p+n_con]  = a_star
-            p += n_con
-        else:
-            a_star = a_old[k]
-            c_star = c_old[k]
-            e_star = e_old[k]
-            
-            #lb_c = max(1e-10,c_star-6)
+                e_new[p:p+n_con]  = m_seg
+                vf_new[p:p+n_con] = vf_seg
+                c_new[p:p+n_con]  = c_seg
+                a_new[p:p+n_con]  = a_star
+                p += n_con
+            else:
+                a_star = a_old[k]
+                c_star = c_old[k]
+                e_star = e_old[k]
+                
+                #lb_c = max(1e-10,c_star-6)
 
-            a_seg = np.linspace(a_star, a_star+2, n_con).astype(a_old.dtype)
-            m_seg = a_seg + c_star
+                a_seg = np.linspace(a_star, a_star+2, n_con).astype(a_old.dtype)
+                m_seg = a_seg + c_star
 
-            vf_seg = u_func(c_star, h_nxt) + beta * vf_next[k]
+                vf_seg = u_func(c_star, h_nxt) + beta * vf_next[k]
 
-            e_new[p:p+n_con]  = m_seg
-            vf_new[p:p+n_con] = vf_seg
-            c_new[p:p+n_con]  = c_star
+                e_new[p:p+n_con]  = m_seg
+                vf_new[p:p+n_con] = vf_seg
+                c_new[p:p+n_con]  = c_star
             
 
         # for 
@@ -503,6 +506,7 @@ def egm_preprocess(egrid, vf, c, a,
                    beta, u_func, vf_next,
                    m_bar,
                    n_con=10,
+                   n_con_nxt = 0,
                    c_max=None,
                    h_nxt=None,
                    **kwargs):
@@ -531,7 +535,7 @@ def egm_preprocess(egrid, vf, c, a,
     e_cat, vf_cat, c_cat, a_cat = _egm_preprocess_core(
         egrid, vf, c, a,
         vf_next, beta, u_func,
-        m_bar, n_con, c_max, h_nxt)
+        m_bar, n_con,n_con_nxt, c_max, h_nxt)
 
     # ---- uniqueness & (optional) sorting -----------------------------------
     unique_ids = uniqueEG(e_cat, vf_cat)

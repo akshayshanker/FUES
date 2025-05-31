@@ -1,6 +1,6 @@
 import numpy as np
 from scipy.interpolate import RegularGridInterpolator, interp1d
-from helpers.sol import Solution
+from dynx.stagecraft.solmaker import Solution
 
 def F_t_cntn_to_dcsn(mover):
     """Create operator for tenure choice (TENU) continuation to decision.
