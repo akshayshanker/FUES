@@ -408,20 +408,26 @@ def _egm_preprocess_core(e_old, vf_old, c_old, a_old,
     del_vf =vf_next[1:] - vf_next[:-1]
 
     # relative gap |Δa| / |a_{t}|   (robust to a_{t}=0)
-    rel_gap = np.empty_like(diff)
-    for i in range(diff.size):
-        b = base[i]
-        rel_gap[i] = np.abs(diff[i] / b) if b != 0.0 else np.inf
+
+    if n_con_nxt>0:
+        rel_gap = np.empty_like(diff)
+        for i in range(diff.size):
+            b = base[i]
+            rel_gap[i] = np.abs(diff[i] / b) if b != 0.0 else np.inf
     
-    #jumps  = rel_gap > m_bar          # m_bar is now a relative threshold
-    jumps  = diff<0 
-    #del_vf_bool = del_vf<0
-    #jumps = jumps*del_vf_bool
-    j_idx  = np.where(jumps)[0]
-    j_idx   = np.where(jumps)[0]          # jump i  ⇒  segment between i and i+1
-    n_jump  = j_idx.size
-    n_add   = n_con + n_jump * n_con_nxt      # total new nodes
-    n_total = n_old + n_add
+        #jumps  = rel_gap > m_bar          # m_bar is now a relative threshold
+        jumps  = diff<0 
+        #del_vf_bool = del_vf<0
+        #jumps = jumps*del_vf_bool
+        j_idx  = np.where(jumps)[0]
+        j_idx   = np.where(jumps)[0]          # jump i  ⇒  segment between i and i+1
+        n_jump  = j_idx.size
+        n_add   = n_con + n_jump * n_con_nxt      # total new nodes
+        n_total = n_old + n_add
+    else:
+        n_add = n_con
+        n_total = n_old + n_add
+        n_jump = 0
 
     #print(j_idx)
     #print(beta)

@@ -425,6 +425,9 @@ def main(argv=None):
     
     # Define parameter paths
     param_paths = ["master.methods.upper_envelope"]
+
+    save_root = os.path.join(os.path.dirname(__file__), "solutions/HR_test_v1")
+    os.makedirs(save_root, exist_ok=True)
     
     # Define the solver function inline
     def solver(model_circuit, recorder=None):
@@ -444,7 +447,11 @@ def main(argv=None):
         param_paths=param_paths,
         model_factory=lambda cfg: initialize_housing_model(cfg, n_periods=args.periods
         ),
-        solver=solver,
+        solver=solver,\
+        output_root=save_root,
+        bundle_prefix="HR_test_v1",
+        save_by_default=True,
+        load_if_exists=False,
         metric_fns={"euler_error": metric_function},
         cache=True,
     )
@@ -542,5 +549,5 @@ def main(argv=None):
 if __name__ == "__main__":
     # Fix argument parsing for Cursor debugger
     import sys
-    sys.argv = ["circuit_runner_solving.py", "--periods", "3", "--ue-method", "FUES", "--verbose"]
+    sys.argv = ["circuit_runner_solving.py", "--periods", "3", "--ue-method", "FUES2DEV, CONSAV", "--verbose"]
     debug_results = main() 

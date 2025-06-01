@@ -593,7 +593,7 @@ def run_time_iteration(model_circuit, n_periods=None, verbose=False,verbose_timi
         period_timings.append(period_data)
         
         # Track times for non-terminal periods only
-        if not is_terminal_period:
+        if period_idx < n_periods - 2:
             total_ue_time += period_ue_time
             total_nonterminal_time += period_time
     

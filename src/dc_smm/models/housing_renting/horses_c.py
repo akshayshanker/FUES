@@ -336,10 +336,13 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
                 "H_nxt": H_val
             })
 
-            c_prime = piecewise_gradient_3rd(policy[:, i_h, i_y], w_grid, m_bar=m_bar)
+            if delta<1:
+                c_prime = piecewise_gradient_3rd(policy[:, i_h, i_y], w_grid, m_bar=m_bar)
+            else:
+                c_prime = np.zeros_like(policy[:, i_h, i_y])
             #print(c_prime)
             #print(policy[:, i_h, i_y])
-            lambda_dcsn[:, i_h, i_y] = (uc_today - (1-delta)*c_prime*uc_today) /delta
+            lambda_dcsn[:, i_h, i_y] = (uc_today - (1-delta)*c_prime*uc_today) /delta 
             vlu_dcsn[:, i_h, i_y] = (Q_dcsn[:, i_h, i_y] - (1-delta)*compiled_funcs.u_func(c=policy[:, i_h, i_y], H_nxt=H_val))/delta
 
             #lambda_dcsn[lambda_dcsn<0] = 1e-10

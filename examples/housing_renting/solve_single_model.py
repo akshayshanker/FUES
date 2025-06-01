@@ -249,7 +249,7 @@ if __name__ == "__main__":
     # ------------------------------------------------------------------
     for mtd in METHODS_TO_RUN:
         # 1. solve and get canonical config container
-        mdl, cfg = main(["--periods", "3", "--ue-method", mtd, "--plot"])
+        mdl, cfg = main(["--periods", "4", "--ue-method", mtd, "--plot"])
         solved_models.append(mdl)
 
         # 2. persist ----------------------------------------------------
