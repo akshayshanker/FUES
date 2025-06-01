@@ -61,7 +61,7 @@ stage:
     n_constraint_points_nxt: ["n_constraint_points_nxt"]
 
   methods:
-    solution: ["solution"]
+    solution: "EGM"
     simulation: "Histogram"
     integration_method: "discretize"
     compilation: 'eval'             

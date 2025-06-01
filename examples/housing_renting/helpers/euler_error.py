@@ -38,12 +38,13 @@ def calculate_euler_error(model):
     z_vals = tenu.dcsn_to_arvl.model.num.shocks.income_shock.process.values
 
     # ------------- policies ----------------------------------------------
-    c_now     = ownc_now.dcsn.sol["policy"]
-    tenure_pol= tenu.dcsn.sol["tenure_policy"]
-    H_pol     = ownh.dcsn.sol["H_policy"]
-    S_pol     = rnth.dcsn.sol["S_policy"]
-    c_owner_n = ownc.dcsn.sol["policy"]          # (a, H_nxt, y)
-    c_renter_n= rntc.dcsn.sol["policy"]          # (a, y)
+    c_now     = ownc_now.dcsn.sol.policy["c"]
+    tenure_pol= tenu.dcsn.sol.policy["tenure"]
+    H_pol     = ownh.dcsn.sol.policy["H"]
+    S_pol     = rnth.dcsn.sol.policy["S"]
+    
+    c_owner_n = ownc.dcsn.sol.policy["c"]         # (a, H_nxt, y)
+    c_renter_n= rntc.dcsn.sol.policy["c"]          # (a, y)
 
     # ------------- primitives --------------------------------------------
     par     = ownc.model.param

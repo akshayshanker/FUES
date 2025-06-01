@@ -61,7 +61,7 @@ stage:
     N_arg_grid_vfi: ["N_arg_grid_vfi"]
 
   methods:
-    solution: ["sol_method"]
+    solution: "EGM"
     simulation: "Histogram"
     integration_method: "discretize"
     compilation: 'eval'             

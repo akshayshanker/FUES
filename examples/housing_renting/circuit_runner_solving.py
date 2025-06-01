@@ -542,5 +542,5 @@ def main(argv=None):
 if __name__ == "__main__":
     # Fix argument parsing for Cursor debugger
     import sys
-    #sys.argv = ["circuit_runner_solving.py", "--periods", "4", "--ue-method", "FUES", "--verbose"]
+    sys.argv = ["circuit_runner_solving.py", "--periods", "3", "--ue-method", "FUES", "--verbose"]
     debug_results = main() 
