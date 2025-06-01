@@ -22,18 +22,19 @@ import numpy as np
 import matplotlib.pyplot as plt
 import copy
 import seaborn as sns
-from matplotlib.ticker import FormatStrFormatter
+from pathlib import Path
 
 # Import from ModCraft
 from dynx.stagecraft import Stage
-from dynx.stagecraft.config_loader import (
+from dynx.stagecraft.makemod import (
     initialize_model_Circuit,
     compile_all_stages,
 )
-from dynx.stagecraft.saver import save_circuit, load_circuit
-from dynx.heptapodx.io.yaml_loader import load_config
+from dynx.stagecraft.io import save_circuit, load_circuit
+from dynx.stagecraft.io import load_config         # ← NEW canonical loader
 from dynx.heptapodx.core.api import initialize_model
 from dynx.heptapodx.num.generate import compile_num as generate_numerical_model
+from dynx.stagecraft.makemod import initialize_model_Circuit, compile_all_stages
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 
@@ -58,161 +59,90 @@ BOUNDS = {
     "Q":          (None, None, -2, 4),
 }
 
-def load_configs():
-    """Load all configuration files."""
-    config_dir = os.path.join(os.path.dirname(__file__), "config_HR")
-    master_path = os.path.join(config_dir, "master.yml")
-    ownh_path = os.path.join(config_dir, "OWNH_stage.yml") 
-    ownc_path = os.path.join(config_dir, "OWNC_stage.yml")
-    renth_path = os.path.join(config_dir, "RNTH_stage.yml")
-    rentc_path = os.path.join(config_dir, "RNTC_stage.yml")
-    tenu_path = os.path.join(config_dir, "TENU_stage.yml")
-    connections_path = os.path.join(config_dir, "connections.yml")
-    
-    # Load configurations
-    print("Loading configurations...")
-    master_config = load_config(master_path)
-    ownh_config = load_config(ownh_path)
-    ownc_config = load_config(ownc_path)
-    renth_config = load_config(renth_path)
-    rentc_config = load_config(rentc_path)
-    tenu_config = load_config(tenu_path)
-    connections_config = load_config(connections_path)
-    
-    return {
-        "master": master_config,
-        "ownh": ownh_config,
-        "ownc": ownc_config,
-        "renth": renth_config,
-        "rentc": rentc_config,
-        "tenu": tenu_config,
-        "connections": connections_config
-    }
 
-def initialize_housing_model():
-    """Initialize the housing model with renting using YAML configuration.
-    
-    Returns
-    -------
-    dict
-        Dictionary containing all five stages (TENU, OWNH, OWNC, RNTH, RNTC)
+def create_multi_period_model(
+    n_periods: int = 3,
+    config_dir: str | Path | None = None,
+    configs: dict | None = None,
+    ue_method: str = "FUES",
+):
     """
-    print("Initializing housing model with renting...")
-    
-    # Load configurations
-    configs = load_configs()
-    # Operator-specific settings will be injected later (via CLI --ue-method)
-    
-    # Prepare stages config dictionary with all five stages
-    stage_configs = {
-        "TENU": configs["tenu"],
-        "OWNH": configs["ownh"],
-        "OWNC": configs["ownc"],
-        "RNTH": configs["renth"],
-        "RNTC": configs["rentc"]
-    }
+    Build a multi-period housing-with-renting ModelCircuit.
 
-    
-    
-    # Let the framework handle all the complexity of creating stages,
-    # perches, movers, and connections
-    print("Building model circuit using configuration...")
-    model_circuit = initialize_model_Circuit(
-        master_config=configs["master"],
-        stage_configs=stage_configs,
-        connections_config=configs["connections"]
-    )
-
-    compile_all_stages(model_circuit)
-    
-    # Get the individual stages from the model circuit
-    # For the housing model with renting, we have one period with five stages
-    period = model_circuit.get_period(0)
-    tenu_stage = period.get_stage("TENU")
-    ownh_stage = period.get_stage("OWNH")
-    ownc_stage = period.get_stage("OWNC")
-    rnth_stage = period.get_stage("RNTH")
-    rntc_stage = period.get_stage("RNTC")
-    
-    # Debug: Print information about the Markov shock process
-    print("\nShock information for TENU stage:")
-    shock_info = tenu_stage.model.num.shocks.income_shock
-    print(f"Transition matrix shape: {shock_info.transition_matrix.shape}")
-    
-    # Mark final period stages
-    # Only consumption stages are marked as terminal
-    ownh_stage.status_flags["is_terminal"] = False
-    ownc_stage.status_flags["is_terminal"] = True
-    rnth_stage.status_flags["is_terminal"] = False
-    rntc_stage.status_flags["is_terminal"] = True
-    tenu_stage.status_flags["is_terminal"] = False
-    
-    # Set external mode for stages
-    ownh_stage.model_mode = "external"
-    ownc_stage.model_mode = "external"
-    rnth_stage.model_mode = "external"
-    rntc_stage.model_mode = "external"
-    tenu_stage.model_mode = "external"
-    
-    # Return all stages as a dictionary
-    return {
-        "TENU": tenu_stage,
-        "OWNH": ownh_stage,
-        "OWNC": ownc_stage,
-        "RNTH": rnth_stage,
-        "RNTC": rntc_stage
-    }
-
-def create_multi_period_model(n_periods=3, configs=None):
-    """Create a multi-period model circuit for the housing model with renting.
-    
     Parameters
     ----------
     n_periods : int
-        Number of periods to create
+        Desired planning horizon (number of periods).
+    config_dir : str | Path, optional
+        Path to the folder that contains *master.yml*, *stages/*, and
+        *connections.yml*.  Defaults to ``<this_file>/config_HR``.
     configs : dict, optional
-        Pre-loaded configuration dictionaries. If provided, these configs are used
-        instead of loading from files. Useful for modifying configs before model creation.
-        
+        An already-loaded config dictionary (same structure returned by
+        ``load_config``).  If supplied, it will be *mutated in-place* to
+        reflect the requested horizon.
+
     Returns
     -------
-    ModelCircuit
-        The multi-period model circuit
+    model_circuit : ModelCircuit
+    configs       : dict
+        The (possibly modified) configuration dictionary actually used.
     """
-    print(f"Creating multi-period model with {n_periods} periods...")
-    
-    # Load configurations or use provided configs
+    print(f"Creating multi-period model with {n_periods} periods …")
+
+    # ------------------------------------------------------------------
+    # 1. Obtain the configuration dict in the *new* canonical format
+    # ------------------------------------------------------------------
     if configs is None:
-        configs = load_configs()
-    
-    # Set the number of periods in the master config
-    # This is critical to properly create a multi-period model
-    master_config = copy.deepcopy(configs["master"])
-    master_config["horizon"] = n_periods
+        if config_dir is None:
+            # default to sibling folder  …/examples/config_HR
+            config_dir = Path(__file__).with_suffix("").parent / "config_HR"
+        configs = load_config(config_dir)  # <- uses dynx.stagecraft.io helper
 
-    configs["master"]["horizon"] = n_periods
+    # ------------------------------------------------------------------
+    # 2. Mutate horizon only once
+    # ------------------------------------------------------------------
+    configs["master"] = copy.deepcopy(configs["master"])
+    configs["master"]["horizon"] = n_periods     # (sometimes called 'periods')
     
-    # Prepare stages config dictionary with all five stages
-    stage_configs = {
-        "TENU": configs["tenu"],
-        "OWNH": configs["ownh"],
-        "OWNC": configs["ownc"],
-        "RNTH": configs["renth"],
-        "RNTC": configs["rentc"]
-    }
-    
-    # Build the multi-period model circuit
-    print("Building multi-period model circuit...")
+    #---
+    #2.1 Update methods
+    #---
+    if ue_method == "FUES2DEV":
+        configs["master"]["methods"] = {"upper_envelope": "FUES2DEV"}
+    elif ue_method == "DCEGM":
+        configs["master"]["methods"] = {"upper_envelope": "DCEGM"}
+    elif ue_method == "RFC":
+        configs["master"]["methods"] = {"upper_envelope": "RFC"}
+    elif ue_method == "CONSAV":
+        configs["master"]["methods"] = {"upper_envelope": "CONSAV"}
+    elif ue_method == "VFI":
+        configs["master"]["methods"] = {"upper_envelope": "VFI"}
+    elif ue_method == "VFI_GRID":
+        configs["master"]["methods"] = {"upper_envelope": "VFI_GRID"}
+    else:
+        configs["master"]["methods"] = {"upper_envelope": "EGM"}
+
+    if ue_method == "VFI" or ue_method == "VFI_GRID":
+        # mover just takes the stage level methods and only the stage level methods
+        # TODO a fix to mover methods assign. 
+        configs["stages"]["OWNC"]["stage"]["methods"]["solution"] = ue_method
+        configs["stages"]["RNTC"]["stage"]["methods"]["solution"] = ue_method
+    else:
+        configs["stages"]["OWNC"]["stage"]["methods"]["solution"] = "EGM"
+        configs["stages"]["RNTC"]["stage"]["methods"]["solution"] = "EGM"
+
+    # ------------------------------------------------------------------
+    # 3. Build and compile the circuit
+    # ------------------------------------------------------------------
+    print("Building multi-period model circuit …")
     model_circuit = initialize_model_Circuit(
-        master_config=master_config,
-        stage_configs=stage_configs,
-        connections_config=configs["connections"]
+        master_config=configs["master"],
+        stage_configs=configs["stages"],      # dict: name → stage-dict
+        connections_config=configs["connections"],
     )
-
     compile_all_stages(model_circuit)
-
     print("done")
-    
+
     return model_circuit, configs
 
 def create_image_dir():
@@ -255,13 +185,15 @@ def main(argv=None):
     
     # Initialize model
     #print("periods", args.periods)
-    model_circuit, master_config = create_multi_period_model(n_periods=args.periods)
+    model_circuit, master_config = create_multi_period_model(n_periods=args.periods, ue_method=args.ue_method.upper())
 
     # ------------------------------------------------------------------
     # Inject chosen upper-envelope method into operator settings of each
     # stage that uses EGM (typically OWNC, RNTC, etc.).  horses_c.py readsgrid
     # the setting from model.operator.get("upper_envelope", "FUES")
     # ------------------------------------------------------------------
+
+    ''''
     for period in model_circuit.periods_list:
         for stage_name, stage in period.stages.items():
             if stage_name in ["OWNC", "RNTC"]:  # Only consumption stages use EGM
@@ -284,6 +216,7 @@ def main(argv=None):
                     #print(mover.model.methods["solution"])
                 else:
                     print(f"Warning: {stage_name}.cntn_to_dcsn has no model")
+    '''
 
     # Solve the multi-period model - set verbose to True for detailed output
     all_stages_solved = run_time_iteration(model_circuit, n_periods=args.periods, verbose=True)
@@ -311,46 +244,44 @@ if __name__ == "__main__":
     solved_models = []
 
 
+    # ------------------------------------------------------------------
+    # run / save / reload / re-plot for each UE method
+    # ------------------------------------------------------------------
     for mtd in METHODS_TO_RUN:
-        mdl, configs = main(["--periods", "3", "--ue-method", mtd, "--plot"])
+        # 1. solve and get canonical config container
+        mdl, cfg = main(["--periods", "3", "--ue-method", mtd, "--plot"])
         solved_models.append(mdl)
 
-        # ---- NEW: persist this circuit --------------------------------------
-        # Use the config directory we already know (config_HR) as `config_src`.
-        config_src_dir = os.path.join(current_dir, "config_HR")
-        # cfg_bundle is the dict returned above; unpack wanted entries
-        master_cfg      = configs["master"]
-        stage_cfgs_dict = {k: configs[k] for k in ["tenu", "ownh", "ownc", "renth", "rentc"]}
-        connections_cfg = configs["connections"]
-
-        # need to put in config_src_dir first to ensure edited config files are overwritten!
-        # TODO: needs fix at DYNX saver. 
-        config_sources = [config_src_dir, master_cfg, *stage_cfgs_dict.values(), connections_cfg] 
-        save_path = save_circuit(mdl, SAVE_DIR, config_sources,
-                                model_id=f"{mtd}")
-
+        # 2. persist ----------------------------------------------------
+        save_path = save_circuit(
+            mdl,
+            SAVE_DIR,
+            cfg,              # ← single canonical dict now accepted
+            model_id=mtd.lower(),
+        )
         print(f"Model '{mtd}' saved to: {save_path}")
-        # ---------------------------------------------------------------------
 
+        # 3. reload -----------------------------------------------------
         loaded_circuit = load_circuit(save_path)
 
-        # make a sibling directory called “…/images_loaded/<method>/”
+        # 4. plot from the re-loaded circuit ---------------------------
         loaded_img_dir = os.path.join(
             os.path.dirname(IMAGE_DIR), "images_loaded", mtd.lower()
         )
         os.makedirs(loaded_img_dir, exist_ok=True)
 
-        # regenerate one set of plots from the *loaded* circuit
         generate_plots(
             loaded_circuit,
             mtd,
             loaded_img_dir,
             plot_period=0,
             bounds=BOUNDS,
-            save_dir=None,
+            save_dir=None,    # send plots to disk only
         )
         print(f"Reloaded circuit plotted to: {loaded_img_dir}")
-    # ---------------------------------------------------------------------
+
+    print("Done.")
+
 
 
     print("Done.")

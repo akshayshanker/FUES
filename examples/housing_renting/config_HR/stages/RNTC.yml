@@ -31,7 +31,7 @@ stage:
     lb: ["lb"]                # Look-back parameter for FUES
     rho: ["rho"]              # Elasticity of substitution between consumption and housing
     gamma: ["gamma"]          # CRRA coefficient (risk aversion parameter)
-  
+    thorn: ["thorn"]          # Fella's thorn parameter
 
   settings:
     tol: ["tol"]                # Convergence tolerance from master
@@ -56,17 +56,17 @@ stage:
     rfc_radius: ["rfc_radius"]
     rfc_n_iter: ["rfc_n_iter"]
     n_constraint_points: ["n_constraint_points"]
+    n_constraint_points_nxt: ["n_constraint_points_nxt"]
     c_max: ["c_max"]
     N_arg_grid_vfi: ["N_arg_grid_vfi"]
-    n_constraint_points_nxt: ["n_constraint_points_nxt"]
 
   methods:
-    sol_method: ["sol_method"]
+    solution: ["sol_method"]
     simulation: "Histogram"
     integration_method: "discretize"
     compilation: 'eval'             
     default_grid: 'linspace'
-    upper_envelope: ["upper_envelope"]
+    upper_envelope: ["upper_envelope"]        
 
   ###################
   # 2) .math Section
@@ -76,24 +76,23 @@ stage:
       # Utility functions from master
       u_func: ["owner_utility"]          # Utility function from master
       uc_inv_func: ["inv_marginal_utility"] # Inverse marginal utility from master
-      owner_utility: ["owner_utility"]
-      inv_marginal_utility: ["inv_marginal_utility"]
-      owner_marginal_utility: ["owner_marginal_utility"]
       
       # Transition functions
       g_av:
         expr: "w = w; H=H; y=y"
         description: "Identity mapping from arrival to decision (no state change)"
       
+      # EGM operations from master
+      egm_operations: ["owner_egm_operations"]
 
       # Budget mapping from decision perch to continuation perch
       g_ve:
-        expr: "a_nxt = w - c; y = y; H_nxt = H_nxt"
+        expr: "a_nxt = w - c; y = y; H_nxt = H_nxt*0"
         description: "Computes next‑period assets after consumption; identity on y and H_nxt"
       
       g_ve_h_ind:
-        expr: "H_nxt_ind = H_ind"
-        description: "Identity mapping from housing choice to housing index"
+        expr: "H_nxt_ind = 0*H_ind"
+        description: "Identity mapping from decision to continuation"
 
 
     constraints:
@@ -117,7 +116,6 @@ stage:
           w_min: ["w_min"]
           w_max: ["w_max"]
           w_points: ["w_points"]
-          y_stop: ["y_stop"]
         grid:
           H_nxt:
             type: "linspace"
@@ -145,7 +143,6 @@ stage:
           w_min: ["w_min"]
           w_max: ["w_max"]
           w_points: ["w_points"]
-          y_stop: ["y_stop"]
         grid:
           H_nxt:
             type: "linspace"
@@ -174,7 +171,6 @@ stage:
           a_nxt_points: ["a_nxt_points"]
           H_nxt_points: ["H_points"]
           y_points: ["y_points"]
-          y_stop: ["y_stop"]
         grid:
           a_nxt:
             type: "linspace"
@@ -245,8 +241,11 @@ movers:
       - inv_marginal_utility
       - g_ve_h_ind
     operator:
-      solution: ["sol_method"]         # direct reference to EGM as method
-      upper_envelope: ue_method  # direct reference to FUES as a method 
+      solution: ["sol_method"]      # direct reference to EGM as method
+      upper_envelope: FUES # direct reference to FUES as a method 
+    methods:
+      solution: ["sol_method"]
+
     description: "Continuation->Decision backwards using EGM with FUES upper envelope"
     required_grids:
       - cntn

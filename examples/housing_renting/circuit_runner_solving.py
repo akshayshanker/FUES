@@ -25,6 +25,7 @@ import json
 import logging
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
+from pathlib import Path
 
 # -----------------------------------------------------------------------------
 # Canonical imports (DynX ≥ 1.6.12)
@@ -32,13 +33,13 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 # Core graph / StageCraft
 from dynx.stagecraft import Stage
-from dynx.stagecraft.config_loader import (
+from dynx.stagecraft.makemod import (
     initialize_model_Circuit,
     compile_all_stages,
 )
 
 # Heptapod-B functional layer
-from dynx.heptapodx.io.yaml_loader import load_config
+from dynx.stagecraft.io import load_config   # <-- new canonical loader
 from dynx.heptapodx.core.api import initialize_model
 from dynx.heptapodx.num.generate import compile_num as generate_numerical_model
 
@@ -96,38 +97,12 @@ logger = logging.getLogger(__name__)
 
 
 def load_configs():
-    """Load all configuration files."""
-    config_dir = os.path.join(os.path.dirname(__file__), "config_HR")
-    master_path = os.path.join(config_dir, "housing_master.yml")
-    ownh_path = os.path.join(config_dir, "OWNH_stage.yml") 
-    ownc_path = os.path.join(config_dir, "OWNC_stage.yml")
-    renth_path = os.path.join(config_dir, "RNTH_stage.yml")
-    rentc_path = os.path.join(config_dir, "RNTC_stage.yml")
-    tenu_path = os.path.join(config_dir, "TENU_stage.yml")
-    connections_path = os.path.join(config_dir, "connections.yml")
-    
-    # Load configurations
-    print("Loading configurations...")
-    master_config = load_config(master_path)
-    ownh_config = load_config(ownh_path)
-    ownc_config = load_config(ownc_path)
-    renth_config = load_config(renth_path)
-    rentc_config = load_config(rentc_path)
-    tenu_config = load_config(tenu_path)
-    connections_config = load_config(connections_path)
-    
-    return {
-        "master": master_config,
-        "ownh": ownh_config,
-        "ownc": ownc_config,
-        "renth": renth_config,
-        "rentc": rentc_config,
-        "tenu": tenu_config,
-        "connections": connections_config
-    }
+    """Return the canonical config container dict."""
+    cfg_dir = Path(__file__).parent / "config_HR"
+    return load_config(cfg_dir)
 
 
-def initialize_housing_model(master_config, stage_configs, connections_config, n_periods=3):
+def initialize_housing_model(cfg_container, n_periods=3):
     """
     Initialize a housing model circuit with the specified configuration.
     
@@ -148,22 +123,16 @@ def initialize_housing_model(master_config, stage_configs, connections_config, n
         Initialized model circuit
     """
     # Deep copy configs to avoid modifying originals
-    master_config = copy.deepcopy(master_config)
-    stage_configs = copy.deepcopy(stage_configs)
-    connections_config = copy.deepcopy(connections_config)
-    
-    # Set the number of periods in the master config
-    master_config["periods"] = n_periods
-    
-    # Build the model circuit
-    model_circuit = initialize_model_Circuit(
-        master_config=master_config,
-        stage_configs=stage_configs,
-        connections_config=connections_config
+    cfg = copy.deepcopy(cfg_container)
+    cfg["master"]["horizon"] = n_periods         # or "periods"
+
+    mc = initialize_model_Circuit(
+        master_config   = cfg["master"],
+        stage_configs   = cfg["stages"],
+        connections_config = cfg["connections"],
     )
-    
-    compile_all_stages(model_circuit)
-    return model_circuit
+    compile_all_stages(mc)
+    return mc
 
 
 def metric_function(model):
@@ -452,17 +421,7 @@ def main(argv=None):
     configs = load_configs()
     
     # Create the unified base configuration for CircuitRunner
-    base_cfg = {
-        "master": configs["master"],
-        "stages": {
-            "OWNH": configs["ownh"],
-            "OWNC": configs["ownc"],
-            "RNTH": configs["renth"],
-            "RNTC": configs["rentc"],
-            "TENU": configs["tenu"],
-        },
-        "connections": configs["connections"],
-    }
+    base_cfg = copy.deepcopy(configs)
     
     # Define parameter paths
     param_paths = ["master.methods.upper_envelope"]
@@ -483,8 +442,7 @@ def main(argv=None):
     runner = CircuitRunner(
         base_cfg=base_cfg,
         param_paths=param_paths,
-        model_factory=lambda cfg: initialize_housing_model(
-            cfg["master"], cfg["stages"], cfg["connections"], n_periods=args.periods
+        model_factory=lambda cfg: initialize_housing_model(cfg, n_periods=args.periods
         ),
         solver=solver,
         metric_fns={"euler_error": metric_function},

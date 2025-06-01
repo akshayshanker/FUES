@@ -19,7 +19,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.
 
 # Import from ModCraft
 from src.stagecraft import Stage
-from src.stagecraft.config_loader import initialize_model_Circuit
+from src.stagecraft.makemod import initialize_model_Circuit
 from src.heptapod_b.io.yaml_loader import load_config
 from src.heptapod_b.num.generate import compile_num as generate_numerical_model
 
