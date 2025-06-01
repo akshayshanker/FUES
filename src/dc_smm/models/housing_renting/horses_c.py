@@ -1,7 +1,7 @@
 import numpy as np
 import time  # Add import for timing
 from dc_smm.models.housing_renting.horses_common import (
-    _safe_interp, egm_preprocess, build_njit_utility, piecewise_gradient, piecewise_gradient_3rd
+    _safe_interp, egm_preprocess, build_njit_utility, piecewise_gradient, piecewise_gradient_3rd, get_u_func
 )  # Use relative import
 from numba import njit
 from dc_smm.uenvelope.upperenvelope import EGM_UE
@@ -211,7 +211,7 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
         "iota" : model.param.iota,
         # add any extra constants referenced in expr_str
     }
-    utility_func = build_njit_utility(expr_str, param_vals)
+    utility_func = get_u_func(expr_str, param_vals)
 
     # ------------------------------------------------------------------
     #  Vectorised pre-computation of c_egm for ALL (w,h,y) points
@@ -258,6 +258,7 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
 
             # Process the EGM solution to ensure grid uniqueness
             if ue_method != "CONSAV":
+                #time_start = time.time()
                 m_egm_unique, vlu_v_egm_unique, c_egm_unique, a_nxt_grid_unique = (
                     egm_preprocess(
                         m_egm, q_egm, c_egm, a_nxt_grid, delta*beta, 
@@ -266,6 +267,7 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
                     )
                 )
                 #print("not CONSAV")
+                #print(f"egm_preprocess time: {time.time() - time_start}")
             else:
                 m_egm_unique = m_egm
                 vlu_v_egm_unique = q_egm
@@ -283,10 +285,6 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
                     "c": c_vals, 
                     "H_nxt": H_nxt_grid[i_h]*thorn
                 })
-
-   
-            
-
             # Get upper envelope solution and timing
             refined, _, _ = EGM_UE(
                 m_egm_unique, vlu_v_egm_unique, q_nxt_raw, c_egm_unique, 
@@ -307,8 +305,8 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
 
             if ue_method != "CONSAV":
                 
-                Q_dcsn[:, i_h, i_y] = interpf(m_refined, q_refined)
-                policy[:, i_h, i_y]   = interpf(m_refined, c_refined)
+                Q_dcsn[:, i_h, i_y] = interp_as(m_refined, q_refined, w_grid, extrap=True)
+                policy[:, i_h, i_y]   = interp_as(m_refined, c_refined, w_grid, extrap=True)
 
                 
                 # Calculate decision objective Q_dcsn for present-biased utility

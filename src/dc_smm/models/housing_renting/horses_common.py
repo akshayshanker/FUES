@@ -4,7 +4,7 @@ from numba import njit
 from numba.typed import Dict    
 from typing import Callable   # NEW  – remove if unused        # NEW
 import time
-
+from functools import lru_cache
 
 @njit
 def piecewise_gradient_3rd(f, x, m_bar, eps=0.9):
@@ -595,3 +595,12 @@ def build_njit_utility(
 
     # 4.  JIT-compile to nopython; result takes (c, H) positional args
     return njit(py_func)
+
+@lru_cache(maxsize=None)          # one compiled version per (expr, frozenset(params))
+def build_njit_utility_cached(expr, params_frozen, h_placeholder="H_nxt"):
+    params = dict(params_frozen)  # thaw for substitution
+    return build_njit_utility(expr, params, h_placeholder)
+
+def get_u_func(expr_str, param_vals):
+    frozen = tuple(sorted(param_vals.items()))          # hashable
+    return build_njit_utility_cached(expr_str, frozen)

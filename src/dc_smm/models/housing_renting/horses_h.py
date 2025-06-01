@@ -67,85 +67,95 @@ def F_shocks_dcsn_to_arvl(mover):
     
     return operator
 
-@njit
-def housing_choice_solver_owner(resource_grid, h_grid, h_next_grid, w_grid, Q_cntn, v_cntn, lambda_cntn, tau, min_wealth):
+from numba import njit, prange
+import numpy as np
+
+@njit(inline='always')
+def _interp_scalar(x_grid, y_grid, x):
     """
-    Jitted function to solve the housing choice problem following Fella implementation.
-    
-    Parameters
-    ----------
-    resource_grid : 2D array (n_a, n_h)
-        Resources available at each (a,h) combination
-    h_grid : 1D array
-        Housing grid (current period)
-    h_next_grid : 1D array
-        Next-period housing choice grid
-    w_grid : 1D array
-        Wealth grid for interpolation
-    value_grids : list of 1D arrays
-        List of value function grids for each housing choice option
-    lambda_grids : list of 1D arrays
-        List of lambda function grids for each housing choice option
-    tau : float
-        Transaction cost parameter
-    min_wealth : float
-        Minimum wealth value
-    
-    Returns
-    -------
-    tuple
+    C-style linear interpolation of *one* point.
+    Assumes x_grid is strictly increasing.
     """
-    # Get dimensions
-    n_a, n_h = resource_grid.shape
-    n_h_next = len(h_next_grid)
-    
-    # Output arrays
-    best_Q = np.full((n_a, n_h), -np.inf)
+    if x <= x_grid[0]:
+        return y_grid[0]
+    if x >= x_grid[-1]:
+        return y_grid[-1]
+
+    # binary search (≈ 6–8 iterations for 1 000 pts)
+    lo, hi = 0, len(x_grid) - 1
+    while hi - lo > 1:
+        mid = (lo + hi) // 2
+        if x_grid[mid] <= x:
+            lo = mid
+        else:
+            hi = mid
+
+    x_lo  = x_grid[lo]
+    inv_dx = 1.0 / (x_grid[hi] - x_lo)   # fastmath: fused later
+    w_hi  = (x - x_lo) * inv_dx          # weight on upper node
+    w_lo  = 1.0 - w_hi
+
+    return w_lo * y_grid[lo] + w_hi * y_grid[hi]
+
+
+@njit(cache=True, fastmath=True)
+def housing_choice_solver_owner(resource_grid, h_grid, h_next_grid,
+                                w_grid, Q_cntn, v_cntn, lambda_cntn,
+                                tau, min_wealth):
+    """
+    Fully-compiled housing-choice kernel
+    (owner version; Fella 2017 style).
+    """
+
+    n_a, n_h      = resource_grid.shape
+    n_h_next      = h_next_grid.size
+
+    best_Q      = np.full((n_a, n_h), -np.inf)
     best_lambda = np.zeros((n_a, n_h))
-    best_indices = np.zeros((n_a, n_h), dtype=np.int32)
-    best_v = np.zeros((n_a, n_h))
-    
-    # Loop over all states
-    for i_a in range(n_a):
-        for i_h in range(n_h):
-            # Current resource and housing values
-            resource = resource_grid[i_a, i_h]
-            h_current = h_grid[i_h]
-            
-            best_lambda[i_a, i_h] = 0
-            best_v[i_a, i_h]      = -np.inf
-            best_indices[i_a, i_h]= 0
+    best_v      = np.zeros((n_a, n_h))
+    best_idx    = np.zeros((n_a, n_h), dtype=np.int32)
 
-            # Try each housing choice option
-            for i_h_next in range(n_h_next):
-                h_next = h_next_grid[i_h_next]
-                
-                # Calculate transaction cost
-                chi = 0 if h_current == h_next else 1
-                trans_cost = chi * tau * np.abs(h_next)
-                
-                # Calculate wealth
-                w_dscn_val = resource + chi * (h_current - h_next) - trans_cost
-                
-                # Skip if wealth is below minimum
-                if w_dscn_val < min_wealth:
+    for ia in range(n_a):                         # ← parallel outer loop
+        for ih in range(n_h):
+            res_now   = resource_grid[ia, ih]
+            h_now     = h_grid[ih]
+
+            best_q_here   = -np.inf
+            best_l_here   = 0.0
+            best_v_here   = -np.inf
+            best_i_next   = 0
+
+            for ih_next in range(n_h_next):
+                h_next = h_next_grid[ih_next]
+
+                # transaction cost and budget
+                moved     = (h_now != h_next)
+                trans_fee = tau * np.abs(h_next) if moved else 0.0
+                w_dcsn    = res_now + moved * (h_now - h_next) - trans_fee
+
+                if w_dcsn < min_wealth:
                     continue
-                
-                # Get value and lambda through interpolation
-                # Using the value grid for this housing choice
-                #v_vals = Q_cntn[:,i_h_next]
-                #l_vals = lambda_grids[:,i_h_next]
 
-                maximand = interp_as(w_grid, Q_cntn[:,i_h_next], np.array([w_dscn_val]))[0]
+                # one binary search → use weight for all three arrays
+                q_here = _interp_scalar(w_grid, Q_cntn[:, ih_next], w_dcsn)
 
-                # Update best choice if this is better
-                if maximand > best_Q[i_a, i_h]:
-                    best_Q[i_a, i_h] = maximand
-                    best_lambda[i_a, i_h] = interp_as(w_grid, lambda_cntn[:,i_h_next], np.array([w_dscn_val]))[0]
-                    best_v[i_a, i_h] = interp_as(w_grid, v_cntn[:,i_h_next], np.array([w_dscn_val]))[0]
-                    best_indices[i_a, i_h] = i_h_next
-    
-    return best_Q, best_v, best_lambda, best_indices 
+                if q_here > best_q_here:
+                    best_q_here = q_here
+                    best_l_here = _interp_scalar(w_grid,
+                                                 lambda_cntn[:, ih_next],
+                                                 w_dcsn)
+                    best_v_here = _interp_scalar(w_grid,
+                                                 v_cntn[:, ih_next],
+                                                 w_dcsn)
+                    best_i_next = ih_next
+
+            best_Q[ia, ih]      = best_q_here
+            best_lambda[ia, ih] = best_l_here
+            best_v[ia, ih]      = best_v_here
+            best_idx[ia, ih]    = best_i_next
+
+    return best_Q, best_v, best_lambda, best_idx
+
 
 @njit
 def housing_choice_solver_renter(w_grid, S_grid, y_grid, w_rent_grid, q_cntn, vlu_cntn, lambda_cntn, Pr, shock_grid):

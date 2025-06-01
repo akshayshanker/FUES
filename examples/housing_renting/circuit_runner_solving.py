@@ -437,7 +437,7 @@ def main(argv=None):
         final_period.get_stage("RNTC").status_flags["is_terminal"] = True
         
         # Run time iteration
-        all_stages_solved = run_time_iteration(model_circuit, verbose=args.verbose, 
+        all_stages_solved = run_time_iteration(model_circuit, n_periods=args.periods, verbose=args.verbose, 
                                               verbose_timings=args.verbose, recorder=recorder)
         return model_circuit
     
@@ -549,5 +549,5 @@ def main(argv=None):
 if __name__ == "__main__":
     # Fix argument parsing for Cursor debugger
     import sys
-    sys.argv = ["circuit_runner_solving.py", "--periods", "3", "--ue-method", "FUES2DEV, CONSAV", "--verbose"]
+    sys.argv = ["circuit_runner_solving.py", "--periods", "4", "--ue-method", "FUES2DEV, CONSAV", "--verbose"]
     debug_results = main() 
