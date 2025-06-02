@@ -26,6 +26,12 @@ import logging
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from pathlib import Path
+from typing import Dict
+
+VALID_METHODS = {"VFI_HDGRID", "VFI" "FUES", "CONSAV", "DCEGM"}    
+FAST_METHODS  = ["FUES", "CONSAV", "DCEGM"]                  
+
+BASELINE = "VFI_HDGRID"                                     
 
 # -----------------------------------------------------------------------------
 # Canonical imports (DynX ≥ 1.6.12)
@@ -96,6 +102,57 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+# --- BEGIN METRICS CSV HELPER FUNCTIONS ---
+def save_bundle_metrics(bundle_dir: Path, metrics: Dict[str, float]) -> None:
+    """Overwrite <bundle>/metrics_table.csv with the latest metrics."""
+    try:
+        df = pd.DataFrame([metrics])
+        df.to_csv(bundle_dir / "metrics_table.csv", index=False)
+    except Exception as exc:
+        print(f"[warn] could not write bundle metrics: {exc}")
+
+def append_experiment_metrics(root_dir: Path, bundle_dir: Path,
+                              metrics: Dict[str, float],
+                              dedup_key_column: str) -> None:
+    """Append a row to <root>/experiment_metrics.csv (dedup on a specified key column)."""
+    try:
+        current_run_data = dict(metrics) # Make a copy
+        # Ensure bundle_dir is relative to root_dir/bundles for consistent paths
+        bundles_root = root_dir / "bundles"
+        if not bundle_dir.is_relative_to(bundles_root):
+            # This case should ideally not happen if bundle_dir is from runner._bundle_path
+            # and output_root is consistent. For safety, use absolute path if not relative.
+            print(f"[warn] bundle_dir {bundle_dir} is not relative to {bundles_root}. Using full path for bundle_dir in CSV.")
+            current_run_data["bundle_dir"] = str(bundle_dir.resolve())
+        else:
+            current_run_data["bundle_dir"] = str(bundle_dir.relative_to(bundles_root))
+        
+        df_new_row = pd.DataFrame([current_run_data])
+        output_csv_path = root_dir / "experiment_metrics.csv"
+
+        if output_csv_path.exists():
+            df_old = pd.read_csv(output_csv_path)
+            # Check if the deduplication key column exists in the old DataFrame
+            if dedup_key_column in df_old.columns:
+                # Concatenate and then drop duplicates based on the method name column
+                df_combined = (pd.concat([df_old, df_new_row], ignore_index=True)
+                               .drop_duplicates(subset=[dedup_key_column], keep="last"))
+            else:
+                # If the dedup key column doesn't exist in old CSV, append without trying to drop based on it.
+                # This might lead to duplicates if the script is run multiple times with evolving schemas.
+                # For a fresh start, deleting the old CSV is recommended.
+                print(f"[warn] Dedup key '{dedup_key_column}' not found in existing {output_csv_path}. Appending data.")
+                df_combined = pd.concat([df_old, df_new_row], ignore_index=True)
+        else: # File doesn't exist
+            df_combined = df_new_row
+        
+        df_combined.to_csv(output_csv_path, index=False)
+
+    except Exception as exc:
+        print(f"[warn] could not update experiment dashboard: {exc}")
+# --- END METRICS CSV HELPER FUNCTIONS ---
+
+
 def load_configs():
     """Return the canonical config container dict."""
     cfg_dir = Path(__file__).parent / "config_HR"
@@ -126,6 +183,15 @@ def initialize_housing_model(cfg_container, n_periods=3):
     cfg = copy.deepcopy(cfg_container)
     cfg["master"]["horizon"] = n_periods         # or "periods"
 
+    # todo: we should not have to manually do this below. 
+    if cfg["master"]["methods"]["upper_envelope"] == "VFI_HDGRID" or cfg["master"]["methods"]["upper_envelope"] == "VFI_HDGRID":
+        cfg["stages"]["OWNC"]["stage"]["methods"]["solution"] = cfg["master"]["methods"]["upper_envelope"]
+        cfg["stages"]["RNTC"]["stage"]["methods"]["solution"] = cfg["master"]["methods"]["upper_envelope"]
+    else:
+        cfg["stages"]["OWNC"]["stage"]["methods"]["solution"] = "EGM"
+        cfg["stages"]["RNTC"]["stage"]["methods"]["solution"] = "EGM"
+    
+
     mc = initialize_model_Circuit(
         master_config   = cfg["master"],
         stage_configs   = cfg["stages"],
@@ -150,6 +216,7 @@ def metric_function(model):
         Euler equation error as a quality metric
     """
     # Use the new euler_error_metric function
+    print(">>> euler_error_metric called")
     return euler_error_metric(model)
 
 
@@ -403,151 +470,162 @@ def format_stage_metrics(results_df):
     return "\n".join(method_tables)
 
 
-def main(argv=None):
-    """Main driver function."""
-    # Parse command line arguments
-    parser = argparse.ArgumentParser(description="Housing model with CircuitRunner")
-    parser.add_argument("--periods", type=int, default=3, help="Number of periods to simulate")
-    parser.add_argument("--verbose", action="store_true", help="Print verbose output")
-    parser.add_argument("--no-plots", action="store_true", help="Skip generating plots")
-    parser.add_argument("--ue-method", type=str, default="ALL",
-                       help="Upper envelope method(s) to use. Can be 'ALL', a single method name, or a comma-separated list/tuple: e.g., 'FUES,CONSAV' or '(FUES, DCEGM)'")
-    parser.add_argument("--plot", action="store_true", help="Generate plots")
-    if argv is None:
-        argv = sys.argv[1:]
-    args = parser.parse_args(argv)
-    
-    # Load configurations
-    configs = load_configs()
-    
-    # Create the unified base configuration for CircuitRunner
-    base_cfg = copy.deepcopy(configs)
-    
-    # Define parameter paths
-    param_paths = ["master.methods.upper_envelope"]
+def main(argv: list[str] | None = None) -> None:
+    """
+    Solve the housing-with-renting model for a reference solver plus a set of
+    fast solvers, report deviation metrics and (optionally) generate plots.
+    """
+    # ------------------------------------------------------------------
+    # 0) CLI arguments
+    # ------------------------------------------------------------------
+    p = argparse.ArgumentParser(prog="circuit_runner_solving.py")
+    p.add_argument("--periods", type=int, default=3,
+                   help="number of time periods")
+    p.add_argument("--ue-method", default="ALL",
+                   help="comma-separated fast methods; 'ALL' = built-ins")
+    p.add_argument("--plot", action="store_true",
+                   help="force plot generation (even if --no-plots present)")
+    p.add_argument("--no-plots", action="store_true",
+                   help="skip plot generation regardless of other flags")
+    p.add_argument("--verbose", action="store_true")
+    args = p.parse_args(argv or sys.argv[1:])
 
-    save_root = os.path.join(os.path.dirname(__file__), "solutions/HR_test_v1")
-    os.makedirs(save_root, exist_ok=True)
-    
-    # Define the solver function inline
-    def solver(model_circuit, recorder=None):
-        # Set terminal flags for last period's consumption stages
-        final_period = model_circuit.get_period(len(model_circuit.periods_list) - 1)
-        final_period.get_stage("OWNC").status_flags["is_terminal"] = True
-        final_period.get_stage("RNTC").status_flags["is_terminal"] = True
-        
-        # Run time iteration
-        all_stages_solved = run_time_iteration(model_circuit, n_periods=args.periods, verbose=args.verbose, 
-                                              verbose_timings=args.verbose, recorder=recorder)
-        return model_circuit
-    
-    # Create CircuitRunner with the new interface
-    runner = CircuitRunner(
-        base_cfg=base_cfg,
-        param_paths=param_paths,
-        model_factory=lambda cfg: initialize_housing_model(cfg, n_periods=args.periods
-        ),
-        solver=solver,\
-        output_root=save_root,
-        bundle_prefix="HR_test_v1",
-        save_by_default=True,
-        load_if_exists=False,
-        metric_fns={"euler_error": metric_function},
-        cache=True,
-    )
-    
-    # Create directory for images
-    image_dir = os.path.join(os.path.dirname(__file__), "images")
-    os.makedirs(image_dir, exist_ok=True)
-    
-    # Run the parameter sweep
-    print("\nRunning parameter sweep with CircuitRunner...")
-    start_time = time.time()
-    
-    # Use sampler utilities to build the parameter design
-    VALID_METHODS = {"FUES", "FUES2DEV", "FUES2DEV3", "CONSAV", "DCEGM"}
-    
-    if args.ue_method == "ALL":
-        methods = ["FUES", "FUES2DEV", "FUES2DEV3", "CONSAV", "DCEGM"]
-    else:
-        # Try to parse as tuple/list using ast.literal_eval
-        try:
-            import ast
-            parsed = ast.literal_eval(args.ue_method)
-            if isinstance(parsed, (list, tuple)):
-                methods = [m.strip().upper() for m in parsed]
-            else:
-                methods = [args.ue_method.strip().upper()]
-        except (ValueError, SyntaxError):
-            # Fall back to comma-separated parsing
-            methods = [m.strip().upper() for m in args.ue_method.split(',') if m.strip()]
-        
-        # Validate methods
-        unknown_methods = [m for m in methods if m not in VALID_METHODS]
-        if unknown_methods:
-            raise ValueError(f"Unknown method(s): {', '.join(unknown_methods)}. "
-                             f"Valid methods are: {', '.join(VALID_METHODS)}")
-        
-        # Deduplicate while preserving order
-        methods = [m for m in dict.fromkeys(methods)]
+    # ------------------------------------------------------------------
+    # 1) configuration & runner
+    # ------------------------------------------------------------------
+    cfg_container = load_configs()
+    param_paths   = ["master.methods.upper_envelope"]      # includes solver flag
+    output_root   = Path(__file__).with_suffix("") / "solutions/HR_test_v1"
+    output_root.mkdir(parents=True, exist_ok=True)
 
-    samplers = [FixedSampler(np.array([[m] for m in methods], dtype=object))]
-    Xs, _ = build_design(param_paths, samplers, Ns=[None], meta={}, seed=0)
-    print("Xs shape =", Xs.shape, "first row =", Xs[0])
-    print("cache =", runner.cache)
-    print("calling mpi_map ...")
-
-    
-    # Suppress matplotlib warnings
-    import warnings
-    warnings.filterwarnings("ignore", category=UserWarning, 
-                          message="set_ticklabels() should only be used with")
-    
-    # Run models with selected methods and get the full metrics
-    results_df, models = mpi_map(runner, Xs, mpi=False, comm= None, return_models=True)
-
-
-    
-    # End of parameter sweep timing
-    end_time = time.time()
-    print(f"Parameter sweep completed in {end_time - start_time:.2f} seconds\n")
-    
-    # Display raw results
-    print("Raw Results:")
-    print(results_df)
-    
-    # Format and display metrics tables
-    print("\nMetrics Summary:")
-    print(format_metrics_table(results_df))
-    #print(format_period_metrics(results_df))
-    print(format_stage_metrics(results_df))
-    
-    # Generate plots if requested or if plot flag is set
-    if args.plot or (not args.no_plots and models is not None):
-        for i, model in enumerate(models):
-            # Get the method from the results dataframe
-            method = results_df.iloc[i]["master.methods.upper_envelope"]
-
-            # Safely generate plots, suppressing any errors
-            try:
-                generate_plots(model, method, image_dir)
-            except Exception as plot_err:
-                if args.verbose:
-                    print(f"[Warning] Plot generation failed for method {method}: {plot_err}")
-                # Continue without interrupting the rest of the script
-    
-    print("\nDone.")
-    # Return the actual data instead of 0 for debugging
-    return {
-        'results_df': results_df,
-        'models': models,
-        'period_timings': [row.get('period_timings', []) for _, row in results_df.iterrows()],
-        'stage_timings': [row.get('stage_timings', []) for _, row in results_df.iterrows()]
+    # ---- metrics -----------------------------------------------------
+    from dynx.runner.metrics.deviations import dev_c_L2
+    metric_fns = {
+        "euler_error": metric_function,
+        "dev_c_L2":    dev_c_L2,
     }
+
+    # ---- solver wrapper ---------------------------------------------
+    def solver(model_circuit, recorder=None):
+        final_prd = model_circuit.get_period(len(model_circuit.periods_list) - 1)
+        final_prd.get_stage("OWNC").status_flags["is_terminal"] = True
+        final_prd.get_stage("RNTC").status_flags["is_terminal"] = True
+        run_time_iteration(model_circuit, n_periods=args.periods,
+                           verbose=args.verbose, verbose_timings=args.verbose,
+                           recorder=recorder)
+        return model_circuit
+
+    runner = CircuitRunner(
+        base_cfg        = copy.deepcopy(cfg_container),
+        param_paths     = param_paths,
+        model_factory   = lambda cfg: initialize_housing_model(cfg, n_periods=args.periods),
+        solver          = solver,
+        metric_fns      = metric_fns,
+        output_root     = output_root,
+        bundle_prefix   = "HR_test_v1",
+        save_by_default = False,
+        load_if_exists  = True,
+        cache           = True,
+    )
+
+    # ------------------------------------------------------------------
+    # 2) design matrix: "reference + fast methods"
+    # ------------------------------------------------------------------
+    REF_METHOD   = "VFI_HDGRID"
+    FAST_DEFAULT = ["FUES", "FUES2DEV", "CONSAV", "DCEGM"]
+
+    if args.ue_method.upper() == "ALL":
+        fast_methods = FAST_DEFAULT
+    else:
+        fast_methods = [m.strip().upper()
+                        for m in args.ue_method.replace("(", "").replace(")", "").split(",")
+                        if m.strip()]
+    methods = [REF_METHOD] + [m for m in fast_methods if m != REF_METHOD]
+
+    Xs, _ = build_design(
+        param_paths,
+        samplers=[FixedSampler(np.array([[m] for m in methods], dtype=object))],
+        Ns=[None], meta={}, seed=0,
+    )
+
+    # ------------------------------------------------------------------
+    # 3) run the sweep
+    # ------------------------------------------------------------------
+    need_models = (args.plot or not args.no_plots)
+    print(f"\nSolving: {', '.join(methods)}  (periods={args.periods})")
+    t0 = time.time()
+    results_df, models = mpi_map(runner, Xs,
+                                 mpi=False,
+                                 return_models=need_models)
+    print(f"Completed in {time.time() - t0:.1f}s\n")
+
+    # --- BEGIN METRICS CSV SAVING ---
+    if results_df is not None:
+        for i in range(len(Xs)): # Assuming Xs and results_df rows correspond
+            x_param_vector = Xs[i] # Changed from Xs.iloc[i] as Xs is a numpy array
+            metrics_for_run = results_df.iloc[i].to_dict()
+
+            # 1. Per-bundle CSV
+            bundle_dir_path = runner._bundle_path(x_param_vector)
+            
+            if bundle_dir_path:
+                bundle_dir_path.mkdir(parents=True, exist_ok=True) # Ensure dir exists
+                save_bundle_metrics(bundle_dir_path, metrics_for_run)
+
+            # 2. Global dashboard
+            if runner.output_root and bundle_dir_path:
+                # The key for deduplication will be the method name itself, 
+                # which is the first (and only) parameter name in this setup.
+                dedup_column_name = runner.param_paths[0] # e.g., "master.methods.upper_envelope"
+                append_experiment_metrics(
+                    root_dir=runner.output_root,
+                    bundle_dir=bundle_dir_path,
+                    metrics=metrics_for_run,
+                    dedup_key_column=dedup_column_name
+                )
+    # --- END METRICS CSV SAVING ---
+
+    # ------------------------------------------------------------------
+    # 4) pretty summary -------------------------------------------------
+    rows = []
+    for _, row in results_df.iterrows():
+        rows.append([
+            row["master.methods.upper_envelope"],
+            f"{row['euler_error']:.3e}" if not pd.isna(row['euler_error']) else "—",
+            f"{row['dev_c_L2']:.3e}"    if not pd.isna(row['dev_c_L2'])    else "—",
+            f"{row['total_solution_time']:.2f}s" if 'total_solution_time' in row else "—",
+        ])
+    print("\n=== Performance & Deviation Summary ===")
+    print(tabulate.tabulate(
+        rows,
+        headers=["Method", "Euler err", "‖c-c★‖₂", "Total time"],
+        tablefmt="grid",
+    ))
+    print("  (c★ = VFI_HDGRID reference)\n")
+
+    # ------------------------------------------------------------------
+    # 5) optional plotting ---------------------------------------------
+    if need_models and models is not None:
+        image_dir = Path(__file__).parent / "images"
+        image_dir.mkdir(exist_ok=True)
+        for mdl, meth in zip(models, methods):
+            try:
+                generate_plots(mdl, meth, image_dir)
+            except Exception as err:
+                if args.verbose:
+                    print(f"[warn] plots for {meth} failed: {err}")
+
+    
+
+    # ------------------------------------------------------------------
+    # 6) return (for debugger / notebooks)
+    # ------------------------------------------------------------------
+    return dict(results=results_df, methods=methods)
+
 
 
 if __name__ == "__main__":
     # Fix argument parsing for Cursor debugger
     import sys
-    sys.argv = ["circuit_runner_solving.py", "--periods", "4", "--ue-method", "FUES2DEV, CONSAV", "--verbose"]
+    sys.argv = ["circuit_runner_solving.py", "--periods", "4",  "--verbose"]
     debug_results = main() 

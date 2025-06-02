@@ -117,12 +117,12 @@ def create_multi_period_model(
         configs["master"]["methods"] = {"upper_envelope": "CONSAV"}
     elif ue_method == "VFI":
         configs["master"]["methods"] = {"upper_envelope": "VFI"}
-    elif ue_method == "VFI_GRID":
-        configs["master"]["methods"] = {"upper_envelope": "VFI_GRID"}
+    elif ue_method == "VFI_HDGRID":
+        configs["master"]["methods"] = {"upper_envelope": "VFI"}
     else:
         configs["master"]["methods"] = {"upper_envelope": "EGM"}
 
-    if ue_method == "VFI" or ue_method == "VFI_GRID":
+    if ue_method == "VFI" or ue_method == "VFI_HDGRID":
         # mover just takes the stage level methods and only the stage level methods
         # TODO a fix to mover methods assign. 
         configs["stages"]["OWNC"]["stage"]["methods"]["solution"] = ue_method
@@ -175,7 +175,7 @@ def main(argv=None):
     parser.add_argument("--periods", type=int, default=3, help="Number of periods to simulate")
     parser.add_argument("--plot", action="store_true", help="Generate and save plots")
     parser.add_argument("--no-solve", action="store_true", help="Skip solving (for testing loading only)")
-    parser.add_argument("--ue-method", default="FUES", choices=["FUES", "DCEGM", "RFC","CONSAV","FUES2DEV" ,"simple", "VFI", "VFI_GRID"], help="Upper-envelope cleaning method")
+    parser.add_argument("--ue-method", default="FUES", choices=["FUES", "DCEGM", "RFC","CONSAV","FUES2DEV" ,"simple", "VFI", "VFI_HDGRID"], help="Upper-envelope cleaning method")
     if argv is None:
         argv = sys.argv[1:]
     args = parser.parse_args(argv)

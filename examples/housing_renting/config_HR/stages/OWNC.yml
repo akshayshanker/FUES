@@ -254,7 +254,7 @@ movers:
     inherit_parameters: true
     inherit_settings: true
     methods:
-      solution: ["sol_method"]
+      solution: solution
   
   # Decision to Arrival (Identity mapping)
   dcsn_to_arvl:

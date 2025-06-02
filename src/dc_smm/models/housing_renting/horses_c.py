@@ -3,7 +3,7 @@ import time  # Add import for timing
 from dc_smm.models.housing_renting.horses_common import (
     _safe_interp, egm_preprocess, build_njit_utility, piecewise_gradient, piecewise_gradient_3rd, get_u_func
 )  # Use relative import
-from numba import njit
+from numba import njit, prange
 from dc_smm.uenvelope.upperenvelope import EGM_UE
 from dc_smm.fues.helpers import interp_as
 from functools import lru_cache
@@ -11,35 +11,57 @@ from quantecon.optimize.scalar_maximization import brent_max
 from dynx.stagecraft.solmaker import Solution
 
 # --- Operator Factory for OWNC Consumption Choice ---
+
+
 def F_ownc_cntn_to_dcsn(mover):
     """Create operator for ownc_cntn_to_dcsn mover.
     Implements EGM or VFI for consumption choice.
     """
-    # Extract model and perches
+    # Extract mover model
     model = mover.model
-    
-    # In StageCraft, Movers have source_name and target_name, not perch objects
-    # We need to access the stage to get the perches
-    source_name = mover.source_name  # Should be 'cntn'
-    target_name = mover.target_name  # Should be 'dcsn'
-    
-    # Get the stage to access perches
-    
+
     # Get solution method from settings
     method = model.methods["solution"]
-    print(method)
     model.stage_name = mover.stage_name
-    
+
+    # Produce the operator given the mover model
     def operator(perch_data):
+        """Solves the agent's consumption and savings problem.
+
+        This operator takes the continuation value and marginal utility
+        from the 'cntn' (continuation) perch and calculates the optimal
+        consumption policy, value function, and marginal utility at the
+        'dcsn' (decision) perch. It supports both EGM and VFI solution methods.
+
+        Args:
+            perch_data: A Solution object containing data from the source perch,
+                        including 'vlu' (value function) and 'lambda_' (marginal utility).
+
+        Returns:
+            A Solution object populated with the decision policy ('c', 'a'),
+            value function ('vlu'), marginal utility ('lambda_'),
+            decision objective ('Q'), EGM grids (if applicable),
+            and timing information.
+
+        Raises:
+            ValueError: If the EGM method is selected but 'lambda_cntn' is not provided.
+            ValueError: If an unknown solution method is specified.
+        """
+
+        # Extract the source perch data (Solution)
         vlu_cntn = perch_data.vlu
         lambda_cntn = perch_data.lambda_
-        
-        # Track total time for this operation
+
+        # Track total time for the operator
         start_time = time.time()
-        
+
+        # EGM loop
+        #  - recall method is solution method (not upper envelope method)
         if method.upper() == "EGM":
             if lambda_cntn is None:
                 raise ValueError("lambda_cntn is required for EGM method.")
+
+            # Heavy lifting loop for EGM
             policy, vlu_dcsn, lambda_dcsn, ue_time_avg, egm_grids, policy_a, Q_dcsn = (
                 _solve_egm_loop(vlu_cntn, lambda_cntn, model)
             )
@@ -48,8 +70,8 @@ def F_ownc_cntn_to_dcsn(mover):
                 "ue_time_avg": ue_time_avg,
                 "total_time": time.time() - start_time
             }
-            
-            # Create Solution object
+
+            # Create Solution object for successor perch
             sol = Solution()
             sol.policy["c"] = policy
             sol.policy["a"] = policy_a
@@ -57,15 +79,9 @@ def F_ownc_cntn_to_dcsn(mover):
             sol.lambda_ = lambda_dcsn
             sol.Q = Q_dcsn
             sol.timing = timing_info
-            
-            #for key, arr in egm_grids["unrefined"].items():
-            #    sol.EGM.unrefined[key] = arr
-            #for key, arr in egm_grids["refined"].items():
-            #    sol.EGM.refined[key] = arr
-            
-            # Store EGM grids
-            
-            
+
+            # Attaching EGM grids to Solution
+            # TODO: SIMPLIFY THIS.
             for key, arr in egm_grids["unrefined"]["e"].items():
                 sol.EGM.unrefined[f"e_{key}"] = arr
             for key, arr in egm_grids["unrefined"]["Q"].items():
@@ -74,7 +90,7 @@ def F_ownc_cntn_to_dcsn(mover):
                 sol.EGM.unrefined[f"c_{key}"] = arr
             for key, arr in egm_grids["unrefined"]["a"].items():
                 sol.EGM.unrefined[f"a_{key}"] = arr
-            
+
             for key, arr in egm_grids["refined"]["e"].items():
                 sol.EGM.refined[f"e_{key}"] = arr
             for key, arr in egm_grids["refined"]["Q"].items():
@@ -85,17 +101,21 @@ def F_ownc_cntn_to_dcsn(mover):
                 sol.EGM.refined[f"a_{key}"] = arr
             for key, arr in egm_grids["refined"]["lambda_"].items():
                 sol.EGM.refined[f"lambda_{key}"] = arr
-             
-            
+
             return sol
-            
-        elif method.upper() == "VFI" or method.upper() == "VFI_GRID":
-            policy, vlu_dcsn, lambda_dcsn, ue_time_avg, egm_grids, policy_a, Q_dcsn= _solve_vfi_loop(vlu_cntn, model)
+
+        # VFI methods
+        elif method.upper() == "VFI" or method.upper() == "VFI_HDGRID":
+            # Heavy lifting loop for VFI
+            policy, vlu_dcsn, lambda_dcsn, ue_time_avg, egm_grids, policy_a, Q_dcsn = (
+                _solve_vfi_loop(vlu_cntn, model)
+            )
+
             # No UE time for VFI
             timing_info = {
                 "total_time": time.time() - start_time
             }
-            
+
             # Create Solution object
             sol = Solution()
             sol.policy["c"] = policy
@@ -105,9 +125,8 @@ def F_ownc_cntn_to_dcsn(mover):
             sol.Q = Q_dcsn
             sol.timing = timing_info
 
-
             # Store empty EGM grids for VFI (if any)
-            
+            # TODO: SIMPLIFY THIS.
             if "e" in egm_grids["unrefined"]:
                 for key, arr in egm_grids["unrefined"]["e"].items():
                     sol.EGM.unrefined[f"e_{key}"] = arr
@@ -120,7 +139,7 @@ def F_ownc_cntn_to_dcsn(mover):
             if "a" in egm_grids["unrefined"]:
                 for key, arr in egm_grids["unrefined"]["a"].items():
                     sol.EGM.unrefined[f"a_{key}"] = arr
-            
+
             # Store refined grids for VFI (if any)
             if "e" in egm_grids["refined"]:
                 for key, arr in egm_grids["refined"]["e"].items():
@@ -137,40 +156,73 @@ def F_ownc_cntn_to_dcsn(mover):
             if "lambda_" in egm_grids["refined"]:
                 for key, arr in egm_grids["refined"]["lambda_"].items():
                     sol.EGM.refined[f"lambda_{key}"] = arr
-            
+
             return sol
         else:
             raise ValueError(
-                f"Unknown solution method: {method}. Choose 'EGM' or 'VFI'."
+                f"Unknown solution method: {method}. Choose 'EGM', 'VFI', or 'VFI_HDGRID'."
             )
-    
-    return operator
 
+    return operator
 
 
 # --- Private Solver Loop Helpers ---
 def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
     """Solves the consumption problem using the EGM loop."""
-    # Use grid proxies for direct grid access
+
+    # ------------------------------------------------------------------
+    # 1. Unpack everything we need from the model numerical object
+    # ------------------------------------------------------------------
+
+    # grids
     a_nxt_grid = model.num.state_space.cntn.grids.a_nxt
     H_nxt_grid = model.num.state_space.cntn.grids.H_nxt
     w_grid = model.num.state_space.dcsn.grids.w
-    c_max = model.settings_dict["c_max"]
-    
-    # Get functions and parameters
+
+    # functions
     compiled_funcs = model.num.functions
+    g_ve_h_ind = compiled_funcs.g_ve_h_ind
+
+    # utility function fully jited
+    # TODO: this should be compiled by Heptapod.
+    expr_str = model.math["functions"]["u_func"]["expr"]
+    param_vals = {
+        "alpha": model.param.alpha,
+        "kappa": model.param.kappa,
+        "iota": model.param.iota,
+        # add any extra constants referenced in expr_str
+    }
+    utility_func = get_u_func(expr_str, param_vals)
+
+    # parameters
     beta = model.param.beta
     delta = model.param.delta_pb      # NEW
     Rfree = model.param.r + 1
-    
-    # Get settings using attribute-style access
-    ue_method = model.methods["upper_envelope"]
+
+    # thorn for renters not for owners
+    if "RNT" in model.stage_name:
+        thorn = model.param.thorn
+    else:
+        thorn = 1
+
+    # settings
+    c_max = model.settings_dict["c_max"]
+
+    # Get functions and parameters
     m_bar = model.settings_dict["m_bar"]
     lb = model.settings_dict["lb"]
     rfc_radius = model.settings_dict["rfc_radius"]
     rfc_n_iter = model.settings_dict["rfc_n_iter"]
     n_con = model.settings_dict["n_constraint_points"]
     n_con_nxt = model.settings_dict["n_constraint_points_nxt"]
+
+    # methods
+    ue_method = model.methods["upper_envelope"]
+
+    # ------------------------------------------------------------------
+    # 2. Produce the grids we will fill
+    # TODO: can be pre-filled into Sol?
+    # ------------------------------------------------------------------
 
     n_w = len(w_grid)
     n_H = vlu_cntn.shape[1]
@@ -181,47 +233,35 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
     vlu_dcsn = np.empty((n_w, n_H, n_y))
     Q_dcsn = np.empty((n_w, n_H, n_y))
     lambda_dcsn = np.empty((n_w, n_H, n_y))
-    
+
+    # Container for EGM grids
+    unrefined_grids = {k: {} for k in ('e', 'Q', 'c', 'a')}
+    refined_grids = {k: {} for k in ('e', 'Q', 'c', 'a', 'lambda_')}
+    egm_grids = {"unrefined": unrefined_grids,
+                 "refined":   refined_grids}
+
+    # array for indices of post-state housing (not services!)
+    # for owners, it is the same as the housing index in the loop
+    # for renters, it is zero. for renters, housing index in loop
+    # is services only.
+    h_nxt_ind_array = g_ve_h_ind(H_ind=np.arange(n_H))
+
     # Track total UE time and count for averaging
     total_ue_time = 0.0
     ue_count = 0
 
-    # Store the unrefined and refined grids
-    unrefined_grids = {k: {} for k in ('e','Q','c','a')}
-    refined_grids   = {k: {} for k in ('e','Q','c','a','lambda_')}
-    egm_grids       = {"unrefined": unrefined_grids,
-                    "refined":   refined_grids}
-
-    q_inv_func = compiled_funcs.inv_marginal_utility
-    g_ve_h_ind = compiled_funcs.g_ve_h_ind
-    
-    h_nxt_ind_array = g_ve_h_ind(H_ind = np.arange(n_H))
-
-    if "RNT" in model.stage_name:
-        thorn = model.param.thorn
-    else:
-        thorn = 1
-    
-    a_nxt_cost = np.zeros((n_w, n_H, n_y))
-    # Create a utility function specific to this housing value\
-    expr_str = model.math["functions"]["u_func"]["expr"]
-    param_vals = {
-        "alpha": model.param.alpha,
-        "kappa": model.param.kappa,
-        "iota" : model.param.iota,
-        # add any extra constants referenced in expr_str
-    }
-    utility_func = get_u_func(expr_str, param_vals)
-
     # ------------------------------------------------------------------
-    #  Vectorised pre-computation of c_egm for ALL (w,h,y) points
+    #  4. Vectorised pre-computation of c_egm for ALL (w,h,y) points
     # ------------------------------------------------------------------
     # 1.  Scale λ once
-    lam_scaled = beta * delta * lambda_cntn * Rfree                     # shape (n_w,n_H_total,n_y)
+    lam_scaled = beta * delta * lambda_cntn * \
+        Rfree  # shape (n_w,n_H_total,n_y)
 
     # 2.  Map continuous-grid H-indices to decision-grid indices (renters need this)
-    lam_sel = np.take(lam_scaled, h_nxt_ind_array, axis=1)      # → (n_w,n_H,n_y)
-    vlu_sel = np.take(vlu_cntn , h_nxt_ind_array, axis=1)       # same mapping for value
+    lam_sel = np.take(lam_scaled, h_nxt_ind_array,
+                      axis=1)      # → (n_w,n_H,n_y)
+    # same mapping for value
+    vlu_sel = np.take(vlu_cntn, h_nxt_ind_array, axis=1)
 
     # 3.  Broadcast housing values (after thorn) to (1,n_H,1)
     H_bcast = (H_nxt_grid * thorn)[None, :, None]
@@ -231,7 +271,7 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
     # Obtain a broadcasting-friendly version of the inverse-utility.
     # If the stored function is a Numba dispatcher it *does* have .py_func;
     # otherwise it is already a plain Python/Numpy function.
-    inv_mu = getattr(compiled_funcs.inv_marginal_utility, "py_func", 
+    inv_mu = getattr(compiled_funcs.inv_marginal_utility, "py_func",
                      compiled_funcs.inv_marginal_utility)
 
     # Evaluate for the whole (w,h,y) cube in one shot.  This relies on the
@@ -240,83 +280,88 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
     # If the function is purely scalar we could fall back to
     # `np.vectorize`, but most models already express it in NumPy algebra.
     c_egm_all = inv_mu(lam_sel, H_bcast)
+    q_egm_all = compiled_funcs.u_func(
+        c_egm_all, H_bcast) + delta*beta * vlu_sel
 
-    interpf = lambda x, y: interp_as(x, y, w_grid, extrap=True)
-
+    # ------------------------------------------------------------------
+    # 5. Loop over all income and housing points to do the upper envelope
+    # ------------------------------------------------------------------
     for i_y in range(n_y):
         for i_h in range(n_H):
 
             # Slice the pre-computed λ, v and c cubes – no recomputation inside the loop
-            #lambda_e = lam_sel[:, i_h, i_y]
-            vlu_e    = vlu_sel[:, i_h, i_y]
-            c_egm    = c_egm_all[:, i_h, i_y]
-            H_val    = H_nxt_grid[i_h] * thorn
+            # lambda_e = lam_sel[:, i_h, i_y]
+            vlu_e = vlu_sel[:, i_h, i_y]
+            c_egm = c_egm_all[:, i_h, i_y]
+            H_val = H_nxt_grid[i_h] * thorn
             m_egm = c_egm + a_nxt_grid
-            u_params = {"c": c_egm, "H_nxt": H_val}
-            q_egm = compiled_funcs.u_func(**u_params) + delta*beta * vlu_e
+            # u_params = {"c": c_egm, "H_nxt": H_val}
+            # q_egm = compiled_funcs.u_func(**u_params) + delta*beta * vlu_e
+
+            q_egm = q_egm_all[:, i_h, i_y]  # current value
+            # continuation value from the POV of current individual
             q_nxt_raw = delta*beta * vlu_e
 
-            # Process the EGM solution to ensure grid uniqueness
+            # Pre-process the EGM solution
+            # Add constraint points for OBC
+            # Add nxt period binding solutions (if time inconsistency)
+            # Only applies to DCEGM, FUES, RFC.
             if ue_method != "CONSAV":
-                #time_start = time.time()
-                m_egm_unique, vlu_v_egm_unique, c_egm_unique, a_nxt_grid_unique = (
+                m_egm_unique, vlu_q_egm_unique, c_egm_unique, a_nxt_grid_unique = (
                     egm_preprocess(
-                        m_egm, q_egm, c_egm, a_nxt_grid, delta*beta, 
-                        utility_func, vlu_e, m_bar = m_bar, n_con=n_con,
-                        n_con_nxt = n_con_nxt, c_max=c_max, h_nxt=H_val
+                        m_egm, q_egm, c_egm, a_nxt_grid, delta*beta,
+                        utility_func, vlu_e, m_bar=m_bar, n_con=n_con,
+                        n_con_nxt=n_con_nxt, c_max=c_max, h_nxt=H_val
                     )
                 )
-                #print("not CONSAV")
-                #print(f"egm_preprocess time: {time.time() - time_start}")
+
             else:
                 m_egm_unique = m_egm
-                vlu_v_egm_unique = q_egm
+                vlu_q_egm_unique = q_egm
                 c_egm_unique = c_egm
                 a_nxt_grid_unique = a_nxt_grid
 
             # Store unrefined grids (before upper envelope)
             grid_key = f"{i_y}-{i_h}"
             unrefined_grids['e'][grid_key] = m_egm_unique
-            unrefined_grids['Q'][grid_key] = vlu_v_egm_unique
+            unrefined_grids['Q'][grid_key] = vlu_q_egm_unique
             unrefined_grids['c'][grid_key] = c_egm_unique
             unrefined_grids['a'][grid_key] = a_nxt_grid_unique
+
+            # The upper envelope wrapper calculates the marginal utility
+            # this can be removed.
+            # TODO: streamline muc here
             def partial_uc(c_vals):
                 return compiled_funcs.uc_func(**{
-                    "c": c_vals, 
+                    "c": c_vals,
                     "H_nxt": H_nxt_grid[i_h]*thorn
                 })
+
             # Get upper envelope solution and timing
             refined, _, _ = EGM_UE(
-                m_egm_unique, vlu_v_egm_unique, q_nxt_raw, c_egm_unique, 
-                a_nxt_grid_unique, w_grid, partial_uc, 
+                m_egm_unique, vlu_q_egm_unique, q_nxt_raw, c_egm_unique,
+                a_nxt_grid_unique, w_grid, partial_uc,
                 u_func={"func": utility_func, "args": H_val},
                 ue_method=ue_method, m_bar=m_bar, lb=lb,
                 rfc_radius=rfc_radius, rfc_n_iter=rfc_n_iter
             )
-            
+
             # Unpack the results from the refined dictionary
             # Prefer *_ref keys, fallback to non-suffixed for broader compatibility
             m_refined = refined["x_dcsn_ref"]
             q_refined = refined["v_dcsn_ref"]
-            c_refined = refined["kappa_ref"] # kappa_ref for consumption
-            a_refined = refined["x_cntn_ref"] # x_cntn_ref for next period assets
-            
+            c_refined = refined["kappa_ref"]  # kappa_ref for consumption
+            # x_cntn_ref for next period assets
+            a_refined = refined["x_cntn_ref"]
+
             lambda_refined = refined["lambda_ref"]
 
             if ue_method != "CONSAV":
-                
-                Q_dcsn[:, i_h, i_y] = interp_as(m_refined, q_refined, w_grid, extrap=True)
-                policy[:, i_h, i_y]   = interp_as(m_refined, c_refined, w_grid, extrap=True)
 
-                
-                # Calculate decision objective Q_dcsn for present-biased utility
-                #uc_today = compiled_funcs.uc_func(**{
-                #    "c": policy[:, i_h, i_y],
-                #    "H_nxt": H_nxt_grid[i_h]
-                #})
-                #c_prime = piecewise_gradient(policy[:, i_h, i_y], w_grid, m_bar=m_bar)
-                #lambda_dcsn[:, i_h, i_y] = (uc_today + (1-delta)*c_prime*uc_today) /delta
-                #vlu_dcsn[:, i_h, i_y] = (Q_dcsn[:, i_h, i_y] + u_func(c=policy[:, i_h, i_y], H_nxt=H_val))/delta
+                Q_dcsn[:, i_h, i_y] = interp_as(
+                    m_refined, q_refined, w_grid, extrap=True)
+                policy[:, i_h, i_y] = interp_as(
+                    m_refined, c_refined, w_grid, extrap=True)
 
             else:
                 Q_dcsn[:, i_h, i_y] = q_refined
@@ -324,64 +369,87 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
                 policy_a[:, i_h, i_y] = a_refined
                 lambda_dcsn[:, i_h, i_y] = lambda_refined
 
-            
-            policy[policy<0] = 1e-10
+            policy[policy < 0] = 1e-10
 
-                
-            # Calculate decision objective Q_dcsn for present-biased utility
+            # Calculate decision objective Q_dcsn and derivative of consumption
+            # for present-biased utility
             uc_today = compiled_funcs.uc_func(**{
                 "c": policy[:, i_h, i_y],
                 "H_nxt": H_val
             })
 
-            if delta<1:
-                c_prime = piecewise_gradient_3rd(policy[:, i_h, i_y], w_grid, m_bar=m_bar)
+            if delta < 1:
+                c_prime = piecewise_gradient_3rd(
+                    policy[:, i_h, i_y], w_grid, m_bar=m_bar)
             else:
                 c_prime = np.zeros_like(policy[:, i_h, i_y])
-            #print(c_prime)
-            #print(policy[:, i_h, i_y])
-            lambda_dcsn[:, i_h, i_y] = (uc_today - (1-delta)*c_prime*uc_today) /delta 
-            vlu_dcsn[:, i_h, i_y] = (Q_dcsn[:, i_h, i_y] - (1-delta)*compiled_funcs.u_func(c=policy[:, i_h, i_y], H_nxt=H_val))/delta
 
-            #lambda_dcsn[lambda_dcsn<0] = 1e-10
+            # Shadow value with marginal utility
+            lambda_dcsn[:, i_h, i_y] = (
+                uc_today - (1-delta)*c_prime*uc_today) / delta
+            vlu_dcsn[:, i_h, i_y] = (Q_dcsn[:, i_h, i_y] - (1-delta) *
+                                     compiled_funcs.u_func(c=policy[:, i_h, i_y], H_nxt=H_val))/delta
 
             ue_time = refined.get("ue_time", 0.0)
-            
-            # Store refined grids (after upper envelope) 
+
+            # Store refined grids (after upper envelope)
             # using consistently retrieved variables
-            refined_grids['e'][grid_key] = m_refined # cash-on-hand / endogenous grid
-            refined_grids['Q'][grid_key] = q_refined # value function
-            refined_grids['c'][grid_key] = c_refined # consumption policy
-            refined_grids['a'][grid_key] = a_refined # asset policy
+            # for consav, refined grids are just the interpolants (consav package returns)
+            # cash-on-hand / endogenous grid
+            refined_grids['e'][grid_key] = m_refined
+            refined_grids['Q'][grid_key] = q_refined  # value function
+            refined_grids['c'][grid_key] = c_refined  # consumption policy
+            refined_grids['a'][grid_key] = a_refined  # asset policy
             refined_grids['lambda_'][grid_key] = lambda_refined
-                            
+
             # Track upper envelope time
             total_ue_time += ue_time
             ue_count += 1
-                
+
     # Calculate average UE time
     avg_ue_time = total_ue_time / max(ue_count, 1)
-    
+
     # Include the grid data in the returned tuple
     egm_grids = {
         'unrefined': unrefined_grids,
         'refined': refined_grids
     }
-    
+
     return policy, vlu_dcsn, lambda_dcsn, avg_ue_time, egm_grids, policy_a, Q_dcsn
 
 
 @njit
 def bellman_obj(a_nxt, w_val, H_val, beta, delta,
                 a_grid, V_slice, u_func):
+    """Objective function for the Bellman equation maximization.
+
+    Calculates the value of choosing next-period assets `a_nxt`, given
+    current wealth `w_val`, housing services `H_val`, and continuation
+    value function `V_slice`.
+
+    Args:
+        a_nxt (float): Candidate for next-period assets (cntn/post-state)
+        w_val (float): Current period wealth (cash-on-hand).
+        H_val (float): Current period housing services.
+        beta (float): Discount factor.
+        delta (float): Present-bias parameter.
+        a_grid (np.ndarray): Grid for next-period assets (cntn/post-state)
+        V_slice (np.ndarray): Slice of the cntn value function
+                              corresponding to cntn H_val and income state.
+        u_func (callable): Utility function u(c, H_nxt).
+
+    Returns:
+        float: The value of the Bellman equation for the given `a_nxt`.
+               Returns -np.inf if consumption is non-positive.
+    """
     c = w_val - a_nxt
     if c <= 0.0:
         return -np.inf
-    # ▸ remove arbitrary 0.1 floor
-    # if a_nxt <= 0.1:
-    #     return -np.inf
+
     V_nxt = interp_as(a_grid, V_slice, np.array([a_nxt]))[0]
+
     return u_func(c, H_val) + beta * delta * V_nxt
+
 
 @njit
 def _solve_vfi_numba(V_next, w_grid, a_grid, H_grid,
@@ -396,16 +464,14 @@ def _solve_vfi_numba(V_next, w_grid, a_grid, H_grid,
         V_cntn     : continuation value
         lambda_cntn: continuation marginal value
     """
-    n_W  = w_grid.size
+    n_W = w_grid.size
     n_A, n_H, n_Y = V_next.shape
 
-    policy_c   = np.empty((n_W, n_H, n_Y))
-    policy_a   = np.empty_like(policy_c)
-    Q_dcsn     = np.empty_like(policy_c)
-    V_cntn     = np.empty_like(policy_c)
-    lambda_cntn= np.empty_like(policy_c)
-    
-    #h_nxt_ind_array = g_ve_h_ind(H_ind = np.arange(n_H))
+    policy_c = np.empty((n_W, n_H, n_Y))
+    policy_a = np.empty_like(policy_c)
+    Q_dcsn = np.empty_like(policy_c)
+    V_cntn = np.empty_like(policy_c)
+    lambda_cntn = np.empty_like(policy_c)
 
     for h in range(n_H):
         H_val = H_grid[h]*thorn
@@ -414,11 +480,9 @@ def _solve_vfi_numba(V_next, w_grid, a_grid, H_grid,
             V_slice = V_next[:, h_nxt_ind, y]                # contiguous 1-D
 
             for iw in range(n_W):
-                w_val  = w_grid[iw]
-                a_low  = a_grid[0]
+                w_val = w_grid[iw]
+                a_low = a_grid[0]
                 a_high = min(w_val + 1e-1, a_grid[-1])
-                
-
 
                 a_star, Q_star, _ = brent_max(
                     bellman_obj,
@@ -427,47 +491,37 @@ def _solve_vfi_numba(V_next, w_grid, a_grid, H_grid,
                           a_grid, V_slice, u_func),
                     xtol=1e-12
                 )
-                c_star            = w_val - a_star
+                c_star = w_val - a_star
 
                 if np.isinf(Q_star):
-                    c_star = 1e-10
-                    Q_star = -10
-                    a_star = 1e-10
+                    c_star = 1e-100
+                    Q_star = -1e100
+                    a_star = 1e-100
 
                 policy_c[iw, h, y] = c_star
                 policy_a[iw, h, y] = a_star
-                Q_dcsn[iw, h, y]   = Q_star
-
-  
-
+                Q_dcsn[iw, h, y] = Q_star
 
             # ---- continuation value + λ --------------------------------
             c_prime = piecewise_gradient(policy_c[:, h, y], w_grid, m_bar)
 
             for iw in range(n_W):
-                c_now  = policy_c[iw, h, y]
+                c_now = policy_c[iw, h, y]
                 uc_now = 1/c_now
                 V_cntn[iw, h, y] = (Q_dcsn[iw, h, y]
                                     - (1.0 - delta)*u_func(c_now, H_val)) / delta
                 lambda_cntn[iw, h, y] = (uc_now -
-                                          (1.0 - delta)*c_prime[iw]*uc_now) / delta
-                
-                #print(V_cntn[iw, h, y][np.isinf(V_cntn[iw, h, y])])
+                                         (1.0 - delta)*c_prime[iw]*uc_now) / delta
+
+                # print(V_cntn[iw, h, y][np.isinf(V_cntn[iw, h, y])])
 
     return policy_c, policy_a, Q_dcsn, V_cntn, lambda_cntn
 
-from numba import njit, prange
-import numpy as np
 
-# ------------------------------------------------------------------
-# Dense-grid replacement for Brent search
-# ------------------------------------------------------------------
-
-#@njit
 @njit
 def _solve_vfi_numba_grid(V_next, w_grid, a_grid, H_grid,
-                        beta, delta, m_bar,
-                        u_func, h_nxt_ind_array, thorn, n_grid = 2000):
+                          beta, delta, m_bar,
+                          u_func, h_nxt_ind_array, thorn, n_grid=2000):
     """
     Dense-grid VFI (no Brent).  Exact same I/O shape as original.
     """
@@ -476,29 +530,29 @@ def _solve_vfi_numba_grid(V_next, w_grid, a_grid, H_grid,
     n_grid = n_grid          # raise for higher accuracy, lower for speed
     # ------------------------------------------------------------------
 
-    n_W  = w_grid.size
+    n_W = w_grid.size
     n_A, n_H, n_Y = V_next.shape
 
-    policy_c    = np.empty((n_W, n_H, n_Y))
-    policy_a    = np.empty_like(policy_c)
-    Q_dcsn      = np.empty_like(policy_c)
-    V_cntn      = np.empty_like(policy_c)
+    policy_c = np.empty((n_W, n_H, n_Y))
+    policy_a = np.empty_like(policy_c)
+    Q_dcsn = np.empty_like(policy_c)
+    V_cntn = np.empty_like(policy_c)
     lambda_cntn = np.empty_like(policy_c)
 
     print(n_grid)
 
     step_inv = 1.0 / (n_grid - 1)        # pre-compute to avoid div inside loop
 
-    for h in prange(n_H):
-        H_val     = H_grid[h] * thorn
+    for h in range(n_H):
+        H_val = H_grid[h] * thorn
         h_nxt_ind = h_nxt_ind_array[h]
 
         for y in range(n_Y):
             V_slice = V_next[:, h_nxt_ind, y]      # contiguous 1-D view
 
             for iw in range(n_W):
-                w_val  = w_grid[iw]
-                a_low  = a_grid[0]
+                w_val = w_grid[iw]
+                a_low = a_grid[0]
                 a_high = min(w_val - 1e-12, a_grid[-1])   # ensure c > 0
 
                 # handle degenerate case (wealth at borrowing limit)
@@ -525,22 +579,22 @@ def _solve_vfi_numba_grid(V_next, w_grid, a_grid, H_grid,
                 if np.isinf(best_Q) or c_star <= 0.0:
                     c_star = 1e-10
                     best_Q = -1e100
-                    best_a = 1e-10
+                    best_a = 1e-100
 
                 policy_c[iw, h, y] = c_star
                 policy_a[iw, h, y] = best_a
-                Q_dcsn[iw, h, y]   = best_Q
+                Q_dcsn[iw, h, y] = best_Q
 
             # ---- continuation value + λ --------------------------------
             c_prime = piecewise_gradient(policy_c[:, h, y], w_grid, m_bar)
 
             for iw in range(n_W):
-                c_now  = policy_c[iw, h, y]
+                c_now = policy_c[iw, h, y]
                 uc_now = 1.0 / c_now
                 V_cntn[iw, h, y] = (Q_dcsn[iw, h, y]
                                     - (1 - delta)*u_func(c_now, H_val)) / delta
                 lambda_cntn[iw, h, y] = (uc_now -
-                                          (1 - delta)*c_prime[iw]*uc_now) / delta
+                                         (1 - delta)*c_prime[iw]*uc_now) / delta
 
     return policy_c, policy_a, Q_dcsn, V_cntn, lambda_cntn
 
@@ -559,13 +613,13 @@ def _solve_vfi_loop(vlu_cntn, model):
         thorn = 1
 
     # --- parameters ---------------------------------------------
-    beta   = float(model.param.beta)
-    delta  = float(model.param.delta_pb)
-    m_bar  = float(model.settings_dict["m_bar"])
+    beta = float(model.param.beta)
+    delta = float(model.param.delta_pb)
+    m_bar = float(model.settings_dict["m_bar"])
     N_arg_grid_vfi = model.settings_dict["N_arg_grid_vfi"]
 
     # --- compiled utility functions -----------------------------
-    u_jit  = model.num.functions.u_func       # scalar (c,H) → u
+    u_jit = model.num.functions.u_func       # scalar (c,H) → u
     uc_jit = model.num.functions.uc_func      # scalar (c,H) → u_c
 
     # --- contiguous 3-D continuation value array ----------------
@@ -575,25 +629,25 @@ def _solve_vfi_loop(vlu_cntn, model):
     param_vals = {
         "alpha": model.param.alpha,
         "kappa": model.param.kappa,
-        "iota" : model.param.iota,
+        "iota": model.param.iota,
         # add any extra constants referenced in expr_str
     }
     utility_func = build_njit_utility(expr_str, param_vals)
     g_ve_h_ind = model.num.functions.g_ve_h_ind
-    h_nxt_ind_array = g_ve_h_ind(H_ind = np.arange(H_grid.size))
+    h_nxt_ind_array = g_ve_h_ind(H_ind=np.arange(H_grid.size))
 
     # --- run kernel ---------------------------------------------
     if model.methods["solution"] == "VFI":
         policy_c, policy_a, Q_dcsn, V_cntn, lambda_cntn = _solve_vfi_numba(
             V_next, w_grid, a_grid, H_grid,
             beta, delta, m_bar,
-            utility_func,h_nxt_ind_array,thorn
+            utility_func, h_nxt_ind_array, thorn
         )
-    if model.methods["solution"] == "VFI_GRID":
+    if model.methods["solution"] == "VFI_HDGRID":
         policy_c, policy_a, Q_dcsn, V_cntn, lambda_cntn = _solve_vfi_numba_grid(
             V_next, w_grid, a_grid, H_grid,
             beta, delta, m_bar,
-            utility_func,h_nxt_ind_array,thorn, n_grid = N_arg_grid_vfi
+            utility_func, h_nxt_ind_array, thorn, n_grid=N_arg_grid_vfi
         )
 
     # The EGM solver returns an average UE time and grid dicts.
@@ -602,8 +656,8 @@ def _solve_vfi_loop(vlu_cntn, model):
 
     # fill in empty egm grids as in the egm code so plotter does not error
     unrefined_grids = {k: {} for k in ('e', 'Q', 'c', 'a')}
-    refined_grids   = {k: {} for k in ('e', 'Q', 'c', 'a', 'lambda_')}
-    egm_grids   = {"unrefined": unrefined_grids, "refined": refined_grids}
+    refined_grids = {k: {} for k in ('e', 'Q', 'c', 'a', 'lambda_')}
+    egm_grids = {"unrefined": unrefined_grids, "refined": refined_grids}
 
     return (policy_c,             # same as `policy`
             V_cntn,               # vlu_dcsn
@@ -615,12 +669,13 @@ def _solve_vfi_loop(vlu_cntn, model):
 
 # --- End Private Solver Loop Helpers ---
 
-# Need F_ownc_dcsn_to_cntn - If it exists, move it here. 
+# Need F_ownc_dcsn_to_cntn - If it exists, move it here.
 # Otherwise, it needs to be defined. Let's assume it needs definition:
+
 
 def F_ownc_dcsn_to_cntn(mover):
     """Create operator for ownc_dcsn_to_cntn mover (Forward step).
-    
+
     Calculates end-of-period assets based on decision-period state and policy.
     Maps (w, H_nxt, y) -> a_nxt.
     The value/lambda mapping is usually handled by backward steps or identity.
@@ -629,31 +684,45 @@ def F_ownc_dcsn_to_cntn(mover):
     """
     # Extract model and stage
     model = mover.model
-    
+
     # In StageCraft, Movers have source_name and target_name, not perch objects
     # We need to access the stage to get the perches
     source_name = mover.source_name  # Should be 'dcsn'
     target_name = mover.target_name  # Should be 'cntn'
-    
+
     # Get the stage to access perches
-    
+
     def operator(perch_data):
-        """Transforms dcsn state & policy to cntn state (assets).
-        
-        This is often simple as cntn state a_nxt = w - policy(w, H_nxt, y).
-        Value/lambda propagation depends on model structure.
-        Often, the backward step (cntn -> dcsn) calculates the necessary value/lambda
-        at the dcsn state, making this forward step potentially just state mapping.
-        Here, we return an empty dict assuming value/lambda mapping isn't needed
-        in this specific forward operator.
+        """Transforms decision state & policy to continuation state (assets).
+
+        This operator calculates the end-of-period assets based on the
+        decision-period state and the consumption policy. The primary purpose
+        is to map the decision state (w, H_nxt, y) and policy C(w, H_nxt, y)
+        to the next-period asset state a_nxt.
+
+        In this simplified version, it's assumed that the value and marginal
+        utility (lambda) propagation is handled by other parts of the model
+        framework, particularly the backward solution steps. Therefore, this
+        operator focuses solely on the state transformation for assets.
+
+        Args:
+            perch_data: A dictionary or Solution object containing data from
+                        the source 'dcsn' perch. Expected to hold the
+                        consumption 'policy' and relevant state grids if needed
+                        (though currently commented out as it returns an empty dict).
+
+        Returns:
+            dict: An empty dictionary. This operator, in its current form,
+                  does not populate any fields in the target 'cntn' perch
+                  as it assumes value/lambda mapping is done elsewhere.
+                  A more complete implementation might return {'a_nxt': a_nxt_array}.
         """
         # policy = perch_data["policy"] # Consumption policy C(w, H_nxt, y)
         # w_grid = stage.dcsn.grid.w
-        # a_nxt = w_grid[:, None, None] - policy
-        
-        # Minimal implementation: returns empty dict assuming value/lambda 
+
+        # Minimal implementation: returns empty dict assuming value/lambda
         # mapping is not done by this specific forward operator.
         # The framework connects states, value calculation happens in backward steps.
         return {}
-        
-    return operator 
+
+    return operator

@@ -59,6 +59,8 @@ def calculate_euler_error(model):
     uc_inv   = ownc.model.num.functions.inv_marginal_utility
 
     logs = []
+    
+    #print(c_owner_n)
 
     for iy, y_now in enumerate(z_vals):
         for ih, H_now in enumerate(H_grid):

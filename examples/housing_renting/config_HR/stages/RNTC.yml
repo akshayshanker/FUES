@@ -244,7 +244,7 @@ movers:
       solution: ["sol_method"]      # direct reference to EGM as method
       upper_envelope: FUES # direct reference to FUES as a method 
     methods:
-      solution: ["sol_method"]
+      solution: solution
 
     description: "Continuation->Decision backwards using EGM with FUES upper envelope"
     required_grids:
