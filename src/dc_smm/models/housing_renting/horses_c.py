@@ -192,7 +192,12 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
         "iota": model.param.iota,
         # add any extra constants referenced in expr_str
     }
-    utility_func = get_u_func(expr_str, param_vals)
+
+    if model.methods["upper_envelope"] == "CONSAV":
+        utility_func_for_consav = build_njit_utility(expr_str, param_vals)
+    else:
+        utility_func = get_u_func(expr_str, param_vals)
+    
 
     # parameters
     beta = model.param.beta
@@ -518,7 +523,7 @@ def _solve_vfi_numba(V_next, w_grid, a_grid, H_grid,
     return policy_c, policy_a, Q_dcsn, V_cntn, lambda_cntn
 
 
-@njit
+@njit(parallel=True)
 def _solve_vfi_numba_grid(V_next, w_grid, a_grid, H_grid,
                           beta, delta, m_bar,
                           u_func, h_nxt_ind_array, thorn, n_grid=2000):
@@ -543,14 +548,14 @@ def _solve_vfi_numba_grid(V_next, w_grid, a_grid, H_grid,
 
     step_inv = 1.0 / (n_grid - 1)        # pre-compute to avoid div inside loop
 
-    for h in range(n_H):
+    for h in prange(n_H):
         H_val = H_grid[h] * thorn
         h_nxt_ind = h_nxt_ind_array[h]
 
         for y in range(n_Y):
             V_slice = V_next[:, h_nxt_ind, y]      # contiguous 1-D view
 
-            for iw in range(n_W):
+            for iw in prange(n_W):
                 w_val = w_grid[iw]
                 a_low = a_grid[0]
                 a_high = min(w_val - 1e-12, a_grid[-1])   # ensure c > 0
@@ -563,7 +568,7 @@ def _solve_vfi_numba_grid(V_next, w_grid, a_grid, H_grid,
                 best_a = a_low
 
                 # exhaustive search over dense grid
-                for g in range(n_grid):
+                for g in prange(n_grid):
                     a_try = a_low + (a_high - a_low) * g * step_inv
                     Q_try = bellman_obj(                # ← your existing fn
                         a_try, w_val, H_val,
@@ -588,7 +593,7 @@ def _solve_vfi_numba_grid(V_next, w_grid, a_grid, H_grid,
             # ---- continuation value + λ --------------------------------
             c_prime = piecewise_gradient(policy_c[:, h, y], w_grid, m_bar)
 
-            for iw in range(n_W):
+            for iw in prange(n_W):
                 c_now = policy_c[iw, h, y]
                 uc_now = 1.0 / c_now
                 V_cntn[iw, h, y] = (Q_dcsn[iw, h, y]
