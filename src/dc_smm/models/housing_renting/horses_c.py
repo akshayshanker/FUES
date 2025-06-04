@@ -552,7 +552,7 @@ def _solve_vfi_numba_grid(V_next, w_grid, a_grid, H_grid,
         H_val = H_grid[h] * thorn
         h_nxt_ind = h_nxt_ind_array[h]
 
-        for y in range(n_Y):
+        for y in prange(n_Y):
             V_slice = V_next[:, h_nxt_ind, y]      # contiguous 1-D view
 
             for iw in prange(n_W):
