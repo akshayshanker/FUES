@@ -518,7 +518,7 @@ def _solve_vfi_numba(V_next, w_grid, a_grid, H_grid,
     return policy_c, policy_a, Q_dcsn, V_cntn, lambda_cntn
 
 
-@njit
+@njit(parallel=True)
 def _solve_vfi_numba_grid(V_next, w_grid, a_grid, H_grid,
                           beta, delta, m_bar,
                           u_func, h_nxt_ind_array, thorn, n_grid=2000):
@@ -543,11 +543,11 @@ def _solve_vfi_numba_grid(V_next, w_grid, a_grid, H_grid,
 
     step_inv = 1.0 / (n_grid - 1)        # pre-compute to avoid div inside loop
 
-    for h in range(n_H):
+    for h in prange(n_H):
         H_val = H_grid[h] * thorn
         h_nxt_ind = h_nxt_ind_array[h]
 
-        for y in range(n_Y):
+        for y in prange(n_Y):
             V_slice = V_next[:, h_nxt_ind, y]      # contiguous 1-D view
 
             for iw in range(n_W):

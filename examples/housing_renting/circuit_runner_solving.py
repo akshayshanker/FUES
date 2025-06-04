@@ -23,13 +23,12 @@ import time
 import copy
 import json
 import logging
-import matplotlib.pyplot as plt
-from mpl_toolkits.axes_grid1 import make_axes_locatable
 from pathlib import Path
 from typing import Dict
 
-VALID_METHODS = {"VFI_HDGRID", "VFI" "FUES", "CONSAV", "DCEGM"}    
-FAST_METHODS  = ["FUES", "CONSAV", "DCEGM"]                  
+VALID_METHODS = {"VFI_HDGRID", "VFI", "FUES", "CONSAV", "DCEGM", "FUES2DEV"}
+FAST_METHODS  = ["FUES", "CONSAV", "DCEGM"]
+VFI_NGRID_ARRAY = [1E+3, 1E+4, 1E+5]                   
 
 BASELINE = "VFI_HDGRID"                                     
 
@@ -38,7 +37,6 @@ BASELINE = "VFI_HDGRID"
 # -----------------------------------------------------------------------------
 
 # Core graph / StageCraft
-from dynx.stagecraft import Stage
 from dynx.stagecraft.makemod import (
     initialize_model_Circuit,
     compile_all_stages,
@@ -46,9 +44,6 @@ from dynx.stagecraft.makemod import (
 
 # Heptapod-B functional layer
 from dynx.stagecraft.io import load_config   # <-- new canonical loader
-from dynx.heptapodx.core.api import initialize_model
-from dynx.heptapodx.num.generate import compile_num as generate_numerical_model
-
 # Runner utilities
 from dynx.runner import CircuitRunner, mpi_map
 from dynx.runner.sampler import FixedSampler, build_design
@@ -159,7 +154,7 @@ def load_configs():
     return load_config(cfg_dir)
 
 
-def initialize_housing_model(cfg_container, n_periods=3):
+def initialize_housing_model(cfg_container, n_periods=3, vf_ngrid=1E+3):
     """
     Initialize a housing model circuit with the specified configuration.
     
@@ -182,9 +177,10 @@ def initialize_housing_model(cfg_container, n_periods=3):
     # Deep copy configs to avoid modifying originals
     cfg = copy.deepcopy(cfg_container)
     cfg["master"]["horizon"] = n_periods         # or "periods"
+    cfg["master"]["settings"]["N_arg_grid_vfi"] = vf_ngrid
 
     # todo: we should not have to manually do this below. 
-    if cfg["master"]["methods"]["upper_envelope"] == "VFI_HDGRID" or cfg["master"]["methods"]["upper_envelope"] == "VFI_HDGRID":
+    if cfg["master"]["methods"]["upper_envelope"] == "VFI_HDGRID" or cfg["master"]["methods"]["upper_envelope"] == "VFI":
         cfg["stages"]["OWNC"]["stage"]["methods"]["solution"] = cfg["master"]["methods"]["upper_envelope"]
         cfg["stages"]["RNTC"]["stage"]["methods"]["solution"] = cfg["master"]["methods"]["upper_envelope"]
     else:
@@ -216,7 +212,7 @@ def metric_function(model):
         Euler equation error as a quality metric
     """
     # Use the new euler_error_metric function
-    print(">>> euler_error_metric called")
+    #print(">>> euler_error_metric called")
     return euler_error_metric(model)
 
 
@@ -488,6 +484,12 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--no-plots", action="store_true",
                    help="skip plot generation regardless of other flags")
     p.add_argument("--verbose", action="store_true")
+    p.add_argument("--output-root", type=str, default="solutions/HR_test_v2",
+                   help="output root directory")
+    p.add_argument("--bundle-prefix", type=str, default="HR_test_v2",
+                   help="bundle prefix")
+    p.add_argument("--vfi-ngrid-index", type=int, default=0, choices=[0,1,2],
+                   help="index 0→1k, 1→10k, 2→100k grid for VFI")
     args = p.parse_args(argv or sys.argv[1:])
 
     # ------------------------------------------------------------------
@@ -495,8 +497,11 @@ def main(argv: list[str] | None = None) -> None:
     # ------------------------------------------------------------------
     cfg_container = load_configs()
     param_paths   = ["master.methods.upper_envelope"]      # includes solver flag
-    output_root   = Path(__file__).with_suffix("") / "solutions/HR_test_v1"
+    output_root = Path(f"{args.output_root}_{args.vfi_ngrid_index}").expanduser().resolve()
     output_root.mkdir(parents=True, exist_ok=True)
+    #output_root.mkdir(parents=True, exist_ok=True)
+
+    vfi_ngrid = VFI_NGRID_ARRAY[args.vfi_ngrid_index]
 
     # ---- metrics -----------------------------------------------------
     from dynx.runner.metrics.deviations import dev_c_L2
@@ -515,16 +520,21 @@ def main(argv: list[str] | None = None) -> None:
                            recorder=recorder)
         return model_circuit
 
+    if args.ue_method.upper() == "VFI" or args.ue_method.upper() == "VFI_HDGRID":
+        load_if_exists = True
+    else:
+        load_if_exists = False
+
     runner = CircuitRunner(
         base_cfg        = copy.deepcopy(cfg_container),
         param_paths     = param_paths,
-        model_factory   = lambda cfg: initialize_housing_model(cfg, n_periods=args.periods),
+        model_factory   = lambda cfg: initialize_housing_model(cfg, n_periods=args.periods, vf_ngrid = vfi_ngrid),
         solver          = solver,
         metric_fns      = metric_fns,
         output_root     = output_root,
-        bundle_prefix   = "HR_test_v1",
-        save_by_default = False,
-        load_if_exists  = True,
+        bundle_prefix   = "HR_test_v2",
+        save_by_default = True,
+        load_if_exists  = load_if_exists,
         cache           = True,
     )
 
@@ -588,25 +598,62 @@ def main(argv: list[str] | None = None) -> None:
     # ------------------------------------------------------------------
     # 4) pretty summary -------------------------------------------------
     rows = []
-    for _, row in results_df.iterrows():
+    for _, r in results_df.iterrows():
+
+        # decode ↦ dict  (it may already be a dict or NaN)
+        cst_raw = r.get("consumption_stage_time", {})
+        if isinstance(cst_raw, str):
+            try:
+                cst = json.loads(cst_raw)
+            except Exception:
+                cst = {}
+        elif isinstance(cst_raw, dict):
+            cst = cst_raw
+        else:
+            cst = {}
+
         rows.append([
-            row["master.methods.upper_envelope"],
-            f"{row['euler_error']:.3e}" if not pd.isna(row['euler_error']) else "—",
-            f"{row['dev_c_L2']:.3e}"    if not pd.isna(row['dev_c_L2'])    else "—",
-            f"{row['total_solution_time']:.2f}s" if 'total_solution_time' in row else "—",
+            r.get("master.methods.upper_envelope", "—"),
+
+            f"{r['euler_error']:.3e}"            if pd.notna(r.get("euler_error"))         else "—",
+            f"{r['dev_c_L2']:.3e}"               if pd.notna(r.get("dev_c_L2"))            else "—",
+
+            f"{r['total_solution_time']:.2f}s"        if pd.notna(r.get("total_solution_time"))        else "—",
+            f"{r['total_nonterminal_time']:.2f}s"     if pd.notna(r.get("total_nonterminal_time"))     else "—",
+
+            f"{cst.get('avg_consumption_time', float('nan')):.2f}s"
+            if 'avg_consumption_time' in cst else "—",
         ])
+
+    headers = [
+        "Method",
+        "Euler err",
+        "‖c–c★‖₂",
+        "Total time",
+        "Non-term time",
+        "⌀ Cons. time",
+    ]
+
+    table_str = tabulate.tabulate(rows, headers=headers, tablefmt="grid")
+
     print("\n=== Performance & Deviation Summary ===")
-    print(tabulate.tabulate(
-        rows,
-        headers=["Method", "Euler err", "‖c-c★‖₂", "Total time"],
-        tablefmt="grid",
-    ))
+    print(table_str)
     print("  (c★ = VFI_HDGRID reference)\n")
+
+    # ------------------------------------------------------------------
+    # 5) persist the pretty summary ------------------------------------
+    out_dir = Path(output_root).expanduser().resolve()
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    (out_dir / "performance_summary.txt").write_text(table_str, encoding="utf-8")
+    pd.DataFrame(rows, columns=headers).to_csv(out_dir / "performance_summary.csv", index=False)
+
+
 
     # ------------------------------------------------------------------
     # 5) optional plotting ---------------------------------------------
     if need_models and models is not None:
-        image_dir = Path(__file__).parent / "images"
+        image_dir = output_root / "images"
         image_dir.mkdir(exist_ok=True)
         for mdl, meth in zip(models, methods):
             try:
@@ -623,9 +670,21 @@ def main(argv: list[str] | None = None) -> None:
     return dict(results=results_df, methods=methods)
 
 
-
 if __name__ == "__main__":
     # Fix argument parsing for Cursor debugger
-    import sys
-    sys.argv = ["circuit_runner_solving.py", "--periods", "4",  "--verbose"]
-    debug_results = main() 
+    # >>> ONLY KEEP THIS SECTION FOR INTERACTIVE DEBUGGING <<<
+    # Comment it out (or wrap in an env-check) when you submit a batch run
+
+
+    
+    if os.getenv("FUES_DEBUG_LOCAL"):          # example guard
+        sys.argv = [
+            "circuit_runner_solving.py",
+            "--periods", "5",
+            "--output-root", "/scratch/tp66/as3442/FUES/solutions/HR_test_v2",
+            "--bundle-prefix", "HR_test_v2",
+            "--vfi-ngrid-index", "1",
+        ]
+
+    # hand control to the real entry point
+    debug_results = main()
