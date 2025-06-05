@@ -7,10 +7,11 @@ using the StageCraft and Heptapod-B architecture, but leverages the
 unified CircuitRunner and sampler utilities (DynX v1.6.12).
 
 Usage:
-    python circuit_runner_solving.py [--periods N]
+    python circuit_runner_solving.py [--periods N] [--vfi-ngrid SIZE]
 
 Options:
-    --periods N     Number of periods to simulate (default: 3)
+    --periods N      Number of periods to simulate (default: 3)
+    --vfi-ngrid SIZE Dense-grid size for VFI (e.g. 10000, 4e4, 1e6)
 """
 
 import os
@@ -28,7 +29,6 @@ from typing import Dict
 
 VALID_METHODS = {"VFI_HDGRID", "VFI", "VFI_MPI", "FUES", "CONSAV", "DCEGM", "FUES2DEV", "VFI_POOL"}
 FAST_METHODS  = ["FUES", "CONSAV", "DCEGM"]
-VFI_NGRID_ARRAY = [1E+3, 1E+4, 4E+4]                   
 
 BASELINE = "VFI_POOL"                                     
 
@@ -488,20 +488,36 @@ def main(argv: list[str] | None = None) -> None:
                    help="output root directory")
     p.add_argument("--bundle-prefix", type=str, default="HR_test_v2",
                    help="bundle prefix")
-    p.add_argument("--vfi-ngrid-index", type=int, default=0, choices=[0,1,2],
-                   help="index 0→1k, 1→10k, 2→100k grid for VFI")
+    p.add_argument("--vfi-ngrid", type=str, default="10000",
+                   help="dense-grid size for VFI (e.g. 10000, 4e4, 1e6)")
+    
+    # Check for old argument and provide clear error
+    if "--vfi-ngrid-index" in (argv or sys.argv[1:]):
+        raise argparse.ArgumentError(None, 
+                                   "ERROR: --vfi-ngrid-index has been renamed to --vfi-ngrid. "
+                                   "Use --vfi-ngrid with the actual grid size (e.g. --vfi-ngrid 10000)")
+    
     args = p.parse_args(argv or sys.argv[1:])
+    
+    # Convert vfi-ngrid string to numeric value
+    try:
+        vfi_ngrid_num = int(float(args.vfi_ngrid))   # "1e6" → 1000000
+        if vfi_ngrid_num < 2:
+            raise ValueError
+    except Exception:
+        raise SystemExit("ERROR: --vfi-ngrid must be a positive number (e.g. 10000 or 1e6)")
+
+    # Keep both forms
+    vfi_ngrid_token = args.vfi_ngrid       # for folder names
+    vfi_ngrid = vfi_ngrid_num              # for the solver
 
     # ------------------------------------------------------------------
     # 1) configuration & runner
     # ------------------------------------------------------------------
     cfg_container = load_configs()
     param_paths   = ["master.methods.upper_envelope"]      # includes solver flag
-    output_root = Path(f"{args.output_root}_{args.vfi_ngrid_index}").expanduser().resolve()
+    output_root = Path(f"{args.output_root}_{vfi_ngrid_token}").expanduser().resolve()
     output_root.mkdir(parents=True, exist_ok=True)
-    #output_root.mkdir(parents=True, exist_ok=True)
-
-    vfi_ngrid = VFI_NGRID_ARRAY[args.vfi_ngrid_index]
 
     # ---- metrics -----------------------------------------------------
     from dynx.runner.metrics.deviations import dev_c_L2
@@ -679,7 +695,7 @@ if __name__ == "__main__":
             "--periods", "5",
             "--output-root", "/scratch/tp66/as3442/FUES/solutions/HR_test_v3",
             "--bundle-prefix", "HR_test_v3",
-            "--vfi-ngrid-index", "1",
+            "--vfi-ngrid", "1e4",
         ]
 
     # hand control to the real entry point
