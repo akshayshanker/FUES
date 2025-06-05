@@ -1,7 +1,9 @@
-import numpy as np
-import time  # Add import for timing
+
+
+
+import os, time, numba, numpy as np
 from dc_smm.models.housing_renting.horses_common import (
-    _safe_interp, egm_preprocess, build_njit_utility, piecewise_gradient, piecewise_gradient_3rd, get_u_func
+    _safe_interp, egm_preprocess, build_njit_utility, piecewise_gradient, piecewise_gradient_3rd, get_u_func, bellman_obj
 )  # Use relative import
 from numba import njit, prange
 from dc_smm.uenvelope.upperenvelope import EGM_UE
@@ -9,9 +11,17 @@ from dc_smm.fues.helpers import interp_as
 from functools import lru_cache
 from quantecon.optimize.scalar_maximization import brent_max
 from dynx.stagecraft.solmaker import Solution
+import os
+from .vfi_pool import _solve_vfi_pool_grid   # new backend
+
+# horses_c.py   (top of file)
+
+
+
+print("NUMBA threads:", numba.get_num_threads(),
+      "OMP_NUM_THREADS:", os.getenv("OMP_NUM_THREADS"))
 
 # --- Operator Factory for OWNC Consumption Choice ---
-
 
 def F_ownc_cntn_to_dcsn(mover):
     """Create operator for ownc_cntn_to_dcsn mover.
@@ -105,7 +115,7 @@ def F_ownc_cntn_to_dcsn(mover):
             return sol
 
         # VFI methods
-        elif method.upper() == "VFI" or method.upper() == "VFI_HDGRID":
+        elif method.upper() == "VFI" or method.upper() == "VFI_HDGRID" or method.upper() == "VFI_POOL":
             # Heavy lifting loop for VFI
             policy, vlu_dcsn, lambda_dcsn, ue_time_avg, egm_grids, policy_a, Q_dcsn = (
                 _solve_vfi_loop(vlu_cntn, model)
@@ -194,7 +204,7 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
     }
 
     if model.methods["upper_envelope"] == "CONSAV":
-        utility_func_for_consav = build_njit_utility(expr_str, param_vals)
+        utility_func = build_njit_utility(expr_str, param_vals)
     else:
         utility_func = get_u_func(expr_str, param_vals)
     
@@ -423,37 +433,7 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
     return policy, vlu_dcsn, lambda_dcsn, avg_ue_time, egm_grids, policy_a, Q_dcsn
 
 
-@njit
-def bellman_obj(a_nxt, w_val, H_val, beta, delta,
-                a_grid, V_slice, u_func):
-    """Objective function for the Bellman equation maximization.
 
-    Calculates the value of choosing next-period assets `a_nxt`, given
-    current wealth `w_val`, housing services `H_val`, and continuation
-    value function `V_slice`.
-
-    Args:
-        a_nxt (float): Candidate for next-period assets (cntn/post-state)
-        w_val (float): Current period wealth (cash-on-hand).
-        H_val (float): Current period housing services.
-        beta (float): Discount factor.
-        delta (float): Present-bias parameter.
-        a_grid (np.ndarray): Grid for next-period assets (cntn/post-state)
-        V_slice (np.ndarray): Slice of the cntn value function
-                              corresponding to cntn H_val and income state.
-        u_func (callable): Utility function u(c, H_nxt).
-
-    Returns:
-        float: The value of the Bellman equation for the given `a_nxt`.
-               Returns -np.inf if consumption is non-positive.
-    """
-    c = w_val - a_nxt
-    if c <= 0.0:
-        return -np.inf
-
-    V_nxt = interp_as(a_grid, V_slice, np.array([a_nxt]))[0]
-
-    return u_func(c, H_val) + beta * delta * V_nxt
 
 
 @njit
@@ -548,11 +528,11 @@ def _solve_vfi_numba_grid(V_next, w_grid, a_grid, H_grid,
 
     step_inv = 1.0 / (n_grid - 1)        # pre-compute to avoid div inside loop
 
-    for h in prange(n_H):
+    for h in range(n_H):
         H_val = H_grid[h] * thorn
         h_nxt_ind = h_nxt_ind_array[h]
 
-        for y in prange(n_Y):
+        for y in range(n_Y):
             V_slice = V_next[:, h_nxt_ind, y]      # contiguous 1-D view
 
             for iw in prange(n_W):
@@ -568,7 +548,7 @@ def _solve_vfi_numba_grid(V_next, w_grid, a_grid, H_grid,
                 best_a = a_low
 
                 # exhaustive search over dense grid
-                for g in prange(n_grid):
+                for g in range(n_grid):
                     a_try = a_low + (a_high - a_low) * g * step_inv
                     Q_try = bellman_obj(                # ← your existing fn
                         a_try, w_val, H_val,
@@ -654,6 +634,17 @@ def _solve_vfi_loop(vlu_cntn, model):
             beta, delta, m_bar,
             utility_func, h_nxt_ind_array, thorn, n_grid=N_arg_grid_vfi
         )
+    
+    elif model.methods["solution"] == "VFI_POOL":          # ← your flag
+        policy_c, policy_a, Q_dcsn, V_cntn, lambda_cntn = _solve_vfi_pool_grid(
+            V_next, w_grid, a_grid, H_grid,
+            beta, delta, m_bar,
+            utility_func, h_nxt_ind_array, thorn,
+            n_grid=N_arg_grid_vfi,
+            max_workers=int(os.getenv("PBS_NCPUS", 48))  # honour PBS
+        )
+
+
 
     # The EGM solver returns an average UE time and grid dicts.
     # For VFI these have no meaning, so we stub them out.

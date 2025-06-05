@@ -6,6 +6,39 @@ from typing import Callable   # NEW  – remove if unused        # NEW
 import time
 from functools import lru_cache
 
+
+@njit
+def bellman_obj(a_nxt, w_val, H_val, beta, delta,
+                a_grid, V_slice, u_func):
+    """Objective function for the Bellman equation maximization.
+
+    Calculates the value of choosing next-period assets `a_nxt`, given
+    current wealth `w_val`, housing services `H_val`, and continuation
+    value function `V_slice`.
+
+    Args:
+        a_nxt (float): Candidate for next-period assets (cntn/post-state)
+        w_val (float): Current period wealth (cash-on-hand).
+        H_val (float): Current period housing services.
+        beta (float): Discount factor.
+        delta (float): Present-bias parameter.
+        a_grid (np.ndarray): Grid for next-period assets (cntn/post-state)
+        V_slice (np.ndarray): Slice of the cntn value function
+                              corresponding to cntn H_val and income state.
+        u_func (callable): Utility function u(c, H_nxt).
+
+    Returns:
+        float: The value of the Bellman equation for the given `a_nxt`.
+               Returns -np.inf if consumption is non-positive.
+    """
+    c = w_val - a_nxt
+    if c <= 0.0:
+        return -np.inf
+
+    V_nxt = interp_as(a_grid, V_slice, np.array([a_nxt]))[0]
+
+    return u_func(c, H_val) + beta * delta * V_nxt
+
 @njit
 def piecewise_gradient_3rd(f, x, m_bar, eps=0.9):
     """

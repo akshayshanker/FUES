@@ -26,11 +26,11 @@ import logging
 from pathlib import Path
 from typing import Dict
 
-VALID_METHODS = {"VFI_HDGRID", "VFI", "FUES", "CONSAV", "DCEGM", "FUES2DEV"}
+VALID_METHODS = {"VFI_HDGRID", "VFI", "VFI_MPI", "FUES", "CONSAV", "DCEGM", "FUES2DEV", "VFI_POOL"}
 FAST_METHODS  = ["FUES", "CONSAV", "DCEGM"]
-VFI_NGRID_ARRAY = [1E+3, 1E+4, 1E+5]                   
+VFI_NGRID_ARRAY = [1E+3, 1E+4, 4E+4]                   
 
-BASELINE = "VFI_HDGRID"                                     
+BASELINE = "VFI_POOL"                                     
 
 # -----------------------------------------------------------------------------
 # Canonical imports (DynX ≥ 1.6.12)
@@ -180,7 +180,7 @@ def initialize_housing_model(cfg_container, n_periods=3, vf_ngrid=1E+3):
     cfg["master"]["settings"]["N_arg_grid_vfi"] = vf_ngrid
 
     # todo: we should not have to manually do this below. 
-    if cfg["master"]["methods"]["upper_envelope"] == "VFI_HDGRID" or cfg["master"]["methods"]["upper_envelope"] == "VFI":
+    if cfg["master"]["methods"]["upper_envelope"] == "VFI_HDGRID" or cfg["master"]["methods"]["upper_envelope"] == "VFI" or cfg["master"]["methods"]["upper_envelope"] == "VFI_POOL":
         cfg["stages"]["OWNC"]["stage"]["methods"]["solution"] = cfg["master"]["methods"]["upper_envelope"]
         cfg["stages"]["RNTC"]["stage"]["methods"]["solution"] = cfg["master"]["methods"]["upper_envelope"]
     else:
@@ -520,10 +520,6 @@ def main(argv: list[str] | None = None) -> None:
                            recorder=recorder)
         return model_circuit
 
-    if args.ue_method.upper() == "VFI" or args.ue_method.upper() == "VFI_HDGRID":
-        load_if_exists = True
-    else:
-        load_if_exists = False
 
     runner = CircuitRunner(
         base_cfg        = copy.deepcopy(cfg_container),
@@ -532,16 +528,16 @@ def main(argv: list[str] | None = None) -> None:
         solver          = solver,
         metric_fns      = metric_fns,
         output_root     = output_root,
-        bundle_prefix   = "HR_test_v2",
+        bundle_prefix   = args.bundle_prefix,
         save_by_default = True,
-        load_if_exists  = load_if_exists,
-        cache           = True,
+        load_if_exists  = False,
+        cache           = False,
     )
 
     # ------------------------------------------------------------------
     # 2) design matrix: "reference + fast methods"
     # ------------------------------------------------------------------
-    REF_METHOD   = "VFI_HDGRID"
+    REF_METHOD   = "VFI_POOL"
     FAST_DEFAULT = ["FUES", "FUES2DEV", "CONSAV", "DCEGM"]
 
     if args.ue_method.upper() == "ALL":
@@ -638,7 +634,7 @@ def main(argv: list[str] | None = None) -> None:
 
     print("\n=== Performance & Deviation Summary ===")
     print(table_str)
-    print("  (c★ = VFI_HDGRID reference)\n")
+    print("  (c★ = VFI_POOL reference)\n")
 
     # ------------------------------------------------------------------
     # 5) persist the pretty summary ------------------------------------
@@ -681,8 +677,8 @@ if __name__ == "__main__":
         sys.argv = [
             "circuit_runner_solving.py",
             "--periods", "5",
-            "--output-root", "/scratch/tp66/as3442/FUES/solutions/HR_test_v2",
-            "--bundle-prefix", "HR_test_v2",
+            "--output-root", "/scratch/tp66/as3442/FUES/solutions/HR_test_v3",
+            "--bundle-prefix", "HR_test_v3",
             "--vfi-ngrid-index", "1",
         ]
 
