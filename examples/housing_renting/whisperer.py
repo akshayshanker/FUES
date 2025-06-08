@@ -4,7 +4,7 @@ Housing model with renting - external whisperer
 This module provides the external solver for the Housing model with renting, including:
 1. build_operators: Associates operator factories with movers
 2. solve_stage: Solves a single stage using backward iteration
-3. run_time_iteration: Solves multiple time periods by operating on an existing model circuit
+3. run_time_iteration: Solves multiple time periods by operating on an existing model circuit (backward induction)
 
 The model includes five stages:
 - TENU: Tenure choice stage (own vs. rent)
@@ -14,26 +14,69 @@ The model includes five stages:
 - RNTC: Renter consumption choice stage
 """
 
-import os
-import sys
 import numpy as np
-import copy
 import time  # Add time module for timing measurements
 
 # Import operator factories directly from their modules
 from dc_smm.models.housing_renting.horses_h import F_shocks_dcsn_to_arvl, F_h_cntn_to_dcsn_owner, F_h_cntn_to_dcsn_renter
-from dc_smm.models.housing_renting.horses_c import F_ownc_cntn_to_dcsn, F_ownc_dcsn_to_cntn
+from dc_smm.models.housing_renting.horses_c import F_ownc_cntn_to_dcsn, F_rntc_cntn_to_dcsn, F_ownc_dcsn_to_cntn
 from dc_smm.models.housing_renting.horses_common import F_id
 from dc_smm.models.housing_renting.horses_t import F_t_cntn_to_dcsn
 from dynx.stagecraft.solmaker import Solution
+# MPI utilities are now handled by circuit_runner
 
-def build_operators(stage):
+def _get_stage_method(stage):
+    """Get the solution method for a stage."""
+    if hasattr(stage, 'methods') and hasattr(stage.methods, 'solution'):
+        return stage.methods.solution
+    elif hasattr(stage, 'model') and hasattr(stage.model, 'methods'):
+        if hasattr(stage.model.methods, 'solution'):
+            return stage.model.methods.solution
+        elif hasattr(stage.model.methods, 'upper_envelope'):
+            return stage.model.methods.upper_envelope
+    return None
+
+def _needs_mpi(stage):
+    """Determine if a stage needs MPI parallelization.
+    
+    Parameters
+    ----------
+    stage : Stage
+        The stage to check
+        
+    Returns
+    -------
+    bool
+        True if stage needs MPI (VFI_HDGRID method + consumption/housing stage)
+    """
+    # Get the stage method - try multiple access patterns for robustness
+    method = None
+    if hasattr(stage, 'methods') and hasattr(stage.methods, 'solution'):
+        method = stage.methods.solution
+    elif hasattr(stage, 'model') and hasattr(stage.model, 'methods'):
+        if hasattr(stage.model.methods, 'solution'):
+            method = stage.model.methods.solution
+        elif hasattr(stage.model.methods, 'upper_envelope'):
+            method = stage.model.methods.upper_envelope
+    
+    # Only VFI_HDGRID method uses MPI
+    if method != "VFI_HDGRID":
+        return False
+    
+    # Only consumption and housing stages need MPI within VFI_HDGRID
+    return any(tag in stage.name for tag in ("OWNC", "RNTC", "OWNH", "RNTH"))
+
+def build_operators(stage, use_mpi=False, comm=None):
     """Build operator mappings for a given stage.
     
     Parameters
     ----------
     stage : Stage
         The stage to build operators for
+    use_mpi : bool, optional
+        Whether to use MPI parallelization
+    comm : MPI communicator, optional
+        MPI communicator (if use_mpi=True)
         
     Returns
     -------
@@ -46,22 +89,22 @@ def build_operators(stage):
     # Check stage type to determine which operators to use
     if "OWNH" in stage.name:
         # Owner housing choice stage
-        operators["cntn_to_dcsn"] = F_h_cntn_to_dcsn_owner(stage.cntn_to_dcsn)
+        operators["cntn_to_dcsn"] = F_h_cntn_to_dcsn_owner(stage.cntn_to_dcsn, use_mpi=use_mpi, comm=comm)
         operators["dcsn_to_arvl"] = F_id(stage.dcsn_to_arvl)
 
     elif "OWNC" in stage.name:
         # Owner consumption stage
-        operators["cntn_to_dcsn"] = F_ownc_cntn_to_dcsn(stage.cntn_to_dcsn)
+        operators["cntn_to_dcsn"] = F_ownc_cntn_to_dcsn(stage.cntn_to_dcsn, use_mpi=use_mpi, comm=comm)
         operators["dcsn_to_arvl"] = F_id(stage.dcsn_to_arvl)
 
     elif "RNTH" in stage.name:
         # Renter housing choice stage
-        operators["cntn_to_dcsn"] = F_h_cntn_to_dcsn_renter(stage.cntn_to_dcsn)
+        operators["cntn_to_dcsn"] = F_h_cntn_to_dcsn_renter(stage.cntn_to_dcsn, use_mpi=use_mpi, comm=comm)
         operators["dcsn_to_arvl"] = F_id(stage.dcsn_to_arvl)
 
     elif "RNTC" in stage.name:
         # Renter consumption stage
-        operators["cntn_to_dcsn"] = F_ownc_cntn_to_dcsn(stage.cntn_to_dcsn)
+        operators["cntn_to_dcsn"] = F_rntc_cntn_to_dcsn(stage.cntn_to_dcsn, use_mpi=use_mpi, comm=comm)
         operators["dcsn_to_arvl"] = F_id(stage.dcsn_to_arvl)
     
     elif "TENU" in stage.name:
@@ -74,7 +117,34 @@ def build_operators(stage):
     
     return operators
 
-def solve_stage(stage, max_iter=None, tol=None, verbose=False):
+
+def build_operators_for_circuit(model_circuit, use_mpi=False, comm=None):
+    """Build operators for all stages in a model circuit.
+    
+    Parameters
+    ---------- 
+    model_circuit : ModelCircuit
+        The model circuit containing all stages
+    use_mpi : bool, optional
+        Whether to use MPI parallelization
+    comm : MPI communicator, optional
+        MPI communicator (if use_mpi=True)
+    """
+    # Store MPI parameters on model circuit for run_time_iteration access
+    model_circuit._use_mpi = use_mpi
+    model_circuit._comm = comm
+    
+    # Store MPI parameters on stages for solve_stage access, but don't build operators here
+    # to avoid double build (they'll be built and cached on first use in solve_stage)
+    for period_idx in range(len(model_circuit.periods_list)):
+        period = model_circuit.get_period(period_idx)
+        for stage_name, stage in period.stages.items():
+            # Store MPI parameters on the stage for use during solving
+            stage._use_mpi = use_mpi
+            stage._comm = comm
+
+
+def solve_stage(stage, max_iter=None, tol=None, verbose=False, use_mpi=False, comm=None):
     """Solve a stage by applying backward operators once.
     
     Parameters
@@ -87,6 +157,10 @@ def solve_stage(stage, max_iter=None, tol=None, verbose=False):
         Not used in this non-iterative implementation
     verbose : bool, optional
         Whether to print verbose output, default False
+    use_mpi : bool, optional
+        Whether to use MPI parallelization
+    comm : MPI communicator, optional
+        MPI communicator (if use_mpi=True)
         
     Returns
     -------
@@ -97,11 +171,35 @@ def solve_stage(stage, max_iter=None, tol=None, verbose=False):
     """
     start_time = time.time()
     
-    if verbose:
+    # Get MPI parameters from stage if not provided
+    if use_mpi is False and hasattr(stage, '_use_mpi'):
+        use_mpi = stage._use_mpi
+    if comm is None and hasattr(stage, '_comm'):
+        comm = stage._comm
+    
+    # -------------------------------------------------------------
+    # 0.  Decide if THIS rank should work or just wait
+    # -------------------------------------------------------------
+    if use_mpi and comm is not None and comm.rank != 0:
+        # Only enter MPI-enabled operators if this stage needs parallel execution
+        if not _needs_mpi(stage):
+            # CRITICAL FIX #1: Add barrier to prevent deadlocks
+            comm.Barrier()  # keep communicator aligned
+            # Return early - workers were idle during this non-MPI stage
+            return stage, {"stage_name": stage.name,
+                           "total_time": 0.0,
+                           "cntn_to_dcsn_time": 0.0,
+                           "dcsn_to_arvl_time": 0.0,
+                           "ue_time": 0.0,
+                           "is_terminal": stage.status_flags.get("is_terminal", False)}
+    
+    if verbose and (not use_mpi or comm is None or comm.rank == 0):
         print(f"Solving stage: {stage.name}")
     
-    # Build operators for this stage
-    operators = build_operators(stage)
+    # Build operators for this stage (cached to avoid double build)
+    if not hasattr(stage, "_ops"):
+        stage._ops = build_operators(stage, use_mpi=use_mpi, comm=comm)
+    operators = stage._ops
     
     # Check if this is a terminal stage
     is_terminal = stage.status_flags.get("is_terminal", False)
@@ -109,10 +207,10 @@ def solve_stage(stage, max_iter=None, tol=None, verbose=False):
     # If this is the final period, initialize analytically
     if is_terminal:
         # Initialize terminal continuation values (CRRA utility)
-        initialize_terminal_values(stage, verbose=verbose)
+        initialize_terminal_values(stage, verbose=verbose, use_mpi=use_mpi, comm=comm)
     
     # Apply backward operators once in sequence
-    if verbose:
+    if verbose and (not use_mpi or comm is None or comm.rank == 0):
         print(f"  Applying backward operators...")
     
     # Step 1: Continuation to decision transformation
@@ -177,7 +275,7 @@ def solve_stage(stage, max_iter=None, tol=None, verbose=False):
     stage.status_flags["solved"] = True
     total_time = time.time() - start_time
     
-    if verbose:
+    if verbose and (not use_mpi or comm is None or comm.rank == 0):
         print(f"  Stage {stage.name} solved with backward pass.")
     
     # Return timing information, including terminal flag
@@ -192,8 +290,12 @@ def solve_stage(stage, max_iter=None, tol=None, verbose=False):
     
     return stage, timing_info
 
-def initialize_terminal_values(stage, verbose=False):
+def initialize_terminal_values(stage, verbose=False, use_mpi=False, comm=None):
     """Initialize terminal continuation values analytically.
+    
+    Only consumption stages (OWNC, RNTC) need genuine terminal values with CRRA 
+    analytic closure. Housing and tenure stages receive their continuation objects
+    from the solved consumption movers one step later.
     
     Parameters
     ----------
@@ -201,12 +303,14 @@ def initialize_terminal_values(stage, verbose=False):
         The stage to initialize
     verbose : bool, optional
         Whether to print verbose output, default False
+    use_mpi : bool, optional
+        Whether MPI is being used
+    comm : MPI communicator, optional
+        MPI communicator
     """
-    if verbose:
+    if verbose and (not use_mpi or comm is None or comm.rank == 0):
         print(f"Initializing terminal values for {stage.name}")
-    
-    # Extract parameters using attribute-style access
-    params = stage.model.param
+
     
     if "OWNC" in stage.name:
         # For owner consumption stage, initialize CRRA utility of consuming assets
@@ -278,150 +382,7 @@ def initialize_terminal_values(stage, verbose=False):
         sol.Q = Q_cntn
         stage.cntn.sol = sol
     
-    elif "OWNH" in stage.name:
-        # For owner housing stage, initialize placeholder values
-        w_grid = stage.cntn.grid.w_own
-        H_nxt_grid = stage.cntn.grid.H_nxt
-        
-        n_w = len(w_grid)
-        n_H = len(H_nxt_grid)
-        n_y = len(stage.cntn.grid.y)  # Number of income states
-        
-        # Initialize with placeholder values
-        vlu_cntn = np.zeros((n_w, n_H, n_y))
-        lambda_cntn = np.zeros((n_w, n_H, n_y))
-        
-        # Use utility function for placeholder values
-        u_func = stage.model.num.functions.owner_utility
-        uc_func = stage.model.num.functions.marginal_utility
-        
-        for i_y in range(n_y):
-            for i_h, h_val in enumerate(H_nxt_grid):
-                for i_w, w_val in enumerate(w_grid):
-                    # Terminal value is utility from consuming everything
-                    vlu_cntn[i_w, i_h, i_y] = u_func(c=w_val, H_nxt=h_val)
-                    lambda_cntn[i_w, i_h, i_y] = uc_func(c=w_val, H_nxt=h_val)
-        
-        # Terminal: Q = v because V_e = 0
-        Q_cntn = vlu_cntn.copy()
-        
-        # Attach to continuation perch as Solution object
-        sol = Solution()
-        sol.vlu = vlu_cntn
-        sol.lambda_ = lambda_cntn
-        sol.Q = Q_cntn
-        stage.cntn.sol = sol
-    
-    elif "RNTH" in stage.name:
-        # For renter housing stage, initialize placeholder values
-        w_grid = stage.cntn.grid.w_rent
-        S_grid = stage.cntn.grid.S
-        
-        n_w = len(w_grid)
-        n_S = len(S_grid)
-        n_y = len(stage.cntn.grid.y)  # Number of income states
-        
-        # Initialize with placeholder values
-        vlu_cntn = np.zeros((n_w, n_S, n_y))
-        lambda_cntn = np.zeros((n_w, n_S, n_y))
-        
-        # Use renter utility function for placeholder values
-        u_func = stage.model.num.functions.renter_utility
-        uc_func = stage.model.num.functions.marginal_utility
-        
-        for i_y in range(n_y):
-            for i_s, s_val in enumerate(S_grid):
-                for i_w, w_val in enumerate(w_grid):
-                    # Terminal value is utility from consuming everything
-                    vlu_cntn[i_w, i_s, i_y] = u_func(c=w_val, S=s_val + 0.5)
-                    lambda_cntn[i_w, i_s, i_y] = uc_func(c=w_val, S=s_val + 0.5)
-        
-        # Terminal: Q = v because V_e = 0
-        Q_cntn = vlu_cntn.copy()
-        
-        # Attach to continuation perch as Solution object
-        sol = Solution()
-        sol.vlu = vlu_cntn
-        sol.lambda_ = lambda_cntn
-        sol.Q = Q_cntn
-        stage.cntn.sol = sol
-    
-    elif "TENU" in stage.name:
-        # For tenure choice stage with branched continuation
-        # Initialize continuation with branching structure
-        if not hasattr(stage, "cntn"):
-            raise ValueError(f"TENU stage {stage.name} is missing cntn perch")
-        
-        if not hasattr(stage.cntn, "sol") or stage.cntn.sol is None:
-            stage.cntn.sol = {}
-        
-        # Ensure branch keys exist
-        if "from_owner" not in stage.cntn.sol:
-            # Initialize owner branch
-            a_grid = stage.model.num.state_space.cntn_own.grids.a
-            H_grid = stage.model.num.state_space.cntn_own.grids.H
-            y_grid = stage.model.num.state_space.cntn_own.grids.y
-            
-            n_a = len(a_grid)
-            n_H = len(H_grid)
-            n_y = len(y_grid)
-            
-            # Initialize own path values
-            vlu_own = np.zeros((n_a, n_H, n_y))
-            lambda_own = np.zeros((n_a, n_H, n_y))
-            
-            # Use owner utility for placeholder values
-            u_func = stage.model.num.functions.owner_utility
-            uc_func = stage.model.num.functions.marginal_utility
-            
-            for i_y in range(n_y):
-                for i_h, h_val in enumerate(H_grid):
-                    for i_a, a_val in enumerate(a_grid):
-                        # Simple placeholder - utility of consuming assets and having housing
-                        vlu_own[i_a, i_h, i_y] = u_func(c=a_val, H_nxt=h_val)
-                        lambda_own[i_a, i_h, i_y] = uc_func(c=a_val, H_nxt=h_val)
-            
-            # Terminal: Q = v because V_e = 0
-            Q_own = vlu_own.copy()
-            
-            # Attach to owner branch as Solution object
-            sol_owner = Solution()
-            sol_owner.vlu = vlu_own
-            sol_owner.lambda_ = lambda_own
-            sol_owner.Q = Q_own
-            stage.cntn.sol["from_owner"] = sol_owner
-        
-        if "from_renter" not in stage.cntn.sol:
-            # Initialize renter branch
-            w_grid = stage.model.num.state_space.cntn.grids.w
-            y_grid = stage.model.num.state_space.cntn.grids.y
-            
-            n_w = len(w_grid)
-            n_y = len(y_grid)
-            
-            # Initialize rent path values
-            vlu_rent = np.zeros((n_w, n_y))
-            lambda_rent = np.zeros((n_w, n_y))
-            
-            # Use renter utility for placeholder
-            u_func = stage.model.num.functions.renter_utility
-            uc_func = stage.model.num.functions.marginal_utility
-            
-            for i_y in range(n_y):
-                for i_w, w_val in enumerate(w_grid):
-                    # Simple placeholder - utility of consuming wealth and minimal housing
-                    vlu_rent[i_w, i_y] = u_func(c=w_val, S=0.1)  # Minimal rental housing
-                    lambda_rent[i_w, i_y] = uc_func(c=w_val, S=0.1)
-            
-            # Terminal: Q = v because V_e = 0
-            Q_rent = vlu_rent.copy()
-            
-            # Attach to renter branch as Solution object
-            sol_renter = Solution()
-            sol_renter.vlu = vlu_rent
-            sol_renter.lambda_ = lambda_rent
-            sol_renter.Q = Q_rent
-            stage.cntn.sol["from_renter"] = sol_renter
+
 
 def run_time_iteration(model_circuit, n_periods=None, verbose=False,verbose_timings =False, recorder=None):
     """Run time iteration by solving all periods in a pre-created model circuit.
@@ -448,11 +409,15 @@ def run_time_iteration(model_circuit, n_periods=None, verbose=False,verbose_timi
     """
     total_start_time = time.time()
     
+    # Get MPI parameters from model circuit if available  
+    use_mpi = getattr(model_circuit, '_use_mpi', False)
+    comm = getattr(model_circuit, '_comm', None)
+    
     # Automatically calculate the number of periods if not provided
     if n_periods is None:
         n_periods = len(model_circuit.periods_list)
         
-    if verbose:
+    if verbose and (not use_mpi or comm is None or comm.rank == 0):
         print(f"Running time iteration for {n_periods} periods")
     
     # Collect stages by period for return
@@ -468,7 +433,8 @@ def run_time_iteration(model_circuit, n_periods=None, verbose=False,verbose_timi
     
     # Mark terminal periods - set terminal flags for the final period's consumption stages
     final_period = model_circuit.get_period(n_periods - 1)
-    
+    print(f"final_period: {final_period}")
+    #print(f"final_period: {final_period}")
     # Get all stages from the final period
     final_tenu = final_period.get_stage("TENU")
     final_ownh = final_period.get_stage("OWNH")
@@ -481,8 +447,12 @@ def run_time_iteration(model_circuit, n_periods=None, verbose=False,verbose_timi
     final_rntc.status_flags["is_terminal"] = True
     
     # Initialize terminal continuation values for the last period's consumption stages
-    initialize_terminal_values(final_ownc, verbose=verbose)
-    initialize_terminal_values(final_rntc, verbose=verbose)
+    initialize_terminal_values(final_ownc, verbose=verbose, use_mpi=use_mpi, comm=comm)
+    initialize_terminal_values(final_rntc, verbose=verbose, use_mpi=use_mpi, comm=comm)
+
+    assert final_ownc.cntn.sol.vlu is not None, "OWNC terminal cntn.sol.vlu missing!"
+    #assert final_rntc.cntn.sol is not None, "RNTC terminal cntn.sol missing!"
+
     
     # Set external mode for all stages
     for period_idx in range(n_periods):
@@ -497,8 +467,11 @@ def run_time_iteration(model_circuit, n_periods=None, verbose=False,verbose_timi
         
         # Flag whether this is the terminal period (first one we solve)
         is_terminal_period = (period_idx == n_periods - 1)
+
+        print(f"period_idx: {period_idx}")
+        print(f"Is terminal: {is_terminal_period}")
         
-        if verbose:
+        if verbose and (not use_mpi or comm is None or comm.rank == 0):
             print(f"\nSolving period {period_idx+1} of {n_periods}")
         
         # Get the stages for this period
@@ -507,6 +480,10 @@ def run_time_iteration(model_circuit, n_periods=None, verbose=False,verbose_timi
         ownc_stage = period.get_stage("OWNC")
         rnth_stage = period.get_stage("RNTH")
         rntc_stage = period.get_stage("RNTC")
+
+
+        assert ownc_stage.cntn.sol.vlu is not None, "OWNC cntn.sol.vlu missing!"
+        assert rntc_stage.cntn.sol.vlu is not None, "RNTC cntn.sol.vlu missing!"
         
         period_ue_time = 0.0
         
@@ -514,13 +491,32 @@ def run_time_iteration(model_circuit, n_periods=None, verbose=False,verbose_timi
         # Solve stages in proper backward order following CDC dependency structure:
         # 1. First the consumption stages (OWNC and RNTC)
         # -------------------------------------------------------------------------------
-        ownc_stage, ownc_timing = solve_stage(ownc_stage, verbose=verbose)
-        stage_timings.append(ownc_timing)
-        period_ue_time += ownc_timing.get("ue_time", 0)
+        # Skip already-solved VFI_HDGRID stages (from baseline preload)
+        if not (_get_stage_method(ownc_stage) == "VFI_HDGRID" 
+                and ownc_stage.status_flags.get("solved", False)):
+            ownc_stage, ownc_timing = solve_stage(ownc_stage, verbose=verbose, use_mpi=use_mpi, comm=comm)
+            stage_timings.append(ownc_timing)
+            period_ue_time += ownc_timing.get("ue_time", 0)
+        else:
+            if verbose and (not use_mpi or comm is None or comm.rank == 0):
+                print(f"  Skipping pre-solved VFI_HDGRID stage: {ownc_stage.name}")
         
-        rntc_stage, rntc_timing = solve_stage(rntc_stage, verbose=verbose)
-        stage_timings.append(rntc_timing)
-        period_ue_time += rntc_timing.get("ue_time", 0)
+        # Barrier after MPI stage to keep ranks synchronized
+        if use_mpi and comm is not None:
+            comm.Barrier()  # workers were idle during non-MPI stages, keep them aligned
+        
+        if not (_get_stage_method(rntc_stage) == "VFI_HDGRID" 
+                and rntc_stage.status_flags.get("solved", False)):
+            rntc_stage, rntc_timing = solve_stage(rntc_stage, verbose=verbose, use_mpi=use_mpi, comm=comm)
+            stage_timings.append(rntc_timing)
+            period_ue_time += rntc_timing.get("ue_time", 0)
+        else:
+            if verbose and (not use_mpi or comm is None or comm.rank == 0):
+                print(f"  Skipping pre-solved VFI_HDGRID stage: {rntc_stage.name}")
+        
+        # Barrier after MPI stage to keep ranks synchronized
+        if use_mpi and comm is not None:
+            comm.Barrier()  # workers were idle during non-MPI stages, keep them aligned
         
         # -------------------------------------------------------------------------------
         # 2. Connect consumption stages to housing stages
@@ -534,13 +530,31 @@ def run_time_iteration(model_circuit, n_periods=None, verbose=False,verbose_timi
         # -------------------------------------------------------------------------------
         # 3. Solve housing choice stages (OWNH and RNTH)
         # -------------------------------------------------------------------------------
-        ownh_stage, ownh_timing = solve_stage(ownh_stage, verbose=verbose)
-        stage_timings.append(ownh_timing)
-        period_ue_time += ownh_timing.get("ue_time", 0)
+        if not (_get_stage_method(ownh_stage) == "VFI_HDGRID" 
+                and ownh_stage.status_flags.get("solved", False)):
+            ownh_stage, ownh_timing = solve_stage(ownh_stage, verbose=verbose, use_mpi=use_mpi, comm=comm)
+            stage_timings.append(ownh_timing)
+            period_ue_time += ownh_timing.get("ue_time", 0)
+        else:
+            if verbose and (not use_mpi or comm is None or comm.rank == 0):
+                print(f"  Skipping pre-solved VFI_HDGRID stage: {ownh_stage.name}")
         
-        rnth_stage, rnth_timing = solve_stage(rnth_stage, verbose=verbose)
-        stage_timings.append(rnth_timing)
-        period_ue_time += rnth_timing.get("ue_time", 0)
+        # Barrier after MPI stage to keep ranks synchronized
+        if use_mpi and comm is not None:
+            comm.Barrier()  # workers were idle during non-MPI stages, keep them aligned
+        
+        if not (_get_stage_method(rnth_stage) == "VFI_HDGRID" 
+                and rnth_stage.status_flags.get("solved", False)):
+            rnth_stage, rnth_timing = solve_stage(rnth_stage, verbose=verbose, use_mpi=use_mpi, comm=comm)
+            stage_timings.append(rnth_timing)
+            period_ue_time += rnth_timing.get("ue_time", 0)
+        else:
+            if verbose and (not use_mpi or comm is None or comm.rank == 0):
+                print(f"  Skipping pre-solved VFI_HDGRID stage: {rnth_stage.name}")
+        
+        # Barrier after MPI stage to keep ranks synchronized
+        if use_mpi and comm is not None:
+            comm.Barrier()  # workers were idle during non-MPI stages, keep them aligned
         
         # -------------------------------------------------------------------------------
         # 4. Connect housing stages to tenure choice stage
@@ -554,9 +568,13 @@ def run_time_iteration(model_circuit, n_periods=None, verbose=False,verbose_timi
         # -------------------------------------------------------------------------------
         # 5. Solve the tenure choice stage (TENU)
         # -------------------------------------------------------------------------------
-        tenu_stage, tenu_timing = solve_stage(tenu_stage, verbose=verbose)
+        tenu_stage, tenu_timing = solve_stage(tenu_stage, verbose=verbose, use_mpi=use_mpi, comm=comm)
         stage_timings.append(tenu_timing)
         period_ue_time += tenu_timing.get("ue_time", 0)
+        
+        # Barrier after stage to keep ranks synchronized
+        if use_mpi and comm is not None:
+            comm.Barrier()  # workers were idle during non-MPI stages, keep them aligned
         
         # -------------------------------------------------------------------------------
         # 6. Inter-period connection: If not first period, connect to previous period
@@ -614,8 +632,8 @@ def run_time_iteration(model_circuit, n_periods=None, verbose=False,verbose_timi
             stage_timings=stage_timings
         )
     
-    # Print timing summary - always show this regardless of verbose setting
-    if verbose_timings:
+    # CRITICAL FIX #6: Guard verbose timing computation to save time when not needed
+    if verbose_timings and (not use_mpi or comm is None or comm.rank == 0):
         print("\n----- Solution Time Summary -----")
         print(f"Total solution time: {total_time:.4f} seconds")
         

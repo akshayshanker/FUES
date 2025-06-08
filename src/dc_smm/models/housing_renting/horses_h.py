@@ -2,6 +2,9 @@ import numpy as np
 from numba import njit
 from dc_smm.models.housing_renting.horses_common import interp_as
 from dynx.stagecraft.solmaker import Solution
+from dc_smm.helpers.mpi_utils import (
+    get_comm, scatter_dict_list, gather_nested, barrier_print, broadcast_arrays, chunk_indices
+)
 
 def F_shocks_dcsn_to_arvl(mover):
     """Create operator for shock integration in backward step.
@@ -241,17 +244,20 @@ def housing_choice_solver_renter(w_grid, S_grid, y_grid, w_rent_grid, q_cntn, vl
     
     return q_dcsn, vlu_dcsn, lambda_dcsn, S_policy
 
-def F_h_cntn_to_dcsn_owner(mover):
-    """Create operator for housing choice (for both owners and renters).
+def F_h_cntn_to_dcsn_owner(mover, use_mpi=False, comm=None):
+    """Create operator for owner housing choice.
     
     Implements discrete housing choice through vectorized enumeration.
-    Detects whether it's being called for owner or renter based on stage name.
     Maximises present-biased payoff `Q_dcsn`; forwards lifetime `vlu`.
     
     Parameters
     ----------
     mover : Mover
         The cntn_to_dcsn mover with self-contained model
+    use_mpi : bool
+        Whether to use MPI parallelization  
+    comm : MPI communicator
+        MPI communicator (if use_mpi=True)
         
     Returns
     -------
@@ -342,17 +348,20 @@ def F_h_cntn_to_dcsn_owner(mover):
     
     return operator
 
-def F_h_cntn_to_dcsn_renter(mover):
-    """Create operator for housing choice (for both owners and renters).
+def F_h_cntn_to_dcsn_renter(mover, use_mpi=False, comm=None):
+    """Create operator for renter housing choice.
     
     Implements discrete housing choice through vectorized enumeration.
-    Detects whether it's being called for owner or renter based on stage name.
     Maximises present-biased payoff `Q_dcsn`; forwards lifetime `vlu`.
     
     Parameters
     ----------
     mover : Mover
         The cntn_to_dcsn mover with self-contained model
+    use_mpi : bool
+        Whether to use MPI parallelization
+    comm : MPI communicator
+        MPI communicator (if use_mpi=True)
         
     Returns
     -------

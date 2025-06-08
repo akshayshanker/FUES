@@ -73,3 +73,58 @@ Consumption policy function generated using Ishkakov et al (2017) params and no 
 Upper envelope generation using FUES and Ishkakov et al (2017) params (age 17):
 
 ![ret_vf_aprime_all_17](/results/plots/retirement/ret_vf_aprime_all_17_3000_sigma0.png)
+
+## Running HD-VFI on Gadi with MPI
+
+The housing-renting model supports MPI parallelization for the VFI_HDGRID (high-density grid VFI) solver, enabling efficient computation on clusters like NCI Gadi.
+
+### Installation
+
+For MPI support, install the optional dependency:
+
+```bash
+pip install FUES[mpi]
+# or manually: pip install mpi4py>=3.1
+```
+
+### Usage
+
+#### Serial execution (default):
+```bash
+python -m examples.housing_renting.circuit_runner_solving --periods 3 --vfi-ngrid 10000
+```
+
+#### MPI parallel execution:
+```bash
+# Set environment for optimal performance
+export NUMBA_NUM_THREADS=1
+export OMP_NUM_THREADS=1
+
+# Run with MPI
+mpiexec -n 8 python -m examples.housing_renting.circuit_runner_solving --periods 3 --vfi-ngrid 100000 --mpi
+```
+
+#### Benchmarking:
+```bash
+# Compare serial vs MPI performance
+python examples/housing_renting/bench_hd.py --periods 3 --grid-m 10000
+mpiexec -n 4 python examples/housing_renting/bench_hd.py --periods 3 --grid-m 10000 --mpi
+```
+
+### MPI Behavior
+
+- **VFI_HDGRID only**: MPI parallelization applies only to the VFI_HDGRID solver. Other methods (FUES, CONSAV, DCEGM) remain single-core for optimal performance.
+- **Deterministic results**: Serial and MPI runs produce byte-identical outputs.
+- **Automatic fallback**: If launched under `mpiexec` without `--mpi`, non-root ranks exit cleanly.
+- **Clean integration**: No code duplication - MPI wraps existing Numba kernels.
+
+### Testing
+
+Run MPI regression tests:
+```bash
+# Single rank (tests serial version)
+pytest tests/test_vfi_mpi_regression.py
+
+# Multiple ranks (tests MPI equivalence)  
+mpiexec -n 4 pytest tests/test_vfi_mpi_regression.py -m mpi
+```

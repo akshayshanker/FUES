@@ -27,6 +27,10 @@ dependencies = [
   "EconModel"
 ]
 
+[project.optional-dependencies]
+# MPI support for HD-VFI parallelization
+mpi = ["mpi4py>=3.1"]
+
 [project.urls]
 "Source" = "https://github.com/akshayshanker/FUES"
 "Bug Tracker" = "https://github.com/akshayshanker/FUES/issues"
