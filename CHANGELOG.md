@@ -2,6 +2,65 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.0 dev4] - 2025-06-09 – **MPI-safe baseline & lean workers**
+
+### Changed
+* mpi_run takes in a solver communicator which splits each run across solvers. Only master rank processes the metrics and loading/saving. 
+* outputs across mpi and non-mpi runs are not consistent. 
+* basic HF vf grid comparison for housing renting model using MPI. (compares to single parameter run in circuit_runner_solving.py)
+
+### Added
+
+* **Root-only metrics path**
+  `CircuitRunner.run()` now skips the expensive `metric_fns` block on
+  non-root ranks; workers only return lightweight timing info.
+  → prevents N× baseline reloads and cuts RAM usage on large jobs.
+
+* **Global MPI helpers** (`_MPI_COMM / _MPI_RANK / _MPI_SIZE`) initialised
+  once at import time; used throughout the runner/solver stack to gate code
+  that should execute only on rank 0.
+
+### Changed
+
+* **`mpi_map()` rewritten for clarity**
+
+  * Always returns a *pair* `(df, models)` (second element `[]` when models
+    are not gathered).
+  * Serial code-path untouched; MPI path defers metrics to rank 0.
+
+* **Stage compilation log-level**
+  `compile_all_stages()` prints *INFO* messages only when the caller set
+  `--verbose`; otherwise it downgrades to *DEBUG* to keep worker logs clean.
+
+* **Config patching** (`patch_cfg`)
+
+  * Consumption stages now carry a cheap `"compute": "SINGLE"` flag for fast
+    methods; `"MPI"` is used only for `VFI_HDGRID`.
+  * Prevents workers from loading the HD grid bundle when they are solving a
+    fast-method row.
+
+* **Solver factory** – workers still solve their share of the VFI grid, but
+  the root rank alone runs the post-solve metric evaluation.
+
+### Fixed
+
+* Endless recursion / memory blow-ups when every rank attempted to load the
+  baseline bundle to compute metrics.
+* `inspect` import was missing in the metric-signature branch – now imported
+  once at the top of the guarded section.
+* Spurious warnings about missing numerical models on worker ranks
+  (initialise/compile order tightened).
+
+### Removed
+
+* Redundant per-rank saving of identical bundles; only rank 0 writes to disk
+  (flag `save_by_default` automatically false on workers).
+
+---
+
+*(Previous entries unchanged – see below for full history.)*
+
+
 ## [0.2.0dev3] - 2025-05-22 – Solution Container 
 
 ### Changed

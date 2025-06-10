@@ -2,9 +2,7 @@ import numpy as np
 from numba import njit
 from dc_smm.models.housing_renting.horses_common import interp_as
 from dynx.stagecraft.solmaker import Solution
-from dc_smm.helpers.mpi_utils import (
-    get_comm, scatter_dict_list, gather_nested, barrier_print, broadcast_arrays, chunk_indices
-)
+
 
 def F_shocks_dcsn_to_arvl(mover):
     """Create operator for shock integration in backward step.

@@ -48,7 +48,8 @@ stage:
     integration_method: "discretize"
     shock_method: "normal"
     compilation: 'eval'             
-    default_grid: 'linspace'        
+    default_grid: 'linspace'      
+    compute: "SINGLE"
 
   ###################
   # 2) .math Section

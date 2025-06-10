@@ -1,6 +1,3 @@
-
-
-
 import os, time, numba, numpy as np
 import logging
 from dc_smm.models.housing_renting.horses_common import (
@@ -524,7 +521,7 @@ def _solve_vfi_numba(V_next, w_grid, a_grid, H_grid,
     return policy_c, policy_a, Q_dcsn, V_cntn, lambda_cntn
 
 
-@njit(cache=True, fastmath=True)
+@njit
 def _solve_vfi_block(h_idx, y_idx, V_next, w_grid, a_grid, H_grid,
                      beta, delta, m_bar, u_func, h_nxt_ind_array,
                      thorn, n_grid):
@@ -572,7 +569,7 @@ def _solve_vfi_block(h_idx, y_idx, V_next, w_grid, a_grid, H_grid,
     lambda_cntn = np.empty((B, n_W))
     
     step_inv = 1.0 / (n_grid - 1)
-    
+    #print(f"Solving block {h_idx[0]}-{y_idx[0]}")
     # Process each (h,y) pair in the block
     for b in range(B):
         h = h_idx[b]
@@ -722,6 +719,7 @@ def solve_vfi_grid_mpi(vlu_cntn, model, comm, use_mpi=True):
         # Split across ranks
         chunks = []
         total_pairs = len(h_all)
+        #print(f"Total pairs: {total_pairs}")
         for rank in range(comm.size):
             rank_indices = chunk_indices(total_pairs, comm.size, rank)
             h_chunk = h_all[rank_indices]
@@ -734,8 +732,8 @@ def solve_vfi_grid_mpi(vlu_cntn, model, comm, use_mpi=True):
     local_chunk = scatter_dict_list(comm, chunks)
     
     if local_chunk:
-        h_local = local_chunk[0]['h_idx']
-        y_local = local_chunk[0]['y_idx']
+        h_local = local_chunk['h_idx']
+        y_local = local_chunk['y_idx']
     else:
         h_local = np.array([], dtype=np.int32)
         y_local = np.array([], dtype=np.int32)
@@ -768,10 +766,10 @@ def solve_vfi_grid_mpi(vlu_cntn, model, comm, use_mpi=True):
             'lambda_cntn': lambda_local
         }
     else:
-        # Empty chunk - create empty arrays
+        # Empty chunk - return empty arrays with correct shapes
         local_results = {
-            'h_idx': np.array([], dtype=np.int32),
-            'y_idx': np.array([], dtype=np.int32),
+            'h_idx': np.empty(0, dtype=np.int32),
+            'y_idx': np.empty(0, dtype=np.int32),
             'policy_c': np.empty((0, n_W)),
             'policy_a': np.empty((0, n_W)),
             'Q_dcsn': np.empty((0, n_W)),
@@ -790,23 +788,17 @@ def solve_vfi_grid_mpi(vlu_cntn, model, comm, use_mpi=True):
         V_cntn = np.empty((n_W, n_H, n_Y))
         lambda_cntn = np.empty((n_W, n_H, n_Y))
         
-        # Flatten gathered results (gather_nested returns list of lists from each rank)
-        flattened_results = []
-        for rank_results in all_results:
-            flattened_results.extend(rank_results)
-        
-        for result in flattened_results:
+        for result in all_results:          # result *is* a dict
             h_idx = result['h_idx']
             y_idx = result['y_idx']
-            
-            for b in range(len(h_idx)):
-                h = h_idx[b]
-                y = y_idx[b]
-                policy_c[:, h, y] = result['policy_c'][b, :]
-                policy_a[:, h, y] = result['policy_a'][b, :]
-                Q_dcsn[:, h, y] = result['Q_dcsn'][b, :]
-                V_cntn[:, h, y] = result['V_cntn'][b, :]
-                lambda_cntn[:, h, y] = result['lambda_cntn'][b, :]
+            for k in range(h_idx.size):          # handle multiple pairs per worker
+                h = h_idx[k]
+                y = y_idx[k]
+                policy_c[:, h, y]   = result['policy_c'][k]
+                policy_a[:, h, y]   = result['policy_a'][k]
+                Q_dcsn[:, h, y]     = result['Q_dcsn'][k]
+                V_cntn[:, h, y]     = result['V_cntn'][k]
+                lambda_cntn[:, h, y]= result['lambda_cntn'][k]
         
         # Package full results for broadcasting
         full = (policy_c, policy_a, Q_dcsn, V_cntn, lambda_cntn)

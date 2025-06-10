@@ -57,6 +57,7 @@ stage:
     compilation: 'eval'             
     default_grid: 'linspace'
     upper_envelope: ["upper_envelope"]        
+    compute: "SINGLE"
 
   ###################
   # 2) .math Section

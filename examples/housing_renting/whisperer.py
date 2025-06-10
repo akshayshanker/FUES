@@ -25,46 +25,6 @@ from dc_smm.models.housing_renting.horses_t import F_t_cntn_to_dcsn
 from dynx.stagecraft.solmaker import Solution
 # MPI utilities are now handled by circuit_runner
 
-def _get_stage_method(stage):
-    """Get the solution method for a stage."""
-    if hasattr(stage, 'methods') and hasattr(stage.methods, 'solution'):
-        return stage.methods.solution
-    elif hasattr(stage, 'model') and hasattr(stage.model, 'methods'):
-        if hasattr(stage.model.methods, 'solution'):
-            return stage.model.methods.solution
-        elif hasattr(stage.model.methods, 'upper_envelope'):
-            return stage.model.methods.upper_envelope
-    return None
-
-def _needs_mpi(stage):
-    """Determine if a stage needs MPI parallelization.
-    
-    Parameters
-    ----------
-    stage : Stage
-        The stage to check
-        
-    Returns
-    -------
-    bool
-        True if stage needs MPI (VFI_HDGRID method + consumption/housing stage)
-    """
-    # Get the stage method - try multiple access patterns for robustness
-    method = None
-    if hasattr(stage, 'methods') and hasattr(stage.methods, 'solution'):
-        method = stage.methods.solution
-    elif hasattr(stage, 'model') and hasattr(stage.model, 'methods'):
-        if hasattr(stage.model.methods, 'solution'):
-            method = stage.model.methods.solution
-        elif hasattr(stage.model.methods, 'upper_envelope'):
-            method = stage.model.methods.upper_envelope
-    
-    # Only VFI_HDGRID method uses MPI
-    if method != "VFI_HDGRID":
-        return False
-    
-    # Only consumption and housing stages need MPI within VFI_HDGRID
-    return any(tag in stage.name for tag in ("OWNC", "RNTC", "OWNH", "RNTH"))
 
 def build_operators(stage, use_mpi=False, comm=None):
     """Build operator mappings for a given stage.
@@ -180,34 +140,38 @@ def solve_stage(stage, max_iter=None, tol=None, verbose=False, use_mpi=False, co
     # -------------------------------------------------------------
     # 0.  Decide if THIS rank should work or just wait
     # -------------------------------------------------------------
-    if use_mpi and comm is not None and comm.rank != 0:
-        # Only enter MPI-enabled operators if this stage needs parallel execution
-        if not _needs_mpi(stage):
-            # CRITICAL FIX #1: Add barrier to prevent deadlocks
-            comm.Barrier()  # keep communicator aligned
-            # Return early - workers were idle during this non-MPI stage
-            return stage, {"stage_name": stage.name,
-                           "total_time": 0.0,
-                           "cntn_to_dcsn_time": 0.0,
-                           "dcsn_to_arvl_time": 0.0,
-                           "ue_time": 0.0,
-                           "is_terminal": stage.status_flags.get("is_terminal", False)}
+    needs_mpi = stage.model.methods.get("compute", "MPI") == "MPI"
+
+    if use_mpi and comm is not None and not needs_mpi:
+        # keep communicator aligned no matter the rank
+        comm.Barrier()
+
+        # workers go idle, master keeps running
+        if comm.rank != 0:
+            return stage, {
+                "stage_name": stage.name,
+                "total_time": 0.0,
+                "cntn_to_dcsn_time": 0.0,
+                "dcsn_to_arvl_time": 0.0,
+                "ue_time": 0.0,
+                "is_terminal": stage.status_flags.get("is_terminal", False),
+            }
     
     if verbose and (not use_mpi or comm is None or comm.rank == 0):
         print(f"Solving stage: {stage.name}")
     
     # Build operators for this stage (cached to avoid double build)
-    if not hasattr(stage, "_ops"):
-        stage._ops = build_operators(stage, use_mpi=use_mpi, comm=comm)
+    #if not hasattr(stage, "_ops"):
+    stage._ops = build_operators(stage, use_mpi=use_mpi, comm=comm)
     operators = stage._ops
     
     # Check if this is a terminal stage
     is_terminal = stage.status_flags.get("is_terminal", False)
     
     # If this is the final period, initialize analytically
-    if is_terminal:
+    #if is_terminal:
         # Initialize terminal continuation values (CRRA utility)
-        initialize_terminal_values(stage, verbose=verbose, use_mpi=use_mpi, comm=comm)
+    #    initialize_terminal_values(stage, verbose=verbose, use_mpi=use_mpi, comm=comm)
     
     # Apply backward operators once in sequence
     if verbose and (not use_mpi or comm is None or comm.rank == 0):
@@ -235,6 +199,9 @@ def solve_stage(stage, max_iter=None, tol=None, verbose=False, use_mpi=False, co
         # Get the data from continuation perches
         own_data = stage.cntn.sol["from_owner"]
         rent_data = stage.cntn.sol["from_renter"]
+
+        #print(own_data["vlu"].shape)
+        #print(rent_data["vlu"].shape)
         
         # Create combined continuation data with branch keys
         cntn_data = {
@@ -246,6 +213,7 @@ def solve_stage(stage, max_iter=None, tol=None, verbose=False, use_mpi=False, co
         cntn_data = stage.cntn.sol
     
     # Apply continuation to decision operator
+    #print("Solving stage: ", stage.name)
     dcsn_data = operators["cntn_to_dcsn"](cntn_data)
     cntn_to_dcsn_time = time.time() - cntn_to_dcsn_start
     
@@ -433,7 +401,7 @@ def run_time_iteration(model_circuit, n_periods=None, verbose=False,verbose_timi
     
     # Mark terminal periods - set terminal flags for the final period's consumption stages
     final_period = model_circuit.get_period(n_periods - 1)
-    print(f"final_period: {final_period}")
+    #print(f"final_period: {final_period}")
     #print(f"final_period: {final_period}")
     # Get all stages from the final period
     final_tenu = final_period.get_stage("TENU")
@@ -447,10 +415,15 @@ def run_time_iteration(model_circuit, n_periods=None, verbose=False,verbose_timi
     final_rntc.status_flags["is_terminal"] = True
     
     # Initialize terminal continuation values for the last period's consumption stages
-    initialize_terminal_values(final_ownc, verbose=verbose, use_mpi=use_mpi, comm=comm)
-    initialize_terminal_values(final_rntc, verbose=verbose, use_mpi=use_mpi, comm=comm)
+    if comm is None or comm.rank == 0:
+        initialize_terminal_values(final_ownc, verbose=verbose, use_mpi=use_mpi, comm=comm)
+        initialize_terminal_values(final_rntc, verbose=verbose, use_mpi=use_mpi, comm=comm)
+    
+    _sync_perch_solutions(final_ownc, use_mpi, comm)
+    _sync_perch_solutions(final_rntc, use_mpi, comm)
 
-    assert final_ownc.cntn.sol.vlu is not None, "OWNC terminal cntn.sol.vlu missing!"
+
+    #assert final_ownc.cntn.sol.vlu is not None, "OWNC terminal cntn.sol.vlu missing!"
     #assert final_rntc.cntn.sol is not None, "RNTC terminal cntn.sol missing!"
 
     
@@ -468,8 +441,8 @@ def run_time_iteration(model_circuit, n_periods=None, verbose=False,verbose_timi
         # Flag whether this is the terminal period (first one we solve)
         is_terminal_period = (period_idx == n_periods - 1)
 
-        print(f"period_idx: {period_idx}")
-        print(f"Is terminal: {is_terminal_period}")
+        #print(f"period_idx: {period_idx}")
+        #print(f"Is terminal: {is_terminal_period}")
         
         if verbose and (not use_mpi or comm is None or comm.rank == 0):
             print(f"\nSolving period {period_idx+1} of {n_periods}")
@@ -482,8 +455,8 @@ def run_time_iteration(model_circuit, n_periods=None, verbose=False,verbose_timi
         rntc_stage = period.get_stage("RNTC")
 
 
-        assert ownc_stage.cntn.sol.vlu is not None, "OWNC cntn.sol.vlu missing!"
-        assert rntc_stage.cntn.sol.vlu is not None, "RNTC cntn.sol.vlu missing!"
+        #assert ownc_stage.cntn.sol.vlu is not None, "OWNC cntn.sol.vlu missing!"
+        #assert rntc_stage.cntn.sol.vlu is not None, "RNTC cntn.sol.vlu missing!"
         
         period_ue_time = 0.0
         
@@ -492,30 +465,27 @@ def run_time_iteration(model_circuit, n_periods=None, verbose=False,verbose_timi
         # 1. First the consumption stages (OWNC and RNTC)
         # -------------------------------------------------------------------------------
         # Skip already-solved VFI_HDGRID stages (from baseline preload)
-        if not (_get_stage_method(ownc_stage) == "VFI_HDGRID" 
-                and ownc_stage.status_flags.get("solved", False)):
-            ownc_stage, ownc_timing = solve_stage(ownc_stage, verbose=verbose, use_mpi=use_mpi, comm=comm)
-            stage_timings.append(ownc_timing)
-            period_ue_time += ownc_timing.get("ue_time", 0)
-        else:
-            if verbose and (not use_mpi or comm is None or comm.rank == 0):
-                print(f"  Skipping pre-solved VFI_HDGRID stage: {ownc_stage.name}")
+
+        ownc_stage, ownc_timing = solve_stage(ownc_stage, verbose=verbose, use_mpi=use_mpi, comm=comm)
+        _sync_perch_solutions(ownc_stage, use_mpi, comm)
+        stage_timings.append(ownc_timing)
+        period_ue_time += ownc_timing.get("ue_time", 0)
+
         
         # Barrier after MPI stage to keep ranks synchronized
         if use_mpi and comm is not None:
+            #print("stage 1 barrier")
             comm.Barrier()  # workers were idle during non-MPI stages, keep them aligned
         
-        if not (_get_stage_method(rntc_stage) == "VFI_HDGRID" 
-                and rntc_stage.status_flags.get("solved", False)):
-            rntc_stage, rntc_timing = solve_stage(rntc_stage, verbose=verbose, use_mpi=use_mpi, comm=comm)
-            stage_timings.append(rntc_timing)
-            period_ue_time += rntc_timing.get("ue_time", 0)
-        else:
-            if verbose and (not use_mpi or comm is None or comm.rank == 0):
-                print(f"  Skipping pre-solved VFI_HDGRID stage: {rntc_stage.name}")
+        rntc_stage, rntc_timing = solve_stage(rntc_stage, verbose=verbose, use_mpi=use_mpi, comm=comm)
+        _sync_perch_solutions(rntc_stage, use_mpi, comm)
+        stage_timings.append(rntc_timing)
+        period_ue_time += rntc_timing.get("ue_time", 0)
+
         
         # Barrier after MPI stage to keep ranks synchronized
         if use_mpi and comm is not None:
+            #print("stage 2 barrier")
             comm.Barrier()  # workers were idle during non-MPI stages, keep them aligned
         
         # -------------------------------------------------------------------------------
@@ -530,30 +500,25 @@ def run_time_iteration(model_circuit, n_periods=None, verbose=False,verbose_timi
         # -------------------------------------------------------------------------------
         # 3. Solve housing choice stages (OWNH and RNTH)
         # -------------------------------------------------------------------------------
-        if not (_get_stage_method(ownh_stage) == "VFI_HDGRID" 
-                and ownh_stage.status_flags.get("solved", False)):
-            ownh_stage, ownh_timing = solve_stage(ownh_stage, verbose=verbose, use_mpi=use_mpi, comm=comm)
-            stage_timings.append(ownh_timing)
-            period_ue_time += ownh_timing.get("ue_time", 0)
-        else:
-            if verbose and (not use_mpi or comm is None or comm.rank == 0):
-                print(f"  Skipping pre-solved VFI_HDGRID stage: {ownh_stage.name}")
+        ownh_stage, ownh_timing = solve_stage(ownh_stage, verbose=verbose, use_mpi=use_mpi, comm=comm)
+        _sync_perch_solutions(ownh_stage, use_mpi, comm)
+        stage_timings.append(ownh_timing)
+        period_ue_time += ownh_timing.get("ue_time", 0)
+
         
         # Barrier after MPI stage to keep ranks synchronized
         if use_mpi and comm is not None:
+            #print("stage 3 barrier")
             comm.Barrier()  # workers were idle during non-MPI stages, keep them aligned
         
-        if not (_get_stage_method(rnth_stage) == "VFI_HDGRID" 
-                and rnth_stage.status_flags.get("solved", False)):
-            rnth_stage, rnth_timing = solve_stage(rnth_stage, verbose=verbose, use_mpi=use_mpi, comm=comm)
-            stage_timings.append(rnth_timing)
-            period_ue_time += rnth_timing.get("ue_time", 0)
-        else:
-            if verbose and (not use_mpi or comm is None or comm.rank == 0):
-                print(f"  Skipping pre-solved VFI_HDGRID stage: {rnth_stage.name}")
-        
+        rnth_stage, rnth_timing = solve_stage(rnth_stage, verbose=verbose, use_mpi=use_mpi, comm=comm)
+        _sync_perch_solutions(rnth_stage, use_mpi, comm)
+        stage_timings.append(rnth_timing)
+        period_ue_time += rnth_timing.get("ue_time", 0)
+
         # Barrier after MPI stage to keep ranks synchronized
         if use_mpi and comm is not None:
+            #print("stage 4 barrier")
             comm.Barrier()  # workers were idle during non-MPI stages, keep them aligned
         
         # -------------------------------------------------------------------------------
@@ -569,11 +534,13 @@ def run_time_iteration(model_circuit, n_periods=None, verbose=False,verbose_timi
         # 5. Solve the tenure choice stage (TENU)
         # -------------------------------------------------------------------------------
         tenu_stage, tenu_timing = solve_stage(tenu_stage, verbose=verbose, use_mpi=use_mpi, comm=comm)
+        _sync_perch_solutions(tenu_stage, use_mpi, comm)
         stage_timings.append(tenu_timing)
         period_ue_time += tenu_timing.get("ue_time", 0)
         
         # Barrier after stage to keep ranks synchronized
         if use_mpi and comm is not None:
+            #print("stage 5 barrier")
             comm.Barrier()  # workers were idle during non-MPI stages, keep them aligned
         
         # -------------------------------------------------------------------------------
@@ -665,3 +632,24 @@ def run_time_iteration(model_circuit, n_periods=None, verbose=False,verbose_timi
         print("---------------------------------")
     
     return all_stages_by_period
+
+# ------------------------------------------------------------------
+#  Synchronise perch .sol objects after a non-MPI stage was solved
+# ------------------------------------------------------------------
+def _sync_perch_solutions(stage, use_mpi: bool, comm):
+    """
+    Broadcast stage.cntn/dcsn/arvl .sol from rank-0 to all other ranks
+    *only* when the stage was executed on a single rank.
+
+    Called *immediately after* solve_stage() for owner/renter consumption
+    and (potentially) housing/tenure stages that run in serial mode.
+    """
+    if not (use_mpi and comm is not None and comm.size > 1):
+        return  # nothing to do in serial mode
+
+    for perch_name in ("cntn", "dcsn", "arvl"):
+        perch = getattr(stage, perch_name, None)
+        if perch is not None:
+            perch.sol = comm.bcast(perch.sol if comm.rank == 0 else None,
+                                   root=0)
+    comm.Barrier()                    # keep ranks aligned
