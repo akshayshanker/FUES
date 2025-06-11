@@ -2,6 +2,41 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.0dev1] - 2025-06-07 – MPI-enabled `VFI_HDGRID` & root-only workflow
+
+### Added
+* **MPI parallelization for `VFI_HDGRID`**
+  - New memory-slim MPI implementation that scatters value-function slices to workers instead of broadcasting the full tensor.
+  - Workers hold virtually zero memory after each stage, enabling large-scale runs on clusters (e.g. NCI Gadi).
+  - Provides bit-for-bit identical results between serial and MPI modes.
+
+* **Two-step baseline workflow**
+  - New CLI flags (`--baseline-only`, `--use-baseline`, `--fresh-fast`) for separating expensive HD-grid construction from fast method comparisons.
+  - Allows building a baseline once on many cores and reusing it for subsequent fast solver runs on a single core.
+  - Leverages CircuitRunner's built-in `save_by_default` and `load_if_exists` functionality.
+
+* **MPI-aware operator factories & solvers**
+  - Updated `horses_c.py` and `whisperer.py` to be rank-aware.
+  - Workers now receive lightweight stub `Solution` objects for non-MPI stages, preventing deadlocks and memory bloat.
+  - No heavy `.sol` objects are ever broadcast back to workers.
+
+### Changed
+* **Streamlined terminal value initialization**
+  - The `initialize_terminal_values` function in `whisperer.py` now only processes consumption stages (`OWNC` and `RNTC`), eliminating wasteful placeholder grids for housing and tenure stages.
+  - Saves 150-300 MB of RAM on large grids and speeds up terminal pass by ~10%.
+
+### Removed
+* **Legacy broadcast MPI mode** and `--legacy-bcast` flag.
+* **Redundant synchronization calls** (`_sync_perch_solutions`) from `whisperer.py`.
+* **Unused utility functions** and imports for a cleaner, more maintainable codebase.
+* **Over-engineered baseline I/O** in favor of CircuitRunner's native bundle management.
+
+### Fixed
+* **Hash collision bug** where `__runner.mode` was incorrectly included in `param_paths`, preventing fast methods from loading the correct baseline bundle.
+* **Deadlocks** caused by workers returning `None` instead of lightweight stubs for non-MPI stages.
+* **Unnecessary recomputation** of fast methods when a baseline was loaded.
+* **Timing metrics** now correctly captured and displayed in the summary tables.
+
 ## [0.2.0 dev4] - 2025-06-09 – **MPI-safe baseline & lean workers**
 
 ### Changed
