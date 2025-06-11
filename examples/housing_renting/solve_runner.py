@@ -84,7 +84,7 @@ def patch_cfg(cfg_container: dict, periods: int, vf_ngrid: int) -> dict:
     return cfg
 
 
-def make_housing_model(cfg_container: dict, periods: int, vf_ngrid: int):
+def make_housing_model(cfg_container: dict, periods: int, vf_ngrid: int, comm=None):
     """
     Patch the YAML config → build a ModelCircuit → compile its stages.
 
@@ -103,8 +103,9 @@ def make_housing_model(cfg_container: dict, periods: int, vf_ngrid: int):
 
     # 3. numerically compile every Stage (grid creation, etc.)
     try:
-        # ‘force=False’: skip already-compiled stages when re-loading bundles
-        compile_all_stages(mc, force=False)
+        # 'force=False': skip already-compiled stages when re-loading bundles
+        if comm is None or comm.rank == 0:
+            compile_all_stages(mc, force=False)
     except Exception as exc:
         # Crash early with a clear message – better than a silent mis-compile
         logger.error("Stage compilation failed – aborting make_housing_model()", exc_info=True)
@@ -192,7 +193,7 @@ def main(argv=None):
     runner = CircuitRunner(
         base_cfg      = cfg_container,
         param_paths   = ["master.methods.upper_envelope", "master.settings.a_points", "master.settings.a_nxt_points", "master.settings.w_points"],
-        model_factory = lambda cfg: make_housing_model(cfg, args.periods, vf_ngrid),
+        model_factory = lambda cfg: make_housing_model(cfg, args.periods, vf_ngrid, comm),
         solver        = make_housing_solver(args, args.mpi, comm),
         metric_fns    = {
             "euler_error": euler_error_metric,
@@ -215,11 +216,22 @@ def main(argv=None):
         if is_root:           # print from root only
             print("\n» Baseline:", "recompute" if args.recompute_baseline else "load/solve-if-missing")
 
+        base_params = np.array([BASE, HD_POINTS, HD_POINTS, HD_POINTS], dtype=object)
+        runner.ref_params = base_params
         base_metrics, base_model = runner.run(
-            np.array([BASE, HD_POINTS, HD_POINTS, HD_POINTS], dtype=object),
-            return_model=is_root,        # runner.run already supports this flag
-            rank = solver_rank)
+            base_params,
+            return_model=is_root,
+            rank=solver_rank)
         base_metrics["master.methods.upper_envelope"] = BASE
+        
+        # Attach the baseline's parameters to the runner so that deviation
+        # metrics (e.g. dev_c_L2) can find the correct reference bundle.
+        #if is_root:
+        #    runner.ref_params = base_params
+            
+        # Write design matrix for the baseline run
+        #if is_root:
+        #    _write_design_matrix(runner, base_params)
 
 
     # --------------------------------------------------------------------
@@ -228,6 +240,7 @@ def main(argv=None):
     fast_methods = ["FUES"]
     STD_POINTS = int(args.grid_points)
     if fast_methods:
+        runner.model_factory = lambda cfg: make_housing_model(cfg, args.periods, vf_ngrid, comm)
         runner.load_if_exists = not args.fresh_fast
         #print
         xs = np.asarray([[m, STD_POINTS, STD_POINTS, STD_POINTS] for m in fast_methods], dtype=object)

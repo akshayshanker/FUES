@@ -11,10 +11,8 @@ from quantecon.optimize.scalar_maximization import brent_max
 from dynx.stagecraft.solmaker import Solution
 
 from dc_smm.helpers.mpi_utils import (
-    get_comm, scatter_dict_list, gather_nested, barrier_print, broadcast_arrays, chunk_indices
+    get_comm, scatter_dict_list, gather_nested, broadcast_arrays, chunk_indices
 )
-
-# horses_c.py   (top of file)
 
 logger = logging.getLogger(__name__)
 
@@ -63,9 +61,16 @@ def F_ownc_cntn_to_dcsn(mover, use_mpi=False, comm=None):
             ValueError: If an unknown solution method is specified.
         """
 
-        # Extract the source perch data (Solution)
-        vlu_cntn = perch_data.vlu
-        lambda_cntn = perch_data.lambda_
+        # Extract the source perch data (Solution) if present
+
+        #vlu_cntn = perch_data.vlu
+        #lambda_cntn = perch_data.lambda_
+        if comm is None or comm.rank == 0:
+            vlu_cntn = perch_data.vlu
+            lambda_cntn = perch_data.lambda_
+        else:
+            vlu_cntn = None
+            lambda_cntn = None
 
         # Track total time for the operator
         start_time = time.time()
@@ -126,7 +131,7 @@ def F_ownc_cntn_to_dcsn(mover, use_mpi=False, comm=None):
                 _solve_vfi_loop(vlu_cntn, model, use_mpi=use_mpi, comm=comm)
             )
 
-            # Root builds a full Solution object
+            # Only root builds a full Solution object for VFI_HDGRID
             if comm is None or comm.rank == 0:
                 # No UE time for VFI
                 timing_info = {
@@ -457,11 +462,106 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
     return policy, vlu_dcsn, lambda_dcsn, avg_ue_time, egm_grids, policy_a, Q_dcsn
 
 
+def _solve_vfi_loop(vlu_cntn, model, use_mpi=False, comm=None):
+    """
+    Drop-in replacement that matches the EGM solver's 7-value return.
+    """
+    # For VFI_HDGRID with MPI, use the optimized memory-slim version
+    if model.methods["solution"] == "VFI_HDGRID" and use_mpi and comm and comm.size > 1:
+        policy_c, policy_a, Q_dcsn, V_cntn, lambda_cntn = solve_vfi_grid_mpi(
+            vlu_cntn, model, comm, use_mpi
+        )
+        # Handle None results from worker ranks
+        if policy_c is None:        # worker rank
+            dummy = np.empty((0, 0, 0))
+            policy_c = policy_a = Q_dcsn = V_cntn = lambda_cntn = dummy
+    else:
+        # Standard path for serial runs or VFI method
+        # --- grids ---------------------------------------------------
+        w_grid = model.num.state_space.dcsn.grids.w.astype(np.float64)
+        a_grid = model.num.state_space.cntn.grids.a_nxt.astype(np.float64)
+        H_grid = model.num.state_space.cntn.grids.H_nxt.astype(np.float64)
+        if "RNT" in model.stage_name:
+            thorn = model.param.thorn
+        else:
+            thorn = 1
+
+        # --- parameters ---------------------------------------------
+        beta = float(model.param.beta)
+        delta = float(model.param.delta_pb)
+        m_bar = float(model.settings_dict["m_bar"])
+        N_arg_grid_vfi = model.settings_dict["N_arg_grid_vfi"]
+
+        # --- contiguous 3-D continuation value array ----------------
+        V_next = np.ascontiguousarray(vlu_cntn, dtype=np.float64)
+
+        expr_str = model.math["functions"]["u_func"]["expr"]
+        param_vals = {
+            "alpha": model.param.alpha,
+            "kappa": model.param.kappa,
+            "iota": model.param.iota,
+            # add any extra constants referenced in expr_str
+        }
+        utility_func = build_njit_utility(expr_str, param_vals)
+        g_ve_h_ind = model.num.functions.g_ve_h_ind
+        h_nxt_ind_array = g_ve_h_ind(H_ind=np.arange(H_grid.size))
+
+        # --- run kernel ---------------------------------------------
+        if model.methods["solution"] == "VFI":
+            # Handle MPI for serial VFI - solve on root only
+            if use_mpi and comm and comm.size > 1:
+                if comm.rank == 0:
+                    policy_c, policy_a, Q_dcsn, V_cntn, lambda_cntn = _solve_vfi_numerical(
+                        V_next, w_grid, a_grid, H_grid,
+                        beta, delta, m_bar,
+                        utility_func, h_nxt_ind_array, thorn
+                    )
+                else:
+                    policy_c = policy_a = Q_dcsn = V_cntn = lambda_cntn = None
+                
+                # Handle None results from worker ranks
+                if policy_c is None:        # worker rank
+                    dummy = np.empty((0, 0, 0))
+                    policy_c = policy_a = Q_dcsn = V_cntn = lambda_cntn = dummy
+            else:
+                # Serial execution
+                policy_c, policy_a, Q_dcsn, V_cntn, lambda_cntn = _solve_vfi_numerical(
+                    V_next, w_grid, a_grid, H_grid,
+                    beta, delta, m_bar,
+                    utility_func, h_nxt_ind_array, thorn
+                )
+        elif model.methods["solution"] == "VFI_HDGRID":
+            # Serial VFI_HDGRID
+            policy_c, policy_a, Q_dcsn, V_cntn, lambda_cntn = solve_vfi_grid_serial(
+                V_next, w_grid, a_grid, H_grid,
+                beta, delta, m_bar,
+                utility_func, h_nxt_ind_array, thorn, n_grid=N_arg_grid_vfi
+            )
+
+        # Memory cleanup
+        del V_next
+        gc.collect()
+
+    # The EGM solver returns an average UE time and grid dicts.
+    # For VFI these have no meaning, so we stub them out.
+    avg_ue_time = 0.0
+
+    # fill in empty egm grids as in the egm code so plotter does not error
+    unrefined_grids = {k: {} for k in ('e', 'Q', 'c', 'a')}
+    refined_grids = {k: {} for k in ('e', 'Q', 'c', 'a', 'lambda_')}
+    egm_grids = {"unrefined": unrefined_grids, "refined": refined_grids}
+
+    return (policy_c,             # same as `policy`
+            V_cntn,               # vlu_dcsn
+            lambda_cntn,          # lambda_dcsn
+            avg_ue_time,
+            egm_grids,
+            policy_a,             # asset policy, matches EGM output
+            Q_dcsn)               # Q_dcsn (decision objective)
 
 
-
-@njit(nopython=False)
-def _solve_vfi_numba(V_next, w_grid, a_grid, H_grid,
+@njit
+def _solve_vfi_numerical(V_next, w_grid, a_grid, H_grid,
                      beta, delta, m_bar,
                      u_func, h_nxt_ind_array, thorn):
     """
@@ -526,6 +626,246 @@ def _solve_vfi_numba(V_next, w_grid, a_grid, H_grid,
 
     return policy_c, policy_a, Q_dcsn, V_cntn, lambda_cntn
 
+
+def solve_vfi_grid_serial(V_next, w_grid, a_grid, H_grid,
+                          beta, delta, m_bar, u_func, h_nxt_ind_array, 
+                          thorn, n_grid=2000):
+    """
+    Serial VFI using block kernel.
+    """
+    n_A, n_H, n_Y = V_next.shape
+    n_W = w_grid.size
+    
+    # Create index arrays for all (h,y) pairs
+    h_idx = np.repeat(np.arange(n_H), n_Y).astype(np.int32)
+    y_idx = np.tile(np.arange(n_Y), n_H).astype(np.int32)
+    
+    # Call block kernel
+    policy_c_block, policy_a_block, Q_block, V_block, lambda_block = _solve_vfi_block(
+        h_idx, y_idx, V_next, w_grid, a_grid, H_grid,
+        beta, delta, m_bar, u_func, h_nxt_ind_array, thorn, n_grid
+    )
+    
+    # Reshape to (n_W, n_H, n_Y) format
+    policy_c = np.empty((n_W, n_H, n_Y))
+    policy_a = np.empty((n_W, n_H, n_Y))
+    Q_dcsn = np.empty((n_W, n_H, n_Y))
+    V_cntn = np.empty((n_W, n_H, n_Y))
+    lambda_cntn = np.empty((n_W, n_H, n_Y))
+    
+    for b in range(len(h_idx)):
+        h = h_idx[b]
+        y = y_idx[b]
+        policy_c[:, h, y] = policy_c_block[b, :]
+        policy_a[:, h, y] = policy_a_block[b, :]
+        Q_dcsn[:, h, y] = Q_block[b, :]
+        V_cntn[:, h, y] = V_block[b, :]
+        lambda_cntn[:, h, y] = lambda_block[b, :]
+    
+    return policy_c, policy_a, Q_dcsn, V_cntn, lambda_cntn
+
+
+def solve_vfi_grid_mpi(vlu_cntn, model, comm, use_mpi=True):
+    """
+    Memory-slim MPI-parallel VFI solver that scatters V_next slices to workers.
+    Workers never hold the full continuation tensor during solves.
+    """
+    # Extract parameters - all ranks need access to basic model info
+    if comm is None or comm.rank == 0:
+        w_grid = model.num.state_space.dcsn.grids.w.astype(np.float64)
+        a_grid = model.num.state_space.cntn.grids.a_nxt.astype(np.float64)
+        H_grid = model.num.state_space.cntn.grids.H_nxt.astype(np.float64)
+        
+        if "RNT" in model.stage_name:
+            thorn = model.param.thorn
+        else:
+            thorn = 1
+            
+        beta = float(model.param.beta)
+        delta = float(model.param.delta_pb)
+        m_bar = float(model.settings_dict["m_bar"])
+        N_arg_grid_vfi = model.settings_dict["N_arg_grid_vfi"]
+        
+        # Build utility function parameters
+        expr_str = model.math["functions"]["u_func"]["expr"]
+        param_vals = {
+            "alpha": model.param.alpha,
+            "kappa": model.param.kappa,
+            "iota": model.param.iota,
+        }
+        
+        g_ve_h_ind = model.num.functions.g_ve_h_ind
+        h_nxt_ind_array = g_ve_h_ind(H_ind=np.arange(H_grid.size))
+        
+        V_next = np.ascontiguousarray(vlu_cntn, dtype=np.float64)
+        n_A, n_H, n_Y = V_next.shape
+        n_W = w_grid.size
+    else:
+        # Workers get None for heavy objects, but need basic info
+        w_grid = a_grid = H_grid = h_nxt_ind_array = V_next = None
+        beta = delta = m_bar = thorn = None
+        N_arg_grid_vfi = None
+        expr_str = None
+        param_vals = None
+        n_A = n_H = n_Y = n_W = None
+
+    # Broadcast read-only data to all ranks
+    broadcast_data = {
+        'w_grid': w_grid,
+        'a_grid': a_grid,
+        'H_grid': H_grid,
+        'h_nxt_ind_array': h_nxt_ind_array,
+        'beta': beta,
+        'delta': delta,
+        'm_bar': m_bar,
+        'thorn': thorn,
+        'n_grid': N_arg_grid_vfi,
+        'expr_str': expr_str,
+        'param_vals': param_vals,
+    }
+    
+    # Broadcast to all ranks
+    broadcast_data = broadcast_arrays(comm, broadcast_data, root=0)
+    
+    # Build utility function on all ranks after broadcast
+    utility_func = build_njit_utility(
+        broadcast_data['expr_str'], 
+        broadcast_data['param_vals']
+    )
+    
+    # Create chunks and associated V_slices on root
+    if comm.rank == 0:
+        # Create all (h,y) pairs
+        h_all = np.repeat(np.arange(n_H), n_Y).astype(np.int32)
+        y_all = np.tile(np.arange(n_Y), n_H).astype(np.int32)
+        
+        # Build chunks with contiguous V_slices
+        chunks = []
+        for rank in range(comm.size):
+            rank_indices = chunk_indices(len(h_all), comm.size, rank)
+            h_chunk = h_all[rank_indices]
+            y_chunk = y_all[rank_indices]
+            
+            # Create contiguous V_slices for this chunk
+            if h_chunk.size > 0:
+                V_slices = np.empty((h_chunk.size, n_A), dtype=np.float64)
+                for i, (h, y) in enumerate(zip(h_chunk, y_chunk)):
+                    h_nxt_ind = h_nxt_ind_array[h]
+                    V_slices[i, :] = V_next[:, h_nxt_ind, y]
+                V_slices = np.ascontiguousarray(V_slices)
+            else:
+                V_slices = np.empty((0, n_A), dtype=np.float64)
+            
+            chunks.append({
+                'h_idx': h_chunk,
+                'y_idx': y_chunk, 
+                'V_slices': V_slices
+            })
+    else:
+        chunks = None
+    
+    # Scatter chunks (including V_slices)
+    local_chunk = scatter_dict_list(comm, chunks)
+    
+    # Memory cleanup on root: release large objects after scattering
+    if comm.rank == 0:
+        del V_next
+        del chunks
+        gc.collect()
+    
+    if local_chunk and local_chunk['h_idx'].size > 0:
+        h_local = local_chunk['h_idx']
+        y_local = local_chunk['y_idx']
+        V_local = local_chunk['V_slices']
+        
+        # Get dimensions from broadcast data
+        n_W = broadcast_data['w_grid'].size
+        
+        # Process with memory-slim kernel
+        policy_c_local, policy_a_local, Q_local, V_cntn_local, lambda_local = _solve_vfi_block_local(
+            h_local, y_local, V_local,
+            broadcast_data['w_grid'],
+            broadcast_data['a_grid'],
+            broadcast_data['H_grid'],
+            broadcast_data['beta'],
+            broadcast_data['delta'],
+            broadcast_data['m_bar'],
+            utility_func,
+            broadcast_data['h_nxt_ind_array'],
+            broadcast_data['thorn'],
+            broadcast_data['n_grid']
+        )
+        
+        # Memory cleanup: immediately release V_local
+        del V_local
+        gc.collect()
+        
+        # Package results
+        local_results = {
+            'h_idx': h_local,
+            'y_idx': y_local,
+            'policy_c': policy_c_local,
+            'policy_a': policy_a_local,
+            'Q_dcsn': Q_local,
+            'V_cntn': V_cntn_local,
+            'lambda_cntn': lambda_local
+        }
+    else:
+        # Empty chunk - need n_W from broadcast data
+        n_W = broadcast_data['w_grid'].size if broadcast_data['w_grid'] is not None else 0
+        local_results = {
+            'h_idx': np.empty(0, dtype=np.int32),
+            'y_idx': np.empty(0, dtype=np.int32),
+            'policy_c': np.empty((0, n_W)),
+            'policy_a': np.empty((0, n_W)),
+            'Q_dcsn': np.empty((0, n_W)),
+            'V_cntn': np.empty((0, n_W)),
+            'lambda_cntn': np.empty((0, n_W))
+        }
+    
+    # Gather results to root
+    if comm.rank == 0:
+        all_results = gather_nested(comm, [local_results], root=0)
+        
+        # Reconstruct full arrays with explicit memory management
+        policy_c = np.empty((n_W, n_H, n_Y))
+        policy_a = np.empty((n_W, n_H, n_Y))
+        Q_dcsn = np.empty((n_W, n_H, n_Y))
+        V_cntn = np.empty((n_W, n_H, n_Y))
+        lambda_cntn = np.empty((n_W, n_H, n_Y))
+        
+        for result in all_results:
+            h_idx = result['h_idx']
+            y_idx = result['y_idx']
+            for k in range(h_idx.size):
+                h = h_idx[k]
+                y = y_idx[k]
+                policy_c[:, h, y]   = result['policy_c'][k]
+                policy_a[:, h, y]   = result['policy_a'][k]
+                Q_dcsn[:, h, y]     = result['Q_dcsn'][k]
+                V_cntn[:, h, y]     = result['V_cntn'][k]
+                lambda_cntn[:, h, y]= result['lambda_cntn'][k]
+        
+        # Clear temporary buffers
+        all_results.clear()
+        gc.collect()
+    else:
+        # Workers participate in gather but don't store results
+        gather_nested(comm, [local_results], root=0)
+        
+        # Free memory on worker ranks after data is sent
+        del local_results
+        gc.collect()
+    
+    # Root returns full results, workers return None
+    if comm.rank == 0:
+        return policy_c, policy_a, Q_dcsn, V_cntn, lambda_cntn
+    else:
+        return (None,)*5          # workers keep virtually zero data
+
+
+# Note: _get_solver function removed as it's no longer used
+# VFI solver selection is now handled directly in _solve_vfi_loop
 
 @njit
 def _solve_vfi_block(h_idx, y_idx, V_next, w_grid, a_grid, H_grid,
@@ -627,7 +967,6 @@ def _solve_vfi_block(h_idx, y_idx, V_next, w_grid, a_grid, H_grid,
     
     return policy_c, policy_a, Q_dcsn, V_cntn, lambda_cntn
 
-
 @njit(cache=True)
 def _solve_vfi_block_local(h_idx, y_idx, V_slices, w_grid, a_grid, H_grid,
                            beta, delta, m_bar, u_func, h_nxt_ind_array,
@@ -727,316 +1066,10 @@ def _solve_vfi_block_local(h_idx, y_idx, V_slices, w_grid, a_grid, H_grid,
     
     return policy_c, policy_a, Q_dcsn, V_cntn, lambda_cntn
 
-
-def solve_vfi_grid_serial(V_next, w_grid, a_grid, H_grid,
-                          beta, delta, m_bar, u_func, h_nxt_ind_array, 
-                          thorn, n_grid=2000):
-    """
-    Serial VFI using block kernel.
-    """
-    n_A, n_H, n_Y = V_next.shape
-    n_W = w_grid.size
-    
-    # Create index arrays for all (h,y) pairs
-    h_idx = np.repeat(np.arange(n_H), n_Y).astype(np.int32)
-    y_idx = np.tile(np.arange(n_Y), n_H).astype(np.int32)
-    
-    # Call block kernel
-    policy_c_block, policy_a_block, Q_block, V_block, lambda_block = _solve_vfi_block(
-        h_idx, y_idx, V_next, w_grid, a_grid, H_grid,
-        beta, delta, m_bar, u_func, h_nxt_ind_array, thorn, n_grid
-    )
-    
-    # Reshape to (n_W, n_H, n_Y) format
-    policy_c = np.empty((n_W, n_H, n_Y))
-    policy_a = np.empty((n_W, n_H, n_Y))
-    Q_dcsn = np.empty((n_W, n_H, n_Y))
-    V_cntn = np.empty((n_W, n_H, n_Y))
-    lambda_cntn = np.empty((n_W, n_H, n_Y))
-    
-    for b in range(len(h_idx)):
-        h = h_idx[b]
-        y = y_idx[b]
-        policy_c[:, h, y] = policy_c_block[b, :]
-        policy_a[:, h, y] = policy_a_block[b, :]
-        Q_dcsn[:, h, y] = Q_block[b, :]
-        V_cntn[:, h, y] = V_block[b, :]
-        lambda_cntn[:, h, y] = lambda_block[b, :]
-    
-    return policy_c, policy_a, Q_dcsn, V_cntn, lambda_cntn
-
-
-def solve_vfi_grid_mpi(vlu_cntn, model, comm, use_mpi=True):
-    """
-    Memory-slim MPI-parallel VFI solver that scatters V_next slices to workers.
-    Workers never hold the full continuation tensor during solves.
-    """
-    # Extract parameters
-    w_grid = model.num.state_space.dcsn.grids.w.astype(np.float64)
-    a_grid = model.num.state_space.cntn.grids.a_nxt.astype(np.float64)
-    H_grid = model.num.state_space.cntn.grids.H_nxt.astype(np.float64)
-    
-    if "RNT" in model.stage_name:
-        thorn = model.param.thorn
-    else:
-        thorn = 1
-        
-    beta = float(model.param.beta)
-    delta = float(model.param.delta_pb)
-    m_bar = float(model.settings_dict["m_bar"])
-    N_arg_grid_vfi = model.settings_dict["N_arg_grid_vfi"]
-    
-    # Build utility function
-    expr_str = model.math["functions"]["u_func"]["expr"]
-    param_vals = {
-        "alpha": model.param.alpha,
-        "kappa": model.param.kappa,
-        "iota": model.param.iota,
-    }
-    utility_func = build_njit_utility(expr_str, param_vals)
-    
-    g_ve_h_ind = model.num.functions.g_ve_h_ind
-    h_nxt_ind_array = g_ve_h_ind(H_ind=np.arange(H_grid.size))
-    
-    V_next = np.ascontiguousarray(vlu_cntn, dtype=np.float64)
-    n_A, n_H, n_Y = V_next.shape
-    n_W = w_grid.size
-    
-    # Broadcast read-only data to all ranks (no V_next)
-    broadcast_data = {
-        'w_grid': w_grid,
-        'a_grid': a_grid,
-        'H_grid': H_grid,
-        'h_nxt_ind_array': h_nxt_ind_array,
-        'beta': beta,
-        'delta': delta,
-        'm_bar': m_bar,
-        'thorn': thorn,
-        'n_grid': N_arg_grid_vfi
-    }
-    broadcast_data = broadcast_arrays(comm, broadcast_data, root=0)
-    
-    # Create chunks and associated V_slices on root
-    if comm.rank == 0:
-        # Create all (h,y) pairs
-        h_all = np.repeat(np.arange(n_H), n_Y).astype(np.int32)
-        y_all = np.tile(np.arange(n_Y), n_H).astype(np.int32)
-        
-        # Build chunks with contiguous V_slices
-        chunks = []
-        for rank in range(comm.size):
-            rank_indices = chunk_indices(len(h_all), comm.size, rank)
-            h_chunk = h_all[rank_indices]
-            y_chunk = y_all[rank_indices]
-            
-            # Create contiguous V_slices for this chunk
-            if h_chunk.size > 0:
-                V_slices = np.empty((h_chunk.size, n_A), dtype=np.float64)
-                for i, (h, y) in enumerate(zip(h_chunk, y_chunk)):
-                    h_nxt_ind = h_nxt_ind_array[h]
-                    V_slices[i, :] = V_next[:, h_nxt_ind, y]
-                V_slices = np.ascontiguousarray(V_slices)
-            else:
-                V_slices = np.empty((0, n_A), dtype=np.float64)
-            
-            chunks.append({
-                'h_idx': h_chunk,
-                'y_idx': y_chunk, 
-                'V_slices': V_slices
-            })
-    else:
-        chunks = None
-    
-    # Scatter chunks (including V_slices)
-    local_chunk = scatter_dict_list(comm, chunks)
-    
-    if local_chunk and local_chunk['h_idx'].size > 0:
-        h_local = local_chunk['h_idx']
-        y_local = local_chunk['y_idx']
-        V_local = local_chunk['V_slices']
-        
-        # Process with memory-slim kernel
-        policy_c_local, policy_a_local, Q_local, V_cntn_local, lambda_local = _solve_vfi_block_local(
-            h_local, y_local, V_local,
-            broadcast_data['w_grid'],
-            broadcast_data['a_grid'],
-            broadcast_data['H_grid'],
-            broadcast_data['beta'],
-            broadcast_data['delta'],
-            broadcast_data['m_bar'],
-            utility_func,
-            broadcast_data['h_nxt_ind_array'],
-            broadcast_data['thorn'],
-            broadcast_data['n_grid']
-        )
-        
-        # Memory cleanup: immediately release V_local
-        del V_local
-        gc.collect()
-        
-        # Package results
-        local_results = {
-            'h_idx': h_local,
-            'y_idx': y_local,
-            'policy_c': policy_c_local,
-            'policy_a': policy_a_local,
-            'Q_dcsn': Q_local,
-            'V_cntn': V_cntn_local,
-            'lambda_cntn': lambda_local
-        }
-    else:
-        # Empty chunk
-        local_results = {
-            'h_idx': np.empty(0, dtype=np.int32),
-            'y_idx': np.empty(0, dtype=np.int32),
-            'policy_c': np.empty((0, n_W)),
-            'policy_a': np.empty((0, n_W)),
-            'Q_dcsn': np.empty((0, n_W)),
-            'V_cntn': np.empty((0, n_W)),
-            'lambda_cntn': np.empty((0, n_W))
-        }
-    
-    # Gather results to root
-    if comm.rank == 0:
-        all_results = gather_nested(comm, [local_results], root=0)
-        
-        # Reconstruct full arrays with explicit memory management
-        policy_c = np.empty((n_W, n_H, n_Y))
-        policy_a = np.empty((n_W, n_H, n_Y))
-        Q_dcsn = np.empty((n_W, n_H, n_Y))
-        V_cntn = np.empty((n_W, n_H, n_Y))
-        lambda_cntn = np.empty((n_W, n_H, n_Y))
-        
-        for result in all_results:
-            h_idx = result['h_idx']
-            y_idx = result['y_idx']
-            for k in range(h_idx.size):
-                h = h_idx[k]
-                y = y_idx[k]
-                policy_c[:, h, y]   = result['policy_c'][k]
-                policy_a[:, h, y]   = result['policy_a'][k]
-                Q_dcsn[:, h, y]     = result['Q_dcsn'][k]
-                V_cntn[:, h, y]     = result['V_cntn'][k]
-                lambda_cntn[:, h, y]= result['lambda_cntn'][k]
-        
-        # Clear temporary buffers
-        all_results.clear()
-        gc.collect()
-    else:
-        # Workers participate in gather but don't store results
-        gather_nested(comm, [local_results], root=0)
-    
-    # Root returns full results, workers return None
-    if comm.rank == 0:
-        return policy_c, policy_a, Q_dcsn, V_cntn, lambda_cntn
-    else:
-        return (None,)*5          # workers keep virtually zero data
-
-
-# Note: _get_solver function removed as it's no longer used
-# VFI solver selection is now handled directly in _solve_vfi_loop
-
-
-def _solve_vfi_loop(vlu_cntn, model, use_mpi=False, comm=None):
-    """
-    Drop-in replacement that matches the EGM solver's 7-value return.
-    """
-    # --- grids ---------------------------------------------------
-    w_grid = model.num.state_space.dcsn.grids.w.astype(np.float64)
-    a_grid = model.num.state_space.cntn.grids.a_nxt.astype(np.float64)
-    H_grid = model.num.state_space.cntn.grids.H_nxt.astype(np.float64)
-    if "RNT" in model.stage_name:
-        thorn = model.param.thorn
-    else:
-        thorn = 1
-
-    # --- parameters ---------------------------------------------
-    beta = float(model.param.beta)
-    delta = float(model.param.delta_pb)
-    m_bar = float(model.settings_dict["m_bar"])
-    N_arg_grid_vfi = model.settings_dict["N_arg_grid_vfi"]
-
-    # --- contiguous 3-D continuation value array ----------------
-    V_next = np.ascontiguousarray(vlu_cntn, dtype=np.float64)
-
-    expr_str = model.math["functions"]["u_func"]["expr"]
-    param_vals = {
-        "alpha": model.param.alpha,
-        "kappa": model.param.kappa,
-        "iota": model.param.iota,
-        # add any extra constants referenced in expr_str
-    }
-    utility_func = build_njit_utility(expr_str, param_vals)
-    g_ve_h_ind = model.num.functions.g_ve_h_ind
-    h_nxt_ind_array = g_ve_h_ind(H_ind=np.arange(H_grid.size))
-
-    # --- run kernel ---------------------------------------------
-    if model.methods["solution"] == "VFI":
-        # Handle MPI for serial VFI - solve on root only
-        if use_mpi and comm and comm.size > 1:
-            if comm.rank == 0:
-                policy_c, policy_a, Q_dcsn, V_cntn, lambda_cntn = _solve_vfi_numba(
-                    V_next, w_grid, a_grid, H_grid,
-                    beta, delta, m_bar,
-                    utility_func, h_nxt_ind_array, thorn
-                )
-            else:
-                policy_c = policy_a = Q_dcsn = V_cntn = lambda_cntn = None
-            
-            # Handle None results from worker ranks
-            if policy_c is None:        # worker rank
-                dummy = np.empty((0, 0, 0))
-                policy_c = policy_a = Q_dcsn = V_cntn = lambda_cntn = dummy
-        else:
-            # Serial execution
-            policy_c, policy_a, Q_dcsn, V_cntn, lambda_cntn = _solve_vfi_numba(
-                V_next, w_grid, a_grid, H_grid,
-                beta, delta, m_bar,
-                utility_func, h_nxt_ind_array, thorn
-            )
-    elif model.methods["solution"] == "VFI_HDGRID":
-        # Choose solver based on MPI settings
-        if use_mpi and comm and comm.size > 1:
-            policy_c, policy_a, Q_dcsn, V_cntn, lambda_cntn = solve_vfi_grid_mpi(
-                vlu_cntn, model, comm, use_mpi
-            )
-            # Handle None results from worker ranks
-            if policy_c is None:        # worker rank
-                dummy = np.empty((0, 0, 0))
-                policy_c = policy_a = Q_dcsn = V_cntn = lambda_cntn = dummy
-        else:
-            policy_c, policy_a, Q_dcsn, V_cntn, lambda_cntn = solve_vfi_grid_serial(
-                V_next, w_grid, a_grid, H_grid,
-                beta, delta, m_bar,
-                utility_func, h_nxt_ind_array, thorn, n_grid=N_arg_grid_vfi
-            )
-
-    # Memory cleanup
-    del V_next
-    gc.collect()
-
-    # The EGM solver returns an average UE time and grid dicts.
-    # For VFI these have no meaning, so we stub them out.
-    avg_ue_time = 0.0
-
-    # fill in empty egm grids as in the egm code so plotter does not error
-    unrefined_grids = {k: {} for k in ('e', 'Q', 'c', 'a')}
-    refined_grids = {k: {} for k in ('e', 'Q', 'c', 'a', 'lambda_')}
-    egm_grids = {"unrefined": unrefined_grids, "refined": refined_grids}
-
-    return (policy_c,             # same as `policy`
-            V_cntn,               # vlu_dcsn
-            lambda_cntn,          # lambda_dcsn
-            avg_ue_time,
-            egm_grids,
-            policy_a,             # asset policy, matches EGM output
-            Q_dcsn)               # Q_dcsn (decision objective)
-
 # --- End Private Solver Loop Helpers ---
 
 # Need F_ownc_dcsn_to_cntn - If it exists, move it here.
 # Otherwise, it needs to be defined. Let's assume it needs definition:
-
 
 def F_ownc_dcsn_to_cntn(mover):
     """Create operator for ownc_dcsn_to_cntn mover (Forward step).

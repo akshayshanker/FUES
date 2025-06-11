@@ -40,7 +40,7 @@ mpiexec -np 45 \
           --output-root /scratch/tp66/$USER/FUES/solutions/HR_test_v3 \
           --bundle-prefix HR \
           --vfi-ngrid 1E4 \
-          --HD-points 10000 \
+          --HD-points 1000 \
           --grid-points 4000 \
           --recompute-baseline \
           --fresh-fast \

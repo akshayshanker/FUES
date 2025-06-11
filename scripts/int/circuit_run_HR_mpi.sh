@@ -15,11 +15,11 @@ mpiexec -np 45 \
         python3 -m examples.housing_renting.solve_runner \
           --periods 3 \
           --ue-method ALL \
-          --output-root /scratch/tp66/$USER/FUES/solutions/HR_test_v3 \
-          --bundle-prefix HR \
-          --vfi-ngrid 1000 \
-          --HD-points 10000 \
-          --grid-points 4000 \
+          --output-root /scratch/tp66/$USER/FUES/solutions/HR_test_v4 \
+          --bundle-prefix HR_test_v4 \
+          --vfi-ngrid 100 \
+          --HD-points 650 \
+          --grid-points 500 \
           --recompute-baseline \
           --fresh-fast \
           --mpi \

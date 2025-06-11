@@ -19,12 +19,11 @@ import time  # Add time module for timing measurements
 
 # Import operator factories directly from their modules
 from dc_smm.models.housing_renting.horses_h import F_shocks_dcsn_to_arvl, F_h_cntn_to_dcsn_owner, F_h_cntn_to_dcsn_renter
-from dc_smm.models.housing_renting.horses_c import F_ownc_cntn_to_dcsn, F_rntc_cntn_to_dcsn, F_ownc_dcsn_to_cntn
+from dc_smm.models.housing_renting.horses_c import F_ownc_cntn_to_dcsn, F_rntc_cntn_to_dcsn
 from dc_smm.models.housing_renting.horses_common import F_id
 from dc_smm.models.housing_renting.horses_t import F_t_cntn_to_dcsn
 from dynx.stagecraft.solmaker import Solution
 # MPI utilities are now handled by circuit_runner
-
 
 def build_operators(stage, use_mpi=False, comm=None):
     """Build operator mappings for a given stage.
@@ -138,13 +137,12 @@ def solve_stage(stage, max_iter=None, tol=None, verbose=False, use_mpi=False, co
         comm = stage._comm
     
     # -------------------------------------------------------------
-    # 0.  Check if this is an MPI stage (workers exit early for true MPI stages)
+    # 0.  Check if this is an MPI stage (workers exit early for non-MPI stages)
     # -------------------------------------------------------------
     needs_mpi = stage.model.methods.get("compute", "MPI") == "MPI"
 
     # Early-exit on workers **only when the stage is NOT an MPI stage**
     if use_mpi and comm is not None and not needs_mpi and comm.rank != 0:
-        _sync_stub_perches(stage, comm, is_root=False)
         return stage, {
             "stage_name": stage.name,
             "total_time": 0.0,
@@ -158,17 +156,11 @@ def solve_stage(stage, max_iter=None, tol=None, verbose=False, use_mpi=False, co
         print(f"Solving stage: {stage.name}")
     
     # Build operators for this stage (cached to avoid double build)
-    #if not hasattr(stage, "_ops"):
     stage._ops = build_operators(stage, use_mpi=use_mpi, comm=comm)
     operators = stage._ops
     
     # Check if this is a terminal stage
     is_terminal = stage.status_flags.get("is_terminal", False)
-    
-    # If this is the final period, initialize analytically
-    #if is_terminal:
-        # Initialize terminal continuation values (CRRA utility)
-    #    initialize_terminal_values(stage, verbose=verbose, use_mpi=use_mpi, comm=comm)
     
     # Apply backward operators once in sequence
     if verbose and (not use_mpi or comm is None or comm.rank == 0):
@@ -177,6 +169,8 @@ def solve_stage(stage, max_iter=None, tol=None, verbose=False, use_mpi=False, co
     # Step 1: Continuation to decision transformation
     cntn_to_dcsn_start = time.time()
     
+    ## TODO: the step below under if TENU is probably redundant tenure stage cntn
+    ## is already a dict in the format we need for dcsn
     if "TENU" in stage.name:
         # Special handling for tenure choice with branched continuations
         # Get solutions from both continuation perches
@@ -196,9 +190,6 @@ def solve_stage(stage, max_iter=None, tol=None, verbose=False, use_mpi=False, co
         # Get the data from continuation perches
         own_data = stage.cntn.sol["from_owner"]
         rent_data = stage.cntn.sol["from_renter"]
-
-        #print(own_data["vlu"].shape)
-        #print(rent_data["vlu"].shape)
         
         # Create combined continuation data with branch keys
         cntn_data = {
@@ -210,7 +201,6 @@ def solve_stage(stage, max_iter=None, tol=None, verbose=False, use_mpi=False, co
         cntn_data = stage.cntn.sol
     
     # Apply continuation to decision operator
-    #print("Solving stage: ", stage.name)
     dcsn_data = operators["cntn_to_dcsn"](cntn_data)
     cntn_to_dcsn_time = time.time() - cntn_to_dcsn_start
     
@@ -242,10 +232,6 @@ def solve_stage(stage, max_iter=None, tol=None, verbose=False, use_mpi=False, co
     
     if verbose and (not use_mpi or comm is None or comm.rank == 0):
         print(f"  Stage {stage.name} solved with backward pass.")
-    
-    # If this was a non-MPI stage, broadcast stub for workers now
-    if use_mpi and comm is not None and not needs_mpi and comm.rank == 0:
-        _sync_stub_perches(stage, comm, is_root=True)
     
     # Return timing information, including terminal flag
     timing_info = {
@@ -279,6 +265,8 @@ def initialize_terminal_values(stage, verbose=False, use_mpi=False, comm=None):
     """
     if verbose and (not use_mpi or comm is None or comm.rank == 0):
         print(f"Initializing terminal values for {stage.name}")
+
+    print("Initializing terminal values for ", stage.name)
 
     
     if "OWNC" in stage.name:
@@ -471,10 +459,12 @@ def run_time_iteration(model_circuit, n_periods=None, verbose=False,verbose_timi
         # Skip already-solved VFI_HDGRID stages (from baseline preload)
 
         ownc_stage, ownc_timing = solve_stage(ownc_stage, verbose=verbose, use_mpi=use_mpi, comm=comm)
+        _sync_perch_solutions(ownc_stage, use_mpi, comm)
         stage_timings.append(ownc_timing)
         period_ue_time += ownc_timing.get("ue_time", 0)
         
         rntc_stage, rntc_timing = solve_stage(rntc_stage, verbose=verbose, use_mpi=use_mpi, comm=comm)
+        _sync_perch_solutions(rntc_stage, use_mpi, comm)
         stage_timings.append(rntc_timing)
         period_ue_time += rntc_timing.get("ue_time", 0)
         
@@ -491,10 +481,12 @@ def run_time_iteration(model_circuit, n_periods=None, verbose=False,verbose_timi
         # 3. Solve housing choice stages (OWNH and RNTH)
         # -------------------------------------------------------------------------------
         ownh_stage, ownh_timing = solve_stage(ownh_stage, verbose=verbose, use_mpi=use_mpi, comm=comm)
+        _sync_perch_solutions(ownh_stage, use_mpi, comm)
         stage_timings.append(ownh_timing)
         period_ue_time += ownh_timing.get("ue_time", 0)
         
         rnth_stage, rnth_timing = solve_stage(rnth_stage, verbose=verbose, use_mpi=use_mpi, comm=comm)
+        _sync_perch_solutions(rnth_stage, use_mpi, comm)
         stage_timings.append(rnth_timing)
         period_ue_time += rnth_timing.get("ue_time", 0)
         
@@ -511,6 +503,7 @@ def run_time_iteration(model_circuit, n_periods=None, verbose=False,verbose_timi
         # 5. Solve the tenure choice stage (TENU)
         # -------------------------------------------------------------------------------
         tenu_stage, tenu_timing = solve_stage(tenu_stage, verbose=verbose, use_mpi=use_mpi, comm=comm)
+        _sync_perch_solutions(tenu_stage, use_mpi, comm)
         stage_timings.append(tenu_timing)
         period_ue_time += tenu_timing.get("ue_time", 0)
         
@@ -611,32 +604,23 @@ def _barrier_if_mpi(use_mpi: bool, comm):
         comm.Barrier()
 
 
-# ─────────────────────────────────────────────────────────────────
-#  Tiny placeholder so workers never see `None`
-# ─────────────────────────────────────────────────────────────────
-def _stub_solution():
-    stub = Solution()
-    # 0-byte arrays keep pickling cheap
-    empty = np.empty((0, 0, 0))
-    stub.vlu = stub.lambda_ = stub.Q = empty
-    return stub
-
-
-def _sync_stub_perches(stage, comm, is_root: bool):
+# ------------------------------------------------------------------
+#  Synchronise perch .sol objects after a non-MPI stage was solved
+# ------------------------------------------------------------------
+def _sync_perch_solutions(stage, use_mpi, comm):
     """
-    Broadcast a single stub Solution from root to all workers and
-    assign it to cntn / dcsn / arvl perches on workers only.
-    Root keeps its original (heavy) solutions untouched.
-    """
-    if comm is None or comm.size == 1:
-        return  # serial run
+    Broadcast stage.cntn/dcsn/arvl .sol from rank-0 to all other ranks
+    *only* when the stage was executed on a single rank.
 
-    if is_root:
-        comm.bcast(_stub_solution(), root=0)      # send once
-    else:
-        stub = comm.bcast(None, root=0)           # receive
-        for perch_name in ("cntn", "dcsn", "arvl"):
-            perch = getattr(stage, perch_name, None)
-            if perch is not None:
-                perch.sol = stub
-    comm.Barrier()                                # align ranks
+    Called *immediately after* solve_stage() for owner/renter consumption
+    and (potentially) housing/tenure stages that run in serial mode.
+    """
+    if not (use_mpi and comm is not None and comm.size > 1):
+        return  # nothing to do in serial mode
+
+    for perch_name in ("cntn", "dcsn", "arvl"):
+        perch = getattr(stage, perch_name, None)
+        if perch is not None:
+            perch.sol = comm.bcast(perch.sol if comm.rank == 0 else None,
+                                   root=0)
+    comm.Barrier()                    # keep ranks aligned
