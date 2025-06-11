@@ -1,9 +1,10 @@
 import os, time, numba, numpy as np
 import logging
+import gc
 from dc_smm.models.housing_renting.horses_common import (
     egm_preprocess, build_njit_utility, piecewise_gradient, piecewise_gradient_3rd, get_u_func, bellman_obj
 )  # Use relative import
-from numba import njit, prange
+from numba import njit
 from dc_smm.uenvelope.upperenvelope import EGM_UE
 from dc_smm.fues.helpers import interp_as
 from quantecon.optimize.scalar_maximization import brent_max
@@ -125,53 +126,58 @@ def F_ownc_cntn_to_dcsn(mover, use_mpi=False, comm=None):
                 _solve_vfi_loop(vlu_cntn, model, use_mpi=use_mpi, comm=comm)
             )
 
-            # No UE time for VFI
-            timing_info = {
-                "total_time": time.time() - start_time
-            }
+            # Root builds a full Solution object
+            if comm is None or comm.rank == 0:
+                # No UE time for VFI
+                timing_info = {
+                    "total_time": time.time() - start_time
+                }
 
-            # Create Solution object
-            sol = Solution()
-            sol.policy["c"] = policy
-            sol.policy["a"] = policy_a
-            sol.vlu = vlu_dcsn
-            sol.lambda_ = lambda_dcsn
-            sol.Q = Q_dcsn
-            sol.timing = timing_info
+                # Create Solution object
+                sol = Solution()
+                sol.policy["c"] = policy
+                sol.policy["a"] = policy_a
+                sol.vlu = vlu_dcsn
+                sol.lambda_ = lambda_dcsn
+                sol.Q = Q_dcsn
+                sol.timing = timing_info
 
-            # Store empty EGM grids for VFI (if any)
-            # TODO: SIMPLIFY THIS.
-            if "e" in egm_grids["unrefined"]:
-                for key, arr in egm_grids["unrefined"]["e"].items():
-                    sol.EGM.unrefined[f"e_{key}"] = arr
-            if "Q" in egm_grids["unrefined"]:
-                for key, arr in egm_grids["unrefined"]["Q"].items():
-                    sol.EGM.unrefined[f"Q_{key}"] = arr
-            if "c" in egm_grids["unrefined"]:
-                for key, arr in egm_grids["unrefined"]["c"].items():
-                    sol.EGM.unrefined[f"c_{key}"] = arr
-            if "a" in egm_grids["unrefined"]:
-                for key, arr in egm_grids["unrefined"]["a"].items():
-                    sol.EGM.unrefined[f"a_{key}"] = arr
+                # Store empty EGM grids for VFI (if any)
+                # TODO: SIMPLIFY THIS.
+                if "e" in egm_grids["unrefined"]:
+                    for key, arr in egm_grids["unrefined"]["e"].items():
+                        sol.EGM.unrefined[f"e_{key}"] = arr
+                if "Q" in egm_grids["unrefined"]:
+                    for key, arr in egm_grids["unrefined"]["Q"].items():
+                        sol.EGM.unrefined[f"Q_{key}"] = arr
+                if "c" in egm_grids["unrefined"]:
+                    for key, arr in egm_grids["unrefined"]["c"].items():
+                        sol.EGM.unrefined[f"c_{key}"] = arr
+                if "a" in egm_grids["unrefined"]:
+                    for key, arr in egm_grids["unrefined"]["a"].items():
+                        sol.EGM.unrefined[f"a_{key}"] = arr
 
-            # Store refined grids for VFI (if any)
-            if "e" in egm_grids["refined"]:
-                for key, arr in egm_grids["refined"]["e"].items():
-                    sol.EGM.refined[f"e_{key}"] = arr
-            if "Q" in egm_grids["refined"]:
-                for key, arr in egm_grids["refined"]["Q"].items():
-                    sol.EGM.refined[f"Q_{key}"] = arr
-            if "c" in egm_grids["refined"]:
-                for key, arr in egm_grids["refined"]["c"].items():
-                    sol.EGM.refined[f"c_{key}"] = arr
-            if "a" in egm_grids["refined"]:
-                for key, arr in egm_grids["refined"]["a"].items():
-                    sol.EGM.refined[f"a_{key}"] = arr
-            if "lambda_" in egm_grids["refined"]:
-                for key, arr in egm_grids["refined"]["lambda_"].items():
-                    sol.EGM.refined[f"lambda_{key}"] = arr
+                # Store refined grids for VFI (if any)
+                if "e" in egm_grids["refined"]:
+                    for key, arr in egm_grids["refined"]["e"].items():
+                        sol.EGM.refined[f"e_{key}"] = arr
+                if "Q" in egm_grids["refined"]:
+                    for key, arr in egm_grids["refined"]["Q"].items():
+                        sol.EGM.refined[f"Q_{key}"] = arr
+                if "c" in egm_grids["refined"]:
+                    for key, arr in egm_grids["refined"]["c"].items():
+                        sol.EGM.refined[f"c_{key}"] = arr
+                if "a" in egm_grids["refined"]:
+                    for key, arr in egm_grids["refined"]["a"].items():
+                        sol.EGM.refined[f"a_{key}"] = arr
+                if "lambda_" in egm_grids["refined"]:
+                    for key, arr in egm_grids["refined"]["lambda_"].items():
+                        sol.EGM.refined[f"lambda_{key}"] = arr
 
-            return sol
+                return sol
+            
+            # Workers return feather-weight stub
+            return Solution()        # empty, <1 kB
         else:
             raise ValueError(
                 f"Unknown solution method: {method}. Choose 'EGM', 'VFI', or 'VFI_HDGRID'."
@@ -569,7 +575,7 @@ def _solve_vfi_block(h_idx, y_idx, V_next, w_grid, a_grid, H_grid,
     lambda_cntn = np.empty((B, n_W))
     
     step_inv = 1.0 / (n_grid - 1)
-    #print(f"Solving block {h_idx[0]}-{y_idx[0]}")
+    
     # Process each (h,y) pair in the block
     for b in range(B):
         h = h_idx[b]
@@ -578,6 +584,106 @@ def _solve_vfi_block(h_idx, y_idx, V_next, w_grid, a_grid, H_grid,
         H_val = H_grid[h] * thorn
         h_nxt_ind = h_nxt_ind_array[h]
         V_slice = V_next[:, h_nxt_ind, y]
+        
+        # Solve for all wealth points for this (h,y)
+        for iw in range(n_W):
+            w_val = w_grid[iw]
+            a_low = a_grid[0]
+            a_high = min(w_val - 1e-12, a_grid[-1])
+            
+            if a_high <= a_low + 1e-14:
+                a_high = a_low
+                
+            best_Q = -1e110
+            best_a = a_low
+            
+            # Dense grid search
+            for g in range(n_grid):
+                a_try = a_low + (a_high - a_low) * g * step_inv
+                Q_try = bellman_obj(a_try, w_val, H_val, beta, delta, a_grid, V_slice, u_func)
+                if Q_try > best_Q:
+                    best_Q = Q_try
+                    best_a = a_try
+                    
+            c_star = w_val - best_a
+            
+            if np.isinf(best_Q) or c_star <= 0.0:
+                c_star = 1e-10
+                best_Q = -1e100
+                best_a = 1e-100
+                
+            policy_c[b, iw] = c_star
+            policy_a[b, iw] = best_a
+            Q_dcsn[b, iw] = best_Q
+        
+        # Calculate continuation value and lambda for this (h,y)
+        c_prime = piecewise_gradient(policy_c[b, :], w_grid, m_bar)
+        
+        for iw in range(n_W):
+            c_now = policy_c[b, iw]
+            uc_now = 1.0 / c_now
+            V_cntn[b, iw] = (Q_dcsn[b, iw] - (1 - delta) * u_func(c_now, H_val)) / delta
+            lambda_cntn[b, iw] = (uc_now - (1 - delta) * c_prime[iw] * uc_now) / delta
+    
+    return policy_c, policy_a, Q_dcsn, V_cntn, lambda_cntn
+
+
+@njit(cache=True)
+def _solve_vfi_block_local(h_idx, y_idx, V_slices, w_grid, a_grid, H_grid,
+                           beta, delta, m_bar, u_func, h_nxt_ind_array,
+                           thorn, n_grid):
+    """
+    Memory-slim VFI kernel that works with pre-scattered V_slices.
+    
+    Parameters
+    ----------
+    h_idx : np.ndarray(int32)
+        Housing indices, shape (B,)
+    y_idx : np.ndarray(int32) 
+        Income indices, shape (B,)
+    V_slices : np.ndarray
+        Pre-scattered continuation value slices, shape (B, n_A)
+    w_grid : np.ndarray
+        Wealth grid
+    a_grid : np.ndarray  
+        Asset grid
+    H_grid : np.ndarray
+        Housing grid
+    beta, delta, m_bar : float
+        Parameters
+    u_func : callable
+        Utility function
+    h_nxt_ind_array : np.ndarray
+        Housing index mapping
+    thorn : float
+        Rental efficiency
+    n_grid : int
+        Grid density
+        
+    Returns
+    -------
+    tuple
+        (policy_c, policy_a, Q_dcsn, V_cntn, lambda_cntn) each shape (B, n_W)
+    """
+    B = h_idx.size
+    n_W = w_grid.size
+    
+    # Pre-allocate reusable work arrays
+    policy_c = np.empty((B, n_W))
+    policy_a = np.empty((B, n_W))
+    Q_dcsn = np.empty((B, n_W))
+    V_cntn = np.empty((B, n_W))
+    lambda_cntn = np.empty((B, n_W))
+    
+    step_inv = 1.0 / (n_grid - 1)
+    
+    # Process each (h,y) pair in the block
+    for b in range(B):
+        h = h_idx[b]
+        y = y_idx[b]
+        
+        H_val = H_grid[h] * thorn
+        V_slice = V_slices[b]  # Use pre-scattered slice instead of V_next[:, h_nxt_ind, y]
         
         # Solve for all wealth points for this (h,y)
         for iw in range(n_W):
@@ -662,9 +768,10 @@ def solve_vfi_grid_serial(V_next, w_grid, a_grid, H_grid,
 
 def solve_vfi_grid_mpi(vlu_cntn, model, comm, use_mpi=True):
     """
-    MPI-parallel VFI grid solver using block kernel.
+    Memory-slim MPI-parallel VFI solver that scatters V_next slices to workers.
+    Workers never hold the full continuation tensor during solves.
     """
-    # Extract parameters (same as serial version)
+    # Extract parameters
     w_grid = model.num.state_space.dcsn.grids.w.astype(np.float64)
     a_grid = model.num.state_space.cntn.grids.a_nxt.astype(np.float64)
     H_grid = model.num.state_space.cntn.grids.H_nxt.astype(np.float64)
@@ -695,9 +802,8 @@ def solve_vfi_grid_mpi(vlu_cntn, model, comm, use_mpi=True):
     n_A, n_H, n_Y = V_next.shape
     n_W = w_grid.size
     
-    # Broadcast read-only data to all ranks
+    # Broadcast read-only data to all ranks (no V_next)
     broadcast_data = {
-        'V_next': V_next,
         'w_grid': w_grid,
         'a_grid': a_grid,
         'H_grid': H_grid,
@@ -710,39 +816,48 @@ def solve_vfi_grid_mpi(vlu_cntn, model, comm, use_mpi=True):
     }
     broadcast_data = broadcast_arrays(comm, broadcast_data, root=0)
     
-    # Create and distribute (h,y) index pairs
+    # Create chunks and associated V_slices on root
     if comm.rank == 0:
-        # Create all pairs
+        # Create all (h,y) pairs
         h_all = np.repeat(np.arange(n_H), n_Y).astype(np.int32)
         y_all = np.tile(np.arange(n_Y), n_H).astype(np.int32)
         
-        # Split across ranks
+        # Build chunks with contiguous V_slices
         chunks = []
-        total_pairs = len(h_all)
-        #print(f"Total pairs: {total_pairs}")
         for rank in range(comm.size):
-            rank_indices = chunk_indices(total_pairs, comm.size, rank)
+            rank_indices = chunk_indices(len(h_all), comm.size, rank)
             h_chunk = h_all[rank_indices]
             y_chunk = y_all[rank_indices]
-            chunks.append({'h_idx': h_chunk, 'y_idx': y_chunk})
+            
+            # Create contiguous V_slices for this chunk
+            if h_chunk.size > 0:
+                V_slices = np.empty((h_chunk.size, n_A), dtype=np.float64)
+                for i, (h, y) in enumerate(zip(h_chunk, y_chunk)):
+                    h_nxt_ind = h_nxt_ind_array[h]
+                    V_slices[i, :] = V_next[:, h_nxt_ind, y]
+                V_slices = np.ascontiguousarray(V_slices)
+            else:
+                V_slices = np.empty((0, n_A), dtype=np.float64)
+            
+            chunks.append({
+                'h_idx': h_chunk,
+                'y_idx': y_chunk, 
+                'V_slices': V_slices
+            })
     else:
         chunks = None
     
-    # Scatter index chunks
+    # Scatter chunks (including V_slices)
     local_chunk = scatter_dict_list(comm, chunks)
     
-    if local_chunk:
+    if local_chunk and local_chunk['h_idx'].size > 0:
         h_local = local_chunk['h_idx']
         y_local = local_chunk['y_idx']
-    else:
-        h_local = np.array([], dtype=np.int32)
-        y_local = np.array([], dtype=np.int32)
-    
-    # Process local chunk with block kernel (guarded for empty chunks)
-    if h_local.size > 0:
-        policy_c_local, policy_a_local, Q_local, V_local, lambda_local = _solve_vfi_block(
-            h_local, y_local,
-            broadcast_data['V_next'],
+        V_local = local_chunk['V_slices']
+        
+        # Process with memory-slim kernel
+        policy_c_local, policy_a_local, Q_local, V_cntn_local, lambda_local = _solve_vfi_block_local(
+            h_local, y_local, V_local,
             broadcast_data['w_grid'],
             broadcast_data['a_grid'],
             broadcast_data['H_grid'],
@@ -755,18 +870,22 @@ def solve_vfi_grid_mpi(vlu_cntn, model, comm, use_mpi=True):
             broadcast_data['n_grid']
         )
         
-        # Package results for gathering
+        # Memory cleanup: immediately release V_local
+        del V_local
+        gc.collect()
+        
+        # Package results
         local_results = {
             'h_idx': h_local,
             'y_idx': y_local,
             'policy_c': policy_c_local,
             'policy_a': policy_a_local,
             'Q_dcsn': Q_local,
-            'V_cntn': V_local,
+            'V_cntn': V_cntn_local,
             'lambda_cntn': lambda_local
         }
     else:
-        # Empty chunk - return empty arrays with correct shapes
+        # Empty chunk
         local_results = {
             'h_idx': np.empty(0, dtype=np.int32),
             'y_idx': np.empty(0, dtype=np.int32),
@@ -778,20 +897,20 @@ def solve_vfi_grid_mpi(vlu_cntn, model, comm, use_mpi=True):
         }
     
     # Gather results to root
-    all_results = gather_nested(comm, [local_results], root=0)
-    
     if comm.rank == 0:
-        # Reconstruct full arrays
+        all_results = gather_nested(comm, [local_results], root=0)
+        
+        # Reconstruct full arrays with explicit memory management
         policy_c = np.empty((n_W, n_H, n_Y))
         policy_a = np.empty((n_W, n_H, n_Y))
         Q_dcsn = np.empty((n_W, n_H, n_Y))
         V_cntn = np.empty((n_W, n_H, n_Y))
         lambda_cntn = np.empty((n_W, n_H, n_Y))
         
-        for result in all_results:          # result *is* a dict
+        for result in all_results:
             h_idx = result['h_idx']
             y_idx = result['y_idx']
-            for k in range(h_idx.size):          # handle multiple pairs per worker
+            for k in range(h_idx.size):
                 h = h_idx[k]
                 y = y_idx[k]
                 policy_c[:, h, y]   = result['policy_c'][k]
@@ -800,29 +919,22 @@ def solve_vfi_grid_mpi(vlu_cntn, model, comm, use_mpi=True):
                 V_cntn[:, h, y]     = result['V_cntn'][k]
                 lambda_cntn[:, h, y]= result['lambda_cntn'][k]
         
-        # Package full results for broadcasting
-        full = (policy_c, policy_a, Q_dcsn, V_cntn, lambda_cntn)
+        # Clear temporary buffers
+        all_results.clear()
+        gc.collect()
     else:
-        full = None
+        # Workers participate in gather but don't store results
+        gather_nested(comm, [local_results], root=0)
     
-    # Synchronize before broadcast to ensure slow ranks don't miss it
-    comm.Barrier()
-    # Broadcast results to all ranks
-    policy_c, policy_a, Q_dcsn, V_cntn, lambda_cntn = comm.bcast(full, root=0)
-    return policy_c, policy_a, Q_dcsn, V_cntn, lambda_cntn
+    # Root returns full results, workers return None
+    if comm.rank == 0:
+        return policy_c, policy_a, Q_dcsn, V_cntn, lambda_cntn
+    else:
+        return (None,)*5          # workers keep virtually zero data
 
 
-def _get_solver(method, use_mpi, comm):
-    """
-    Select appropriate VFI solver based on method and MPI settings.
-    
-    Returns:
-        callable: Either solve_vfi_grid_serial or solve_vfi_grid_mpi
-    """
-    if method == "VFI_HDGRID" and use_mpi and comm and comm.size > 1:
-        return solve_vfi_grid_mpi
-    else:
-        return solve_vfi_grid_serial
+# Note: _get_solver function removed as it's no longer used
+# VFI solver selection is now handled directly in _solve_vfi_loop
 
 
 def _solve_vfi_loop(vlu_cntn, model, use_mpi=False, comm=None):
@@ -844,10 +956,6 @@ def _solve_vfi_loop(vlu_cntn, model, use_mpi=False, comm=None):
     m_bar = float(model.settings_dict["m_bar"])
     N_arg_grid_vfi = model.settings_dict["N_arg_grid_vfi"]
 
-    # --- compiled utility functions -----------------------------
-    u_jit = model.num.functions.u_func       # scalar (c,H) → u
-    uc_jit = model.num.functions.uc_func      # scalar (c,H) → u_c
-
     # --- contiguous 3-D continuation value array ----------------
     V_next = np.ascontiguousarray(vlu_cntn, dtype=np.float64)
 
@@ -864,7 +972,7 @@ def _solve_vfi_loop(vlu_cntn, model, use_mpi=False, comm=None):
 
     # --- run kernel ---------------------------------------------
     if model.methods["solution"] == "VFI":
-        # Handle MPI for serial VFI - solve on root and broadcast
+        # Handle MPI for serial VFI - solve on root only
         if use_mpi and comm and comm.size > 1:
             if comm.rank == 0:
                 policy_c, policy_a, Q_dcsn, V_cntn, lambda_cntn = _solve_vfi_numba(
@@ -872,12 +980,13 @@ def _solve_vfi_loop(vlu_cntn, model, use_mpi=False, comm=None):
                     beta, delta, m_bar,
                     utility_func, h_nxt_ind_array, thorn
                 )
-                out = (policy_c, policy_a, Q_dcsn, V_cntn, lambda_cntn)
             else:
-                out = None
-            # Broadcast tuple of 5 nd-arrays to all ranks
-            out = comm.bcast(out, root=0)
-            policy_c, policy_a, Q_dcsn, V_cntn, lambda_cntn = out
+                policy_c = policy_a = Q_dcsn = V_cntn = lambda_cntn = None
+            
+            # Handle None results from worker ranks
+            if policy_c is None:        # worker rank
+                dummy = np.empty((0, 0, 0))
+                policy_c = policy_a = Q_dcsn = V_cntn = lambda_cntn = dummy
         else:
             # Serial execution
             policy_c, policy_a, Q_dcsn, V_cntn, lambda_cntn = _solve_vfi_numba(
@@ -891,15 +1000,20 @@ def _solve_vfi_loop(vlu_cntn, model, use_mpi=False, comm=None):
             policy_c, policy_a, Q_dcsn, V_cntn, lambda_cntn = solve_vfi_grid_mpi(
                 vlu_cntn, model, comm, use_mpi
             )
+            # Handle None results from worker ranks
+            if policy_c is None:        # worker rank
+                dummy = np.empty((0, 0, 0))
+                policy_c = policy_a = Q_dcsn = V_cntn = lambda_cntn = dummy
         else:
             policy_c, policy_a, Q_dcsn, V_cntn, lambda_cntn = solve_vfi_grid_serial(
                 V_next, w_grid, a_grid, H_grid,
                 beta, delta, m_bar,
                 utility_func, h_nxt_ind_array, thorn, n_grid=N_arg_grid_vfi
             )
-    
 
-
+    # Memory cleanup
+    del V_next
+    gc.collect()
 
     # The EGM solver returns an average UE time and grid dicts.
     # For VFI these have no meaning, so we stub them out.

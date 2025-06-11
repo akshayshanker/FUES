@@ -6,6 +6,7 @@ when MPI is not available or not requested.
 """
 import sys
 from typing import Any, Optional, Union, List, Dict
+import numpy as np
 
 
 class DummyComm:
@@ -97,6 +98,30 @@ def chunk_indices(n_items: int, n_chunks: int, k: int) -> range:
         end = start + chunk_size
     
     return range(start, min(end, n_items))
+
+
+def contiguous_chunk_array(arr, n_chunks: int, k: int):
+    """
+    Extract a contiguous chunk from array for better memory layout.
+    
+    Parameters
+    ----------
+    arr : array_like
+        Array to chunk
+    n_chunks : int
+        Number of chunks
+    k : int
+        Chunk index
+        
+    Returns
+    -------
+    ndarray
+        Contiguous chunk array
+    """
+    indices = chunk_indices(len(arr), n_chunks, k)
+    chunk = arr[indices]
+    # Ensure contiguity for MPI operations
+    return np.ascontiguousarray(chunk) if hasattr(chunk, 'flags') else chunk
 
 
 def scatter_dict_list(comm, payload: Optional[List[Dict]] = None) -> List[Dict]:
