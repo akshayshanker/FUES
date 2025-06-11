@@ -11,3 +11,6 @@ tabulate
 pyDOE
 ConSav
 EconModel
+
+[mpi]
+mpi4py>=3.1

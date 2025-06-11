@@ -83,8 +83,6 @@ stage:
         expr: "w = w; H=H; y=y"
         description: "Identity mapping from arrival to decision (no state change)"
       
-      # EGM operations from master
-      egm_operations: ["owner_egm_operations"]
 
       # Budget mapping from decision perch to continuation perch
       g_ve:

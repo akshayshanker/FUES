@@ -3,7 +3,7 @@ import logging
 from dc_smm.models.housing_renting.horses_common import (
     egm_preprocess, build_njit_utility, piecewise_gradient, piecewise_gradient_3rd, get_u_func, bellman_obj
 )  # Use relative import
-from numba import njit, prange
+from numba import njit, float64
 from dc_smm.uenvelope.upperenvelope import EGM_UE
 from dc_smm.fues.helpers import interp_as
 from quantecon.optimize.scalar_maximization import brent_max
@@ -454,7 +454,7 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
 
 
 
-@njit(nopython=False)
+@njit
 def _solve_vfi_numba(V_next, w_grid, a_grid, H_grid,
                      beta, delta, m_bar,
                      u_func, h_nxt_ind_array, thorn):
@@ -521,7 +521,7 @@ def _solve_vfi_numba(V_next, w_grid, a_grid, H_grid,
     return policy_c, policy_a, Q_dcsn, V_cntn, lambda_cntn
 
 
-@njit
+@njit(fastmath=True)
 def _solve_vfi_block(h_idx, y_idx, V_next, w_grid, a_grid, H_grid,
                      beta, delta, m_bar, u_func, h_nxt_ind_array,
                      thorn, n_grid):

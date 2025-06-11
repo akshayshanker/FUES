@@ -39,7 +39,7 @@ from tabulate import tabulate
 from examples.housing_renting.helpers.euler_error import euler_error_metric
 from examples.housing_renting.whisperer import run_time_iteration
 # Import from the appropriate module where these functions are defined
-from examples.housing_renting.circuit_runner_solving import load_configs, initialize_housing_model
+from examples.housing_renting.solve_runner import load_configs, initialize_housing_model
 
 
 logging.basicConfig(

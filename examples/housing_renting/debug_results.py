@@ -16,7 +16,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../.
 
 # Import the whisperer module to examine timing
 from examples.housing_renting.whisperer import solve_stage, run_time_iteration
-from examples.housing_renting.circuit_runner_solving import initialize_housing_model, load_configs
+from examples.housing_renting.solve_runner import initialize_housing_model, load_configs
 
 # Add the src directory to the path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
