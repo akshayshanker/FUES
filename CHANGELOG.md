@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.0dev2] - 2025-06-12 – MPI-enabled `VFI_HDGRID` & root-only workflow
+
+### Changed
+* Runner metric now specific to each model -- metrics is local rather than being imported from `dynx.runner.metrics.deviations`
+
 ## [0.3.0dev1] - 2025-06-07 – MPI-enabled `VFI_HDGRID` & root-only workflow
 
 ### Added

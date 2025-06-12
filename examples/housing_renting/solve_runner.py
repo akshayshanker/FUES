@@ -40,7 +40,7 @@ import pandas as pd
 from dynx.runner       import CircuitRunner, mpi_map
 from dynx.stagecraft.io import load_config
 from dynx.stagecraft.makemod import initialize_model_Circuit, compile_all_stages
-from dynx.runner.metrics.deviations import dev_c_L2
+#from dynx.runner.metrics.deviations import dev_c_L2
 
 # ────────────────────────────────────────────────────────────────────────────
 #  local helpers (imported lazily to keep fall-back stubs tiny)
@@ -50,6 +50,7 @@ try:
     from helpers.euler_error import euler_error_metric
     from helpers.plots        import generate_plots
     from helpers.tables       import print_summary
+    from helpers.metrics      import dev_a_L2
 except ImportError:
     from .whisperer import build_operators_for_circuit, run_time_iteration
     from .helpers.euler_error import euler_error_metric
