@@ -266,8 +266,6 @@ def initialize_terminal_values(stage, verbose=False, use_mpi=False, comm=None):
     if verbose and (not use_mpi or comm is None or comm.rank == 0):
         print(f"Initializing terminal values for {stage.name}")
 
-    print("Initializing terminal values for ", stage.name)
-
     
     if "OWNC" in stage.name:
         # For owner consumption stage, initialize CRRA utility of consuming assets
