@@ -139,20 +139,23 @@ def make_policy_dev_metric(
         ref_model = load_reference_model(_runner, _x)
         if ref_model is None:
             return np.nan
-
+        print("Extracting policy from model")
         pol,   g_mod = _extract_policy(
             model,
             stage, sol_attr, policy_attr,
             perch_grid_key=perch_grid_key,
             cont_grid_key=cont_grid_key,
         )
+        print("Extracting policy from baseline")
         refp, g_ref = _extract_policy(
             ref_model,
             stage, sol_attr, policy_attr,
             perch_grid_key=perch_grid_key,
             cont_grid_key=cont_grid_key,
         )
+        print("Policy extracted from model")
         if pol is None or refp is None or g_mod is None or g_ref is None:
+            print("Policy not extracted from model or baseline")
             return np.nan
 
         # ── interpolation step ─────────────────────────────────────────
@@ -169,6 +172,7 @@ def make_policy_dev_metric(
                     for i, (a, b) in enumerate(zip(pol.shape, refp.shape))
                 )
                 if not other_axes_equal or pol.shape[ax] == refp.shape[ax]:
+                    print("Grid lengths and array lengths inconsistent1")
                     return np.nan
             else:
                 diff_axes = [i for i, (a, b) in enumerate(zip(pol.shape, refp.shape)) if a != b]
@@ -177,6 +181,11 @@ def make_policy_dev_metric(
                 ax = diff_axes[0]
 
             if g_mod.size != pol.shape[ax] or g_ref.size != refp.shape[ax]:
+                print("Grid lengths and array lengths inconsistent -- axes used is ", ax)
+                print("Model grid length: ", g_mod.size)
+                print("Model array length: ", pol.shape[ax])
+                print("Baseline grid length: ", g_ref.size)
+                print("Baseline array length: ", refp.shape[ax])
                 return np.nan  # grid lengths and array lengths inconsistent
 
             # reshape‑and‑interp using np.interp
@@ -188,12 +197,13 @@ def make_policy_dev_metric(
             refp = np.moveaxis(out.reshape(*ref_swapped.shape[:-1], g_mod.size), -1, ax)
 
             if pol.shape != refp.shape:
+                print("Policy shapes inconsistent")
                 return np.nan
 
         # ── compute deviation ──────────────────────────────────────────
         diff = pol - refp
         ord_ = 2 if norm == "L2" else np.inf
-        return float(np.linalg.norm(diff.ravel(), ord=ord_))
+        return float(np.linalg.norm(diff.ravel(), ord=ord_))/(len(pol)**(1/ord_))
 
     metric.__name__ = f"dev_{policy_attr}_{norm}"
     metric.__doc__  = (

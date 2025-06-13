@@ -3,9 +3,14 @@
 Housing model with renting – baseline HD grid search/fast-methods runner.
 
 This script provides workflows for solving the housing-renting model using different
-solution methods, and comparing the methods against a baseline methods. 
+solution methods (test methods), and comparing the methods against a reference method
+given metrics supplied by the user. 
 
-The script support for both serial and parallel (MPI) execution.
+The script support for both serial and parralell execution using message passing interface  (MPI).
+
+Functions
+---------
+**list them here?***
 
 Workflows
 ---------
@@ -75,7 +80,8 @@ For large-scale problems, running with MPI is recommended to accelerate the
     .. note::
         The solvers currently require that the number of housing x income grid points
         >= the number of mpicores. Ideally, run this s.t. each core gets a single 
-        housing-income point to work on in the HD grid search. 
+        housing-income point to work on in the HD grid search.
+
 """
 
 from __future__ import annotations
@@ -84,11 +90,12 @@ import copy
 import sys
 import time
 from pathlib import Path
+import gc
 
 import numpy as np
 import pandas as pd
 
-from dynx.runner import CircuitRunner, mpi_map
+from dynx.runner import CircuitRunner, write_design_matrix_csv
 from dynx.stagecraft.io import load_config
 from dynx.stagecraft.makemod import initialize_model_Circuit, compile_all_stages
 
@@ -106,15 +113,23 @@ except ImportError:
     from .helpers.euler_error import euler_error_metric
     from .helpers.plots import generate_plots
     from .helpers.tables import print_summary
+    from .helpers.metrics import dev_c_L2
 
 
 CFG_DIR = Path(__file__).parent / "config_HR"
 BASE = "VFI_HDGRID"
 ALL_METHODS = ["VFI_HDGRID", "FUES", "FUES2DEV", "CONSAV", "DCEGM"]
-FAST_METHODS = ["FUES"]
+FAST_METHODS = ["FUES","FUES2DEV", "CONSAV"]
 
 
 def patch_cfg(cfg_container: dict, periods: int, vf_ngrid: int) -> dict:
+    """
+
+    The method we change is the upper_envelope method: VFI_HDGRID, FUES, FUES2DEV, CONSAV, DCEGM. However, 
+    the first is a VFI method and the rest are EGM methods. This helper avoids
+    also havign to specify the solution method name and assigns EGM or VFI appropriately.
+    
+    """
     cfg = copy.deepcopy(cfg_container)
     cfg["master"]["horizon"] = periods
     cfg["master"]["settings"]["N_arg_grid_vfi"] = vf_ngrid
@@ -135,6 +150,16 @@ def patch_cfg(cfg_container: dict, periods: int, vf_ngrid: int) -> dict:
 
 def make_housing_model(cfg_container: dict, periods: int, vf_ngrid: int, comm=None):
     """
+
+    This helper:
+    - patches the YAML config so solution method is consistent. (Recall that core parameter asssignment is handled by the runner )
+    - initializes the model circuit
+    - numerically compiles the model circuit
+
+    return
+    ------
+    - compiled model circuit
+
     Patch the YAML config → build a ModelCircuit → compile its stages.
 
     All compile-time warnings are logged; any hard failure is re-raised so
@@ -172,7 +197,15 @@ def make_housing_solver(args, use_mpi: bool, comm):
     """
 
     def _solve(mc, recorder=None):
+        """
+        This closure:
+        - attaches MPI-aware operators once per ModelCircuit
+        - marks last-period consumption stages as terminal
+        - runs backward time iteration
+        """
+
         # 0. attach MPI-aware operators once per ModelCircuit
+        ## TODO: This is redudnant as MPI use can be specified in congig file. 
         build_operators_for_circuit(mc, use_mpi=use_mpi, comm=comm)
 
         # 1. mark last-period consumption stages as terminal
@@ -197,6 +230,40 @@ def make_housing_solver(args, use_mpi: bool, comm):
 #  CLI + main
 # ────────────────────────────────────────────────────────────────────────────
 def main(argv=None):
+
+    """Explanation of arguments:
+
+    --periods 3: number of periods to solve for. Note that N periods mean that the
+    periods will be labelled as N-1, ...,0, where 0 is the initial period and N-1
+    is the terminal period. The number of periods should not exceed the horizon in
+    the master config file and should be consistent with the period inter connectors in the file
+    'config_HR/connections.yaml'. If the number of periods is strictly less than 
+    the horizon, a circuit with all periods in the horizon and its interconnections
+    will be attempted but will result in a non-fatal error saying that the period 
+    does not exist.
+    -- ue-method ALL: which upper envelope `test' methods to run. 
+    -- output-root: the root directory for the output of this version. It is understood
+    that the output directory should determien the version of an experiment, and will contain 
+    a set of model runs that are meaningfully "run in the same ...??"\
+    --vfi-ngrid: number of choice grid points for the numerical grid search 
+    -- HD-points: number of asset (a), wealth (w), and post-state asset points (a_nxt) 
+                    for the HD grid search method.
+    -- grid-points: number of asset (a), wealth (w), and post-state asset points (a_nxt) in the test methods
+    -- recompute-baseline: force recompute the baseline model , even if it is found in the output directory (if not included, the saved baseline is loaded if it has the same parameter hash)
+    -- fresh-fast: force recompute the fast methods, even if they are found in the output directory (if not included, the saved baseline is loaded if it has the same parameter hash)
+    -- plots: generate plots for the model runs
+    -- verbose: print verbose output
+    -- mpi: run the model in parallel using MPI
+
+    --- parameter hash: within a batch, each parameterized model is hashed by:
+        - the grid sizes
+
+        however, the method name does not effect the parmeret hash. So the bundles (with the same grid combos contain difgferent methods)
+
+        we however, when generating the comparison to a reference, have to specify the reference parameters (arg ref_params) so that the fast methods know which hash to get the reference from. 
+
+    
+    """
     p = argparse.ArgumentParser(
         prog="solve_runner.py",
         description="Solve baseline and fast UE methods for the HR model"
@@ -226,7 +293,6 @@ def main(argv=None):
     vf_ngrid = int(float(args.vfi_ngrid))
 
     #  method list
-    
     methods = ALL_METHODS if args.ue_method.upper() == "ALL" \
         else [m.strip().upper() for m in args.ue_method.split(",")]
 
@@ -261,8 +327,11 @@ def main(argv=None):
         load_if_exists=True,
     )
 
+    all_metrics = []
+    all_param_vectors = []  # Collect all parameter vectors for design matrix
+
     # --------------------------------------------------------------------
-    #  1) make sure baseline is available / solved
+    #  1) Solve, plot, and process baseline immediately
     # --------------------------------------------------------------------
     
     HD_POINTS = int(args.HD_points)
@@ -271,82 +340,85 @@ def main(argv=None):
         if is_root:  # print from root only
             print("\n» Baseline:", "recompute" if args.recompute_baseline else "load/solve-if-missing")
 
-        base_params = np.array([BASE, HD_POINTS, HD_POINTS, HD_POINTS], dtype=object)
-        runner.ref_params = base_params
-        base_metrics, base_model = runner.run(
-            base_params,
+        ref_params = np.array([BASE, HD_POINTS, HD_POINTS, HD_POINTS], dtype=object)
+        runner.ref_params = ref_params
+        all_param_vectors.append(ref_params)  # Add to design matrix
+        
+        ref_metrics, ref_model = runner.run(
+            ref_params,
             return_model=is_root,
             rank=solver_rank
         )
-        base_metrics["master.methods.upper_envelope"] = BASE
+        ref_metrics["master.methods.upper_envelope"] = BASE
+        all_metrics.append(ref_metrics)
 
-        # Attach the baseline's parameters to the runner so that deviation
-        # metrics (e.g. dev_c_L2) can find the correct reference bundle.
-        # if is_root:
-        #     runner.ref_params = base_params
-
-        # Write design matrix for the baseline run
-        # if is_root:
-        #     _write_design_matrix(runner, base_params)
+        # Generate plots immediately and delete model
+        if is_root and args.plots and ref_model is not None:
+            img_dir = output_root / "images" 
+            img_dir.mkdir(exist_ok=True)
+            try:
+                print(f"  Generating plots for {BASE}...")
+                generate_plots(ref_model, BASE, img_dir)
+            except Exception as err:
+                print(f"[warn] plot-gen for {BASE} failed: {err}")
+            finally:
+                del ref_model
+                gc.collect()
 
     # --------------------------------------------------------------------
-    #  2) run fast methods (optionally fresh)
+    #  2) Solve test methods one by one, processing each immediately  
     # --------------------------------------------------------------------
     
     STD_POINTS = int(args.grid_points)
-    if FAST_METHODS:
-        runner.model_factory = lambda cfg: make_housing_model(cfg, args.periods, vf_ngrid, comm)
+    fast_methods_to_run = [m for m in FAST_METHODS if m in methods]
+    
+    if fast_methods_to_run:
         runner.load_if_exists = not args.fresh_fast
-        runner.ref_params = base_params
-        # print
-        xs = np.asarray([[m, STD_POINTS, STD_POINTS, STD_POINTS] for m in FAST_METHODS], dtype=object)
+        runner.ref_params = ref_params if BASE in methods else None
+        
         if is_root:  # print from root only
-            print(f"\n» Fast methods: {', '.join(FAST_METHODS)}")
-        t0 = time.time()
-        res_df, models = mpi_map(
-            runner,
-            xs,
-            mpi=False,
-            comm=None,
-            comm_solver=comm,
-            return_models=is_root
-        )
-        # print(f"✓ completed in {time.time()-t0:.1f}s")
-    else:
-        res_df, models = None, None
+            print(f"\n» Fast methods: {', '.join(fast_methods_to_run)}")
+            
+        for method in fast_methods_to_run:
+            if is_root:
+                print(f"  Solving {method}...")
+                
+            params = np.array([method, STD_POINTS, STD_POINTS, STD_POINTS], dtype=object)
+            all_param_vectors.append(params)  # Add to design matrix
+            
+            metrics, model = runner.run(params, return_model=is_root, rank=solver_rank)
+            metrics["master.methods.upper_envelope"] = method
+            all_metrics.append(metrics)
+            
+            # Generate plots immediately and delete model
+            if is_root and args.plots and model is not None:
+                img_dir = output_root / "images"
+                img_dir.mkdir(exist_ok=True) 
+                try:
+                    print(f"  Generating plots for {method}...")
+                    generate_plots(model, method, img_dir)
+                except Exception as err:
+                    print(f"[warn] plot-gen for {method} failed: {err}")
+                finally:
+                    del model
+                    gc.collect()
 
     if comm is not None:
         comm.Barrier()
 
-    # ----------------------------------------------------------
-    #  include baseline row (if we just computed / loaded it)
-    # ----------------------------------------------------------
-    if BASE in methods and is_root:
-        base_df = pd.DataFrame([base_metrics])
-        if res_df is not None:
-            res_df = pd.concat([base_df, res_df], ignore_index=True)
-        else:
-            res_df = base_df
-
     # --------------------------------------------------------------------
-    #  3) summary + plots
+    #  3) Create final summary table and save design matrix
     # --------------------------------------------------------------------
-    if is_root and res_df is not None and len(res_df):
+    if is_root and all_metrics:
+        res_df = pd.DataFrame(all_metrics)
         print_summary(res_df, output_root)
-
-    # prepend baseline model/name if we have one
-    if is_root and args.plots:
-        models = [base_model] + models
-        plot_seq = [BASE] + FAST_METHODS
-
-        if models is not None:
-            img_dir = output_root / "images"
-            img_dir.mkdir(exist_ok=True)
-            for m_obj, m_name in zip(models, plot_seq):
-                try:
-                    generate_plots(m_obj, m_name, img_dir)
-                except Exception as err:
-                    print(f"[warn] plot-gen for {m_name} failed: {err}")
+        
+        # Save complete design matrix with all parameter vectors
+        if all_param_vectors:
+            design_matrix = np.array(all_param_vectors, dtype=object)
+            write_design_matrix_csv(runner, design_matrix)
+            if is_root:
+                print(f"  Design matrix saved to {output_root}/design_matrix.csv")
 
 if __name__ == "__main__":
     main()

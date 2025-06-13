@@ -2,6 +2,74 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.0dev3] - 2025-06-13 – MPI Error Handling & Memory Optimization
+
+### Added
+* **Comprehensive MPI warning suppression**
+  - Added environment variables to suppress non-fatal MPI collective communication warnings (`LOG_CAT_ML`, `basesmuma`, `ml_discover_hierarchy`)
+  - New MPI configuration variables: `OMPI_MCA_coll_ml_priority=0`, `OMPI_MCA_coll_hcoll_enable=0`, and BTL layer warning suppressions
+  - Implemented stderr filtering in MPI scripts to remove noise while preserving genuine errors
+
+* **Numba cache management for MPI environments**
+  - Added automatic Numba cache clearing before MPI runs to prevent cache corruption
+  - Implemented process-specific cache directories (`NUMBA_CACHE_DIR=/tmp/numba_cache_$$`)
+  - Added `NUMBA_DISABLE_CACHE=1` and `NUMBA_NUM_THREADS=1` for MPI safety
+
+* **Memory-efficient model processing workflow**
+  - Implemented immediate model processing pattern: solve → extract metrics → generate plots → delete model → garbage collect
+  - Added per-model memory cleanup with explicit `del model` and `gc.collect()` calls
+  - Replaced batch processing with sequential processing to minimize peak memory usage
+
+* **Enhanced logging and error tracking**
+  - Added timestamped log files for both stdout and stderr with `tee` command
+  - Implemented comprehensive error logging while maintaining screen output visibility
+  - Added run completion status reporting with exit codes
+
+### Changed
+* **Solve runner workflow optimization**
+  - Modified `solve_runner.py` to process each model individually instead of keeping all models in memory
+  - Baseline and fast methods now follow identical solve-plot-delete pattern
+  - Replaced `mpi_map` batch processing with individual `runner.run()` calls for better memory control
+  - Updated metrics collection to use `all_metrics` list instead of DataFrame concatenation
+
+* **MPI script robustness**
+  - Enhanced `circuit_run_HR_mpi.sh` with comprehensive error suppression and cache management
+  - Added pre-run cache cleaning and post-run status reporting
+  - Implemented filtered stderr to separate MPI noise from application errors
+
+### Fixed
+* **Numba compilation race conditions**
+  - Resolved `KeyError` exceptions in Numba caching system during concurrent MPI compilation
+  - Fixed `ReferenceError: underlying object has vanished` errors during object serialization
+  - Eliminated cache corruption issues when multiple MPI processes compile identical functions
+
+* **Memory management issues**
+  - Fixed memory accumulation when processing multiple models sequentially
+  - Resolved potential memory leaks by ensuring proper model cleanup after plotting
+  - Eliminated peak memory spikes by processing models one at a time
+
+* **MPI communication noise**
+  - Suppressed non-fatal `basesmuma` component warnings that cluttered error logs
+  - Filtered out `ml_discover_hierarchy` and collective communication layer warnings
+  - Maintained visibility of genuine MPI errors while removing infrastructure noise
+
+### Technical Details
+* **Error patterns addressed:**
+  - `KeyError: ((Array(int32, 1, 'C', False, aligned=True), ...))` in Numba caching
+  - `ReferenceError: underlying object has vanished` during serialization
+  - `[LOG_CAT_ML] component basesmuma is not available` MPI warnings
+  - Memory exhaustion from keeping multiple large models in memory simultaneously
+
+* **Environment variables added:**
+  ```bash
+  NUMBA_DISABLE_CACHE=1
+  NUMBA_CACHE_DIR=/tmp/numba_cache_$$
+  NUMBA_NUM_THREADS=1
+  OMPI_MCA_coll_ml_priority=0
+  OMPI_MCA_coll_hcoll_enable=0
+  OMPI_MCA_btl_base_warn_component_unused=0
+  ```
+
 ## [0.3.0dev2] - 2025-06-12 – MPI-enabled `VFI_HDGRID` & root-only workflow
 
 ### Changed
@@ -75,129 +143,4 @@ All notable changes to this project will be documented in this file.
 * **Config patching** (`patch_cfg`)
 
   * Consumption stages now carry a cheap `"compute": "SINGLE"` flag for fast
-    methods; `"MPI"` is used only for `VFI_HDGRID`.
-  * Prevents workers from loading the HD grid bundle when they are solving a
-    fast-method row.
-
-* **Solver factory** – workers still solve their share of the VFI grid, but
-  the root rank alone runs the post-solve metric evaluation.
-
-### Fixed
-
-* Endless recursion / memory blow-ups when every rank attempted to load the
-  baseline bundle to compute metrics.
-* `inspect` import was missing in the metric-signature branch – now imported
-  once at the top of the guarded section.
-* Spurious warnings about missing numerical models on worker ranks
-  (initialise/compile order tightened).
-
-### Removed
-
-* Redundant per-rank saving of identical bundles; only rank 0 writes to disk
-  (flag `save_by_default` automatically false on workers).
-
----
-
-*(Previous entries unchanged – see below for full history.)*
-
-
-## [0.2.0dev3] - 2025-05-22 – Solution Container 
-
-### Changed
-* **Breaking**: `perch.sol` is now an instance of `stagecraft.solmaker.Solution`. Old code using dictionary syntax continues to work, but the object is no longer a plain dict.
-* Updated all solver operators (`horses_c.py`, `horses_h.py`, `horses_t.py`) to return Solution objects
-* Modified `whisperer.py` to handle both Solution objects and legacy dictionaries
-* Updated plotting utilities with helper function to access both Solution and dict formats
-* Refactored EGM grid storage to use nested structure (unrefined/refined/interpolated layers)
-
-## [0.2.0dev2] - 2025-05-22 – MPI Parameter Sweep
-
-* Fix dumb plotting errors in housing_renting example plots. 
-* Convenience scripts for running MPI parameter sweeps for housing renting model
-
-
-## [0.2.0dev1] - 2025-05-22 – MPI Parameter Sweep
-
-* Clean up no pickling of model classes
-* Convenience scripts for running MPI parameter sweeps for housing renting model
-
-
-## [0.2.0dev0] - 2025-05-21 – Enhanced Parameter Sweep and UE Timing Metrics
-
-* Clean up dependencies with DynX remote packages
-* Add `dynx-runner` as a hard dependency
-* Added comparison to CONSAV
-
-
-
-## [0.1.0a3] - 2025-05-21 – Enhanced Parameter Sweep and UE Timing Metrics
-
-### Added
-* Enhanced parameter sweep example with detailed metrics reporting
-* Added  UE timing metrics collection and display
-* Improved debugging capabilities to diagnose timing issues
-* Added dynamic table formatting using the `tabulate` library
-* Added support for saving detailed results to CSV files with timestamps
-
-### Changed
-* Fixed path resolution issue in `param_sweep.py` to correctly import from examples directory
-* Improved metric extraction in CircuitRunner to capture UE timing information
-* Enhanced console output with better formatted tables and progress information
-* Fixed issues with empty performance tables by ensuring minimum metrics are always present
-* Refactored the `enhanced_metric_function` to properly extract timing data from model
-
-## [0.1.0a2] - 2025-05-20 – DynX Runner API Modernization
-
-### Added
-* Added support for new DynX v1.6.12 unified `CircuitRunner` and sampler utilities
-* Updated housing model examples to use the new API
-
-### Changed
-* Refactored `examples/housing_renting/circuit_runner_solving.py` to use the new single-dict `CircuitRunner` constructor
-* Replaced manual parameter arrays with `dynx.runner.sampler` helpers for parameter space exploration
-* Simplified configuration handling with a unified `base_cfg` dictionary
-* Updated parameter path definitions to work with the new sampler interface
-* Removed legacy constructor arguments (`epochs_cfgs`, `stage_cfgs`, `conn_cfg`, `param_specs`)
-* Streamlined MPI map execution and result handling
-* Updated module docstrings to reflect the new API usage
-
-## [0.1.0a1] - 2025-05-13 – Preliminary Public Release
-
-### Added
-* First public (alpha) release available on PyPI under the name `dc-smm`.
-* Added this `CHANGELOG.md` following the *Keep a Changelog* format and PEP 440 versioning.
-
-### Changed
-* **Package layout migrated to a standard *src/* layout**.
-  * All source code now lives in `src/`.
-* **Namespace renamed** – legacy `FUES.*` imports replaced by the canonical
-  `dc_smm.fues.*` (lower-snake-case) path.  A Bowler refactor script
-  (`fix_imports.py`) updates downstream code automatically.
-* Introduced umbrella namespace package `dc_smm` exposing the two public
-  sub-packages `fues` and `uenvelope`.
-* Rewritten internal relative imports to absolute ones that honour the new
-  package structure.
-* Consolidated various ad-hoc upper-envelope implementations into
-  `dc_smm.uenvelope.upperenvelope.EGM_UE` with a registry system
-  (FUES, DCEGM, RFC, CONSAV, SIMPLE).
-* Example scripts updated to use DynX ≥ 1.6.12 canonical import paths:
-  `dynx.stagecraft`, `dynx.heptapodx`, `dynx.runner`.
-* All path-hacks (`sys.path.append/insert`, `os.chdir`) removed from driver
-  scripts in `examples/housing_renting`.
-* Added helper module `dc_smm.fues.helpers.math_funcs` with
-  `interp_as`, `mask_jumps`, `correct_jumps1d`, etc.
-* Replaced bespoke EGM upper-envelope kernels with vectorised implementations
-  backed by Numba/JIT wherever feasible.
-* `pyproject.toml` modernised to PEP-621:  minimal runtime deps, `build-system`
-  section, and SPDX licence expression.
-
-### Removed
-* Deprecated shims in `old_deprecated/` (scheduled for deletion in a later
-  release).
-* Local copies of DynX helper modules – upstream PyPI packages are now the
-  single source of truth.
-
----
-
-See `refactoring_summary.md` for a more granular developer-level breakdown of
-refactor steps. 
+    methods; `

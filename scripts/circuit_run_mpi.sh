@@ -35,13 +35,13 @@ export MKL_NUM_THREADS=1
 # ------------ MPI RUN ------------
 mpiexec -np 45 \
         python3 -m examples.housing_renting.solve_runner \
-          --periods 3 \
+          --periods 5 \
           --ue-method ALL \
-          --output-root /scratch/tp66/$USER/FUES/solutions/HR_test_v3 \
-          --bundle-prefix HR \
-          --vfi-ngrid 1E4 \
-          --HD-points 1000 \
-          --grid-points 4000 \
+          --output-root /scratch/tp66/$USER/FUES/solutions/HR_test_v5 \
+          --bundle-prefix HR_test_v5 \
+          --vfi-ngrid 2000 \
+          --HD-points 20000 \
+          --grid-points 3000 \
           --recompute-baseline \
           --fresh-fast \
           --mpi \
