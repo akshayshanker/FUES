@@ -2,24 +2,20 @@
 """
 Housing model with renting – baseline HD grid search/fast-methods runner.
 
-This script provides workflows for solving the housing-renting model using different
-solution methods (test methods), and comparing the methods against a reference method
-given metrics supplied by the user. 
+This script provides workflows for solving the housing-renting model using
+different solution methods and comparing them against a reference method given
+user-supplied metrics.
 
-The script support for both serial and parralell execution using message passing interface  (MPI).
-
-Functions
----------
-**list them here?***
+The script supports both serial and parallel execution using the Message
+Passing Interface (MPI).
 
 Workflows
 ---------
-
 **Serial Execution (No MPI)**
 
 1.  **Full Run: Fresh Baseline + Fast Methods**
-    This workflow computes the high-density baseline (`VFI_HDGRID`) and all
-    fast methods from scratch. This is useful for a complete, fresh build.
+    This computes the high-density baseline (`VFI_HDGRID`) and all fast
+    methods from scratch.
 
     .. code-block:: bash
 
@@ -36,10 +32,8 @@ Workflows
             --plots
 
 2.  **Fast Methods Only (with existing baseline)**
-    This runs only the "fast" solvers (e.g., `FUES`, `CONSAV`). It relies on a
-    pre-computed baseline solution (with the same `vfi-ngrid` and `HD-points` 
-    as entered in the command line) being present in the output directory.
-    If a matching baseline is found, it's loaded for comparison.
+    This runs only the "fast" solvers (e.g., `FUES`, `CONSAV`), relying
+    on a pre-computed baseline solution.
 
     .. code-block:: bash
 
@@ -53,14 +47,13 @@ Workflows
             --plots
 
     .. note::
-       When `--recompute-baseline` is omitted, the runner will search for an
-       existing baseline bundle matching the `vfi-ngrid` and `HD-points`
-       settings in the `output-root`.
+       When ``--recompute-baseline`` is omitted, the runner searches for a
+       baseline bundle matching the ``vfi-ngrid`` and ``HD-points``.
 
 **Parallel Execution (MPI)**
 
-For large-scale problems, running with MPI is recommended to accelerate the
-`VFI_HDGRID` baseline computation.
+For large-scale problems, MPI is recommended to accelerate the baseline
+computation.
 
 .. code-block:: bash
 
@@ -78,9 +71,8 @@ For large-scale problems, running with MPI is recommended to accelerate the
           --mpi \\
           --plots
     .. note::
-        The solvers currently require that the number of housing x income grid points
-        >= the number of mpicores. Ideally, run this s.t. each core gets a single 
-        housing-income point to work on in the HD grid search.
+        The solvers currently require that the number of housing × income
+        grid points be ≥ the number of MPI cores.
 
 """
 
@@ -119,16 +111,18 @@ except ImportError:
 CFG_DIR = Path(__file__).parent / "config_HR"
 BASE = "VFI_HDGRID"
 ALL_METHODS = ["VFI_HDGRID", "FUES", "FUES2DEV", "CONSAV", "DCEGM"]
-FAST_METHODS = ["FUES","FUES2DEV", "CONSAV"]
+FAST_METHODS = ["FUES"]
+PRE_COMPILE_PARAMS = np.array(["VFI_HDGRID", 500, 500, 500], dtype=object)
 
 
 def patch_cfg(cfg_container: dict, periods: int, vf_ngrid: int) -> dict:
     """
+    Patch config with solution method and MPI compute settings.
 
-    The method we change is the upper_envelope method: VFI_HDGRID, FUES, FUES2DEV, CONSAV, DCEGM. However, 
-    the first is a VFI method and the rest are EGM methods. This helper avoids
-    also havign to specify the solution method name and assigns EGM or VFI appropriately.
-    
+    The upper-envelope method (`VFI_HDGRID`, `FUES`, etc.) determines
+    whether the underlying solver should be VFI or EGM. This helper
+    sets the correct `solution` and `compute` methods on consumption
+    stages without requiring extra CLI flags.
     """
     cfg = copy.deepcopy(cfg_container)
     cfg["master"]["horizon"] = periods
@@ -150,20 +144,20 @@ def patch_cfg(cfg_container: dict, periods: int, vf_ngrid: int) -> dict:
 
 def make_housing_model(cfg_container: dict, periods: int, vf_ngrid: int, comm=None):
     """
+    Patch the config, build a ModelCircuit, and compile its stages.
 
-    This helper:
-    - patches the YAML config so solution method is consistent. (Recall that core parameter asssignment is handled by the runner )
-    - initializes the model circuit
-    - numerically compiles the model circuit
+    This helper prepares a model for the solver. It:
+    1.  Patches the YAML config for the correct solution method.
+    2.  Initializes the `ModelCircuit` skeleton.
+    3.  Numerically compiles all stages (e.g., creating grids).
 
-    return
-    ------
-    - compiled model circuit
+    Any compile-time warnings are logged, and hard failures are re-raised so
+    that the calling runner can handle them cleanly.
 
-    Patch the YAML config → build a ModelCircuit → compile its stages.
-
-    All compile-time warnings are logged; any hard failure is re-raised so
-    that the calling code (runner) can handle / abort cleanly.
+    Returns
+    -------
+    ModelCircuit
+        A fully initialized and compiled model circuit.
     """
     # 1. patch master + stage configs
     cfg = patch_cfg(cfg_container, periods, vf_ngrid)
@@ -212,6 +206,8 @@ def make_housing_solver(args, use_mpi: bool, comm):
         final_period = mc.get_period(len(mc.periods_list) - 1)
         for tag in ("OWNC", "RNTC"):
             final_period.get_stage(tag).status_flags["is_terminal"] = True
+        
+        #print(args.verbose)
 
         # 2. backward time iteration
         run_time_iteration(
@@ -230,39 +226,63 @@ def make_housing_solver(args, use_mpi: bool, comm):
 #  CLI + main
 # ────────────────────────────────────────────────────────────────────────────
 def main(argv=None):
+    """
+    Command-line interface for solving and benchmarking the Housing–Renting model.
 
-    """Explanation of arguments:
+    Parameters
+    ----------
+    argv : list[str] | None, optional
+        Custom argument vector (for unit tests). If *None* (default),
+        ``sys.argv[1:]`` is used.
 
-    --periods 3: number of periods to solve for. Note that N periods mean that the
-    periods will be labelled as N-1, ...,0, where 0 is the initial period and N-1
-    is the terminal period. The number of periods should not exceed the horizon in
-    the master config file and should be consistent with the period inter connectors in the file
-    'config_HR/connections.yaml'. If the number of periods is strictly less than 
-    the horizon, a circuit with all periods in the horizon and its interconnections
-    will be attempted but will result in a non-fatal error saying that the period 
-    does not exist.
-    -- ue-method ALL: which upper envelope `test' methods to run. 
-    -- output-root: the root directory for the output of this version. It is understood
-    that the output directory should determien the version of an experiment, and will contain 
-    a set of model runs that are meaningfully "run in the same ...??"\
-    --vfi-ngrid: number of choice grid points for the numerical grid search 
-    -- HD-points: number of asset (a), wealth (w), and post-state asset points (a_nxt) 
-                    for the HD grid search method.
-    -- grid-points: number of asset (a), wealth (w), and post-state asset points (a_nxt) in the test methods
-    -- recompute-baseline: force recompute the baseline model , even if it is found in the output directory (if not included, the saved baseline is loaded if it has the same parameter hash)
-    -- fresh-fast: force recompute the fast methods, even if they are found in the output directory (if not included, the saved baseline is loaded if it has the same parameter hash)
-    -- plots: generate plots for the model runs
-    -- verbose: print verbose output
-    -- mpi: run the model in parallel using MPI
+    Key CLI options
+    ---------------
+    --periods INT
+        Number of model periods to solve (e.g., 3 for periods 2, 1, 0).
+    --ue-method STR
+        Comma-separated list of UE methods to run, or ``ALL``.
+    --output-root PATH
+        Directory for all bundles, plots, and metrics.
+    --bundle-prefix STR
+        Prefix for bundle filenames within ``output-root``.
+    --vfi-ngrid INT
+        Number of choice-grid points used by the VFI baseline.
+    --HD-points INT
+        State-grid size (a, w, a_nxt) for the HD-grid baseline.
+    --grid-points INT
+        Same as ``--HD-points`` but for fast methods.
+    --recompute-baseline
+        Ignore any existing baseline bundle and recompute it.
+    --fresh-fast
+        Re-solve fast methods even if their bundles already exist.
+    --plots
+        Create diagnostic figures for every solved model.
+    --mpi
+        Activate MPI mode; the script will auto-detect the communicator.
+    --verbose
+        Print detailed progress and timing information.
+    --precompile
+        Run a small VFI job to pre-compile Numba functions.
 
-    --- parameter hash: within a batch, each parameterized model is hashed by:
-        - the grid sizes
+    Behaviour
+    ---------
+    1.  Build or load the **baseline** (``VFI_HDGRID``), unless excluded.
+    2.  Solve each requested **fast method** individually.
+    3.  On rank 0:
+        *   Generate plots (if ``--plots``).
+        *   Compute Euler-error and consumption-norm metrics.
+        *   Print a summary table.
+        *   Write the design matrix to ``design_matrix.csv``.
 
-        however, the method name does not effect the parmeret hash. So the bundles (with the same grid combos contain difgferent methods)
+    Notes
+    -----
+    **Parameter Hash**: Bundles are keyed by grid sizes only; the UE method
+    itself is *not* part of the hash. Consequently, fast-method runs must
+    specify the hash of the reference baseline via ``runner.ref_params`` so
+    that deviations are computed against the correct bundle.
 
-        we however, when generating the comparison to a reference, have to specify the reference parameters (arg ref_params) so that the fast methods know which hash to get the reference from. 
-
-    
+    (The ``method_param_path`` argument in `CircuitRunner` is used to
+    specify the parameter path to the method that is not included in the hash.)
     """
     p = argparse.ArgumentParser(
         prog="solve_runner.py",
@@ -280,6 +300,9 @@ def main(argv=None):
     p.add_argument("--mpi", action="store_true")
     p.add_argument("--fresh-fast", action="store_true")
     p.add_argument("--recompute-baseline", action="store_true")
+    p.add_argument("--precompile", action="store_true", help="Run a small VFI job to pre-compile Numba functions.")
+    p.add_argument("--RUN-ID", default="")
+    p.add_argument("--stages-L2dev", default="OWNC")
     args = p.parse_args(argv or sys.argv[1:])
 
     #  MPI communicator
@@ -298,15 +321,44 @@ def main(argv=None):
 
     #  IO paths
     packroot = Path.cwd()
-    output_root = packroot / f"{args.output_root}_{args.vfi_ngrid}"
+    output_root = packroot / f"{args.output_root}"
     output_root.mkdir(parents=True, exist_ok=True)
-
+    cfg_dir_bundle = CFG_DIR /  f"{args.bundle_prefix}"
     #  set-up runner ------------------------------------------------------
-    cfg_container = load_config(CFG_DIR)
+    cfg_container = load_config(cfg_dir_bundle)
     save_by_default = (comm is None) or (comm.rank == 0)
     is_root = (comm is None) or (comm.rank == 0)
     solver_rank = comm.rank if comm is not None else 0
 
+    # --- Optional Pre-compilation Step ---
+    if args.precompile:
+        if is_root:
+            print("\n--- Running Numba Pre-compilation for VFI_HDGRID ---")
+        precompile_runner = CircuitRunner(
+            base_cfg=cfg_container,
+            param_paths=[
+                "master.methods.upper_envelope",
+                "master.settings.a_points",
+                "master.settings.a_nxt_points",
+                "master.settings.w_points",
+            ],
+            model_factory=lambda cfg: make_housing_model(cfg, 2, 100, comm), # Minimal settings
+            solver=make_housing_solver(argparse.Namespace(verbose=False, periods=2), use_mpi=args.mpi, comm=comm),
+            metric_fns={},
+            save_by_default=False,
+            load_if_exists=False,
+        )
+        try:
+            precompile_runner.run(PRE_COMPILE_PARAMS, rank=solver_rank)
+            if is_root:
+                print("--- Pre-compilation Complete ---\n")
+        except Exception as e:
+            if is_root:
+                print(f"--- Pre-compilation Failed: {e} ---", file=sys.stderr)
+
+    comm.Barrier()
+
+    #  set-up main runner ------------------------------------------------------
     runner = CircuitRunner(
         base_cfg=cfg_container,
         param_paths=[
@@ -326,6 +378,10 @@ def main(argv=None):
         save_by_default=save_by_default,
         load_if_exists=True,
     )
+    # NOTE: this has to be consistent with whatever the metric L2 actually wants to do!
+    # TODO: make this more flexible, so that we can do L2dev on any stage. AND HARdwire it
+    runner.stages_to_load = [args.stages_L2dev]
+    runner.stages_to_save = [args.stages_L2dev]
 
     all_metrics = []
     all_param_vectors = []  # Collect all parameter vectors for design matrix
@@ -334,7 +390,7 @@ def main(argv=None):
     #  1) Solve, plot, and process baseline immediately
     # --------------------------------------------------------------------
     
-    HD_POINTS = int(args.HD_points)
+    HD_POINTS = int(float(args.HD_points))
     if BASE in methods:
         runner.load_if_exists = not args.recompute_baseline
         if is_root:  # print from root only
@@ -350,6 +406,9 @@ def main(argv=None):
             rank=solver_rank
         )
         ref_metrics["master.methods.upper_envelope"] = BASE
+        ref_metrics["param_hash"] = runner._hash_param_vec(ref_params)
+        ref_metrics["reference_bundle_hash"] = runner._hash_param_vec(ref_params)
+        ref_metrics["latest_time_id"] = args.RUN_ID 
         all_metrics.append(ref_metrics)
 
         # Generate plots immediately and delete model
@@ -369,7 +428,7 @@ def main(argv=None):
     #  2) Solve test methods one by one, processing each immediately  
     # --------------------------------------------------------------------
     
-    STD_POINTS = int(args.grid_points)
+    STD_POINTS = int(float(args.grid_points))
     fast_methods_to_run = [m for m in FAST_METHODS if m in methods]
     
     if fast_methods_to_run:
@@ -388,6 +447,9 @@ def main(argv=None):
             
             metrics, model = runner.run(params, return_model=is_root, rank=solver_rank)
             metrics["master.methods.upper_envelope"] = method
+            metrics["param_hash"] = runner._hash_param_vec(params)
+            metrics["reference_bundle_hash"] = runner._hash_param_vec(ref_params)
+            metrics["latest_time_id"] = args.RUN_ID 
             all_metrics.append(metrics)
             
             # Generate plots immediately and delete model

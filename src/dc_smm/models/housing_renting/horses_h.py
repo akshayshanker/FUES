@@ -44,7 +44,11 @@ def F_shocks_dcsn_to_arvl(mover):
             
             # Integrate over income states using einsum (matrix multiplication)
             vlu_arvl = np.einsum('ahj,ij->ahi', vlu_dcsn, Pi)
-            lambda_arvl = np.einsum('ahj,ij->ahi', lambda_dcsn, Pi)
+
+            try:
+                lambda_arvl = np.einsum('ahj,ij->ahi', lambda_dcsn, Pi)
+            except:
+                lambda_arvl = np.empty((1,1,1))
             
             # Create new Solution for output
             sol = Solution()
@@ -59,7 +63,11 @@ def F_shocks_dcsn_to_arvl(mover):
             
             # Integrate over income states using einsum (matrix multiplication)
             vlu_arvl = np.einsum('ahj,ij->ahi', vlu_dcsn, Pi)
-            lambda_arvl = np.einsum('ahj,ij->ahi', lambda_dcsn, Pi)
+
+            try:
+                lambda_arvl = np.einsum('ahj,ij->ahi', lambda_dcsn, Pi)
+            except:
+                lambda_arvl = np.empty((1,1,1))
             
             return {
                 "vlu": vlu_arvl,

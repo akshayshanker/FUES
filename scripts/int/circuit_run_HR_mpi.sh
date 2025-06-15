@@ -1,4 +1,32 @@
-module load openmpi/4.1.7
+set -euo pipefail
+
+# --- Source the Configuration Library ---
+source ../lib/job_configs.sh
+
+# --- Define the Sequence of Configurations to Run ---
+CONFIG_TO_RUN=(
+    "STD_RES_SETTINGS"
+    "HIGH_RES_SETTINGS_TEST"
+    # "DEBUG_SETTINGS"
+)
+
+# --- Environment Setup ---
+module purge
+module load python3/3.12.1 openmpi/4.1.7
+export VENV_ROOT=/scratch/tp66/$USER/venvs
+source "$VENV_ROOT/fues02-py3121/bin/activate"
+
+export FUES_HOME=$HOME/dev/fues.dev/FUES
+export PYTHONPATH="$FUES_HOME${PYTHONPATH:+:$PYTHONPATH}"
+cd "$FUES_HOME"
+
+# --- MPI and Numba Configuration ---
+export OMPI_MCA_btl_base_warn_component_unused=0
+export NUMBA_DISABLE_CACHE=1
+export NUMBA_NUM_THREADS=1
+
+# ---  errors 
+
 export PYTHONPATH=$PWD:$PYTHONPATH
 export MAKEMOD_QUIET=true           # Only errors
 export PERIOD_QUIET=true            # Only errors
@@ -13,8 +41,6 @@ export OMPI_MCA_orte_base_help_aggregate=1
 export OMPI_MCA_mpi_show_handle_leaks=0
 export OMPI_MCA_btl_openib_warn_default_gid_prefix=0
 export OMPI_MCA_btl_openib_warn_no_device_params_found=0
-export OMPI_MCA_btl_base_warn_component_unused=0
-export OMPI_MCA_mca_base_component_show_load_errors=0
 export OMPI_MCA_coll_ml_priority=0
 export OMPI_MCA_coll_hcoll_enable=0
 
@@ -23,48 +49,58 @@ export NUMBA_DISABLE_CACHE=1        # Disable caching to avoid MPI conflicts
 export NUMBA_CACHE_DIR=/tmp/numba_cache_$$  # Use process-specific cache dir
 export NUMBA_NUM_THREADS=1          # Prevent thread conflicts
 
-cd $HOME/dev/fues.dev/FUES
+# --- Loop Through and Execute Each Configuration ---
+for CONFIG_NAME in "${CONFIG_TO_RUN[@]}"; do
+    
+    declare -n CONFIG_REF=$CONFIG_NAME
 
-# Clear Numba cache to avoid MPI cache corruption
-echo "Clearing Numba cache..."
-python3 -c "import numba; numba.config.CACHE_DIR.clear()" 2>/dev/null || true
-find ~/.numba_cache -name "*.nbc" -delete 2>/dev/null || true
-find ~/.numba_cache -name "*.nbi" -delete 2>/dev/null || true
+    echo "========================================================"
+    echo "Running Configuration: ${CONFIG_NAME}"
+    echo "Periods: ${CONFIG_REF[periods]}"
+    echo "VFI Grid: ${CONFIG_REF[vfi_ngrid]}"
+    echo "HD Points: ${CONFIG_REF[hd_points]}"
+    echo "Grid Points: ${CONFIG_REF[grid_points]}"
+    echo "========================================================"
 
-# Create logs directory if it doesn't exist
-mkdir -p logs
+    TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
+    VERSION_TAG="${CONFIG_REF[version_suffix]}"
+    LOG_DIR="logs/${VERSION_TAG}"
+    mkdir -p "$LOG_DIR"
+    
+    SOLUTION_ROOT="/scratch/tp66/$USER/FUES/solutions/housing_renting/"
+    OUTPUT_DIR="$SOLUTION_ROOT/${VERSION_TAG}"
 
-# Set log file names with timestamp
-TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
-LOG_FILE="logs/HR_mpi_run_${TIMESTAMP}.log"
-ERROR_FILE="logs/HR_mpi_errors_${TIMESTAMP}.log"
+    echo "Starting MPI run for ${CONFIG_NAME} at $(date)"
+    echo "Output will be saved to: $OUTPUT_DIR"
+    echo "Logs will be saved to: $LOG_DIR"
 
-echo "Starting MPI run at $(date)"
-echo "Logs will be saved to: $LOG_FILE"
-echo "Errors will be saved to: $ERROR_FILE"
+    mpiexec -np 45 python3 -m examples.housing_renting.solve_runner \
+      --periods "${CONFIG_REF[periods]}" \
+      --ue-method ALL \
+      --output-root "$OUTPUT_DIR" \
+      --bundle-prefix "${VERSION_TAG}" \
+      --RUN-ID "${VERSION_TAG}_${TIMESTAMP}" \
+      --vfi-ngrid "${CONFIG_REF[vfi_ngrid]}" \
+      --HD-points "${CONFIG_REF[hd_points]}" \
+      --grid-points "${CONFIG_REF[grid_points]}" \
+      --precompile \
+      --recompute-baseline \
+      --fresh-fast \
+      --mpi \
+      --plots \
+      2> >(tee "${LOG_DIR}/run.err") \
+      1> >(tee "${LOG_DIR}/run.log")
 
-# ------------ MPI RUN ------------
-mpiexec -np 45 \
-        python3 -m examples.housing_renting.solve_runner \
-          --periods 3 \
-          --ue-method ALL \
-          --output-root /scratch/tp66/$USER/FUES/solutions/HR_test_v4 \
-          --bundle-prefix HR_test_v4 \
-          --vfi-ngrid 100 \
-          --HD-points 600 \
-          --grid-points 500 \
-          --recompute-baseline \
-          --fresh-fast \
-          --mpi \
-          --plots \
-        2> >(grep -v "LOG_CAT_ML\|basesmuma\|ml_discover_hierarchy" | tee -a "$ERROR_FILE" >&2) \
-        1> >(tee -a "$LOG_FILE")
+    EXIT_CODE=$?
+    if [ $EXIT_CODE -ne 0 ]; then
+        echo "Run for ${CONFIG_NAME} failed with exit code: $EXIT_CODE" >&2
+        # Decide if you want to exit immediately or continue with next config
+        # exit $EXIT_CODE  # Uncomment to stop on first failure
+    else
+        echo "Run for ${CONFIG_NAME} completed successfully."
+    fi
+    
+done
 
-# Capture exit code
-EXIT_CODE=$?
-
-echo "MPI run completed at $(date) with exit code: $EXIT_CODE"
-echo "Check logs at: $LOG_FILE"
-echo "Check errors at: $ERROR_FILE"
-
-exit $EXIT_CODE
+echo "All configurations processed."
+exit 0 

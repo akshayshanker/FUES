@@ -2,6 +2,42 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.0dev4] - Planned – Hierarchical MPI Parameter Sweeps
+
+### Planned Features
+* **Hierarchical MPI parameter sweep architecture**
+  - Two-level MPI communicators: `COMM_TOP` for parameter distribution, `COMM_SOLVER` for intra-node VFI computation
+  - Enable scaling to large parameter spaces (e.g., 50 parameter combinations × 45 cores each = 2250 total cores)
+  - Each node runs complete baseline+fast workflow for one parameter combination
+
+* **Memory-efficient parameter processing**
+  - Apply solve→plot→delete→gc pattern from `solve_runner.py` to parameter sweeps
+  - Process each parameter combination sequentially to avoid memory accumulation
+  - Immediate model cleanup after plotting and metric extraction
+
+* **DynX Sampler integration for parameter sweeps**
+  - Replace manual parameter grid construction with built-in `Cartesian` sampler
+  - Canonical column ordering and robust parameter space handling
+  - Support for both list (`PATH=v1,v2,v3`) and range (`PATH=min:max:N`) parameter specifications
+
+* **Enhanced bundle management for parameter caching**
+  - Hash-based bundle directories for each parameter combination
+  - Automatic skip of completed parameter combinations
+  - Robust restart capability for interrupted parameter sweeps
+  - Method-aware bundle organization (VFI_HDGRID, FUES, CONSAV in separate subdirectories)
+
+### Implementation Strategy
+* **Phase 1**: Core architecture with hierarchical MPI and sampler integration
+* **Phase 2**: Integration with proven solve_runner patterns and bundle management
+* **Phase 3**: CLI enhancement and workflow optimization
+* **Migration Path**: Create `param_sweep_v2.py` alongside existing implementation
+
+### Expected Benefits
+* **Performance**: 10-100x reduction in peak memory usage for large parameter sweeps
+* **Scalability**: Linear scaling to hundreds of parameter combinations across multiple nodes
+* **Robustness**: Automatic restart capability and bundle corruption recovery
+* **Maintainability**: Code reuse from solve_runner and elimination of manual parameter bookkeeping
+
 ## [0.3.0dev3] - 2025-06-13 – MPI Error Handling & Memory Optimization
 
 ### Added

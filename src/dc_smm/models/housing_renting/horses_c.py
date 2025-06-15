@@ -778,29 +778,33 @@ def solve_vfi_grid_mpi(vlu_cntn, model, comm, use_mpi=True):
         y_local = local_chunk['y_idx']
         V_local = local_chunk['V_slices']
         
-        # Get dimensions from broadcast data
+        B_local = h_local.size
         n_W = broadcast_data['w_grid'].size
         
-        # Process with memory-slim kernel
-        policy_c_local, policy_a_local, Q_local, V_cntn_local, lambda_local = _solve_vfi_block_local(
+        # --- Pre-allocate work arrays ONCE here ---
+        policy_c_local = np.empty((B_local, n_W))
+        policy_a_local = np.empty((B_local, n_W))
+        Q_local = np.empty((B_local, n_W))
+        V_cntn_local = np.empty((B_local, n_W))
+        lambda_local = np.empty((B_local, n_W))
+        
+        # --- Pass pre-allocated arrays to the kernel ---
+        _solve_vfi_block_local(
             h_local, y_local, V_local,
-            broadcast_data['w_grid'],
-            broadcast_data['a_grid'],
-            broadcast_data['H_grid'],
-            broadcast_data['beta'],
-            broadcast_data['delta'],
-            broadcast_data['m_bar'],
-            utility_func,
-            broadcast_data['h_nxt_ind_array'],
-            broadcast_data['thorn'],
-            broadcast_data['n_grid']
+            broadcast_data['w_grid'], broadcast_data['a_grid'],
+            broadcast_data['H_grid'], broadcast_data['beta'],
+            broadcast_data['delta'], broadcast_data['m_bar'],
+            utility_func, broadcast_data['h_nxt_ind_array'],
+            broadcast_data['thorn'], broadcast_data['n_grid'],
+            # The five pre-allocated arrays:
+            policy_c_local, policy_a_local, Q_local, V_cntn_local, lambda_local
         )
         
         # Memory cleanup: immediately release V_local
         del V_local
         gc.collect()
         
-        # Package results
+        # Package results from the now-filled arrays
         local_results = {
             'h_idx': h_local,
             'y_idx': y_local,
@@ -858,8 +862,9 @@ def solve_vfi_grid_mpi(vlu_cntn, model, comm, use_mpi=True):
         gc.collect()
     
     # Root returns full results, workers return None
+    # TODO: MAKE NOTE RETURNING COMPLETE ARRAYS AN OPTION!  
     if comm.rank == 0:
-        return policy_c, policy_a, Q_dcsn, V_cntn, lambda_cntn
+        return policy_c, np.empty((1,1,1)), Q_dcsn, V_cntn, np.zeros(np.shape(V_cntn))
     else:
         return (None,)*5          # workers keep virtually zero data
 
@@ -929,7 +934,7 @@ def _solve_vfi_block(h_idx, y_idx, V_next, w_grid, a_grid, H_grid,
         for iw in range(n_W):
             w_val = w_grid[iw]
             a_low = a_grid[0]
-            a_high = min(w_val - 1e-12, a_grid[-1])
+            a_high = min(w_val - 1e-12, a_grid[-1]+10) #TODO: HARDWIRE THIS
             
             if a_high <= a_low + 1e-14:
                 a_high = a_low
@@ -967,12 +972,14 @@ def _solve_vfi_block(h_idx, y_idx, V_next, w_grid, a_grid, H_grid,
     
     return policy_c, policy_a, Q_dcsn, V_cntn, lambda_cntn
 
-@njit(cache=True)
+@njit
 def _solve_vfi_block_local(h_idx, y_idx, V_slices, w_grid, a_grid, H_grid,
                            beta, delta, m_bar, u_func, h_nxt_ind_array,
-                           thorn, n_grid):
+                           thorn, n_grid,
+                           policy_c, policy_a, Q_dcsn, V_cntn, lambda_cntn):
     """
-    Memory-slim VFI kernel that works with pre-scattered V_slices.
+    Memory-slim VFI kernel that works with pre-scattered V_slices and
+    pre-allocated output arrays.
     
     Parameters
     ----------
@@ -998,21 +1005,18 @@ def _solve_vfi_block_local(h_idx, y_idx, V_slices, w_grid, a_grid, H_grid,
         Rental efficiency
     n_grid : int
         Grid density
+    policy_c, policy_a, Q_dcsn, V_cntn, lambda_cntn : np.ndarray
+        Pre-allocated output arrays
         
     Returns
     -------
-    tuple
-        (policy_c, policy_a, Q_dcsn, V_cntn, lambda_cntn) each shape (B, n_W)
+    None
     """
     B = h_idx.size
     n_W = w_grid.size
     
-    # Pre-allocate reusable work arrays
-    policy_c = np.empty((B, n_W))
-    policy_a = np.empty((B, n_W))
-    Q_dcsn = np.empty((B, n_W))
-    V_cntn = np.empty((B, n_W))
-    lambda_cntn = np.empty((B, n_W))
+    # This function now expects pre-allocated arrays and fills them in-place.
+    # No new allocations happen here.
     
     step_inv = 1.0 / (n_grid - 1)
     
@@ -1028,7 +1032,7 @@ def _solve_vfi_block_local(h_idx, y_idx, V_slices, w_grid, a_grid, H_grid,
         for iw in range(n_W):
             w_val = w_grid[iw]
             a_low = a_grid[0]
-            a_high = min(w_val - 1e-12, a_grid[-1])
+            a_high = min(w_val - 1e-12, a_grid[-1]+10) #TODO: HARDWIRE THIS
             
             if a_high <= a_low + 1e-14:
                 a_high = a_low
@@ -1056,15 +1060,20 @@ def _solve_vfi_block_local(h_idx, y_idx, V_slices, w_grid, a_grid, H_grid,
             Q_dcsn[b, iw] = best_Q
         
         # Calculate continuation value and lambda for this (h,y)
-        c_prime = piecewise_gradient(policy_c[b, :], w_grid, m_bar)
+        #c_prime = piecewise_gradient(policy_c[b, :], w_grid, m_bar)
         
+        # IMPORTANT 
+        # TODO: MAKE THIS HARDWIRED NOT TO COMPUTE LAMBDA IN HD GRID!
+        # IMPORTANT 
         for iw in range(n_W):
             c_now = policy_c[b, iw]
-            uc_now = 1.0 / c_now
+            #uc_now = 1.0 / c_now
             V_cntn[b, iw] = (Q_dcsn[b, iw] - (1 - delta) * u_func(c_now, H_val)) / delta
-            lambda_cntn[b, iw] = (uc_now - (1 - delta) * c_prime[iw] * uc_now) / delta
+            #lambda_cntn[b, iw] = (uc_now - (1 - delta) * c_prime[iw] * uc_now) / delta
+            lambda_cntn[b, iw] = 0.0
     
-    return policy_c, policy_a, Q_dcsn, V_cntn, lambda_cntn
+    # No return value needed as arrays are modified in-place
+    return
 
 # --- End Private Solver Loop Helpers ---
 

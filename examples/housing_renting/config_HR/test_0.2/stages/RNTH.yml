@@ -133,11 +133,13 @@ stage:
       income_shock:
         description: "Income shock with explicit Markov process from Fella"
         methods:
-          method: "manual"  # Use explicit Markov process
+          method: "tauchen4"  # Use explicit Markov process
           shock_method: "discretemarkov"
         parameters:
-          transition_matrix: ["Pi"]  # Use transition matrix from master config
-          values: ["z_vals"]         # Use shock values from master config
+          mu:
+          rho:
+          sigma:
+
       
 
 # Movers section

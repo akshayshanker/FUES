@@ -168,7 +168,10 @@ def solve_stage(stage, max_iter=None, tol=None, verbose=False, use_mpi=False, co
     
     # Step 1: Continuation to decision transformation
     cntn_to_dcsn_start = time.time()
+
+    cntn_data = stage.cntn.sol
     
+    ''' 
     ## TODO: the step below under if TENU is probably redundant tenure stage cntn
     ## is already a dict in the format we need for dcsn
     if "TENU" in stage.name:
@@ -199,6 +202,7 @@ def solve_stage(stage, max_iter=None, tol=None, verbose=False, use_mpi=False, co
     else:
         # Regular stage with single continuation
         cntn_data = stage.cntn.sol
+    '''
     
     # Apply continuation to decision operator
     dcsn_data = operators["cntn_to_dcsn"](cntn_data)
@@ -408,6 +412,9 @@ def run_time_iteration(model_circuit, n_periods=None, verbose=False,verbose_timi
     if comm is None or comm.rank == 0:
         initialize_terminal_values(final_ownc, verbose=verbose, use_mpi=use_mpi, comm=comm)
         initialize_terminal_values(final_rntc, verbose=verbose, use_mpi=use_mpi, comm=comm)
+
+    if verbose and (not use_mpi or comm is None or comm.rank == 0):
+        print("terminal values initialized")
     
     # All ranks need to be aligned after terminal initialization
     _barrier_if_mpi(use_mpi, comm)
@@ -444,10 +451,6 @@ def run_time_iteration(model_circuit, n_periods=None, verbose=False,verbose_timi
         rnth_stage = period.get_stage("RNTH")
         rntc_stage = period.get_stage("RNTC")
 
-
-        #assert ownc_stage.cntn.sol.vlu is not None, "OWNC cntn.sol.vlu missing!"
-        #assert rntc_stage.cntn.sol.vlu is not None, "RNTC cntn.sol.vlu missing!"
-        
         period_ue_time = 0.0
         
         # -------------------------------------------------------------------------------

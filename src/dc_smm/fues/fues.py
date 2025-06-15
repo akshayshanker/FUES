@@ -401,5 +401,6 @@ def _scan(e_grid, vf, a_prime,del_a, m_bar, LB, fwd_scan_do=True, endog_mbar= Tr
 
                     k = j
                     j = i + 1
+    #del vf_full
 
     return e_grid, vf
