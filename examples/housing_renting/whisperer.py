@@ -19,7 +19,10 @@ import time  # Add time module for timing measurements
 
 # Import operator factories directly from their modules
 from dc_smm.models.housing_renting.horses_h import F_shocks_dcsn_to_arvl, F_h_cntn_to_dcsn_owner, F_h_cntn_to_dcsn_renter
-from dc_smm.models.housing_renting.horses_c import F_ownc_cntn_to_dcsn, F_rntc_cntn_to_dcsn
+from dc_smm.models.housing_renting.horses_c import (
+    F_ownc_cntn_to_dcsn, F_rntc_cntn_to_dcsn, F_ownc_cntn_to_dcsn_gpu,
+    F_rntc_cntn_to_dcsn_gpu
+)
 from dc_smm.models.housing_renting.horses_common import F_id
 from dc_smm.models.housing_renting.horses_t import F_t_cntn_to_dcsn
 from dynx.stagecraft.solmaker import Solution
@@ -53,17 +56,24 @@ def build_operators(stage, use_mpi=False, comm=None):
 
     elif "OWNC" in stage.name:
         # Owner consumption stage
-        operators["cntn_to_dcsn"] = F_ownc_cntn_to_dcsn(stage.cntn_to_dcsn, use_mpi=use_mpi, comm=comm)
+        if stage.model.methods.get("compute") == "GPU":
+            operators["cntn_to_dcsn"] = F_ownc_cntn_to_dcsn_gpu(stage.cntn_to_dcsn)
+        else:
+            operators["cntn_to_dcsn"] = F_ownc_cntn_to_dcsn(stage.cntn_to_dcsn, use_mpi=use_mpi, comm=comm)
         operators["dcsn_to_arvl"] = F_id(stage.dcsn_to_arvl)
 
     elif "RNTH" in stage.name:
         # Renter housing choice stage
+
         operators["cntn_to_dcsn"] = F_h_cntn_to_dcsn_renter(stage.cntn_to_dcsn, use_mpi=use_mpi, comm=comm)
         operators["dcsn_to_arvl"] = F_id(stage.dcsn_to_arvl)
 
     elif "RNTC" in stage.name:
         # Renter consumption stage
-        operators["cntn_to_dcsn"] = F_rntc_cntn_to_dcsn(stage.cntn_to_dcsn, use_mpi=use_mpi, comm=comm)
+        if stage.model.methods.get("compute") == "GPU":
+            operators["cntn_to_dcsn"] = F_rntc_cntn_to_dcsn_gpu(stage.cntn_to_dcsn)
+        else:
+            operators["cntn_to_dcsn"] = F_rntc_cntn_to_dcsn(stage.cntn_to_dcsn, use_mpi=use_mpi, comm=comm)
         operators["dcsn_to_arvl"] = F_id(stage.dcsn_to_arvl)
     
     elif "TENU" in stage.name:
@@ -130,26 +140,20 @@ def solve_stage(stage, max_iter=None, tol=None, verbose=False, use_mpi=False, co
     """
     start_time = time.time()
     
-    # Get MPI parameters from stage if not provided
-    if use_mpi is False and hasattr(stage, '_use_mpi'):
-        use_mpi = stage._use_mpi
-    if comm is None and hasattr(stage, '_comm'):
-        comm = stage._comm
+    # Get MPI parameters from stage if they were attached previously
+    use_mpi = getattr(stage, '_use_mpi', use_mpi)
+    comm = getattr(stage, '_comm', comm)
     
-    # -------------------------------------------------------------
-    # 0.  Check if this is an MPI stage (workers exit early for non-MPI stages)
-    # -------------------------------------------------------------
-    needs_mpi = stage.model.methods.get("compute", "MPI") == "MPI"
+    # Determine if this stage uses a parallel compute method (MPI or GPU)
+    compute_method = stage.model.methods.get("compute", "SINGLE")
+    is_parallel_stage = compute_method in ("MPI", "GPU")
 
-    # Early-exit on workers **only when the stage is NOT an MPI stage**
-    if use_mpi and comm is not None and not needs_mpi and comm.rank != 0:
+    # Early exit for workers on non-parallel stages
+    if use_mpi and comm and comm.rank != 0 and not is_parallel_stage:
         return stage, {
-            "stage_name": stage.name,
-            "total_time": 0.0,
-            "cntn_to_dcsn_time": 0.0,
-            "dcsn_to_arvl_time": 0.0,
-            "ue_time": 0.0,
-            "is_terminal": stage.status_flags.get("is_terminal", False),
+            "stage_name": stage.name, "total_time": 0.0,
+            "cntn_to_dcsn_time": 0.0, "dcsn_to_arvl_time": 0.0,
+            "ue_time": 0.0, "is_terminal": stage.status_flags.get("is_terminal", False)
         }
     
     if verbose and (not use_mpi or comm is None or comm.rank == 0):

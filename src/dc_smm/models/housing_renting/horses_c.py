@@ -13,6 +13,7 @@ from dynx.stagecraft.solmaker import Solution
 from dc_smm.helpers.mpi_utils import (
     get_comm, scatter_dict_list, gather_nested, broadcast_arrays, chunk_indices
 )
+from dc_smm.models.housing_renting.horses_c_gpu import solve_vfi_gpu
 
 logger = logging.getLogger(__name__)
 
@@ -192,17 +193,20 @@ def F_ownc_cntn_to_dcsn(mover, use_mpi=False, comm=None):
 
 
 def F_rntc_cntn_to_dcsn(mover, use_mpi=False, comm=None):
-    """Create operator for rntc_cntn_to_dcsn mover.
-    Implements EGM or VFI for renter consumption choice.
-    
-    Args:
-        mover: StageCraft mover object
-        use_mpi: Whether to use MPI parallelization
-        comm: MPI communicator (if use_mpi=True)
     """
-    # This is essentially the same as the owner version
-    # The difference is handled inside the solver via model.stage_name
+    Operator factory for the renter's consumption choice (CPU).
+    This is a simple wrapper around the owner's factory, as the
+    underlying solvers differentiate based on stage name.
+    """
     return F_ownc_cntn_to_dcsn(mover, use_mpi=use_mpi, comm=comm)
+
+
+def F_rntc_cntn_to_dcsn_gpu(mover, use_mpi=False, comm=None):
+    """
+    Operator factory for the renter's consumption choice (GPU).
+    This is a simple wrapper around the owner's GPU factory.
+    """
+    return F_ownc_cntn_to_dcsn_gpu(mover, use_mpi=use_mpi, comm=comm)
 
 
 # --- Private Solver Loop Helpers ---
@@ -591,7 +595,7 @@ def _solve_vfi_numerical(V_next, w_grid, a_grid, H_grid,
             for iw in range(n_W):
                 w_val = w_grid[iw]
                 a_low = a_grid[0]
-                a_high = min(w_val + 1e-1, a_grid[-1])
+                a_high = min(w_val - 1e-12, a_grid[-1])
 
                 a_star, Q_star, _ = brent_max(
                     bellman_obj,
@@ -934,7 +938,7 @@ def _solve_vfi_block(h_idx, y_idx, V_next, w_grid, a_grid, H_grid,
         for iw in range(n_W):
             w_val = w_grid[iw]
             a_low = a_grid[0]
-            a_high = min(w_val - 1e-12, a_grid[-1]+10) #TODO: HARDWIRE THIS
+            a_high = min(w_val - 1e-12, a_grid[-1])
             
             if a_high <= a_low + 1e-14:
                 a_high = a_low
@@ -1054,7 +1058,7 @@ def _solve_vfi_block_local(h_idx, y_idx, V_slices, w_grid, a_grid, H_grid,
                 c_star = 1e-10
                 best_Q = -1e100
                 best_a = 1e-100
-                
+            
             policy_c[b, iw] = c_star
             policy_a[b, iw] = best_a
             Q_dcsn[b, iw] = best_Q
@@ -1133,3 +1137,32 @@ def F_ownc_dcsn_to_cntn(mover):
         return {}
 
     return operator
+
+def F_ownc_cntn_to_dcsn_gpu(mover, use_mpi=False, comm=None):
+    """
+    Operator factory for the GPU-based VFI solver.
+    """
+    model = mover.model
+    model.stage_name = mover.stage_name
+
+    def operator(perch_data):
+        """
+        Launches the GPU VFI solver.
+        """
+        vlu_cntn = perch_data.vlu
+        
+        # This call offloads the heavy computation to the GPU
+        policy, policy_a, Q_dcsn, V_cntn, lambda_cntn = solve_vfi_gpu(
+            vlu_cntn, model
+        )
+
+        sol = Solution()
+        sol.policy["c"] = policy
+        sol.policy["a"] = policy_a
+        sol.vlu = V_cntn # Note: We use V_cntn from the GPU run
+        sol.lambda_ = lambda_cntn
+        sol.Q = Q_dcsn
+        return sol
+
+    return operator
+

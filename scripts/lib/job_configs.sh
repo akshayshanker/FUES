@@ -1,0 +1,69 @@
+#!/bin/bash
+
+# ======================================================================
+#  Experiment Configuration Library
+# ======================================================================
+#
+# This file contains the parameter settings for different experimental
+# runs. It is intended to be sourced by PBS submission scripts.
+#
+# Each configuration is an associative array.
+#
+
+# --- Configuration Set 1 (LOW POINTS FOR TESTING): Standard Resolution ---
+# A standard, medium-sized run for quick validation.
+declare -A STD_RES_SETTINGS
+STD_RES_SETTINGS[periods]=3
+STD_RES_SETTINGS[vfi_ngrid]=1000
+STD_RES_SETTINGS[hd_points]=600
+STD_RES_SETTINGS[grid_points]=500
+STD_RES_SETTINGS[version_suffix]="test_0.1"
+
+# --- Configuration Set 1.1 (LOW POINTS FOR TESTING: High Resolution Benchmark ---
+# A high-resolution run for producing final, accurate results.
+declare -A HIGH_RES_SETTINGS_TEST
+HIGH_RES_SETTINGS_TEST[periods]=5
+HIGH_RES_SETTINGS_TEST[vfi_ngrid]=10000
+HIGH_RES_SETTINGS_TEST[hd_points]=5000
+HIGH_RES_SETTINGS_TEST[grid_points]=3000
+HIGH_RES_SETTINGS_TEST[version_suffix]="test_0.1"
+
+# --- Configuration Set 2: High Resolution Benchmark ---
+# A high-resolution run for producing final, accurate results.
+declare -A HIGH_RES_SETTINGS_A
+HIGH_RES_SETTINGS_A[periods]=5
+HIGH_RES_SETTINGS_A[vfi_ngrid]=1E4
+HIGH_RES_SETTINGS_A[hd_points]=4E4
+HIGH_RES_SETTINGS_A[grid_points]=3000
+HIGH_RES_SETTINGS_A[version_suffix]="test_0.1"
+
+declare -A HIGH_RES_SETTINGS_B
+HIGH_RES_SETTINGS_B[periods]=5
+HIGH_RES_SETTINGS_B[vfi_ngrid]=2E4
+HIGH_RES_SETTINGS_B[hd_points]=6E4
+HIGH_RES_SETTINGS_B[grid_points]=3000
+HIGH_RES_SETTINGS_B[version_suffix]="test_0.1"
+
+declare -A HIGH_RES_SETTINGS_C
+HIGH_RES_SETTINGS_C[periods]=5
+HIGH_RES_SETTINGS_C[vfi_ngrid]=3E4
+HIGH_RES_SETTINGS_C[hd_points]=8E4
+HIGH_RES_SETTINGS_C[grid_points]=3000
+HIGH_RES_SETTINGS_C[version_suffix]="test_0.1"
+
+
+
+# --- Configuration Set 3: Quick Debug Run ---
+# A very small, fast run for debugging purposes.
+declare -A DEBUG_SETTINGS
+DEBUG_SETTINGS[periods]=2
+DEBUG_SETTINGS[vfi_ngrid]=50
+DEBUG_SETTINGS[hd_points]=100
+DEBUG_SETTINGS[grid_points]=100
+DEBUG_SETTINGS[version_suffix]="test_0.1"
+
+# --- Add more configurations as needed ---
+# Example:
+# declare -A SENSITIVITY_ANALYSIS_1
+# SENSITIVITY_ANALYSIS_1[periods]=3
+# ... 

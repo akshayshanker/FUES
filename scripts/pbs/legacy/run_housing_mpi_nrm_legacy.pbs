@@ -1,0 +1,96 @@
+#!/bin/bash
+#PBS -N fues-run
+#PBS -P tp66
+#PBS -q normal
+#PBS -l ncpus=48,mem=192GB,walltime=05:00:00
+#PBS -l storage=scratch/tp66
+#PBS -l wd
+#PBS -j oe          
+
+set -eu  # fail hard on errors
+module purge
+module load python3/3.12.1
+export VENV_ROOT=/scratch/tp66/$USER/venvs
+source "$VENV_ROOT/fues02-py3121/bin/activate"
+
+module load openmpi/4.1.7          # sets MPI headers/libs first
+
+export FUES_HOME=$HOME/dev/fues.dev/FUES
+export PYTHONPATH="$FUES_HOME${PYTHONPATH:+:$PYTHONPATH}"   # ← fixed line
+cd "$FUES_HOME"
+
+export PYTHONPATH=$PWD:$PYTHONPATH
+export MAKEMOD_QUIET=true           # Only errors
+export PERIOD_QUIET=true            # Only errors
+export SHOCKS_QUIET=true
+
+# Suppress non-fatal MPI warnings
+export OMPI_MCA_btl_base_warn_component_unused=0
+export OMPI_MCA_mca_base_component_show_load_errors=0
+export OMPI_MCA_btl_vader_single_copy_mechanism=none
+export OMPI_MCA_mpi_warn_on_fork=0
+export OMPI_MCA_orte_base_help_aggregate=1
+export OMPI_MCA_mpi_show_handle_leaks=0
+export OMPI_MCA_btl_openib_warn_default_gid_prefix=0
+export OMPI_MCA_btl_openib_warn_no_device_params_found=0
+export OMPI_MCA_coll_ml_priority=0
+export OMPI_MCA_coll_hcoll_enable=0
+
+# Numba settings for MPI safety
+export NUMBA_DISABLE_CACHE=1        # Disable caching to avoid MPI conflicts
+export NUMBA_CACHE_DIR=/tmp/numba_cache_$$  # Use process-specific cache dir
+export NUMBA_NUM_THREADS=1          # Prevent thread conflicts
+
+cd $HOME/dev/fues.dev/FUES
+
+# Clear Numba cache to avoid MPI cache corruption
+echo "Clearing Numba cache..."
+python3 -c "import numba; numba.config.CACHE_DIR.clear()" 2>/dev/null || true
+find ~/.numba_cache -name "*.nbc" -delete 2>/dev/null || true
+find ~/.numba_cache -name "*.nbi" -delete 2>/dev/null || true
+
+# Create logs directory if it doesn't exist
+mkdir -p logs
+
+# Set log file names with timestamp
+TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
+LOG_FILE="logs/HR_mpi_run_${TIMESTAMP}.log"
+ERROR_FILE="logs/HR_mpi_errors_${TIMESTAMP}.log"
+
+echo "Starting MPI run at $(date)"
+echo "Logs will be saved to: $LOG_FILE"
+echo "Errors will be saved to: $ERROR_FILE"
+
+export OMP_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+
+# --- Experiment settings ---
+SOLUTION_ROOT="/scratch/tp66/$USER/FUES/solutions"
+VERSION="test_0.1"
+
+# ------------ MPI RUN ------------
+mpiexec -np 45 \
+        python3 -m examples.housing_renting.solve_runner \
+          --periods 5 \
+          --ue-method ALL \
+          --output-root "$SOLUTION_ROOT/$VERSION" \
+          --bundle-prefix "$VERSION" \
+          --vfi-ngrid 1000 \
+          --HD-points 300 \
+          --grid-points 3000 \
+          --recompute-baseline \
+          --fresh-fast \
+          --mpi \
+          --plots \
+        2> >(grep -v "LOG_CAT_ML\|basesmuma\|ml_discover_hierarchy" | tee -a "$ERROR_FILE" >&2) \
+        1> >(tee -a "$LOG_FILE")
+
+# Capture exit code
+EXIT_CODE=$?
+
+echo "MPI run completed at $(date) with exit code: $EXIT_CODE"
+echo "Check logs at: $LOG_FILE"
+echo "Check errors at: $ERROR_FILE"
+
+exit $EXIT_CODE

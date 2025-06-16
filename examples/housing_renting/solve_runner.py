@@ -109,8 +109,8 @@ except ImportError:
 
 
 CFG_DIR = Path(__file__).parent / "config_HR"
-BASE = "VFI_HDGRID"
-ALL_METHODS = ["VFI_HDGRID", "FUES", "FUES2DEV", "CONSAV", "DCEGM"]
+BASE = "VFI_HDGRID_GPU"
+ALL_METHODS = ["VFI_HDGRID", "VFI_HDGRID_GPU", "FUES", "FUES2DEV", "CONSAV", "DCEGM"]
 FAST_METHODS = ["FUES"]
 PRE_COMPILE_PARAMS = np.array(["VFI_HDGRID", 500, 500, 500], dtype=object)
 
@@ -119,8 +119,8 @@ def patch_cfg(cfg_container: dict, periods: int, vf_ngrid: int) -> dict:
     """
     Patch config with solution method and MPI compute settings.
 
-    The upper-envelope method (`VFI_HDGRID`, `FUES`, etc.) determines
-    whether the underlying solver should be VFI or EGM. This helper
+    The upper-envelope method (`VFI_HDGRID`, `VFI_HDGRID_GPU`, etc.) determines
+    whether the underlying solver should be VFI, EGM, or GPU. This helper
     sets the correct `solution` and `compute` methods on consumption
     stages without requiring extra CLI flags.
     """
@@ -129,13 +129,16 @@ def patch_cfg(cfg_container: dict, periods: int, vf_ngrid: int) -> dict:
     cfg["master"]["settings"]["N_arg_grid_vfi"] = vf_ngrid
 
     sol = cfg["master"]["methods"]["upper_envelope"]
-    target = sol if sol in ("VFI_HDGRID", "VFI", "VFI_POOL") else "EGM"
+    target = sol if sol in ("VFI_HDGRID", "VFI", "VFI_POOL","VFI_HDGRID_GPU") else "EGM"
     cfg["stages"]["OWNC"]["stage"]["methods"]["solution"] = target
     cfg["stages"]["RNTC"]["stage"]["methods"]["solution"] = target
 
     if sol == "VFI_HDGRID":
         cfg["stages"]["OWNC"]["stage"]["methods"]["compute"] = "MPI"
         cfg["stages"]["RNTC"]["stage"]["methods"]["compute"] = "MPI"
+    elif sol == "VFI_HDGRID_GPU":
+        cfg["stages"]["OWNC"]["stage"]["methods"]["compute"] = "GPU"
+        cfg["stages"]["RNTC"]["stage"]["methods"]["compute"] = "GPU"
     else:
         cfg["stages"]["OWNC"]["stage"]["methods"]["compute"] = "SINGLE"
         cfg["stages"]["RNTC"]["stage"]["methods"]["compute"] = "SINGLE"
@@ -189,17 +192,11 @@ def make_housing_solver(args, use_mpi: bool, comm):
     """
     Returns an _solve(model, recorder) closure that the CircuitRunner calls.
     """
-
     def _solve(mc, recorder=None):
         """
-        This closure:
-        - attaches MPI-aware operators once per ModelCircuit
-        - marks last-period consumption stages as terminal
-        - runs backward time iteration
+        This closure correctly uses the MPI settings passed to the factory.
         """
-
-        # 0. attach MPI-aware operators once per ModelCircuit
-        ## TODO: This is redudnant as MPI use can be specified in congig file. 
+        # Correctly use the use_mpi flag from the factory's scope
         build_operators_for_circuit(mc, use_mpi=use_mpi, comm=comm)
 
         # 1. mark last-period consumption stages as terminal
@@ -331,25 +328,36 @@ def main(argv=None):
     solver_rank = comm.rank if comm is not None else 0
 
     # --- Optional Pre-compilation Step ---
-    if args.precompile:
-        if is_root:
-            print("\n--- Running Numba Pre-compilation for VFI_HDGRID ---")
+    if args.precompile and is_root:
+        print("\n--- Running Numba Pre-compilation ---")
+        
+        is_gpu_run = "VFI_HDGRID_GPU" in methods
+        precompile_method = "VFI_HDGRID_GPU" if is_gpu_run else "VFI_HDGRID"
+        
+        # --- Create a minimal config for the pre-compilation run ---
+        precompile_cfg = copy.deepcopy(cfg_container)
+        precompile_cfg['master']['settings']['a_points'] = 100
+        precompile_cfg['master']['settings']['w_points'] = 100
+        precompile_cfg['master']['settings']['a_nxt_points'] = 100
+        
+        precompile_params = np.array([precompile_method, 100, 100, 100], dtype=object)
+
         precompile_runner = CircuitRunner(
-            base_cfg=cfg_container,
+            base_cfg=precompile_cfg, # Use the minimal config
             param_paths=[
                 "master.methods.upper_envelope",
                 "master.settings.a_points",
                 "master.settings.a_nxt_points",
                 "master.settings.w_points",
             ],
-            model_factory=lambda cfg: make_housing_model(cfg, 2, 100, comm), # Minimal settings
+            model_factory=lambda cfg: make_housing_model(cfg, 2, 100, comm),
             solver=make_housing_solver(argparse.Namespace(verbose=False, periods=2), use_mpi=args.mpi, comm=comm),
             metric_fns={},
             save_by_default=False,
             load_if_exists=False,
         )
         try:
-            precompile_runner.run(PRE_COMPILE_PARAMS, rank=solver_rank)
+            precompile_runner.run(precompile_params, rank=solver_rank)
             if is_root:
                 print("--- Pre-compilation Complete ---\n")
         except Exception as e:
@@ -389,7 +397,7 @@ def main(argv=None):
     # --------------------------------------------------------------------
     #  1) Solve, plot, and process baseline immediately
     # --------------------------------------------------------------------
-    
+    print(is_root)
     HD_POINTS = int(float(args.HD_points))
     if BASE in methods:
         runner.load_if_exists = not args.recompute_baseline
@@ -430,7 +438,7 @@ def main(argv=None):
     
     STD_POINTS = int(float(args.grid_points))
     fast_methods_to_run = [m for m in FAST_METHODS if m in methods]
-    
+    print(fast_methods_to_run)
     if fast_methods_to_run:
         runner.load_if_exists = not args.fresh_fast
         runner.ref_params = ref_params if BASE in methods else None
@@ -441,7 +449,7 @@ def main(argv=None):
         for method in fast_methods_to_run:
             if is_root:
                 print(f"  Solving {method}...")
-                
+            print("here")
             params = np.array([method, STD_POINTS, STD_POINTS, STD_POINTS], dtype=object)
             all_param_vectors.append(params)  # Add to design matrix
             

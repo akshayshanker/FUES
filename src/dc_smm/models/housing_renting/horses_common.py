@@ -1,10 +1,11 @@
 import numpy as np
 from scipy.interpolate import interp1d
-from numba import njit
+from numba import njit, cuda
 from numba.typed import Dict    
-from typing import Callable   # NEW  – remove if unused        # NEW
+from typing import Callable, Literal   # NEW  – remove if unused        # NEW
 import time
 from functools import lru_cache
+import math
 
 
 @njit
@@ -560,7 +561,7 @@ def egm_preprocess(egrid, vf, c, a,
     original signature (Pi, i_z, i_h_prime, h_nxt, …).
     """
 
-    # choose a default c_max if the caller doesn’t specify one
+    # choose a default c_max if the caller doesn't specify one
     if c_max is None:
         c_max = 1.05 * np.max(c)          # 5 % above current max consumption
 
@@ -637,3 +638,79 @@ def build_njit_utility_cached(expr, params_frozen, h_placeholder="H_nxt"):
 def get_u_func(expr_str, param_vals):
     frozen = tuple(sorted(param_vals.items()))          # hashable
     return build_njit_utility_cached(expr_str, frozen)
+
+# ======================================================================
+#  GPU Device Functions
+# ======================================================================
+
+@cuda.jit(device=True)
+def searchsorted_gpu(a, v):
+    """
+    A GPU-compatible binary search implementation, equivalent to
+    np.searchsorted(a, v, side='right').
+    """
+    lower_bound = 0
+    upper_bound = len(a)
+    while lower_bound < upper_bound:
+        i = lower_bound + (upper_bound - lower_bound) // 2
+        if a[i] < v:
+            lower_bound = i + 1
+        else:
+            upper_bound = i
+    return lower_bound
+
+@cuda.jit(device=True)
+def interp_gpu(x_new, x_old, y_old):
+    """
+    A simple linear interpolation function that is compatible with Numba's
+    CUDA target.
+    """
+    i = searchsorted_gpu(x_old, x_new)
+    
+    # Handle edges
+    if i == 0:
+        return y_old[0]
+    if i >= len(x_old):
+        return y_old[-1]
+
+    # Linear interpolation formula
+    x0, x1 = x_old[i - 1], x_old[i]
+    y0, y1 = y_old[i - 1], y_old[i]
+    
+    # Avoid division by zero if grid points are not unique
+    if x1 == x0:
+        return y0
+    
+    return y0 + (y1 - y0) * (x_new - x0) / (x1 - x0)
+
+@cuda.jit(device=True)
+def u_func_gpu_crra(c, H, alpha, kappa, iota):
+    """GPU device version of the CRRA utility function."""
+    if c <= 0:
+        return -1e12
+    return (c**(1 - alpha) / (1 - alpha)) * (H**kappa * iota)
+
+@cuda.jit(device=True)
+def u_func_gpu_log(c, H, alpha, kappa, iota):
+    """GPU device version of the log-utility function."""
+    if c <= 0:
+        return -1e12
+    return alpha * math.log(c) + (1 - alpha) * math.log(kappa * H + iota)
+
+@cuda.jit(device=True)
+def bellman_obj_gpu(a_prime, w, H, beta, delta, a_grid, V_next,
+                    h_nxt_ind, y_ind,
+                    alpha, kappa, iota):
+    """
+    GPU device version of the Bellman object function (CRRA only).
+    """
+    c = w - a_prime
+    if c <= 0:
+        return -1e110
+
+    v_next_slice = V_next[:, h_nxt_ind, y_ind]
+    v_interp = interp_gpu(a_prime, a_grid, v_next_slice)
+    
+    util = u_func_gpu_log(c, H, alpha, kappa, iota)
+    
+    return util + beta * delta * v_interp

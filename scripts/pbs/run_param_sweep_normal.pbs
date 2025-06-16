@@ -1,0 +1,67 @@
+#!/bin/bash
+#PBS -N fues-sweep-normal
+#PBS -P tp66
+#PBS -q normal
+#PBS -l ncpus=96
+#PBS -l mem=380GB
+#PBS -l walltime=02:00:00
+#PBS -l storage=gdata/tp66+scratch/tp66
+#PBS -l wd
+#PBS -j oe
+
+# ======================================================================
+#  Hierarchical Parameter Sweep on the 'normal' Queue
+# ======================================================================
+# This script is designed to run a parameter sweep across multiple
+# standard compute nodes on Gadi.
+#
+# - It requests two full nodes (2 * 48 = 96 cpus).
+# - It uses the hierarchical MPI setup in `param_sweep_v2.py`.
+# - Each node (48 cores) will process one parameter combination at a time.
+#
+
+set -euo pipefail
+
+# --- 1. Environment Setup ---
+module purge
+module load python3/3.12.1 openmpi/4.1.7
+
+export VENV_ROOT=/g/data/tp66/$USER/venvs
+source "$VENV_ROOT/fues02-py3121/bin/activate"
+
+export FUES_HOME=$HOME/dev/fues.dev/FUES
+export PYTHONPATH="$FUES_HOME${PYTHONPATH:+:$PYTHONPATH}"
+cd "$FUES_HOME"
+
+# --- 2. MPI and Numba Configuration ---
+# These settings are crucial for robust MPI + Numba runs.
+export OMPI_MCA_btl_base_warn_component_unused=0
+export NUMBA_DISABLE_CACHE=1
+export NUMBA_NUM_THREADS=1
+
+# --- 3. Execution ---
+echo "========================================================"
+echo "Starting Hierarchical Parameter Sweep"
+echo "Job ID: ${PBS_JOBID}"
+echo "Total Cores: ${PBS_NCPUS}"
+echo "========================================================"
+
+# mpiexec will launch one python process per core requested (96 in this case).
+# The python script itself will handle the two-level MPI logic.
+mpiexec python3 -m experiments.housing_renting.param_sweep_v2 \
+  --mpi \
+  --group-size 48 \
+  --param "master.parameters.beta=0.95,0.97" \
+  --param "master.parameters.gamma=2.0,4.0" \
+  --output-root "solutions/HR_param_sweep_normal" \
+  --bundle-prefix "HR_normal_sweep" \
+  --periods 3 \
+  --vfi-ngrid 1000 \
+  --HD-points 2000 \
+  --grid-points 1000 \
+  --recompute-baseline \
+  --plots
+
+EXIT_CODE=$?
+echo "Parameter sweep completed at $(date) with exit code: $EXIT_CODE"
+exit $EXIT_CODE 

@@ -2,6 +2,35 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.0] - 2025-06-16 – GPU-Accelerated VFI Solver
+
+### Added
+* **GPU-Accelerated VFI Solver (`VFI_HDGRID_GPU`)**
+  - Implemented a new solver backend using Numba CUDA to offload the VFI dense grid search to NVIDIA GPUs.
+  - The `vfi_gpu_kernel` performs the core computation in parallel across thousands of GPU threads.
+  - The `solve_vfi_gpu` host function manages data transfers (CPU↔GPU) and kernel launches.
+  - This provides a significant performance increase for high-density baseline calculations, enabling larger and more complex models to be solved within practical time limits.
+
+* **Dynamic and Shared Memory on GPU**
+  - The GPU kernel now uses **dynamic shared memory** to dramatically reduce slow global memory access, a key optimization for performance.
+  - The launcher calculates the required shared memory size at runtime, allowing the kernel to handle variable-sized grids without hardcoded limits.
+
+* **Unified Solver and Pre-compilation Workflow**
+  - `solve_runner.py` is now the single entry point for all workflows (CPU, MPI, and GPU).
+  - A new `--precompile` flag intelligently warms up the correct Numba cache (either CPU or GPU) based on the selected method.
+  - The framework now automatically uses minimal grid settings during pre-compilation to prevent GPU out-of-memory errors.
+
+* **Robust GPU-Compatible Helper Functions**
+  - Created a GPU-safe `interp_gpu` function to perform linear interpolation, as `np.interp` is not supported in CUDA kernels.
+  - Implemented a "dispatcher pattern" for utility functions, using an integer ID to select between pre-compiled, static GPU device functions (`u_func_gpu_crra`, etc.). This is the robust solution for handling different functional forms on the GPU.
+
+### Fixed
+* **GPU Compilation Errors**: Resolved a series of `TypingError` and `NameError` issues by:
+  - Replacing unsupported function calls (`np.interp`, `cuda.lib.isinf`) with GPU-compatible equivalents (`interp_gpu`, `math.isinf`).
+  - Correctly handling function namespaces (`math` vs. `np`) inside device code.
+  - Eliminating the use of unsupported closures as kernel arguments.
+* **GPU Out-of-Memory Errors**: Fixed `CudaAPIError: [700]` by ensuring the pre-compilation step uses a minimal memory footprint.
+
 ## [0.3.0dev4] - Planned – Hierarchical MPI Parameter Sweeps
 
 ### Planned Features

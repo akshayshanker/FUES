@@ -1,0 +1,51 @@
+#!/bin/bash
+#PBS -N fues-gpu-run
+#PBS -P tp66
+#PBS -q gpuhub
+#PBS -l ncpus=16,mem=128GB,walltime=01:00:00
+#PBS -l ngpus=1
+#PBS -l storage=gdata/tp66+scratch/tp66
+#PBS -l wd
+#PBS -j oe
+
+set -euo pipefail
+
+# --- 1. Environment Setup ---
+module purge
+module load python3/3.12.1 cuda/11.8.0
+export VENV_ROOT=/g/data/tp66/$USER/venvs
+source "$VENV_ROOT/fues02-py3121/bin/activate"
+
+export FUES_HOME=$HOME/dev/fues.dev/FUES
+export PYTHONPATH="$FUES_HOME${PYTHONPATH:+:$PYTHONPATH}"
+cd "$FUES_HOME"
+
+# --- 2. Logging Setup ---
+TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
+RUN_ID="GPU_run_${TIMESTAMP}"
+LOG_DIR="logs/${RUN_ID}"
+mkdir -p "$LOG_DIR"
+
+echo "========================================================"
+echo "Starting GPU VFI Run: ${RUN_ID}"
+echo "========================================================"
+echo "Output and logs will be saved to: $LOG_DIR"
+
+# --- 3. Execution ---
+# Note: This is a single-process run that offloads work to the GPU.
+# We are not using mpiexec here.
+python3 -m examples.housing_renting.solve_runner_gpu \
+  --periods 5 \
+  --ue-method VFI_HDGRID_GPU \
+  --output-root "solutions/HR_GPU_run_${RUN_ID}" \
+  --bundle-prefix "HR_GPU_${RUN_ID}" \
+  --vfi-ngrid 100000 \
+  --HD-points 40000 \
+  --recompute-baseline \
+  --plots \
+  2> >(tee "${LOG_DIR}/run.err") \
+  1> >(tee "${LOG_DIR}/run.log")
+
+EXIT_CODE=$?
+echo "GPU run completed at $(date) with exit code: $EXIT_CODE"
+exit $EXIT_CODE 
