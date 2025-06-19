@@ -23,6 +23,7 @@ from __future__ import annotations
 from typing import Callable, Dict, Any, Protocol, Optional, Tuple
 import time
 from numba import njit
+from consav import upperenvelope 
 
 import numpy as np
 
@@ -448,15 +449,13 @@ def _consav_engine(
     u_func : dict with keys ``func`` (njitted utility) and ``args``.
     use_inv_w : see Consav documentation
     """
-    try:
-        from consav import upperenvelope  # noqa: WPS433
-    except ImportError as err:
-        raise ImportError("Consav not installed; `pip install consav`. ") from err
 
     # cache compiled kernel to avoid recompilation cost
     key = (u_func["func"].py_func.__code__.co_code, use_inv_w)
     if "_CONSAV_CACHE" not in globals():
         globals()["_CONSAV_CACHE"] = {}
+    #else:
+    #    print("Consav cache already exists")
     env_cache = globals()["_CONSAV_CACHE"]
     env = env_cache.get(key)
     if env is None:
@@ -467,7 +466,11 @@ def _consav_engine(
     kappa_pol = np.empty_like(X_dcsn)
     v_dcsn = np.empty_like(X_dcsn)
 
-    env(X_cntn, x_dcsn_hat, kappa_hat, v_cntn_hat, X_dcsn, kappa_pol, v_dcsn, u_func["args"])
+    # Convert the dictionary of arguments into a tuple of values.
+    args_as_tuple = tuple(u_func["args"].values())
+
+    # Call the compiled Numba kernel, unpacking the arguments correctly.
+    env(X_cntn, x_dcsn_hat, kappa_hat, v_cntn_hat, X_dcsn, kappa_pol, v_dcsn, *args_as_tuple)
 
     X_cntn_pol = np.maximum(X_dcsn - kappa_pol, 0.0)
     lambda_dcsn = uc_func_partial(kappa_pol)

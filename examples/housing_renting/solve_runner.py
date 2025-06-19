@@ -98,20 +98,20 @@ try:
     from whisperer import build_operators_for_circuit, run_time_iteration
     from helpers.euler_error import euler_error_metric
     from helpers.plots import generate_plots
-    from helpers.tables import print_summary
-    from helpers.metrics import dev_c_L2
+    from helpers.tables import print_summary, generate_latex_table
+    from helpers.metrics import dev_c_L2, dev_v_L2
 except ImportError:
     from .whisperer import build_operators_for_circuit, run_time_iteration
     from .helpers.euler_error import euler_error_metric
     from .helpers.plots import generate_plots
-    from .helpers.tables import print_summary
-    from .helpers.metrics import dev_c_L2
+    from .helpers.tables import print_summary, generate_latex_table
+    from .helpers.metrics import dev_c_L2, dev_v_L2
 
 
 CFG_DIR = Path(__file__).parent / "config_HR"
 BASE = "VFI_HDGRID_GPU"
 ALL_METHODS = ["VFI_HDGRID", "VFI_HDGRID_GPU", "FUES", "FUES2DEV", "CONSAV", "DCEGM"]
-FAST_METHODS = ["FUES"]
+FAST_METHODS = ["FUES", "CONSAV"] # Added CONSAV for easier comparison
 PRE_COMPILE_PARAMS = np.array(["VFI_HDGRID", 500, 500, 500], dtype=object)
 
 
@@ -178,8 +178,7 @@ def make_housing_model(cfg_container: dict, periods: int, vf_ngrid: int, comm=No
         if comm is None or comm.rank == 0:
             compile_all_stages(mc, force=False)
     except Exception as exc:
-        # Crash early with a clear message – better than a silent mis-compile
-        logger.error("Stage compilation failed – aborting make_housing_model()", exc_info=True)
+        # logger.error("Stage compilation failed – aborting make_housing_model()", exc_info=True)
         raise
 
     return mc
@@ -204,8 +203,6 @@ def make_housing_solver(args, use_mpi: bool, comm):
         for tag in ("OWNC", "RNTC"):
             final_period.get_stage(tag).status_flags["is_terminal"] = True
         
-        #print(args.verbose)
-
         # 2. backward time iteration
         run_time_iteration(
             mc,
@@ -225,61 +222,6 @@ def make_housing_solver(args, use_mpi: bool, comm):
 def main(argv=None):
     """
     Command-line interface for solving and benchmarking the Housing–Renting model.
-
-    Parameters
-    ----------
-    argv : list[str] | None, optional
-        Custom argument vector (for unit tests). If *None* (default),
-        ``sys.argv[1:]`` is used.
-
-    Key CLI options
-    ---------------
-    --periods INT
-        Number of model periods to solve (e.g., 3 for periods 2, 1, 0).
-    --ue-method STR
-        Comma-separated list of UE methods to run, or ``ALL``.
-    --output-root PATH
-        Directory for all bundles, plots, and metrics.
-    --bundle-prefix STR
-        Prefix for bundle filenames within ``output-root``.
-    --vfi-ngrid INT
-        Number of choice-grid points used by the VFI baseline.
-    --HD-points INT
-        State-grid size (a, w, a_nxt) for the HD-grid baseline.
-    --grid-points INT
-        Same as ``--HD-points`` but for fast methods.
-    --recompute-baseline
-        Ignore any existing baseline bundle and recompute it.
-    --fresh-fast
-        Re-solve fast methods even if their bundles already exist.
-    --plots
-        Create diagnostic figures for every solved model.
-    --mpi
-        Activate MPI mode; the script will auto-detect the communicator.
-    --verbose
-        Print detailed progress and timing information.
-    --precompile
-        Run a small VFI job to pre-compile Numba functions.
-
-    Behaviour
-    ---------
-    1.  Build or load the **baseline** (``VFI_HDGRID``), unless excluded.
-    2.  Solve each requested **fast method** individually.
-    3.  On rank 0:
-        *   Generate plots (if ``--plots``).
-        *   Compute Euler-error and consumption-norm metrics.
-        *   Print a summary table.
-        *   Write the design matrix to ``design_matrix.csv``.
-
-    Notes
-    -----
-    **Parameter Hash**: Bundles are keyed by grid sizes only; the UE method
-    itself is *not* part of the hash. Consequently, fast-method runs must
-    specify the hash of the reference baseline via ``runner.ref_params`` so
-    that deviations are computed against the correct bundle.
-
-    (The ``method_param_path`` argument in `CircuitRunner` is used to
-    specify the parameter path to the method that is not included in the hash.)
     """
     p = argparse.ArgumentParser(
         prog="solve_runner.py",
@@ -364,7 +306,8 @@ def main(argv=None):
             if is_root:
                 print(f"--- Pre-compilation Failed: {e} ---", file=sys.stderr)
 
-    comm.Barrier()
+    if comm is not None:
+        comm.Barrier()
 
     #  set-up main runner ------------------------------------------------------
     runner = CircuitRunner(
@@ -379,7 +322,6 @@ def main(argv=None):
         solver=make_housing_solver(args, args.mpi, comm),
         metric_fns={
             "euler_error": euler_error_metric,
-            "dev_c_L2": dev_c_L2,
         },
         output_root=output_root,
         bundle_prefix=args.bundle_prefix,
@@ -397,12 +339,12 @@ def main(argv=None):
     # --------------------------------------------------------------------
     #  1) Solve, plot, and process baseline immediately
     # --------------------------------------------------------------------
-    print(is_root)
     HD_POINTS = int(float(args.HD_points))
+    # Use the BASE variable, which could be VFI_HDGRID or VFI_HDGRID_GPU
     if BASE in methods:
         runner.load_if_exists = not args.recompute_baseline
         if is_root:  # print from root only
-            print("\n» Baseline:", "recompute" if args.recompute_baseline else "load/solve-if-missing")
+            print(f"\n» Baseline ({BASE}):", "recompute" if args.recompute_baseline else "load/solve-if-missing")
 
         ref_params = np.array([BASE, HD_POINTS, HD_POINTS, HD_POINTS], dtype=object)
         runner.ref_params = ref_params
@@ -438,18 +380,25 @@ def main(argv=None):
     
     STD_POINTS = int(float(args.grid_points))
     fast_methods_to_run = [m for m in FAST_METHODS if m in methods]
-    print(fast_methods_to_run)
+    
     if fast_methods_to_run:
         runner.load_if_exists = not args.fresh_fast
-        runner.ref_params = ref_params if BASE in methods else None
-        
+        runner.metric_fns = {
+            "euler_error": euler_error_metric,
+            "dev_c_L2": dev_c_L2,
+        }
+        # Ensure ref_params is defined, even if baseline wasn't run
+        if 'ref_params' not in locals():
+             ref_params = np.array([BASE, HD_POINTS, HD_POINTS, HD_POINTS], dtype=object)
+        runner.ref_params = ref_params
+
         if is_root:  # print from root only
             print(f"\n» Fast methods: {', '.join(fast_methods_to_run)}")
             
         for method in fast_methods_to_run:
             if is_root:
                 print(f"  Solving {method}...")
-            print("here")
+            
             params = np.array([method, STD_POINTS, STD_POINTS, STD_POINTS], dtype=object)
             all_param_vectors.append(params)  # Add to design matrix
             
@@ -482,6 +431,7 @@ def main(argv=None):
     if is_root and all_metrics:
         res_df = pd.DataFrame(all_metrics)
         print_summary(res_df, output_root)
+        generate_latex_table(res_df, output_root) # Added call to generate LaTeX table
         
         # Save complete design matrix with all parameter vectors
         if all_param_vectors:

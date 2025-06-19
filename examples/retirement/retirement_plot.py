@@ -37,7 +37,7 @@ if PROJECT_ROOT not in sys.path:
 from dc_smm.fues.fues import FUES as fues_alg
 from dc_smm.models.retirement.retirement import Operator_Factory, RetirementModel, euler
 
-def plot_egrids(age, e_grid, vf_work, c_worker, del_a, g_size, cp, tag = 'sigma0'):
+def plot_egrids(age, e_grid, vf_work, c_worker, del_a, g_size, cp, save_path, tag = 'sigma0'):
     """ 
 
     Plot unrefined vs refined endogenous grid for age. 
@@ -60,6 +60,8 @@ def plot_egrids(age, e_grid, vf_work, c_worker, del_a, g_size, cp, tag = 'sigma0
         Grid size for the model for labeling.
     cp : RetirementModel
         RetirementModel instance
+    save_path : str
+        Path to save the plot
     tag : str, optional
         Tag for labeling, default is 'sigma0'.
      
@@ -166,12 +168,12 @@ def plot_egrids(age, e_grid, vf_work, c_worker, del_a, g_size, cp, tag = 'sigma0
     fig.tight_layout(rect=[0, 0.05, 1, 0.95])
     fig.supxlabel('Financial assets at time t', fontsize=11)
     fig.savefig(
-        'results/plots/retirement/ret_vf_aprime_all_{}_{}_{}.png'.format(age, g_size, tag))
+        os.path.join(save_path, 'ret_vf_aprime_all_{}_{}_{}.png'.format(age, g_size, tag)))
     pl.close()
 
     return None
 
-def plot_cons_pol(sigma_work, cp, ages = [17,10,0]):
+def plot_cons_pol(sigma_work, cp, save_path, ages = [17,10,0]):
 
     """
     Plot consumption policy for difference ages.
@@ -182,6 +184,8 @@ def plot_cons_pol(sigma_work, cp, ages = [17,10,0]):
         Dictionary of consumption policy functions by age
     cp : RetirementModel
         RetirementModel instance
+    save_path : str
+        Path to save the plot
     ages : list
         List of ages to plot consumption policy for
     
@@ -225,13 +229,13 @@ def plot_cons_pol(sigma_work, cp, ages = [17,10,0]):
         ax.set_xlabel('Financial assets at time $t$', fontsize=11)
 
     ax.legend(frameon=False, prop={'size': 10})
-    fig.savefig('results/plots/retirement/ret_cons_all.png'.format(t))
+    fig.savefig(os.path.join(save_path, 'ret_cons_all.png'))
     pl.close()
 
     return None
 
 def plot_dcegm_cf(
-    age, g_size, e_grid, vf_work, c_worker, dela_worker, a_prime, cp, 
+    age, g_size, e_grid, vf_work, c_worker, dela_worker, a_prime, cp, save_path,
     tag='sigma05', plot=True
 ):
     """
@@ -257,6 +261,8 @@ def plot_dcegm_cf(
         Taste shock (sigma) for labeling.
     cp : RetirementModel
         RetirementModel instance
+    save_path : str
+        Path to save the plot
     tag : str, optional
         Tag for labeling, default is 'sigma05'.
     plot : bool, optional
@@ -462,8 +468,8 @@ def plot_dcegm_cf(
         # add common x label
         fig.supxlabel('Financial assets at time t', fontsize=11)
         fig.tight_layout()
-        fig.savefig('results/plots/retirement/ret_vf_aprime_all_{}_cf_{}_{}.png'
-                    .format(g_size, age,tag))
+        fig.savefig(os.path.join(save_path, 'ret_vf_aprime_all_{}_cf_{}_{}.png'
+                    .format(g_size, age,tag)))
 
     return v_upper, v_env2, vf_clean, a_prime_clean, m_upper2, a1_env2
 
@@ -471,6 +477,7 @@ def test_Timings(grid_sizes, delta_values,n =3):
     # Initialize lists to hold results for LaTeX tables
     latex_errors_data = []
     latex_timings_data = []
+    latex_total_timing_data = []  # New list for total solution time
 
     for g_size_baseline in grid_sizes:
         for delta in delta_values:
@@ -500,6 +507,10 @@ def test_Timings(grid_sizes, delta_values,n =3):
             best_time_FUES = float('inf')
             best_time_DCEGM = float('inf')
             best_time_CONSAV = float('inf')
+            best_total_time_RFC = float('inf')
+            best_total_time_FUES = float('inf')
+            best_total_time_DCEGM = float('inf')
+            best_total_time_CONSAV = float('inf')
             best_error_RFC = float('inf')
             best_error_FUES = float('inf')
             best_error_DCEGM = float('inf')
@@ -511,13 +522,15 @@ def test_Timings(grid_sizes, delta_values,n =3):
                     cp, method='RFC'
                 )
                 time_end_RFC = np.mean(iter_time_age[0])
+                total_time_RFC = iter_time_age[1]
                 Euler_error_RFC = euler(cp, c_refined_RFC)
 
                 # Test FUES
                 _, _, _, _, c_refined_FUES, _, iter_time_age = iter_bell(
-                    cp, method='FUES'
+                    cp, method='FUES2DEV'
                 )
                 time_end_FUES = np.mean(iter_time_age[0])
+                total_time_FUES = iter_time_age[1]
                 Euler_error_FUES = euler(cp, c_refined_FUES)
 
                 # Test DCEGM
@@ -525,6 +538,7 @@ def test_Timings(grid_sizes, delta_values,n =3):
                     cp, method='DCEGM'
                 )
                 time_end_DCEGM = np.mean(iter_time_age[0])
+                total_time_DCEGM = iter_time_age[1]
                 Euler_error_DCEGM = euler(cp, c_refined_DCEGM)
                 
                 # Test CONSAV
@@ -532,6 +546,7 @@ def test_Timings(grid_sizes, delta_values,n =3):
                     cp, method='CONSAV'
                 )
                 time_end_CONSAV = np.mean(iter_time_age[0])
+                total_time_CONSAV = iter_time_age[1]
                 Euler_error_CONSAV = euler(cp, c_refined_CONSAV)
 
                 # Take the best of 3 runs for timings
@@ -539,6 +554,12 @@ def test_Timings(grid_sizes, delta_values,n =3):
                 best_time_FUES = min(best_time_FUES, time_end_FUES)
                 best_time_DCEGM = min(best_time_DCEGM, time_end_DCEGM)
                 best_time_CONSAV = min(best_time_CONSAV, time_end_CONSAV)
+
+                # Take the best of 3 runs for total solution timings
+                best_total_time_RFC = min(best_total_time_RFC, total_time_RFC)
+                best_total_time_FUES = min(best_total_time_FUES, total_time_FUES)
+                best_total_time_DCEGM = min(best_total_time_DCEGM, total_time_DCEGM)
+                best_total_time_CONSAV = min(best_total_time_CONSAV, total_time_CONSAV)
 
                 # Take the best of 3 runs for errors
                 best_error_RFC = min(best_error_RFC, Euler_error_RFC)
@@ -554,6 +575,10 @@ def test_Timings(grid_sizes, delta_values,n =3):
             latex_timings_data.append([
                 g_size_baseline, delta, best_time_RFC * 1000,
                 best_time_FUES * 1000, best_time_DCEGM * 1000, best_time_CONSAV * 1000
+            ])
+            latex_total_timing_data.append([
+                g_size_baseline, delta, best_total_time_RFC * 1000,
+                best_total_time_FUES * 1000, best_total_time_DCEGM * 1000, best_total_time_CONSAV * 1000
             ])
 
             # Print results for current grid size and delta
@@ -572,6 +597,79 @@ def test_Timings(grid_sizes, delta_values,n =3):
     generate_latex_table(latex_timings_data,latex_errors_data,\
                                 "timing", "Retirement model"
     )
+    
+    # Generate separate timing-only LaTeX table
+    generate_timing_latex_table(latex_total_timing_data, "total_timing", "Retirement model")
+
+def generate_timing_latex_table(data, table_type, caption):
+    """
+    Generates a LaTeX table with total solution time performance for RFC, FUES, DCEGM, CONSAV.
+
+    Parameters:
+    data : list of lists
+        Data for RFC, FUES, DCEGM, CONSAV total solution timings.
+    table_type : str
+        Type of the table for labeling.
+    caption : str
+        Caption for the LaTeX table.
+    """
+    # Header for LaTeX table with multirow and formatting
+    latex_code = f"""
+        \\begin{{table}}[htbp]
+        \\centering
+        \\small
+        \\begin{{tabular}}{{cccccc}}
+        \\toprule
+        \\multirow{{2}}{{*}}{{\\textit{{Grid Size}}}} & 
+        \\multirow{{2}}{{*}}{{\\textit{{Delta}}}} & 
+        \\multicolumn{{4}}{{c}}{{\\textbf{{Total Solution Time (Milliseconds)}}}} \\\\
+        & & \\textbf{{RFC}} & \\textbf{{FUES}} & \\textbf{{DCEGM}} & \\textbf{{CONSAV}} \\\\
+        \\midrule
+        """
+
+    unique_grid_sizes = np.unique([row[0] for row in data])
+
+    for grid_size in unique_grid_sizes:
+        filtered_data = [row for row in data if row[0] == grid_size]
+
+        latex_code += f"\\multirow{{{len(filtered_data)}}}{{*}}{{\\textit{{"
+        latex_code += f"{int(grid_size)}}}}} "
+
+        for i, row in enumerate(filtered_data):
+            # Extract timing data
+            delta = row[1]
+            rfc_time = row[2]
+            fues_time = row[3]
+            dcegm_time = row[4]
+            consav_time = row[5]
+            
+            row_str = (
+                f"& {delta:.2f} & {rfc_time:.3f} & {fues_time:.3f} & "
+                f"{dcegm_time:.3f} & {consav_time:.3f} \\\\\n"
+            )
+            
+            if i == 0:
+                latex_code += row_str
+            else:
+                latex_code += f" {row_str}"
+
+        latex_code += "\\midrule\n"
+
+    latex_code += f"""
+        \\bottomrule
+        \\end{{tabular}}
+        \\caption{{\\textit{{{caption}}} total solution time (milliseconds) comparison across different grid sizes and delta values}}
+        \\label{{tab:{table_type}_comparison}}
+        \\end{{table}}
+        """
+
+    results_dir = os.path.join("results")
+    os.makedirs(results_dir, exist_ok=True)
+
+    file_path = os.path.join(results_dir, f"retirement_{table_type}.tex")
+
+    with open(file_path, "w") as file:
+        file.write(latex_code)
 
 def generate_latex_table(data, errors, table_type, caption):
     """
@@ -673,10 +771,14 @@ def generate_latex_table(data, errors, table_type, caption):
 if __name__ == "__main__":
 
     
-    grid_sizes = [500, 1000, 2000, 3000]  # Test different grid sizes
-    delta_values = [0.25, 0.5, 1, 1.5, 2]  # Test different delta values
+    grid_sizes = [500, 1000, 2000, 3000,10000]  # Test different grid sizes
+    delta_values = [0.25, 0.5, 1, 2]  # Test different delta values
     egrid_plot_age = 17
-    run_performance_tests = True
+    run_performance_tests = False
+
+    # Define save path for plots and create directory if it doesn't exist
+    save_path = os.path.join('results', 'plots', 'retirement')
+    os.makedirs(save_path, exist_ok=True)
 
     # Test performance of different methods for RetirementModel across grid sizes
     if run_performance_tests:
@@ -708,8 +810,8 @@ if __name__ == "__main__":
         )
 
     # precompile numba functions
-    _ = iter_bell(cp, method='FUES')
-    _, _, _, _, c_refined_FUES, _, time_end_FUES = iter_bell(cp, method='FUES')
+    _ = iter_bell(cp, method='FUES2DEV')
+    _, _, _, _, c_refined_FUES, _, time_end_FUES = iter_bell(cp, method='FUES2DEV')
 
     # precompile numba functions
     _ = iter_bell(cp, method='DCEGM')
@@ -736,15 +838,15 @@ if __name__ == "__main__":
     # 2. Plot and save value and policy on ref/unref. EGM grids
     plot_egrids(
         egrid_plot_age, e_grid_worker_unref, vf_work_unref, c_worker_unref,
-        dela_unrefined, g_size_baseline, cp, tag='sigma0'
+        dela_unrefined, g_size_baseline, cp, save_path, tag='sigma0'
     )
 
     # 3. Plot consumption function for worker, before next period's work decision
-    plot_cons_pol(c_refined_FUES, cp)
+    plot_cons_pol(c_refined_FUES, cp, save_path)
 
     # 4. Plot comparison with DC-EGM
     v_upper, v1_env, vf_interp_fues, a_interp_fues, m_upper, a1_env = \
         plot_dcegm_cf(
             egrid_plot_age, g_size_baseline, e_grid_worker_unref, vf_work_unref,
-            c_worker_unref, dela_unrefined, cp.asset_grid_A, cp, tag='sigma0', plot=True
+            c_worker_unref, dela_unrefined, cp.asset_grid_A, cp, save_path, tag='sigma0', plot=True
         )

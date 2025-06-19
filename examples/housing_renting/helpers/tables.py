@@ -269,3 +269,41 @@ def print_summary(results_df: pd.DataFrame,
         (output_root / "stage_metrics.txt").write_text(stage_table, encoding="utf-8")
         
         print(f"Detailed metrics saved to: {output_root}") 
+
+
+
+def generate_latex_table(res_df: pd.DataFrame, output_root: Path):
+    """
+    Generates a LaTeX table from the results DataFrame and saves it to a .tex file.
+    
+    The table will compare different solution methods based on key metrics.
+    """
+    # Define columns to include and their LaTeX header names
+    cols_to_latex = {
+        "master.methods.upper_envelope": "Method",
+        "solve_time": "Solve Time (s)",
+        "euler_error": "Euler Error",
+        "dev_c_L2": r"$\|c - c_{base}\|_{L_2}$",
+        "VFI_L2_error": r"$\|V - V_{base}\|_{L_2}$"
+    }
+    
+    # Select and rename columns that exist in the dataframe
+    existing_cols = [col for col in cols_to_latex.keys() if col in res_df.columns]
+    table_df = res_df[existing_cols].rename(columns=cols_to_latex)
+
+    # Convert to LaTeX format
+    latex_table = table_df.to_latex(
+        index=False,
+        float_format="%.4f",
+        caption="Comparison of solution methods against the high-density grid baseline.",
+        label="tab:method_comparison",
+        column_format="lrrrr",
+        escape=False  # To allow LaTeX commands in headers
+    )
+
+    # Save to file
+    table_path = output_root / "comparison_table.tex"
+    with open(table_path, "w") as f:
+        f.write(latex_table)
+    
+    print(f"LaTeX comparison table saved to: {table_path}")
