@@ -109,13 +109,13 @@ except ImportError:
 
 
 CFG_DIR = Path(__file__).parent / "config_HR"
-BASE = "VFI_HDGRID_GPU"
+BASE = "VFI_HDGRID"
 ALL_METHODS = ["VFI_HDGRID", "VFI_HDGRID_GPU", "FUES", "FUES2DEV", "CONSAV", "DCEGM"]
 FAST_METHODS = ["FUES", "CONSAV"] # Added CONSAV for easier comparison
 PRE_COMPILE_PARAMS = np.array(["VFI_HDGRID", 500, 500, 500], dtype=object)
 
 
-def patch_cfg(cfg_container: dict, periods: int, vf_ngrid: int) -> dict:
+def patch_cfg(args,cfg_container: dict, periods: int, vf_ngrid: int) -> dict:
     """
     Patch config with solution method and MPI compute settings.
 
@@ -133,10 +133,10 @@ def patch_cfg(cfg_container: dict, periods: int, vf_ngrid: int) -> dict:
     cfg["stages"]["OWNC"]["stage"]["methods"]["solution"] = target
     cfg["stages"]["RNTC"]["stage"]["methods"]["solution"] = target
 
-    if sol == "VFI_HDGRID":
+    if sol == "VFI_HDGRID" and args.mpi:
         cfg["stages"]["OWNC"]["stage"]["methods"]["compute"] = "MPI"
         cfg["stages"]["RNTC"]["stage"]["methods"]["compute"] = "MPI"
-    elif sol == "VFI_HDGRID_GPU":
+    elif sol == "VFI_HDGRID_GPU" and args.gpu:
         cfg["stages"]["OWNC"]["stage"]["methods"]["compute"] = "GPU"
         cfg["stages"]["RNTC"]["stage"]["methods"]["compute"] = "GPU"
     else:
@@ -145,7 +145,7 @@ def patch_cfg(cfg_container: dict, periods: int, vf_ngrid: int) -> dict:
     return cfg
 
 
-def make_housing_model(cfg_container: dict, periods: int, vf_ngrid: int, comm=None):
+def make_housing_model(args, cfg_container: dict, periods: int, vf_ngrid: int, comm=None):
     """
     Patch the config, build a ModelCircuit, and compile its stages.
 
@@ -163,7 +163,7 @@ def make_housing_model(cfg_container: dict, periods: int, vf_ngrid: int, comm=No
         A fully initialized and compiled model circuit.
     """
     # 1. patch master + stage configs
-    cfg = patch_cfg(cfg_container, periods, vf_ngrid)
+    cfg = patch_cfg(args, cfg_container, periods, vf_ngrid)
 
     # 2. build ModelCircuit skeleton (no heavy maths yet)
     mc = initialize_model_Circuit(
@@ -242,6 +242,7 @@ def main(argv=None):
     p.add_argument("--precompile", action="store_true", help="Run a small VFI job to pre-compile Numba functions.")
     p.add_argument("--RUN-ID", default="")
     p.add_argument("--stages-L2dev", default="OWNC")
+    p.add_argument("--delta-pb", default="1")
     args = p.parse_args(argv or sys.argv[1:])
 
     #  MPI communicator
@@ -253,6 +254,7 @@ def main(argv=None):
 
     #  parse grid size
     vf_ngrid = int(float(args.vfi_ngrid))
+    pb_delta = float(args.delta_pb)
 
     #  method list
     methods = ALL_METHODS if args.ue_method.upper() == "ALL" \
@@ -273,8 +275,8 @@ def main(argv=None):
     if args.precompile and is_root:
         print("\n--- Running Numba Pre-compilation ---")
         
-        is_gpu_run = "VFI_HDGRID_GPU" in methods
-        precompile_method = "VFI_HDGRID_GPU" if is_gpu_run else "VFI_HDGRID"
+        #is_gpu_run = "VFI_HDGRID_GPU" in methods
+        #precompile_method = "VFI_HDGRID_GPU" if is_gpu_run else "VFI_HDGRID"
         
         # --- Create a minimal config for the pre-compilation run ---
         precompile_cfg = copy.deepcopy(cfg_container)
@@ -282,7 +284,7 @@ def main(argv=None):
         precompile_cfg['master']['settings']['w_points'] = 100
         precompile_cfg['master']['settings']['a_nxt_points'] = 100
         
-        precompile_params = np.array([precompile_method, 100, 100, 100], dtype=object)
+        precompile_params = np.array([BASE, 100, 100, 100,pb_delta ], dtype=object)
 
         precompile_runner = CircuitRunner(
             base_cfg=precompile_cfg, # Use the minimal config
@@ -291,8 +293,9 @@ def main(argv=None):
                 "master.settings.a_points",
                 "master.settings.a_nxt_points",
                 "master.settings.w_points",
+                "master.parameters.delta_pb",
             ],
-            model_factory=lambda cfg: make_housing_model(cfg, 2, 100, comm),
+            model_factory=lambda cfg: make_housing_model(args,cfg, 2, 100, comm),
             solver=make_housing_solver(argparse.Namespace(verbose=False, periods=2), use_mpi=args.mpi, comm=comm),
             metric_fns={},
             save_by_default=False,
@@ -317,8 +320,9 @@ def main(argv=None):
             "master.settings.a_points",
             "master.settings.a_nxt_points",
             "master.settings.w_points",
+            "master.parameters.delta_pb",
         ],
-        model_factory=lambda cfg: make_housing_model(cfg, args.periods, vf_ngrid, comm),
+        model_factory=lambda cfg: make_housing_model(args,cfg, args.periods, vf_ngrid, comm),
         solver=make_housing_solver(args, args.mpi, comm),
         metric_fns={
             "euler_error": euler_error_metric,
@@ -346,7 +350,7 @@ def main(argv=None):
         if is_root:  # print from root only
             print(f"\n» Baseline ({BASE}):", "recompute" if args.recompute_baseline else "load/solve-if-missing")
 
-        ref_params = np.array([BASE, HD_POINTS, HD_POINTS, HD_POINTS], dtype=object)
+        ref_params = np.array([BASE, HD_POINTS, HD_POINTS, HD_POINTS,pb_delta], dtype=object)
         runner.ref_params = ref_params
         all_param_vectors.append(ref_params)  # Add to design matrix
         
@@ -389,7 +393,7 @@ def main(argv=None):
         }
         # Ensure ref_params is defined, even if baseline wasn't run
         if 'ref_params' not in locals():
-             ref_params = np.array([BASE, HD_POINTS, HD_POINTS, HD_POINTS], dtype=object)
+             ref_params = np.array([BASE, HD_POINTS, HD_POINTS, HD_POINTS,pb_delta], dtype=object)
         runner.ref_params = ref_params
 
         if is_root:  # print from root only
@@ -399,7 +403,7 @@ def main(argv=None):
             if is_root:
                 print(f"  Solving {method}...")
             
-            params = np.array([method, STD_POINTS, STD_POINTS, STD_POINTS], dtype=object)
+            params = np.array([method, STD_POINTS, STD_POINTS, STD_POINTS, pb_delta], dtype=object)
             all_param_vectors.append(params)  # Add to design matrix
             
             metrics, model = runner.run(params, return_model=is_root, rank=solver_rank)

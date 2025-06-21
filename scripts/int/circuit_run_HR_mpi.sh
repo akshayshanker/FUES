@@ -6,7 +6,6 @@ source ../lib/job_configs.sh
 # --- Define the Sequence of Configurations to Run ---
 CONFIG_TO_RUN=(
     "STD_RES_SETTINGS"
-    "HIGH_RES_SETTINGS_TEST"
     # "DEBUG_SETTINGS"
 )
 
@@ -45,7 +44,6 @@ export OMPI_MCA_coll_ml_priority=0
 export OMPI_MCA_coll_hcoll_enable=0
 
 # Numba settings for MPI safety
-export NUMBA_DISABLE_CACHE=1        # Disable caching to avoid MPI conflicts
 export NUMBA_CACHE_DIR=/tmp/numba_cache_$$  # Use process-specific cache dir
 export NUMBA_NUM_THREADS=1          # Prevent thread conflicts
 
@@ -76,18 +74,17 @@ for CONFIG_NAME in "${CONFIG_TO_RUN[@]}"; do
 
     mpiexec -np 45 python3 -m examples.housing_renting.solve_runner \
       --periods "${CONFIG_REF[periods]}" \
-      --ue-method ALL \
+      --ue-method "VFI_HDGRID,FUES" \
       --output-root "$OUTPUT_DIR" \
       --bundle-prefix "${VERSION_TAG}" \
       --RUN-ID "${VERSION_TAG}_${TIMESTAMP}" \
       --vfi-ngrid "${CONFIG_REF[vfi_ngrid]}" \
       --HD-points "${CONFIG_REF[hd_points]}" \
       --grid-points "${CONFIG_REF[grid_points]}" \
-      --precompile \
       --recompute-baseline \
       --fresh-fast \
+      --delta-pb "${CONFIG_REF[delta_pb]}" \
       --mpi \
-      --plots \
       2> >(tee "${LOG_DIR}/run.err") \
       1> >(tee "${LOG_DIR}/run.log")
 

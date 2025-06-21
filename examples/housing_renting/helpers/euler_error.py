@@ -1,9 +1,160 @@
-
 import numpy as np
-from numba import njit
+from numba import njit, cuda
 
-# Import the shared utility builder and interpolation functions
-from dc_smm.models.housing_renting.horses_common import build_njit_utility, interp_as
+# Import the shared interpolation and NEW static GPU utility functions
+from dc_smm.models.housing_renting.horses_common import (
+    interp_as, interp_gpu, uc_owner_gpu, uc_renter_gpu, inv_uc_owner_gpu
+)
+
+@cuda.jit
+def _calculate_euler_error_cuda_kernel(
+    z_vals, H_grid, w_dcsn_now, c_now, tenure_pol, H_pol, S_pol,
+    c_owner_n, c_renter_n, tenure_a_grid, owner_a_grid, renter_a_grid,
+    H_nxt_grid, S_grid, w_dcsn_o, w_dcsn_r, Pi, beta, R, Pr, tau_phi, tau_phi_R,
+    theta, iota, kappa, rho, # Pass parameters directly
+    output_logs
+):
+    """
+    CUDA kernel to calculate Euler errors in parallel on the GPU.
+    """
+    iw, ih, iy = cuda.grid(3)
+    w_stride, h_stride, y_stride = cuda.gridsize(3)
+    
+    for i_w_loop in range(iw, w_dcsn_now.shape[0], w_stride):
+        for i_h_loop in range(ih, H_grid.shape[0], h_stride):
+            for i_y_loop in range(iy, z_vals.shape[0], y_stride):
+
+                w_now, H_now = w_dcsn_now[i_w_loop], H_grid[i_h_loop]
+                c0 = c_now[i_w_loop, i_h_loop, i_y_loop]
+                if c0 <= 1e-12: 
+                    continue
+                a_next = w_now - c0
+                if a_next <= 0.1: 
+                    continue
+
+                E_lam = 0.0
+                for jy, y_next in enumerate(z_vals):
+                    # Use proper GPU interpolation function instead of manual loops
+                    tenure_val = interp_gpu(a_next, tenure_a_grid, tenure_pol[:, i_h_loop, jy])
+                    τ = int(tenure_val)
+
+                    if τ == 1: # Owner
+                        # Use proper GPU interpolation
+                        h_idx_val = interp_gpu(a_next, owner_a_grid, H_pol[:, i_h_loop, jy])
+                        H1 = H_nxt_grid[int(h_idx_val)]
+                        w_dcsn_vals = (R * a_next + y_next - H1 + H_now - (tau_phi*H1 if H1 != H_now else 0.0))
+                        
+                        # Use proper GPU interpolation for consumption
+                        c1 = interp_gpu(w_dcsn_vals, w_dcsn_o, c_owner_n[:, int(h_idx_val), jy])
+                        lam_next = uc_owner_gpu(c1, H1, theta, iota, kappa, rho)
+                        
+                    else: # Renter
+                        # Use proper GPU interpolation
+                        s_idx_val = interp_gpu(R * a_next + y_next, renter_a_grid, S_pol[:, jy])
+                        S1 = S_grid[int(s_idx_val)]
+                        # FIXED: corrected sign error and re-added renter transaction cost
+                        w_dcsn_vals = (R * a_next + y_next + H_now - Pr * S1 - tau_phi_R)
+                        
+                        # Use proper GPU interpolation for consumption
+                        c1 = interp_gpu(w_dcsn_vals, w_dcsn_r, c_renter_n[:, int(s_idx_val), jy])
+                        lam_next = uc_renter_gpu(c1, S1, theta, rho)
+
+                    E_lam += Pi[i_y_loop, jy] * lam_next
+                
+                c_star = inv_uc_owner_gpu(beta * R * E_lam, H_now, theta, iota, kappa, rho)
+                output_logs[i_w_loop, i_h_loop, i_y_loop] = cuda.libdevice.log10(abs((c_star - c0) / c0) + 1e-16)
+
+def calculate_euler_error_gpu(model):
+    """
+    GPU orchestrator. Extracts data, moves it to the GPU, runs the kernel, and returns the result.
+    """
+    p0, p1 = model.get_period(0), model.get_period(1)
+    ownc_now = p0.get_stage("OWNC")
+    ownc, tenu, ownh, rnth, rntc = (p1.get_stage("OWNC"), p1.get_stage("TENU"), p1.get_stage("OWNH"),
+                                  p1.get_stage("RNTH"), p1.get_stage("RNTC"))
+
+    data = {
+        'z_vals': tenu.dcsn_to_arvl.model.num.shocks.income_shock.process.values, 
+        'H_grid': ownc.dcsn.grid.H_nxt,
+        'w_dcsn_now': ownc_now.dcsn.grid.w, 
+        'c_now': ownc_now.dcsn.sol.policy["c"],
+        'tenure_pol': tenu.dcsn.sol.policy["tenure"], 
+        'H_pol': ownh.dcsn.sol.policy["H"],
+        'S_pol': rnth.dcsn.sol.policy["S"], 
+        'c_owner_n': ownc.dcsn.sol.policy["c"],
+        'c_renter_n': rntc.dcsn.sol.policy["c"], 
+        'tenure_a_grid': tenu.dcsn.grid.a,
+        'owner_a_grid': ownh.dcsn.grid.a, 
+        'renter_a_grid': rnth.dcsn.grid.w,
+        'H_nxt_grid': ownh.cntn.grid.H_nxt, 
+        'S_grid': rnth.cntn.grid.S,
+        'w_dcsn_o': ownc.dcsn.grid.w, 
+        'w_dcsn_r': rntc.dcsn.grid.w,
+        'Pi': tenu.dcsn_to_arvl.model.num.shocks.income_shock.transition_matrix
+    }
+    par = ownc.model.param
+    data.update({
+        'beta': par.beta, 
+        'R': 1 + par.r, 
+        'Pr': rnth.model.param.Pr,
+        'tau_phi': par.phi, 
+        'tau_phi_R': getattr(par, "phi_R", 0.0),
+        'theta': par.theta, 
+        'iota': par.iota, 
+        'kappa': par.kappa, 
+        'rho': par.rho
+    })
+
+    # Convert numpy arrays to GPU arrays
+    gpu_data = {}
+    for key, val in data.items():
+        if isinstance(val, np.ndarray):
+            gpu_data[key] = cuda.to_device(val)
+        else:
+            gpu_data[key] = val
+    
+    output_logs_gpu = cuda.device_array_like(data['c_now'])
+    output_logs_gpu.copy_to_device(np.full_like(data['c_now'], np.nan))
+    
+    threads_per_block = (8, 8, 4)
+    blocks_per_grid_x = (data['w_dcsn_now'].shape[0] + threads_per_block[0] - 1) // threads_per_block[0]
+    blocks_per_grid_y = (data['H_grid'].shape[0] + threads_per_block[1] - 1) // threads_per_block[1]
+    blocks_per_grid_z = (data['z_vals'].shape[0] + threads_per_block[2] - 1) // threads_per_block[2]
+    blocks_per_grid = (blocks_per_grid_x, blocks_per_grid_y, blocks_per_grid_z)
+    
+    # Call the kernel with all required arguments
+    _calculate_euler_error_cuda_kernel[blocks_per_grid, threads_per_block](
+        gpu_data['z_vals'],
+        gpu_data['H_grid'],
+        gpu_data['w_dcsn_now'],
+        gpu_data['c_now'],
+        gpu_data['tenure_pol'],
+        gpu_data['H_pol'],
+        gpu_data['S_pol'],
+        gpu_data['c_owner_n'],
+        gpu_data['c_renter_n'],
+        gpu_data['tenure_a_grid'],
+        gpu_data['owner_a_grid'],
+        gpu_data['renter_a_grid'],
+        gpu_data['H_nxt_grid'],
+        gpu_data['S_grid'],
+        gpu_data['w_dcsn_o'],
+        gpu_data['w_dcsn_r'],
+        gpu_data['Pi'],
+        gpu_data['beta'],
+        gpu_data['R'],
+        gpu_data['Pr'],
+        gpu_data['tau_phi'],
+        gpu_data['tau_phi_R'],
+        gpu_data['theta'],
+        gpu_data['iota'],
+        gpu_data['kappa'],
+        gpu_data['rho'],
+        output_logs_gpu
+    )
+    
+    logs_array = output_logs_gpu.copy_to_host()
+    return float(np.nanmean(logs_array)) if not np.all(np.isnan(logs_array)) else np.nan
 
 @njit
 def _calculate_euler_error_jit(
@@ -13,7 +164,7 @@ def _calculate_euler_error_jit(
     uc_owner, uc_rent, uc_inv
 ):
     """
-    This is the core numerical kernel, compiled with Numba for high performance.
+    This is the core numerical kernel, compiled with Numba for high performance (CPU fallback).
     """
     logs = []
 
@@ -40,7 +191,7 @@ def _calculate_euler_error_jit(
                         h_idx = int(h_idx_arr[0])
                         H1 = H_nxt_grid[h_idx]
 
-                        w_dcsn_vals = (R * a_next + y_next - H1 + H_now - (tau_phi if H1 != H_now else 0.0))
+                        w_dcsn_vals = (R * a_next + y_next - H1 + H_now - (tau_phi*H1 if H1 != H_now else 0.0))
                         c1_arr = interp_as(w_dcsn_o, c_owner_n[:, h_idx, jy], np.array([w_dcsn_vals]))
                         c1 = c1_arr[0]
                         # Call the jitted utility function
@@ -51,7 +202,7 @@ def _calculate_euler_error_jit(
                         s_idx = int(s_idx_arr[0])
                         S1 = S_grid[s_idx]
 
-                        w_dcsn_vals = (R * a_next + y_next + H_now + Pr * S1 - tau_phi_R)
+                        w_dcsn_vals = (R * a_next + y_next + H_now - Pr * S1)
                         c1_arr = interp_as(w_dcsn_r, c_renter_n[:, s_idx, jy], np.array([w_dcsn_vals]))
                         c1 = c1_arr[0]
                         # Call the jitted utility function
@@ -60,16 +211,17 @@ def _calculate_euler_error_jit(
                     E_lam += Pi[iy, jy] * lam_next
                 
                 # Call the jitted inverse utility function
-                c_star = uc_inv(E_lam, H_now)
+                c_star = uc_inv(beta*R*E_lam, H_now)
                 logs.append(np.log10(abs((c_star - c0) / c0) + 1e-16))
 
     return np.array(logs)
 
-def calculate_euler_error(model):
+def calculate_euler_error_cpu(model):
     """
-    Euler-error orchestrator.
-    This function extracts data from the model and calls the fast JIT-compiled kernel.
+    CPU-based Euler error calculation using the original approach.
     """
+    from dc_smm.models.housing_renting.horses_common import build_njit_utility
+    
     p0, p1 = model.get_period(0), model.get_period(1)
     
     ownc_now = p0.get_stage("OWNC")
@@ -89,24 +241,22 @@ def calculate_euler_error(model):
     
     # ------------- primitives --------------------------------------------
     par = ownc.model.param
+    par_dict_for_njit_builder = {"alpha": par.alpha, "kappa": par.kappa, "iota": par.iota}
     beta, r, Pr, tau_phi = par.beta, par.r, rnth.model.param.Pr, par.phi
     tau_phi_R, R = getattr(par, "phi_R", 0.0), 1 + r
 
-    # --- CORRECTED CODE: Build JIT-compatible functions from the model config ---
-    # Instead of passing the methods directly, we find their string expressions
-    # and parameters in the model config and compile them into new, JIT-safe functions.
-    
+    # --- Build JIT-compatible functions from the model config ---
     # 1. Owner's marginal utility
-    uc_owner_expr = ownc.model.stage.math.functions.owner_marginal_utility.expr
-    uc_owner = build_njit_utility(uc_owner_expr, par, h_placeholder="H_nxt")
+    uc_owner_expr = ownc.model.math["functions"]["owner_marginal_utility"]["expr"]
+    uc_owner = build_njit_utility(uc_owner_expr, par_dict_for_njit_builder, arg1_name="c", arg2_name="H_nxt")
 
-    # 2. Renter's marginal utility (assuming it has a similar structure)
-    uc_rent_expr = rntc.model.stage.math.functions.uc_func.expr
-    uc_rent = build_njit_utility(uc_rent_expr, par, h_placeholder="H_nxt")
+    # 2. Renter's marginal utility
+    uc_rent_expr = ownc.model.math["functions"]["uc_func"]["expr"]
+    uc_rent = build_njit_utility(uc_rent_expr, par_dict_for_njit_builder, arg1_name="c", arg2_name="H_nxt")
 
     # 3. Inverse marginal utility
-    uc_inv_expr = ownc.model.stage.math.functions.inv_marginal_utility.expr
-    uc_inv = build_njit_utility(uc_inv_expr, par, h_placeholder="H_nxt")
+    uc_inv_expr = ownc.model.math["functions"]["inv_marginal_utility"]["expr"]
+    uc_inv = build_njit_utility(uc_inv_expr, par_dict_for_njit_builder, arg1_name="lambda_e", arg2_name="H_nxt")
     
     # Call the JIT-compiled kernel with the newly compiled functions
     logs_array = _calculate_euler_error_jit(
@@ -118,6 +268,18 @@ def calculate_euler_error(model):
 
     return float(np.mean(logs_array)) if logs_array.size > 0 else np.nan
 
-def euler_error_metric(model):
-    """Metric wrapper for the Euler error calculation."""
-    return calculate_euler_error(model)
+def euler_error_metric(model, use_gpu=True):
+    """
+    Metric wrapper. Set use_gpu=False to use the CPU version.
+    """
+    if use_gpu and cuda.is_available():
+        try:
+            return calculate_euler_error_gpu(model)
+        except Exception as e:
+            print(f"Warning: GPU Euler error calculation failed: {e}")
+            print("Falling back to CPU implementation...")
+            return calculate_euler_error_cpu(model)
+    else:
+        if use_gpu: 
+            print("Warning: GPU not available, falling back to CPU for Euler error.")
+        return calculate_euler_error_cpu(model)

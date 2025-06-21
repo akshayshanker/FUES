@@ -596,6 +596,8 @@ def build_njit_utility(
     expr: str,
     params: Dict[str, float],
     h_placeholder: str = "H_nxt",
+    arg1_name: str = "c",
+    arg2_name: str = "H",
 ) -> Callable[[float, float], float]:
     """
     Compile a two-argument utility u(c, H) that is Numba nopython.
@@ -608,6 +610,10 @@ def build_njit_utility(
         Literal parameter values referenced in *expr* (alpha, kappa, …).
     h_placeholder : str, optional
         Token for housing inside *expr* (default "H_nxt").
+    arg1_name : str, optional
+        The name for the first argument of the compiled function (default "c").
+    arg2_name : str, optional
+        The name for the second argument of the compiled function (default "H").
 
     Returns
     -------
@@ -615,12 +621,11 @@ def build_njit_utility(
         nopython-compiled function u(c, H) → float
     """
 
-    # 1.  replace the placeholder with a run-time variable name 'H'
-    #patched = expr.replace(h_placeholder, "H")
-    patched = expr.replace(h_placeholder, "H")
+    # 1.  replace the placeholder with the specified run-time variable name
+    patched = expr.replace(h_placeholder, arg2_name)
 
-    # 2.  build source code for a pure Python function
-    func_src = "def _u(c, H):\n    return " + patched
+    # 2.  build source code for a pure Python function with dynamic arg names
+    func_src = f"def _u({arg1_name}, {arg2_name}):\n    return " + patched
 
     # 3.  execute in a tiny namespace containing numpy and constants
     ns = {"np": np, **params}
@@ -714,3 +719,32 @@ def bellman_obj_gpu(a_prime, w, H, beta, delta, a_grid, V_next,
     util = u_func_gpu_log(c, H, alpha, kappa, iota)
     
     return util + beta * delta * v_interp
+
+# --- NEW FUNCTIONS FOR EULER ERROR CALCULATION ---
+
+@cuda.jit(device=True)
+def uc_owner_gpu(c, H, theta, iota, kappa, rho):
+    """
+    GPU device function for the owner's marginal utility.
+    """
+    if c <= 0: 
+        return 1e12
+    return theta * c**(-rho) * (H**kappa * iota)**(1.0 - rho)
+
+@cuda.jit(device=True)
+def uc_renter_gpu(c, H, theta, rho):
+    """
+    GPU device function for the renter's marginal utility (H represents S).
+    """
+    if c <= 0: 
+        return 1e12
+    return theta * c**(-rho) * H**(1.0 - rho)
+    
+@cuda.jit(device=True)
+def inv_uc_owner_gpu(lambda_e, H, theta, iota, kappa, rho):
+    """
+    GPU device function for the owner's inverse marginal utility.
+    """
+    if lambda_e <= 0: 
+        return 1e-12
+    return (lambda_e / (theta * (H**kappa * iota)**(1.0-rho)))**(-1.0/rho)

@@ -472,6 +472,7 @@ def _solve_vfi_loop(vlu_cntn, model, use_mpi=False, comm=None):
     """
     # For VFI_HDGRID with MPI, use the optimized memory-slim version
     if model.methods["solution"] == "VFI_HDGRID" and use_mpi and comm and comm.size > 1:
+        print("Solving VFI_HDGRID with MPI")
         policy_c, policy_a, Q_dcsn, V_cntn, lambda_cntn = solve_vfi_grid_mpi(
             vlu_cntn, model, comm, use_mpi
         )

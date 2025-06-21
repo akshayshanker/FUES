@@ -143,18 +143,30 @@ def solve_stage(stage, max_iter=None, tol=None, verbose=False, use_mpi=False, co
     # Get MPI parameters from stage if they were attached previously
     use_mpi = getattr(stage, '_use_mpi', use_mpi)
     comm = getattr(stage, '_comm', comm)
-    
-    # Determine if this stage uses a parallel compute method (MPI or GPU)
-    compute_method = stage.model.methods.get("compute", "SINGLE")
-    is_parallel_stage = compute_method in ("MPI", "GPU")
 
-    # Early exit for workers on non-parallel stages
-    if use_mpi and comm and comm.rank != 0 and not is_parallel_stage:
+    # Early-exit on workers **only when the stage is NOT an MPI stage**
+    # Get MPI parameters from stage if not provided
+    if use_mpi is False and hasattr(stage, '_use_mpi'):
+        use_mpi = stage._use_mpi
+    if comm is None and hasattr(stage, '_comm'):
+        comm = stage._comm
+    
+    # -------------------------------------------------------------
+    # 0.  Check if this is an MPI stage (workers exit early for non-MPI stages)
+    # -------------------------------------------------------------
+    needs_mpi = stage.model.methods.get("compute", "MPI") == "MPI"
+
+    # Early-exit on workers **only when the stage is NOT an MPI stage**
+    if use_mpi and comm is not None and not needs_mpi and comm.rank != 0:
         return stage, {
-            "stage_name": stage.name, "total_time": 0.0,
-            "cntn_to_dcsn_time": 0.0, "dcsn_to_arvl_time": 0.0,
-            "ue_time": 0.0, "is_terminal": stage.status_flags.get("is_terminal", False)
+            "stage_name": stage.name,
+            "total_time": 0.0,
+            "cntn_to_dcsn_time": 0.0,
+            "dcsn_to_arvl_time": 0.0,
+            "ue_time": 0.0,
+            "is_terminal": stage.status_flags.get("is_terminal", False),
         }
+    
     
     if verbose and (not use_mpi or comm is None or comm.rank == 0):
         print(f"Solving stage: {stage.name}")
