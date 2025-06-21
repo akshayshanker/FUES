@@ -96,7 +96,7 @@ settings:
   rfc_radius: 0.75
   rfc_n_iter: 20
   n_constraint_points: 100
-  n_constraint_points_nxt: 0
+  n_constraint_points_nxt: 100
   N_arg_grid_vfi: 500   # Number of grid points for VFI_GRID
 
 ###################

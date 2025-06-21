@@ -85,6 +85,7 @@ for CONFIG_NAME in "${CONFIG_TO_RUN[@]}"; do
       --fresh-fast \
       --delta-pb "${CONFIG_REF[delta_pb]}" \
       --mpi \
+      --plots \
       2> >(tee "${LOG_DIR}/run.err") \
       1> >(tee "${LOG_DIR}/run.log")
 
