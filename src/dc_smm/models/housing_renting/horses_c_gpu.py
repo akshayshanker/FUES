@@ -84,12 +84,12 @@ def _calculate_continuation_values_cpu(
     for h in prange(n_H):
         for y in range(n_Y):
             H_val = H_grid[h] * thorn
-            c_prime = piecewise_gradient(policy_c[:, h, y], w_grid, m_bar)
+            #c_prime = piecewise_gradient(policy_c[:, h, y], w_grid, m_bar)
             for iw in range(n_W):
                 c_now = policy_c[iw, h, y]
                 uc_now = 1.0 / c_now
                 V_cntn[iw, h, y] = (Q_dcsn[iw, h, y] - (1 - delta) * u_func_cpu(c_now, H_val)) / delta
-                lambda_cntn[iw, h, y] = (uc_now - (1 - delta) * c_prime[iw] * uc_now) / delta
+                #lambda_cntn[iw, h, y] = (uc_now - (1 - delta) * c_prime[iw] * uc_now) / delta
 
 # ======================================================================
 #  Host-Side GPU Launcher
@@ -158,8 +158,10 @@ def solve_vfi_gpu(vlu_cntn, model):
     )
 
     # --- 4. Copy Results Back to CPU ---
+    # TODO: CLEANLY REMOVE lambda_cntn ETC.
     policy_c = d_policy_c.copy_to_host()
-    policy_a = d_policy_a.copy_to_host()
+    #policy_a = d_policy_a.copy_to_host()
+    policy_a = np.empty_like(d_policy_c)
     Q_dcsn = d_Q_dcsn.copy_to_host()
 
     # --- 5. CPU-side Calculation for Continuation Values ---

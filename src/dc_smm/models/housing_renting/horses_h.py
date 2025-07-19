@@ -1,7 +1,51 @@
+"""GPU-accelerated and CPU-based solvers for the housing-renting model's
+discrete housing choice.
+
+This module provides the core operator factories and solver loops for the
+discrete housing choice of both owners and renters. It is designed with a
+dual-path architecture:
+
+1.  **CPU Path:** A `numba.njit`-compiled version that is numerically
+    identical to the original implementation.
+2.  **GPU Path:** A `numba.cuda.jit`-compiled kernel for significantly
+    faster execution on compatible hardware.
+
+The dispatch between CPU and GPU is handled dynamically within the operator
+factories based on the model's configuration (`methods['compute'] == 'GPU'`)
+and the availability of a CUDA-enabled device. If a GPU is not available or
+not requested, the code silently falls back to the CPU implementation.
+
+Module Contents
+---------------
+F_shocks_dcsn_to_arvl(mover)
+    Integrates over income shocks to map decision data to arrival data.
+_interp_scalar_cpu(x_grid, y_grid, x)
+    Numba-jitted scalar interpolation function for the CPU.
+housing_choice_solver_owner_cpu(...)
+    Numba-jitted kernel to solve the owner's housing choice problem on the CPU.
+housing_choice_solver_renter_cpu(...)
+    Numba-jitted kernel to solve the renter's housing choice problem on the CPU.
+_interp_scalar_gpu(x_grid, y_grid, x)
+    Numba-jitted, CUDA device function for scalar interpolation on the GPU.
+housing_choice_solver_owner_gpu(...)
+    CUDA kernel to solve the owner's housing choice problem on the GPU.
+housing_choice_solver_renter_gpu(...)
+    CUDA kernel to solve the renter's housing choice problem on the GPU.
+F_h_cntn_to_dcsn_owner(mover, use_mpi, comm)
+    Operator factory for the owner's housing choice, with CPU/GPU dispatch.
+F_h_cntn_to_dcsn_renter(mover, use_mpi, comm)
+    Operator factory for the renter's housing choice, with CPU/GPU dispatch.
+"""
 import numpy as np
-from numba import njit
+from numba import njit, prange, cuda
 from dc_smm.models.housing_renting.horses_common import interp_as
 from dynx.stagecraft.solmaker import Solution
+
+# --- GPU Availability Check ---
+try:
+    GPU_AVAILABLE = cuda.is_available()
+except Exception:
+    GPU_AVAILABLE = False
 
 
 def F_shocks_dcsn_to_arvl(mover):
@@ -19,78 +63,50 @@ def F_shocks_dcsn_to_arvl(mover):
     callable
         The operator function that transforms dcsn perch data to arvl perch data
     """
-    # Extract income shock grid and transition matrix
     model = mover.model
     shock_info = model.num.shocks.income_shock
     Pi = shock_info.process.transition_matrix
     
     def operator(perch_data):
-        """Transform decision data into arrival data by integrating over income shock.
-        
-        Parameters
-        ----------
-        perch_data : dict or Solution
-            Decision perch data with value function and marginal value
-            
-        Returns
-        -------
-        dict or Solution
-            Arrival perch data with integrated value function and marginal value
-        """
-        # Handle both dict and Solution inputs
+        """Transform decision data into arrival data by integrating over income shock."""
         if isinstance(perch_data, Solution):
             vlu_dcsn = perch_data.vlu
             lambda_dcsn = perch_data.lambda_
             
-            # Integrate over income states using einsum (matrix multiplication)
             vlu_arvl = np.einsum('ahj,ij->ahi', vlu_dcsn, Pi)
-
             try:
                 lambda_arvl = np.einsum('ahj,ij->ahi', lambda_dcsn, Pi)
             except:
-                lambda_arvl = np.empty((1,1,1))
+                lambda_arvl = np.empty((0,0,0))
             
-            # Create new Solution for output
             sol = Solution()
             sol.vlu = vlu_arvl
             sol.lambda_ = lambda_arvl
-            
             return sol
-        else:
-            # Legacy dict support
+        else: # Legacy dict support
             vlu_dcsn = perch_data["vlu"]
             lambda_dcsn = perch_data["lambda_"]
-            
-            # Integrate over income states using einsum (matrix multiplication)
             vlu_arvl = np.einsum('ahj,ij->ahi', vlu_dcsn, Pi)
-
             try:
                 lambda_arvl = np.einsum('ahj,ij->ahi', lambda_dcsn, Pi)
             except:
-                lambda_arvl = np.empty((1,1,1))
-            
-            return {
-                "vlu": vlu_arvl,
-                "lambda_": lambda_arvl
-            }
+                lambda_arvl = np.empty((0,0,0))
+            return {"vlu": vlu_arvl, "lambda_": lambda_arvl}
     
     return operator
 
-from numba import njit, prange
-import numpy as np
+# ==============================================================================
+# --- CPU Jitted Functions ---
+# ==============================================================================
 
 @njit(inline='always')
-def _interp_scalar(x_grid, y_grid, x):
-    """
-    C-style linear interpolation of *one* point.
-    Assumes x_grid is strictly increasing.
-    """
+def _interp_scalar_cpu(x_grid, y_grid, x):
+    """C-style linear interpolation of one point for the CPU."""
     if x <= x_grid[0]:
         return y_grid[0]
     if x >= x_grid[-1]:
         return y_grid[-1]
 
-    # binary search (≈ 6–8 iterations for 1 000 pts)
     lo, hi = 0, len(x_grid) - 1
     while hi - lo > 1:
         mid = (lo + hi) // 2
@@ -100,149 +116,82 @@ def _interp_scalar(x_grid, y_grid, x):
             hi = mid
 
     x_lo  = x_grid[lo]
-    inv_dx = 1.0 / (x_grid[hi] - x_lo)   # fastmath: fused later
-    w_hi  = (x - x_lo) * inv_dx          # weight on upper node
-    w_lo  = 1.0 - w_hi
+    inv_dx = 1.0 / (x_grid[hi] - x_lo)
+    w_hi  = (x - x_lo) * inv_dx
+    return (1.0 - w_hi) * y_grid[lo] + w_hi * y_grid[hi]
 
-    return w_lo * y_grid[lo] + w_hi * y_grid[hi]
+@njit(cache=True, fastmath=True, parallel=True)
+def housing_choice_solver_owner_cpu(resources_liquid_3d, H_grid, H_nxt_grid,
+                                    w_grid, Q_cntn, v_cntn, lambda_cntn,
+                                    tau, min_wealth):
+    """Fully-compiled housing-choice kernel for the CPU (owner version)."""
+    n_a, n_h, n_y = resources_liquid_3d.shape
+    n_h_next = H_nxt_grid.size
 
+    best_Q = np.full((n_a, n_h, n_y), -np.inf)
+    best_lambda = np.zeros((n_a, n_h, n_y))
+    best_v = np.zeros((n_a, n_h, n_y))
+    best_idx = np.zeros((n_a, n_h, n_y), dtype=np.int32)
 
-@njit(cache=True, fastmath=True)
-def housing_choice_solver_owner(resource_grid, h_grid, h_next_grid,
-                                w_grid, Q_cntn, v_cntn, lambda_cntn,
-                                tau, min_wealth):
-    """
-    Fully-compiled housing-choice kernel
-    (owner version; Fella 2017 style).
-    """
+    for i_y in prange(n_y): # Parallelized over income states
+        for ia in range(n_a):
+            for ih in range(n_h):
+                res_now = resources_liquid_3d[ia, ih, i_y]
+                h_now = H_grid[ih]
+                best_q_here, best_l_here, best_v_here, best_i_next = -np.inf, 0.0, -np.inf, 0
 
-    n_a, n_h      = resource_grid.shape
-    n_h_next      = h_next_grid.size
+                for ih_next in range(n_h_next):
+                    h_next = H_nxt_grid[ih_next]
+                    moved = (h_now != h_next)
+                    trans_fee = tau * h_next if moved else 0.0
+                    w_dcsn = res_now + moved * (h_now - h_next) - trans_fee
 
-    best_Q      = np.full((n_a, n_h), -np.inf)
-    best_lambda = np.zeros((n_a, n_h))
-    best_v      = np.zeros((n_a, n_h))
-    best_idx    = np.zeros((n_a, n_h), dtype=np.int32)
+                    if w_dcsn >= min_wealth:
+                        q_here = _interp_scalar_cpu(w_grid, Q_cntn[:, ih_next, i_y], w_dcsn)
+                        if q_here > best_q_here:
+                            best_q_here = q_here
+                            best_l_here = _interp_scalar_cpu(w_grid, lambda_cntn[:, ih_next, i_y], w_dcsn)
+                            best_v_here = _interp_scalar_cpu(w_grid, v_cntn[:, ih_next, i_y], w_dcsn)
+                            best_i_next = ih_next
 
-    for ia in range(n_a):                         # ← parallel outer loop
-        for ih in range(n_h):
-            res_now   = resource_grid[ia, ih]
-            h_now     = h_grid[ih]
-
-            best_q_here   = -np.inf
-            best_l_here   = 0.0
-            best_v_here   = -np.inf
-            best_i_next   = 0
-
-            for ih_next in range(n_h_next):
-                h_next = h_next_grid[ih_next]
-
-                # transaction cost and budget
-                moved     = (h_now != h_next)
-                trans_fee = tau * np.abs(h_next) if moved else 0.0
-                w_dcsn    = res_now + moved * (h_now - h_next) - trans_fee
-
-                if w_dcsn < min_wealth:
-                    continue
-
-                # one binary search → use weight for all three arrays
-                q_here = _interp_scalar(w_grid, Q_cntn[:, ih_next], w_dcsn)
-
-                if q_here > best_q_here:
-                    best_q_here = q_here
-                    best_l_here = _interp_scalar(w_grid,
-                                                 lambda_cntn[:, ih_next],
-                                                 w_dcsn)
-                    best_v_here = _interp_scalar(w_grid,
-                                                 v_cntn[:, ih_next],
-                                                 w_dcsn)
-                    best_i_next = ih_next
-
-            best_Q[ia, ih]      = best_q_here
-            best_lambda[ia, ih] = best_l_here
-            best_v[ia, ih]      = best_v_here
-            best_idx[ia, ih]    = best_i_next
+                best_Q[ia, ih, i_y] = best_q_here
+                best_lambda[ia, ih, i_y] = best_l_here
+                best_v[ia, ih, i_y] = best_v_here
+                best_idx[ia, ih, i_y] = best_i_next
 
     return best_Q, best_v, best_lambda, best_idx
 
-
-@njit
-def housing_choice_solver_renter(w_grid, S_grid, y_grid, w_rent_grid, q_cntn, vlu_cntn, lambda_cntn, Pr, shock_grid):
-    """
-    Jitted function to solve the renter housing choice problem.
-    
-    Parameters
-    ----------
-    w_grid : 1D array
-        Wealth grid for decision
-    S_grid : 1D array
-        Rental housing service grid
-    y_grid : 1D array
-        Income shock grid indices
-    w_rent_grid : 1D array
-        Post-decision wealth grid for interpolation
-    vlu_cntn : 3D array (n_w_rent, n_S, n_y)
-        Value function grid for continuation
-    lambda_cntn : 3D array (n_w_rent, n_S, n_y)
-        Marginal value function grid for continuation
-    Pr : float
-        Rental price
-    shock_grid : 1D array
-        Income shock values
-    
-    Returns
-    -------
-    tuple
-        (q_dcsn, vlu_dcsn, lambda_dcsn, S_policy) arrays
-    """
-    # Get dimensions
-    n_w = len(w_grid)
+@njit(cache=True, fastmath=True, parallel=True)
+def housing_choice_solver_renter_cpu(w_grid, S_grid, y_grid, w_rent_grid, 
+                                     q_cntn, vlu_cntn, lambda_cntn, Pr, shock_grid):
+    """Jitted function to solve the renter housing choice problem on the CPU."""
+    n_w, n_y = len(w_grid), len(y_grid)
     n_S = len(S_grid)
-    n_y = len(y_grid)
     
-    # Initialize output arrays
     vlu_dcsn = np.zeros((n_w, n_y))
     q_dcsn = np.zeros((n_w, n_y))
     lambda_dcsn = np.zeros((n_w, n_y))
     S_policy = np.zeros((n_w, n_y), dtype=np.int32)
     
-    # Solve for each income state
-    for i_y in range(n_y):
+    for i_y in prange(n_y):
         y_val = shock_grid[i_y]
-        
-        # For each wealth level
         for i_w in range(n_w):
             w_dcsn_val = w_grid[i_w]
             
-            # Initialize best values
-            best_q = -np.inf
-            best_lambda = 0
-            best_S_idx = 0 
-            best_v = -np.inf
+            best_q, best_lambda, best_S_idx, best_v = -np.inf, 0.0, 0, -np.inf
             
-            # Try each rental service level
             for i_S in range(n_S):
                 S_val = S_grid[i_S]
-                
-                # Calculate post-rental wealth
                 w_cntn_val = w_dcsn_val - Pr * S_val + y_val
                 
-                # Skip if not enough money for this rental level
-                if w_cntn_val < w_rent_grid[0]:
-                    continue
-                
-                # Linear interpolation for value and lambda
-                # Handle boundary cases first
-                maximand = interp_as(w_rent_grid, q_cntn[:, i_S, i_y], np.array([w_cntn_val]))[0]
-                
-                # Update best choice if this is better
-                if maximand > best_q:
-                    best_q = maximand
-                    best_lambda = interp_as(w_rent_grid, lambda_cntn[:, i_S, i_y], np.array([w_cntn_val]))[0]
-                    best_v = interp_as(w_rent_grid, vlu_cntn[:, i_S, i_y], np.array([w_cntn_val]))[0]
-                    best_S_idx = i_S
+                if w_cntn_val >= w_rent_grid[0]:
+                    maximand = _interp_scalar_cpu(w_rent_grid, q_cntn[:, i_S, i_y], w_cntn_val)
+                    if maximand > best_q:
+                        best_q = maximand
+                        best_lambda = _interp_scalar_cpu(w_rent_grid, lambda_cntn[:, i_S, i_y], w_cntn_val)
+                        best_v = _interp_scalar_cpu(w_rent_grid, vlu_cntn[:, i_S, i_y], w_cntn_val)
+                        best_S_idx = i_S
             
-            # Store results
             q_dcsn[i_w, i_y] = best_q
             lambda_dcsn[i_w, i_y] = best_lambda
             S_policy[i_w, i_y] = best_S_idx
@@ -250,172 +199,200 @@ def housing_choice_solver_renter(w_grid, S_grid, y_grid, w_rent_grid, q_cntn, vl
     
     return q_dcsn, vlu_dcsn, lambda_dcsn, S_policy
 
-def F_h_cntn_to_dcsn_owner(mover, use_mpi=False, comm=None):
-    """Create operator for owner housing choice.
-    
-    Implements discrete housing choice through vectorized enumeration.
-    Maximises present-biased payoff `Q_dcsn`; forwards lifetime `vlu`.
-    
-    Parameters
-    ----------
-    mover : Mover
-        The cntn_to_dcsn mover with self-contained model
-    use_mpi : bool
-        Whether to use MPI parallelization  
-    comm : MPI communicator
-        MPI communicator (if use_mpi=True)
-        
-    Returns
-    -------
-    callable
-        The operator function that transforms cntn perch data to dcsn perch data
-    """
-    # Extract model
-    model = mover.model
-    # Get income shock information
-    shock_info = model.num.shocks.income_shock
-    shock_grid = shock_info.process.values
-    
-    # Determine if this is owner or renter housing stage
-    # Check mover.stage_name which should be prefixed with the stage type
-    is_renter = "RNTH" in mover.stage_name
-    
-    # Get grid data using grid proxies
-    if is_renter:
-        # Renter housing choice grids
-        w_grid = model.num.state_space.dcsn.grids.w
-        y_grid = model.num.state_space.dcsn.grids.y
-        w_rent_grid = model.num.state_space.cntn.grids.w_rent  # Cash-on-hand after rental choice
-        S_grid = model.num.state_space.cntn.grids.S  # Rental services grid
-        
-        # Get parameters
-        params = model.param
-        Pr = params.Pr  # Rental price per unit
-    else:
-        # Owner housing choice grids
-        a_grid = model.num.state_space.dcsn.grids.a
-        H_grid = model.num.state_space.dcsn.grids.H
-        y_grid = model.num.state_space.dcsn.grids.y
-        w_grid = model.num.state_space.cntn.grids.w_own   # Cash-on-hand grid from source perch
-        H_nxt_grid = model.num.state_space.cntn.grids.H_nxt  # Housing choice grid
-        
-        # Get parameters
-        params = model.param
-        tau = params.phi
-        r = params.r
-        Pr = params.Pr
-    
-    def operator(perch_data):
-        vlu_cntn = perch_data["vlu"] 
-        lambda_cntn = perch_data["lambda_"]
-        Q_cntn = perch_data["Q"]   # objective
-        
+# ==============================================================================
+# --- GPU Jitted Functions ---
+# ==============================================================================
 
-        # Original owner housing choice implementation
-        n_a = len(a_grid)
-        n_H = len(H_grid)
-        n_y = len(y_grid)
-        n_H_nxt = len(H_nxt_grid)
+@cuda.jit(device=True)
+def _interp_scalar_gpu(x_grid, y_grid, x):
+    """C-style linear interpolation of one point for the GPU."""
+    if x <= x_grid[0]:
+        return y_grid[0]
+    if x >= x_grid[-1]:
+        return y_grid[-1]
+
+    lo, hi = 0, len(x_grid) - 1
+    while hi - lo > 1:
+        mid = (lo + hi) // 2
+        if x_grid[mid] <= x:
+            lo = mid
+        else:
+            hi = mid
+
+    x_lo  = x_grid[lo]
+    inv_dx = 1.0 / (x_grid[hi] - x_lo)
+    w_hi = (x - x_lo) * inv_dx
+    return (1.0 - w_hi) * y_grid[lo] + w_hi * y_grid[hi]
+
+@cuda.jit
+def housing_choice_solver_owner_gpu(
+    resources_liquid_3d, H_grid, H_nxt_grid, w_grid,
+    Q_cntn, v_cntn, lambda_cntn,
+    tau, min_wealth,
+    best_Q, best_v, best_lambda, best_idx
+):
+    """3D CUDA kernel for the owner housing choice. One thread per (a, h, y) state."""
+    ia, ih, i_y = cuda.grid(3)
+    n_a, n_h, n_y = resources_liquid_3d.shape
+
+    if ia < n_a and ih < n_h and i_y < n_y:
+        res_now, h_now = resources_liquid_3d[ia, ih, i_y], H_grid[ih]
+        best_q_here, best_l_here, best_v_here, best_i_next = -np.inf, 0.0, -np.inf, 0
+
+        for ih_next in range(H_nxt_grid.size):
+            h_next = H_nxt_grid[ih_next]
+            moved = (h_now != h_next)
+            trans_fee = tau * h_next if moved else 0.0
+            w_dcsn = res_now + moved * (h_now - h_next) - trans_fee
+
+            if w_dcsn >= min_wealth:
+                q_here = _interp_scalar_gpu(w_grid, Q_cntn[:, ih_next, i_y], w_dcsn)
+                if q_here > best_q_here:
+                    best_q_here = q_here
+                    best_l_here = _interp_scalar_gpu(w_grid, lambda_cntn[:, ih_next, i_y], w_dcsn)
+                    best_v_here = _interp_scalar_gpu(w_grid, v_cntn[:, ih_next, i_y], w_dcsn)
+                    best_i_next = ih_next
+
+        best_Q[ia, ih, i_y] = best_q_here
+        best_lambda[ia, ih, i_y] = best_l_here
+        best_v[ia, ih, i_y] = best_v_here
+        best_idx[ia, ih, i_y] = best_i_next
+
+@cuda.jit
+def housing_choice_solver_renter_gpu(w_grid, S_grid, y_grid, w_rent_grid,
+                                     q_cntn, vlu_cntn, lambda_cntn, Pr, shock_grid,
+                                     q_dcsn, vlu_dcsn, lambda_dcsn, S_policy):
+    """CUDA kernel for the renter housing choice solver."""
+    i_w, i_y = cuda.grid(2)
+    n_w, n_y = len(w_grid), len(y_grid)
+    n_S = len(S_grid)
+
+    if i_w < n_w and i_y < n_y:
+        y_val, w_dcsn_val = shock_grid[i_y], w_grid[i_w]
+        best_q, best_lambda, best_S_idx, best_v = -np.inf, 0.0, 0, -np.inf
+
+        for i_S in range(n_S):
+            S_val = S_grid[i_S]
+            w_cntn_val = w_dcsn_val - Pr * S_val + y_val
+
+            if w_cntn_val >= w_rent_grid[0]:
+                maximand = _interp_scalar_gpu(w_rent_grid, q_cntn[:, i_S, i_y], w_cntn_val)
+                if maximand > best_q:
+                    best_q = maximand
+                    best_lambda = _interp_scalar_gpu(w_rent_grid, lambda_cntn[:, i_S, i_y], w_cntn_val)
+                    best_v = _interp_scalar_gpu(w_rent_grid, vlu_cntn[:, i_S, i_y], w_cntn_val)
+                    best_S_idx = i_S
         
-        # Initialize output arrays
-        vlu_dcsn = np.zeros((n_a, n_H, n_y))
-        Q_dcsn = np.zeros((n_a, n_H, n_y))
-        lambda_dcsn = np.zeros((n_a, n_H, n_y))
-        H_policy = np.zeros((n_a, n_H, n_y), dtype=int)
+        q_dcsn[i_w, i_y] = best_q
+        lambda_dcsn[i_w, i_y] = best_lambda
+        S_policy[i_w, i_y] = best_S_idx
+        vlu_dcsn[i_w, i_y] = best_v
+
+# ==============================================================================
+# --- Main Operator Functions with GPU Dispatch (Efficient Version) ---
+# ==============================================================================
+
+def F_h_cntn_to_dcsn_owner(mover, use_mpi=False, comm=None):
+    """Operator factory for owner housing choice with efficient CPU/GPU dispatch."""
+    model = mover.model
+    shock_grid = model.num.shocks.income_shock.process.values
+    a_grid, H_grid = model.num.state_space.dcsn.grids.a, model.num.state_space.dcsn.grids.H
+    w_grid, H_nxt_grid = model.num.state_space.cntn.grids.w_own, model.num.state_space.cntn.grids.H_nxt
+    params = model.param
+    tau, r = params.phi, params.r
+    
+    use_gpu = model.methods.get("compute") == "GPU" and GPU_AVAILABLE
+
+    def operator(perch_data):
+        vlu_cntn, lambda_cntn, Q_cntn = perch_data.vlu, perch_data.lambda_, perch_data.Q
+        n_a, n_H, n_y = vlu_cntn.shape
         
-        # Create resources matrix: (a,h) -> resources
-        a_mesh, H_mesh = np.meshgrid(a_grid, H_grid, indexing='ij')
+        # This is inefficient, but necessary for meshgrid to work with non-vectorized y_val
+        y_grid_for_mesh = shock_grid
         
-        # Solve for each income state
-        for i_y, y_val in enumerate(shock_grid):
-            # Calculate resources for all asset-housing combinations
-            resources_liquid = (1 + r) * a_mesh + y_val
+        a_mesh, H_mesh, y_mesh = np.meshgrid(a_grid, H_grid, y_grid_for_mesh, indexing='ij')
+        resources_liquid_3d = (1 + r) * a_mesh + y_mesh
+
+        if use_gpu:
+            # --- EFFICIENT GPU PATH ---
+            d_resources = cuda.to_device(resources_liquid_3d)
+            d_H_grid, d_H_nxt_grid, d_w_grid = cuda.to_device(H_grid), cuda.to_device(H_nxt_grid), cuda.to_device(w_grid)
+            d_Q_cntn, d_v_cntn, d_lam_cntn = cuda.to_device(Q_cntn), cuda.to_device(vlu_cntn), cuda.to_device(lambda_cntn)
             
-            Q_dcsn_sl, v_dcsn_sl, lambda_dcsn_sl, idx_sl = housing_choice_solver_owner(
-                resources_liquid, H_grid, H_nxt_grid, 
-                w_grid, Q_cntn[:,:,i_y],vlu_cntn[:,:,i_y], lambda_cntn[:,:,i_y], 
-                tau, w_grid[0]
-            )
+            d_Q_out, d_v_out, d_lam_out = (cuda.device_array_like(Q_cntn) for _ in range(3))
+            best_idx_template = np.empty((n_a, n_H, n_y), dtype=np.int32)
+            d_idx_out = cuda.device_array_like(best_idx_template)
             
-            # Store results for this income state
-            lambda_dcsn[:, :, i_y] = lambda_dcsn_sl
-            H_policy[:, :, i_y] = idx_sl
-            Q_dcsn[:, :, i_y] = Q_dcsn_sl
-            vlu_dcsn[:, :, i_y] = v_dcsn_sl
+            threads = (8, 8, 4)
+            blocks = (int(np.ceil(n_a / threads[0])), int(np.ceil(n_H / threads[1])), int(np.ceil(n_y / threads[2])))
+
+            housing_choice_solver_owner_gpu[blocks, threads](
+                d_resources, d_H_grid, d_H_nxt_grid, d_w_grid,
+                d_Q_cntn, d_v_cntn, d_lam_cntn, tau, w_grid[0],
+                d_Q_out, d_v_out, d_lam_out, d_idx_out)
             
-        # Create Solution object
+            Q_dcsn, vlu_dcsn, lambda_dcsn, H_policy = (d.copy_to_host() for d in [d_Q_out, d_v_out, d_lam_out, d_idx_out])
+        else:
+            # --- EFFICIENT CPU PATH ---
+            Q_dcsn, vlu_dcsn, lambda_dcsn, H_policy = housing_choice_solver_owner_cpu(
+                resources_liquid_3d, H_grid, H_nxt_grid, w_grid,
+                Q_cntn, vlu_cntn, lambda_cntn, tau, w_grid[0])
+            
         sol = Solution()
-        sol.Q = Q_dcsn
-        sol.vlu = vlu_dcsn
-        sol.lambda_ = lambda_dcsn
-        sol.policy["H"] = H_policy.astype(np.float64)  # Convert to float for typed dict
-        
+        sol.Q, sol.vlu, sol.lambda_ = Q_dcsn, vlu_dcsn, lambda_dcsn
+        sol.policy["H"] = H_policy.astype(np.float64)
         return sol
     
     return operator
 
 def F_h_cntn_to_dcsn_renter(mover, use_mpi=False, comm=None):
-    """Create operator for renter housing choice.
-    
-    Implements discrete housing choice through vectorized enumeration.
-    Maximises present-biased payoff `Q_dcsn`; forwards lifetime `vlu`.
-    
-    Parameters
-    ----------
-    mover : Mover
-        The cntn_to_dcsn mover with self-contained model
-    use_mpi : bool
-        Whether to use MPI parallelization
-    comm : MPI communicator
-        MPI communicator (if use_mpi=True)
-        
-    Returns
-    -------
-    callable
-        The operator function that transforms cntn perch data to dcsn perch data
-    """
-    # Extract model
+    """Operator factory for renter housing choice with CPU/GPU dispatch."""
     model = mover.model
-    # Get income shock information
-    shock_info = model.num.shocks.income_shock
-    shock_grid = shock_info.process.values
+    shock_grid = model.num.shocks.income_shock.process.values
     
-    # Determine if this is owner or renter housing stage
-    # Check mover.stage_name which should be prefixed with the stage type
-    is_renter = "RNTH" in mover.stage_name
+    w_grid, y_grid = model.num.state_space.dcsn.grids.w, model.num.state_space.dcsn.grids.y
+    w_rent_grid = model.num.state_space.cntn.grids.w_rent
+    S_grid = model.num.state_space.cntn.grids.S
     
-    # Get grid data using grid proxies
-    # Renter housing choice grids
-    w_grid = model.num.state_space.dcsn.grids.w
-    y_grid = model.num.state_space.dcsn.grids.y
-    w_rent_grid = model.num.state_space.cntn.grids.w_rent  # Cash-on-hand after rental choice
-    S_grid = model.num.state_space.cntn.grids.S  # Rental services grid
-    
-    # Get parameters
-    params = model.param
-    Pr = params.Pr  # Rental price per unit
+    Pr = model.param.Pr
+    use_gpu = model.methods.get("compute") == "GPU" and GPU_AVAILABLE
 
-    
     def operator(perch_data):
-        vlu_cntn = perch_data["vlu"] 
-        lambda_cntn = perch_data["lambda_"]
-        Q_cntn = perch_data["Q"]   # objective
+        vlu_cntn, lambda_cntn, Q_cntn = perch_data.vlu, perch_data.lambda_, perch_data.Q
         
-        # Use numba-optimized renter housing choice solver
-        Q_dcsn, vlu_dcsn, lambda_dcsn, S_policy = housing_choice_solver_renter(
-            w_grid, S_grid, y_grid, w_rent_grid, 
-            Q_cntn, vlu_cntn, lambda_cntn, Pr, shock_grid
-        )
-        
-        # Create Solution object
-        sol = Solution()
-        sol.Q = Q_dcsn
-        sol.vlu = vlu_dcsn
-        sol.lambda_ = lambda_dcsn
-        sol.policy["S"] = S_policy.astype(np.float64)  # Convert to float for typed dict
-        
-        return sol
-        
+        if use_gpu:
+            # --- GPU Path ---
+            d_w_grid, d_S_grid, d_y_grid = cuda.to_device(w_grid), cuda.to_device(S_grid), cuda.to_device(y_grid)
+            d_w_rent_grid, d_shock_grid = cuda.to_device(w_rent_grid), cuda.to_device(shock_grid)
+            d_q_cntn, d_v_cntn, d_lam_cntn = cuda.to_device(Q_cntn), cuda.to_device(vlu_cntn), cuda.to_device(lambda_cntn)
 
+            n_w, n_y = len(w_grid), len(y_grid)
+            d_q_out = cuda.device_array((n_w, n_y), dtype=np.float64)
+            d_v_out = cuda.device_array((n_w, n_y), dtype=np.float64)
+            d_lam_out = cuda.device_array((n_w, n_y), dtype=np.float64)
+            d_S_pol = cuda.device_array((n_w, n_y), dtype=np.int32)
+
+            threads = (16, 16)
+            blocks_x = int(np.ceil(n_w / threads[0]))
+            blocks_y = int(np.ceil(n_y / threads[1]))
+            blocks = (blocks_x, blocks_y)
+            
+            housing_choice_solver_renter_gpu[blocks, threads](
+                d_w_grid, d_S_grid, d_y_grid, d_w_rent_grid, 
+                d_q_cntn, d_v_cntn, d_lam_cntn, Pr, d_shock_grid,
+                d_q_out, d_v_out, d_lam_out, d_S_pol)
+            
+            Q_dcsn, vlu_dcsn = d_q_out.copy_to_host(), d_v_out.copy_to_host()
+            lambda_dcsn, S_policy = d_lam_out.copy_to_host(), d_S_pol.copy_to_host()
+        else:
+            # --- CPU Path ---
+            Q_dcsn, vlu_dcsn, lambda_dcsn, S_policy = housing_choice_solver_renter_cpu(
+                w_grid, S_grid, y_grid, w_rent_grid, 
+                Q_cntn, vlu_cntn, lambda_cntn, Pr, shock_grid)
+        
+        sol = Solution()
+        sol.Q, sol.vlu, sol.lambda_ = Q_dcsn, vlu_dcsn, lambda_dcsn
+        sol.policy["S"] = S_policy.astype(np.float64)
+        return sol
     
     return operator 

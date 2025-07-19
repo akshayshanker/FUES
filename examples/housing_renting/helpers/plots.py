@@ -103,36 +103,22 @@ def generate_plots(model, method, image_dir, plot_period=0, bounds=None,
     #print(f"Policy function plots for {method} saved to {policy_dir}")
 
 def plot_dcsn_policy(first_period, image_dir, bounds=None, sol_override=None):
-    """Plot policy functions for the renting model.
-    
-    Parameters
-    ----------
-    first_period : Period
-        Period object containing stage data
-    image_dir : str
-        Directory to save the output images
-    bounds : dict
-        Dictionary containing bounds for plots
-    sol_override : dict, optional
-        If provided, use this solution instead of the one from the first_period
-    """
-    # We'll create three plots:
-    # 1. Consumption policies for owners and renters
-    # 2. Housing choice policies
-    # 3. Tenure choice policies
+    """Plot policy functions for the renting model, matching fella plot style."""
     
     import matplotlib.pyplot as plt
     import os
     import matplotlib.ticker as mticker
-    from matplotlib.colors import TABLEAU_COLORS
+    from matplotlib.ticker import FormatStrFormatter
+    import seaborn as sns
 
     if bounds is None:
         bounds = {}
 
-    # Use a color cycle from Tableau colors
-    color_cycle = list(TABLEAU_COLORS.values())[:3]  # Get first three colors
+    # Set seaborn style to match plot_pols_fella
+    sns.set(style="white", rc={"font.size": 11, "axes.titlesize": 11, "axes.labelsize": 11})
+    color_cycle = ['blue', 'red', 'green']  # Use distinct colors like fella plot
 
-    # Get stages - only get them if first_period is provided
+    # Get stages
     if first_period is not None:
         tenu_stage = first_period.get_stage("TENU")
         ownh_stage = first_period.get_stage("OWNH") 
@@ -140,293 +126,193 @@ def plot_dcsn_policy(first_period, image_dir, bounds=None, sol_override=None):
         rnth_stage = first_period.get_stage("RNTH")
         rntc_stage = first_period.get_stage("RNTC")
     else:
-        # If no first_period, we must have sol_override
         if sol_override is None:
             raise ValueError("Either first_period or sol_override must be provided")
-        # Create dummy stages with None values - we'll only use sol_override
         class DummyStage:
             def __init__(self):
                 self.dcsn = type('obj', (object,), {'sol': None, 'grid': None})()
                 self.cntn = type('obj', (object,), {'grid': None})()
         tenu_stage = ownh_stage = ownc_stage = rnth_stage = rntc_stage = DummyStage()
     
-    # 1. Consumption policies plot
+    # --- 1. Consumption policies plot ---
     fig1, ax1 = plt.subplots(1, 2, figsize=(12, 6))
-    
-    # Owner consumption policy - plot for different housing values
-    # Use sol_override only for OWNC stage
+    for ax in ax1:
+        ax.spines['right'].set_visible(False)
+        ax.spines['top'].set_visible(False)
+        ax.grid(True)
+        ax.yaxis.set_major_formatter(FormatStrFormatter("%.1f"))
+        ax.xaxis.set_major_formatter(FormatStrFormatter("%.1f"))
+
     ownc_sol = sol_override if sol_override is not None else (ownc_stage.dcsn.sol if ownc_stage.dcsn.sol is not None else None)
+    y_idx = 0 # Assume middle income state for simplicity
     
-    if ownc_sol is not None and ownc_stage.dcsn.grid is not None:
+    if ownc_sol and ownc_stage.dcsn.grid:
         w_grid = ownc_stage.dcsn.grid.w
         H_nxt_grid = ownc_stage.dcsn.grid.H_nxt
-        y_idx = 0  # Middle income state
-        
-        # Get indices for low, medium, high housing values
-        if len(H_nxt_grid) >= 5:
-            H_indices = [0, len(H_nxt_grid)//2, len(H_nxt_grid)-1]  # Low, medium, high
-        else:
-            H_indices = list(range(len(H_nxt_grid)))  # Use all available indices
+        H_indices = [0, len(H_nxt_grid)//2, len(H_nxt_grid)-1] if len(H_nxt_grid) >= 3 else list(range(len(H_nxt_grid)))
             
-        # Plot consumption policy for different housing values
         for i, H_idx in enumerate(H_indices):
             h_val = H_nxt_grid[H_idx]
             color = color_cycle[i % len(color_cycle)]
             owner_consumption = _get_sol_field(ownc_sol, "policy", "c")[:, H_idx, y_idx]
-            ax1[0].plot(w_grid, owner_consumption, color=color, linestyle='-', 
-                       label=f"Housing={h_val:.2f}")
+            ax1[0].plot(w_grid, owner_consumption, color=color, linestyle='-', label=f"H={h_val:.2f}")
         
-        # Add 45-degree line for reference
-        ax1[0].plot(w_grid, w_grid, 'k--', label="45-degree Line")
-        ax1[0].set_title("Owner Consumption Policy by Housing Value")
-        ax1[0].set_xlabel("Cash-on-Hand (w)")
+        ax1[0].set_title("Owner Consumption")
         ax1[0].set_ylabel("Consumption (c)")
-        ax1[0].legend()
-        ax1[0].grid(True)
+        ax1[0].set_xlabel("Cash-on-Hand (w)")
+        ax1[0].legend(frameon=False, prop={'size': 10})
     
-    # Renter consumption policy - plot for different rental service values
-    # Don't use sol_override for RNTC stage
-    if rntc_stage.dcsn.sol is not None and rntc_stage.dcsn.grid is not None:
+    if rntc_stage.dcsn.sol and rntc_stage.dcsn.grid:
         w_grid_rent = rntc_stage.dcsn.grid.w
         S_grid = rntc_stage.dcsn.grid.H_nxt
+        S_indices = [0, len(S_grid)//2, len(S_grid)-1] if len(S_grid) >= 3 else list(range(len(S_grid)))
         
-        # Get indices for low, medium, high rental service values
-        if len(S_grid) >= 5:
-            S_indices = [0, len(S_grid)//2, len(S_grid)-1]  # Low, medium, high
-        else:
-            S_indices = list(range(len(S_grid)))  # Use all available indices
-        
-        # Plot consumption policy for different rental service values
         for i, S_idx in enumerate(S_indices):
             s_val = S_grid[S_idx]
             color = color_cycle[i % len(color_cycle)]
             renter_consumption = _get_sol_field(rntc_stage.dcsn.sol, "policy", "c")[:, S_idx, y_idx]
-            ax1[1].plot(w_grid_rent, renter_consumption, color=color, linestyle='-', 
-                       label=f"Services={s_val:.2f}")
+            ax1[1].plot(w_grid_rent, renter_consumption, color=color, linestyle='-', label=f"S={s_val:.2f}")
         
-        # Add 45-degree line for reference
-        ax1[1].plot(w_grid_rent, w_grid_rent, 'k--', label="45-degree Line")
-        ax1[1].set_title("Renter Consumption Policy by Service Level")
+        ax1[1].set_title("Renter Consumption")
         ax1[1].set_xlabel("Cash-on-Hand (w)")
-        ax1[1].set_ylabel("Consumption (c)")
-        ax1[1].legend()
-        ax1[1].grid(True)
+        ax1[1].legend(frameon=False, prop={'size': 10})
 
-    # Allow user-specified axis limits via bounds dict
-    # keys: 'cons_owner', 'cons_renter' each → (xmin,xmax,ymin,ymax)
-    if "cons_owner" in bounds:
-        xmin,xmax,ymin,ymax = bounds["cons_owner"]
-        ax1[0].set_xlim([xmin,xmax]); ax1[0].set_ylim([ymin,ymax])
-    if "cons_renter" in bounds:
-        xmin,xmax,ymin,ymax = bounds["cons_renter"]
-        ax1[1].set_xlim([xmin,xmax]); ax1[1].set_ylim([ymin,ymax])
-    
-    plt.tight_layout()
+    fig1.tight_layout()
     fig1.savefig(os.path.join(image_dir, "consumption_policies.png"))
-    #print(f"Consumption policies plot saved to {os.path.join(image_dir, 'consumption_policies.png')}")
-    
-    # 2. Housing choice policies plot
+
+    # --- 2. Housing choice policies plot ---
     fig2, ax2 = plt.subplots(1, 2, figsize=(12, 6))
-    
-    # Owner housing policy - plot for different housing values
-    # Don't use sol_override for OWNH stage
-    if ownh_stage.dcsn.sol is not None and ownh_stage.dcsn.grid is not None:
+    for ax in ax2:
+        ax.spines['right'].set_visible(False)
+        ax.spines['top'].set_visible(False)
+        ax.grid(True)
+
+    if ownh_stage.dcsn.sol and ownh_stage.dcsn.grid:
         a_grid = ownh_stage.dcsn.grid.a
         H_grid = ownh_stage.dcsn.grid.H
+        H_indices = [0, len(H_grid)//2, len(H_grid)-1] if len(H_grid) >= 3 else list(range(len(H_grid)))
         
-        # Get indices for low, medium, high current housing values
-        if len(H_grid) >= 5:
-            H_indices = [0, len(H_grid)//2, len(H_grid)-1]  # Low, medium, high
-        else:
-            H_indices = list(range(len(H_grid)))  # Use all available indices
-        
-        if _get_sol_field(ownh_stage.dcsn.sol, "H_policy") is not None:
-            # Plot housing policy for different current housing values
+        H_policy_data = _get_sol_field(ownh_stage.dcsn.sol, "policy", "H")
+        if H_policy_data is not None:
+            H_nxt_grid = ownh_stage.cntn.grid.H_nxt
             for i, H_idx in enumerate(H_indices):
                 h_val = H_grid[H_idx]
                 color = color_cycle[i % len(color_cycle)]
-                
-                H_policy_idx = _get_sol_field(ownh_stage.dcsn.sol, "H_policy")[:, H_idx, y_idx].astype(int)
-                H_nxt_grid = ownh_stage.cntn.grid.H_nxt
+                H_policy_idx = H_policy_data[:, H_idx, y_idx].astype(int)
                 H_policy = H_nxt_grid[H_policy_idx]
+                ax2[0].step(a_grid, H_policy, color=color, where='post', label=f"Current H={h_val:.2f}")
             
-                ax2[0].step(a_grid, H_policy, color=color, where='post', 
-                            label=f"Current H={h_val:.2f}")
-                
-            ax2[0].set_title("Owner Housing Policy by Current Housing")
+            ax2[0].set_title("Owner Housing Policy")
             ax2[0].set_xlabel("Assets (a)")
-            ax2[0].set_ylabel("Housing Choice (H)")
-            ax2[0].legend()
-            ax2[0].grid(True)
+            ax2[0].set_ylabel("Housing Choice (H')")
+            ax2[0].legend(frameon=False, prop={'size': 10})
     
-    # Renter housing (services) policy - plot for different income levels
-    # Don't use sol_override for RNTH stage
-    if rnth_stage.dcsn.sol is not None and rnth_stage.dcsn.grid is not None:
+    if rnth_stage.dcsn.sol and rnth_stage.dcsn.grid:
         w_grid_rent = rnth_stage.dcsn.grid.w
-        y_grid = rnth_stage.dcsn.grid.y
-        
-        # Get indices for different income levels
-        if len(y_grid) >= 3:
-            y_indices = [0, len(y_grid)//2, len(y_grid)-1]  # Low, medium, high
-        else:
-            y_indices = list(range(len(y_grid)))  # Use all available indices
-        
-        if _get_sol_field(rnth_stage.dcsn.sol, "S_policy") is not None:
-            # Plot rental service policy for different income levels
-            for i, y_idx in enumerate(y_indices):
-                y_val = y_grid[y_idx]
-                color = color_cycle[i % len(color_cycle)]
-                
-                S_policy_idx = _get_sol_field(rnth_stage.dcsn.sol, "S_policy")[:, y_idx].astype(int)
-                S_grid = rnth_stage.cntn.grid.S
-                S_policy = S_grid[S_policy_idx]
-                
-                ax2[1].step(w_grid_rent, S_policy, color=color, where='post', 
-                           label=f"Income={y_val:.2f}")
-                
-            ax2[1].set_title("Renter Housing Services by Income")
+        S_policy_data = _get_sol_field(rnth_stage.dcsn.sol, "policy", "S")
+        if S_policy_data is not None:
+            S_grid = rnth_stage.cntn.grid.S
+            S_policy_idx = S_policy_data[:, y_idx].astype(int)
+            S_policy = S_grid[S_policy_idx]
+            ax2[1].step(w_grid_rent, S_policy, where='post')
+            ax2[1].set_title("Renter Service Choice")
             ax2[1].set_xlabel("Cash-on-Hand (w)")
             ax2[1].set_ylabel("Rental Services (S)")
-            ax2[1].legend()
-            ax2[1].grid(True)
     
-    # Owner housing limits
-    if "owner_housing" in bounds:
-        xmin,xmax,ymin,ymax = bounds["owner_housing"]
-        ax2[0].set_xlim([xmin,xmax]); ax2[0].set_ylim([ymin,ymax])
-    
-    plt.tight_layout()
+    fig2.tight_layout()
     fig2.savefig(os.path.join(image_dir, "housing_policies.png"))
-    #print(f"Housing policies plot saved to {os.path.join(image_dir, 'housing_policies.png')}")
-    
-    # 3. Tenure choice plot
+
+    # --- 3. Tenure choice plot ---
     fig3, ax3 = plt.subplots(figsize=(10, 6))
-    
-    # Extract tenure choice from TENU stage
-    # Don't use sol_override for TENU stage
-    if tenu_stage.dcsn.sol is not None and tenu_stage.dcsn.grid is not None:
-        if _get_sol_field(tenu_stage.dcsn.sol, "tenure_policy") is not None:
+    ax3.spines['right'].set_visible(False)
+    ax3.spines['top'].set_visible(False)
+    ax3.grid(True)
+
+    if tenu_stage.dcsn.sol and tenu_stage.dcsn.grid:
+        tenure_policy_data = _get_sol_field(tenu_stage.dcsn.sol, "policy", "tenure")
+        if tenure_policy_data is not None:
             a_grid = tenu_stage.dcsn.grid.a
             H_grid = tenu_stage.dcsn.grid.H
+            H_indices = [0, len(H_grid)//2, len(H_grid)-1] if len(H_grid) >= 3 else list(range(len(H_grid)))
             
-            # Get indices for different housing values
-            if len(H_grid) >= 3:
-                H_indices = [0, len(H_grid)//2, len(H_grid)-1]  # Low, medium, high
-            else:
-                H_indices = list(range(len(H_grid)))  # Use all available indices
-            
-            # Plot tenure choice for different housing values
             for i, H_idx in enumerate(H_indices):
                 h_val = H_grid[H_idx]
                 color = color_cycle[i % len(color_cycle)]
-                
-                tenure_policy = _get_sol_field(tenu_stage.dcsn.sol, "tenure_policy")[:, H_idx, y_idx]
-                
-                # Plot tenure choices as steps (0 = rent, 1 = own)
-                ax3.step(a_grid, tenure_policy, color=color, where='post', linewidth=2,
-                        label=f"Housing={h_val:.2f}")
+                tenure_policy = tenure_policy_data[:, H_idx, y_idx]
+                ax3.step(a_grid, tenure_policy, color=color, where='post', linewidth=2, label=f"H={h_val:.2f}")
             
-            ax3.set_title("Tenure Choice Policy by Housing Value (0 = Rent, 1 = Own)")
+            ax3.set_title("Tenure Choice (0=Rent, 1=Own)")
             ax3.set_xlabel("Assets (a)")
             ax3.set_ylabel("Tenure Choice")
-            
-            # Set fixed ticks for y-axis with proper labels
             ax3.set_yticks([0, 1])
             ax3.set_yticklabels(["Rent", "Own"])
-            
-            ax3.legend()
-            ax3.grid(True)
-    
-    # Tenure plot limits
-    if "tenure" in bounds:
-        xmin,xmax,ymin,ymax = bounds["tenure"]
-        ax3.set_xlim([xmin,xmax]); ax3.set_ylim([ymin,ymax])
-    
-    plt.tight_layout()
+            ax3.legend(frameon=False, prop={'size': 10})
+
+    fig3.tight_layout()
     fig3.savefig(os.path.join(image_dir, "tenure_policy.png"))
-    #print(f"Tenure policy plot saved to {os.path.join(image_dir, 'tenure_policy.png')}")
 
-    # 4. Plot value function
-    fig4, ax4 = plt.subplots(figsize=(10, 6))
-    
-    # Extract value function from OWNC stage
-    # Use sol_override for OWNC stage
-    if ownc_sol is not None:
-        if _get_sol_field(ownc_sol, "vlu") is not None and ownc_stage.dcsn.grid is not None:
-            a_grid = ownc_stage.dcsn.grid.w
-            H_grid = ownc_stage.dcsn.grid.H_nxt  # Use H_nxt_grid from OWNC stage
-        
-            # Plot value function for different housing values
-            for i, H_idx in enumerate(H_indices):
-                h_val = H_grid[H_idx]
-                color = color_cycle[i % len(color_cycle)]
-                
-                value_function = _get_sol_field(ownc_sol, "vlu")[:, H_idx, y_idx]
+    # --- 4. Value and Q Function Plots ---
+    fig4, (ax4, ax5) = plt.subplots(1, 2, figsize=(12, 6))
+    for ax in [ax4, ax5]:
+        ax.spines['right'].set_visible(False)
+        ax.spines['top'].set_visible(False)
+        ax.grid(True)
 
-                # plot
-                ax4.plot(a_grid, value_function, color=color, label=f"Housing={h_val:.2f}")
-                
-            ax4.set_title("Owner Value Function by Housing Value")
-            ax4.set_xlabel("Assets (a)")
-            ax4.set_ylabel("Value Function (V)")
-            ax4.legend()
-            ax4.grid(True)
+    if ownc_sol and ownc_stage.dcsn.grid:
+        w_grid = ownc_stage.dcsn.grid.w
+        H_nxt_grid = ownc_stage.dcsn.grid.H_nxt
+        H_indices = [0, len(H_nxt_grid)//2, len(H_nxt_grid)-1] if len(H_nxt_grid) >= 3 else list(range(len(H_nxt_grid)))
 
-    #5. Plot Q func
-    fig5, ax5 = plt.subplots(figsize=(10, 6))
-    # Extract Q function from OWNC stage
-    # Use sol_override for OWNC stage
-    if ownc_sol is not None:
-        if _get_sol_field(ownc_sol, "Q") is not None and ownc_stage.dcsn.grid is not None:
-            a_grid = ownc_stage.dcsn.grid.w
-            H_grid = ownc_stage.dcsn.grid.H_nxt  # Use H_nxt_grid from OWNC stage
-            
-            # Plot Q function for different housing values
-            for i, H_idx in enumerate(H_indices):
-                h_val = H_grid[H_idx]
-                color = color_cycle[i % len(color_cycle)]
-                
-                Q_function = _get_sol_field(ownc_sol, "Q")[:, H_idx, y_idx]
-                
-                # plot
-                ax5.plot(a_grid, Q_function, color=color, label=f"Housing={h_val:.2f}")
-                
-            ax5.set_title("Owner Q Function by Housing Value")
-            ax5.set_xlabel("Assets (a)")
-            ax5.set_ylabel("Q Function (Q)")
-            ax5.legend()
-            ax5.grid(True)
+        vlu_data = _get_sol_field(ownc_sol, "vlu")
+        q_data = _get_sol_field(ownc_sol, "Q")
 
-    fig4.savefig(os.path.join(image_dir, "value_function.png"))
-    fig5.savefig(os.path.join(image_dir, "Q_function.png"))
-
-    # Plot savings
-    fig6, ax6 = plt.subplots(figsize=(10, 6))
-
-    # Use sol_override for OWNC stage
-    if ownc_sol is not None and ownc_stage.dcsn.grid is not None:
-        # No "if 'savings' …" guard here – we compute it ourselves
         for i, H_idx in enumerate(H_indices):
-            h_val = H_grid[H_idx]
+            h_val = H_nxt_grid[H_idx]
             color = color_cycle[i % len(color_cycle)]
+            label=f"H={h_val:.2f}"
+            if vlu_data is not None:
+                ax4.plot(w_grid, vlu_data[:, H_idx, y_idx], color=color, label=label)
+            if q_data is not None:
+                ax5.plot(w_grid, q_data[:, H_idx, y_idx], color=color, label=label)
 
-            w_grid = ownc_stage.dcsn.grid.w          # cash-on-hand grid
-            consumption = _get_sol_field(ownc_sol, "policy", "c")[:, H_idx, y_idx]
-            savings = w_grid - consumption           # simple definition
+    ax4.set_title("Owner Value Function")
+    ax4.set_xlabel("Cash-on-Hand (w)")
+    ax4.set_ylabel("Value")
+    ax4.legend(frameon=False, prop={'size': 10})
 
-            ax6.plot(w_grid, savings,
-                    color=color,
-                    label=f"Housing={h_val:.2f}")
-
-        ax6.set_title("Owner Savings")
-        ax6.set_xlabel("Cash-on-Hand (w)")
-        ax6.set_ylabel("Savings (w – c)")
-        ax6.legend()
-        ax6.grid(True)
-
-    fig6.savefig(os.path.join(image_dir, "savings.png"))
+    ax5.set_title("Owner Q-Function")
+    ax5.set_xlabel("Cash-on-Hand (w)")
+    ax5.legend(frameon=False, prop={'size': 10})
     
-    # Close all figures
+    fig4.tight_layout()
+    fig4.savefig(os.path.join(image_dir, "value_q_functions.png"))
+
+    # --- 5. Savings Plot ---
+    fig5, ax6 = plt.subplots(figsize=(10, 6))
+    ax6.spines['right'].set_visible(False)
+    ax6.spines['top'].set_visible(False)
+    ax6.grid(True)
+
+    if ownc_sol and ownc_stage.dcsn.grid:
+        H_nxt_grid = ownc_stage.dcsn.grid.H_nxt
+        H_indices = [0, len(H_nxt_grid)//2, len(H_nxt_grid)-1] if len(H_nxt_grid) >= 3 else list(range(len(H_nxt_grid)))
+
+        for i, H_idx in enumerate(H_indices):
+            h_val = H_nxt_grid[H_idx]
+            color = color_cycle[i % len(color_cycle)]
+            w_grid = ownc_stage.dcsn.grid.w
+            consumption = _get_sol_field(ownc_sol, "policy", "c")[:, H_idx, y_idx]
+            savings = w_grid - consumption
+            ax6.plot(w_grid, savings, color=color, label=f"H={h_val:.2f}")
+
+        ax6.set_title("Owner Savings (w-c)")
+        ax6.set_xlabel("Cash-on-Hand (w)")
+        ax6.set_ylabel("Savings")
+        ax6.legend(frameon=False, prop={'size': 10})
+
+    fig5.tight_layout()
+    fig5.savefig(os.path.join(image_dir, "savings.png"))
+    
     plt.close('all')
 
 def plot_endogenous_grids(first_period, image_dir):
@@ -1060,79 +946,17 @@ def plot_compare_value_Q(model_list, methods, image_dir, plot_period=0, bounds=N
 
     plt.close("all")
 
-def _get_sol_field(sol, field, subfield=None):
-    """Helper to access solution fields from either dict or Solution object.
-    
-    Parameters
-    ----------
-    sol : dict or Solution
-        Solution object
-    field : str
-        Main field name (e.g., 'policy', 'vlu', 'EGM')
-    subfield : str, optional
-        Subfield name for nested access (e.g., 'c' for policy.c)
-        
-    Returns
-    -------
-    array or dict
-        The requested field data
-    """
-    if isinstance(sol, Solution):
-        if field == "policy":
-            return sol.policy[subfield] if subfield else dict(sol.policy)
-        elif field == "EGM":
-            if subfield:
-                # Handle nested EGM access like EGM.refined.e
-                parts = subfield.split('.')
-                if len(parts) == 2:  # e.g., "refined.e"
-                    layer, grid_type = parts
-                    # Return dict of all keys for this grid type
-                    result = {}
-                    layer_dict = getattr(sol.EGM, layer)
-                    prefix = f"{grid_type}_"
-                    for key, val in layer_dict.items():
-                        if key.startswith(prefix):
-                            grid_key = key[len(prefix):]  # Remove prefix
-                            result[grid_key] = val
-                    return result
-                else:
-                    result = sol.EGM
-                    for part in parts:
-                        result = getattr(result, part) if hasattr(result, part) else result[part]
-                    return result
+def _get_sol_field(sol, *keys):
+    """Safely get a nested attribute from a Solution object."""
+    try:
+        for key in keys:
+            if isinstance(sol, dict):
+                sol = sol.get(key)
             else:
-                # Return full dict representation with reconstructed structure
-                egm_dict = {}
-                for layer in ["unrefined", "refined", "interpolated"]:
-                    layer_data = {}
-                    for grid_type in ["e", "Q", "c", "a", "lambda"]:
-                        grid_data = {}
-                        prefix = f"{grid_type}_"
-                        layer_dict = getattr(sol.EGM, layer)
-                        for key, val in layer_dict.items():
-                            if key.startswith(prefix):
-                                grid_key = key[len(prefix):]
-                                grid_data[grid_key] = val
-                        if grid_data:
-                            layer_data[grid_type] = grid_data
-                    egm_dict[layer] = layer_data
-                return egm_dict
-        elif field == "timing":
-            return dict(sol.timing)
-        elif field in ["vlu", "Q", "lambda", "phi"]:
-            return getattr(sol, field.replace("lambda", "lambda_"))
-        elif field == "H_policy":
-            return sol.policy["H"]
-        elif field == "S_policy":
-            return sol.policy["S"]
-        elif field == "tenure_policy":
-            return sol.policy["tenure"]
-        else:
-            return sol[field] if hasattr(sol, '__getitem__') else getattr(sol, field)
-    else:
-        # Legacy dict access
-        if subfield and field in sol and isinstance(sol[field], dict):
-            return sol[field][subfield]
-        else:
-            return sol.get(field)
+                sol = getattr(sol, key)
+            if sol is None:
+                return None
+        return sol
+    except (AttributeError, KeyError):
+        return None
 

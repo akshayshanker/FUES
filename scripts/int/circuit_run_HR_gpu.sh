@@ -18,7 +18,7 @@ source ../lib/job_configs.sh
 
 # --- 2. Define the Sequence of Configurations to Run ---
 CONFIG_TO_RUN=(
-    "HIGH_RES_SETTINGS_A"
+    "STD_RES_SETTINGS_PB"
 )
 
 # --- 3. Environment Setup ---
@@ -28,7 +28,6 @@ module load cuda/12.8.0
 
 export VENV_ROOT=/scratch/tp66/$USER/venvs
 source "$VENV_ROOT/fues02-py3121/bin/activate"
-
 
 export FUES_HOME=$HOME/dev/fues.dev/FUES
 export PYTHONPATH="$FUES_HOME${PYTHONPATH:+:$PYTHONPATH}"
@@ -64,30 +63,32 @@ for CONFIG_NAME in "${CONFIG_TO_RUN[@]}"; do
     declare -n CONFIG_REF=$CONFIG_NAME
 
     echo "========================================================"
-    echo "Running GPU Configuration: ${CONFIG_NAME}"
+    echo "Running GPU Profiling for: ${CONFIG_NAME}"
     echo "========================================================"
 
     # --- Logging and Paths ---
     TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
     VERSION_TAG="${CONFIG_REF[version_suffix]}"
+    TRIAL_ID="gpu_test"
     RUN_ID="${VERSION_TAG}_${TIMESTAMP}"
-    LOG_DIR="logs/${RUN_ID}"
+    LOG_DIR="logs/${RUN_ID}_${TRIAL_ID}"
     mkdir -p "$LOG_DIR"
 
     SOLUTION_ROOT="/scratch/tp66/$USER/FUES/solutions/housing_renting/"
-    OUTPUT_DIR="$SOLUTION_ROOT/HR_run_${VERSION_TAG}"
+    OUTPUT_DIR="$SOLUTION_ROOT/${VERSION_TAG}_${TRIAL_ID}"
+    
+    #PROFILE_OUTPUT_FILE="${FUES_HOME}/profile_${RUN_ID}.pstats"
 
-    echo "Starting GPU run for ${CONFIG_NAME} at $(date)"
+    echo "Starting GPU profiling run for ${CONFIG_NAME} at $(date)"
     echo "Output will be saved to: $OUTPUT_DIR"
     echo "Logs will be saved to: $LOG_DIR"
+    #echo "Profile data will be saved to: $PROFILE_OUTPUT_FILE"
 
-    # --- Execution ---
-    # NOTE: We run this as a single-process Python script. The script
-    # itself will detect the 'VFI_HDGRID_GPU' method and offload the
-    # heavy computation to the GPU. No mpiexec is needed.
+    # --- Execution with cProfile ---
+    # The python3 command is now wrapped with 'cProfile' to generate a performance profile.
     python3 -m examples.housing_renting.solve_runner \
       --periods "${CONFIG_REF[periods]}" \
-      --ue-method "VFI_HDGRID_GPU, FUES" \
+      --ue-method "VFI_HDGRID_GPU,FUES2DEV" \
       --output-root "$OUTPUT_DIR" \
       --bundle-prefix "$VERSION_TAG" \
       --vfi-ngrid "${CONFIG_REF[vfi_ngrid]}" \
@@ -96,13 +97,15 @@ for CONFIG_NAME in "${CONFIG_TO_RUN[@]}"; do
       --recompute-baseline \
       --fresh-fast \
       --precompile \
+      --delta-pb "${CONFIG_REF[delta_pb]}" \
       --plots \
+      --gpu \
       2> >(tee "${LOG_DIR}/run.err") \
       1> >(tee "${LOG_DIR}/run.log")
 
-    echo "GPU run for ${CONFIG_NAME} completed successfully."
+    echo "GPU profiling run for ${CONFIG_NAME} completed successfully."
 
 done
 
 echo "All GPU configurations processed."
-exit 0 
+exit 0

@@ -111,7 +111,7 @@ except ImportError:
 CFG_DIR = Path(__file__).parent / "config_HR"
 BASE = "VFI_HDGRID_GPU"
 ALL_METHODS = ["VFI_HDGRID", "VFI_HDGRID_GPU", "FUES", "FUES2DEV", "CONSAV", "DCEGM"]
-FAST_METHODS = ["FUES", "CONSAV"] # Added CONSAV for easier comparison
+FAST_METHODS = ["FUES2DEV", "CONSAV"] # Added CONSAV for easier comparison
 PRE_COMPILE_PARAMS = np.array(["VFI_HDGRID", 500, 500, 500], dtype=object)
 
 
@@ -139,9 +139,17 @@ def patch_cfg(args,cfg_container: dict, periods: int, vf_ngrid: int) -> dict:
     elif sol == "VFI_HDGRID_GPU" and args.gpu:
         cfg["stages"]["OWNC"]["stage"]["methods"]["compute"] = "GPU"
         cfg["stages"]["RNTC"]["stage"]["methods"]["compute"] = "GPU"
+        cfg["stages"]["OWNH"]["stage"]["methods"]["compute"] = "GPU"
+        cfg["stages"]["RNTH"]["stage"]["methods"]["compute"] = "GPU"
     else:
         cfg["stages"]["OWNC"]["stage"]["methods"]["compute"] = "SINGLE"
         cfg["stages"]["RNTC"]["stage"]["methods"]["compute"] = "SINGLE"
+
+    # compute h choice with GPU if avail in all cases. 
+    if args.gpu:
+        cfg["stages"]["OWNH"]["stage"]["methods"]["compute"] = "GPU"
+        cfg["stages"]["RNTH"]["stage"]["methods"]["compute"] = "GPU"
+
     return cfg
 
 

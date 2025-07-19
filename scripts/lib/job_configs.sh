@@ -15,10 +15,18 @@
 declare -A STD_RES_SETTINGS
 STD_RES_SETTINGS[periods]=5
 STD_RES_SETTINGS[vfi_ngrid]=1000
-STD_RES_SETTINGS[hd_points]=600
+STD_RES_SETTINGS[hd_points]=2000
 STD_RES_SETTINGS[grid_points]=2000
 STD_RES_SETTINGS[version_suffix]="test_0.1"
-STD_RES_SETTINGS[delta_pb]=0.7
+STD_RES_SETTINGS[delta_pb]=1
+
+declare -A STD_RES_SETTINGS_PB
+STD_RES_SETTINGS_PB[periods]=5
+STD_RES_SETTINGS_PB[vfi_ngrid]=2000
+STD_RES_SETTINGS_PB[hd_points]=2000
+STD_RES_SETTINGS_PB[grid_points]=6000
+STD_RES_SETTINGS_PB[version_suffix]="test_0.1"
+STD_RES_SETTINGS_PB[delta_pb]=0.6
 
 # --- Configuration Set 1.1 (LOW POINTS FOR TESTING: High Resolution Benchmark ---
 # A high-resolution run for producing final, accurate results.

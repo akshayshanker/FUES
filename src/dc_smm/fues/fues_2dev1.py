@@ -89,7 +89,7 @@ def FUES(e_grid, vf, policy_1, policy_2, del_a,
 @njit
 def _scan(e_grid, vf, a_prime, del_a,
           m_bar, LB, fwd_scan_do,
-          endog_mbar, padding_mbar):
+          endog_mbar, padding_mbar, ID_NM = True):
     """FUES single‑pass scan (no consecutive left turns).
 
     Implements:
@@ -133,9 +133,22 @@ def _scan(e_grid, vf, a_prime, del_a,
         M_max = max(np.abs(del_a[j]), np.abs(del_a[i+1])) + padding_mbar
         if not endog_mbar:
             M_max = m_bar
+
+        del_pol = a_prime[i+1] - a_prime[j]
         g_tilde_a = np.abs((a_prime[i+1] - a_prime[j]) / de_lead)
 
+        del_pol_a = (e_grid[i+1] - a_prime[i+1]) - (e_grid[j] - a_prime[j])
+
+        #if ID_NM:
+        #    right_turn_jump = ((g_1 < g_jm1) and (g_tilde_a > M_max)) or (del_pol_a<0 and g_1 < g_jm1)
+            #left_turn = del_pol> 0 and g_1 > g_jm1
+        #else:
         right_turn_jump = (g_1 < g_jm1) and (g_tilde_a > M_max)
+            #left_turn = g_1 > g_jm1
+
+        # ------------- Case A: right‑turn jump ----------------------
+            
+        #right_turn_jump = (g_1 < g_jm1) and (g_tilde_a > M_max)
         left_turn = g_1 > g_jm1
 
         # ------------- Case A: right‑turn jump ----------------------
@@ -164,10 +177,11 @@ def _scan(e_grid, vf, a_prime, del_a,
             continue
 
         # ------------- Case B: drop due to value fall / monotone ----
-        if (vf_full[i+1] - vf_full[j] < 0) or (g_1 < g_jm1 and (a_prime[i+1] - a_prime[j]) < 0):
+        if (vf_full[i+1] - vf_full[j] < 0) or (ID_NM and (del_pol_a<0)):
             vf[i+1] = np.nan
             m_head = circ_put(m_buf, m_head, i+1)
             continue
+    
 
         # ------------- Case C: left turn or right w/o jump ----------
         # Backward scan using circular buffer → fill g_m_* scratch

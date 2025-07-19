@@ -498,7 +498,7 @@ def _egm_preprocess_core(e_old, vf_old, c_old, a_old,
             c_star = c_old[k+1]
             e_star = e_old[k+1]
             
-            lb_c = max(1e-10,c_star-6)
+            lb_c = max(1e-10,c_star-10)
 
             c_seg = np.linspace(lb_c, c_star, n_con_nxt).astype(c_old.dtype)
             #a_seg = np.linspace(a_star, a_star+2, n_con).astype(a_old.dtype)

@@ -556,8 +556,13 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
                 c_prime = np.zeros_like(policy[:, i_h, i_y])
 
             # Shadow value with marginal utility
+            # divide by beta because we apply discoutn factor in next period
+            # this matches eq in Harris and Laibson (2001)
+            #lambda_dcsn[:, i_h, i_y] = (c_prime*beta*delta + (1-c_prime)*beta)*uc_today/beta*delta
+            #lambda_dcsn[:,i_h,i_y] = 
             lambda_dcsn[:, i_h, i_y] = (
                 uc_today - (1-delta)*c_prime*uc_today) / delta
+            
             vlu_dcsn[:, i_h, i_y] = (Q_dcsn[:, i_h, i_y] - (1-delta) *
                                      compiled_funcs.u_func(c=policy[:, i_h, i_y], H_nxt=H_val))/delta
 
