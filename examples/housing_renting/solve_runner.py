@@ -109,7 +109,7 @@ except ImportError:
 
 
 CFG_DIR = Path(__file__).parent / "config_HR"
-BASE = "VFI_HDGRID"
+BASE = "VFI_HDGRID_GPU"
 ALL_METHODS = ["VFI_HDGRID", "VFI_HDGRID_GPU", "FUES", "FUES2DEV", "CONSAV", "DCEGM"]
 FAST_METHODS = ["FUES", "CONSAV"] # Added CONSAV for easier comparison
 PRE_COMPILE_PARAMS = np.array(["VFI_HDGRID", 500, 500, 500], dtype=object)
@@ -243,6 +243,7 @@ def main(argv=None):
     p.add_argument("--RUN-ID", default="")
     p.add_argument("--stages-L2dev", default="OWNC")
     p.add_argument("--delta-pb", default="1")
+    p.add_argument("--gpu", action="store_true")
     args = p.parse_args(argv or sys.argv[1:])
 
     #  MPI communicator

@@ -179,11 +179,11 @@ math:
       description: "Utility function for renters"
 
     marginal_utility:
-      expr: "alpha/(c + 1e-10) + S*0"
+      expr: "alpha/(c) + S*0"
       description: "Marginal utility of consumption with numerical stability"
     
     owner_marginal_utility:
-      expr: "alpha/(c + 1e-10) + H_nxt*0"
+      expr: "alpha/(c) + H_nxt*0"
       description: "Marginal utility of consumption with numerical stability"
 
     inv_marginal_utility:
@@ -193,18 +193,18 @@ math:
     # Joint utility and marginal utility helpers
     owner_util_mutil:
       u_val: "alpha*np.log(c) + (1-alpha)*np.log(kappa*(H_nxt+iota))"
-      uc_val: "alpha/(c + 1e-10)"
+      uc_val: "alpha/(c)"
       description: "Returns both utility and marginal utility for owners"
 
     renter_util_mutil:
       u_val: "alpha*np.log(c) + (1-alpha)*np.log(kappa*(S+iota))"
-      uc_val: "alpha/(c + 1e-10)"
+      uc_val: "alpha/(c)"
       description: "Returns both utility and marginal utility for renters"
     
     # Override functions from master with local modifications
     uc_func:
       inherit: "uc_general"                   # Inherit but override expression
-      expr: "alpha/(c + 1e-10) +H_nxt*0"               # Override with local modification
+      expr: "alpha/(c) +H_nxt*0"               # Override with local modification
       description: "Modified marginal utility with numerical stability"
     
     # Functions that build on master patterns

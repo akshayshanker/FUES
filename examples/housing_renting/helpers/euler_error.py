@@ -10,8 +10,8 @@ from dc_smm.models.housing_renting.horses_common import (
 def _calculate_euler_error_cuda_kernel(
     z_vals, H_grid, w_dcsn_now, c_now, tenure_pol, H_pol, S_pol,
     c_owner_n, c_renter_n, tenure_a_grid, owner_a_grid, renter_a_grid,
-    H_nxt_grid, S_grid, w_dcsn_o, w_dcsn_r, Pi, beta, R, Pr, tau_phi, tau_phi_R,
-    theta, iota, kappa, rho, # Pass parameters directly
+    H_nxt_grid, S_grid, w_dcsn_o, w_dcsn_r, Pi, beta, R, Pr, tau_phi,
+    alpha,
     output_logs
 ):
     """
@@ -46,22 +46,22 @@ def _calculate_euler_error_cuda_kernel(
                         
                         # Use proper GPU interpolation for consumption
                         c1 = interp_gpu(w_dcsn_vals, w_dcsn_o, c_owner_n[:, int(h_idx_val), jy])
-                        lam_next = uc_owner_gpu(c1, H1, theta, iota, kappa, rho)
+                        lam_next = uc_owner_gpu(c1, H1, alpha)
                         
                     else: # Renter
                         # Use proper GPU interpolation
                         s_idx_val = interp_gpu(R * a_next + y_next, renter_a_grid, S_pol[:, jy])
                         S1 = S_grid[int(s_idx_val)]
-                        # FIXED: corrected sign error and re-added renter transaction cost
-                        w_dcsn_vals = (R * a_next + y_next + H_now - Pr * S1 - tau_phi_R)
+                        # User-specified change: Keep renter wealth calculation as is
+                        w_dcsn_vals = (R * a_next + y_next + H_now - Pr * S1)
                         
                         # Use proper GPU interpolation for consumption
                         c1 = interp_gpu(w_dcsn_vals, w_dcsn_r, c_renter_n[:, int(s_idx_val), jy])
-                        lam_next = uc_renter_gpu(c1, S1, theta, rho)
+                        lam_next = uc_renter_gpu(c1, S1, alpha)
 
                     E_lam += Pi[i_y_loop, jy] * lam_next
                 
-                c_star = inv_uc_owner_gpu(beta * R * E_lam, H_now, theta, iota, kappa, rho)
+                c_star = inv_uc_owner_gpu(beta * R * E_lam, H_now, alpha)
                 output_logs[i_w_loop, i_h_loop, i_y_loop] = cuda.libdevice.log10(abs((c_star - c0) / c0) + 1e-16)
 
 def calculate_euler_error_gpu(model):
@@ -102,7 +102,8 @@ def calculate_euler_error_gpu(model):
         'theta': par.theta, 
         'iota': par.iota, 
         'kappa': par.kappa, 
-        'rho': par.rho
+        'rho': par.rho,
+        'alpha': par.alpha
     })
 
     # Convert numpy arrays to GPU arrays
@@ -145,11 +146,7 @@ def calculate_euler_error_gpu(model):
         gpu_data['R'],
         gpu_data['Pr'],
         gpu_data['tau_phi'],
-        gpu_data['tau_phi_R'],
-        gpu_data['theta'],
-        gpu_data['iota'],
-        gpu_data['kappa'],
-        gpu_data['rho'],
+        gpu_data['alpha'],
         output_logs_gpu
     )
     
@@ -160,7 +157,7 @@ def calculate_euler_error_gpu(model):
 def _calculate_euler_error_jit(
     z_vals, H_grid, w_dcsn_now, c_now, tenure_pol, H_pol, S_pol,
     c_owner_n, c_renter_n, tenure_a_grid, owner_a_grid, renter_a_grid,
-    H_nxt_grid, S_grid, w_dcsn_o, w_dcsn_r, Pi, beta, R, Pr, tau_phi, tau_phi_R,
+    H_nxt_grid, S_grid, w_dcsn_o, w_dcsn_r, Pi, beta, R, Pr, tau_phi,
     uc_owner, uc_rent, uc_inv
 ):
     """
@@ -262,7 +259,7 @@ def calculate_euler_error_cpu(model):
     logs_array = _calculate_euler_error_jit(
         z_vals, H_grid, w_dcsn_now, c_now, tenure_pol, H_pol, S_pol,
         c_owner_n, c_renter_n, tenure_a_grid, owner_a_grid, renter_a_grid,
-        H_nxt_grid, S_grid, w_dcsn_o, w_dcsn_r, Pi, beta, R, Pr, tau_phi, tau_phi_R,
+        H_nxt_grid, S_grid, w_dcsn_o, w_dcsn_r, Pi, beta, R, Pr, tau_phi,
         uc_owner, uc_rent, uc_inv
     )
 

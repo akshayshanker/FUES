@@ -1,3 +1,43 @@
+"""CPU-based solvers for the housing-renting model's consumption choice.
+
+This module provides the core operator factories and solver loops for the
+consumption and savings decisions of both owners and renters. It implements
+several solution methods, including:
+- Endogenous Grid Method (EGM) with an upper envelope step.
+- Value Function Iteration (VFI) for standard resolution grids.
+- MPI-parallelized VFI for high-density grids (`VFI_HDGRID`).
+
+The solvers are designed to be integrated into a larger model circuit via
+StageCraft operator factories. The module also includes GPU-specific operator
+factories that delegate the computation to the corresponding GPU kernels.
+
+Module Contents
+---------------
+F_ownc_cntn_to_dcsn(mover, use_mpi, comm)
+    Factory for the owner's EGM/VFI consumption solver (CPU).
+F_rntc_cntn_to_dcsn(mover, use_mpi, comm)
+    Wrapper factory for the renter's consumption solver (CPU).
+F_rntc_cntn_to_dcsn_gpu(mover, use_mpi, comm)
+    Wrapper factory for the renter's consumption solver (GPU).
+F_ownc_dcsn_to_cntn(mover)
+    Forward-step operator mapping decision state to next-period assets.
+F_ownc_cntn_to_dcsn_gpu(mover, use_mpi, comm)
+    Factory for the owner's VFI consumption solver (GPU).
+_solve_egm_loop(vlu_cntn, lambda_cntn, model)
+    Private helper to solve the consumption problem using the EGM algorithm.
+_solve_vfi_loop(vlu_cntn, model, use_mpi, comm)
+    Private helper to solve the consumption problem using VFI (serial or MPI).
+_solve_vfi_numerical(V_next, w_grid, a_grid, H_grid, beta, delta, m_bar, u_func, h_nxt_ind_array, thorn)
+    Numba-jitted kernel for VFI using Brent's method optimization.
+solve_vfi_grid_serial(V_next, w_grid, a_grid, H_grid, beta, delta, m_bar, u_func, h_nxt_ind_array, thorn, n_grid)
+    Serial VFI solver that uses a block kernel for a dense grid search.
+solve_vfi_grid_mpi(vlu_cntn, model, comm, use_mpi)
+    Memory-slim MPI-parallel VFI solver that scatters continuation values to workers.
+_solve_vfi_block(h_idx, y_idx, V_next, w_grid, a_grid, H_grid, beta, delta, m_bar, u_func, h_nxt_ind_array, thorn, n_grid)
+    Numba-jitted kernel to solve VFI for a block of (h,y) pairs.
+_solve_vfi_block_local(h_idx, y_idx, V_slices, w_grid, a_grid, H_grid, beta, delta, m_bar, u_func, h_nxt_ind_array, thorn, n_grid, policy_c, policy_a, Q_dcsn, V_cntn, lambda_cntn)
+    Memory-slim, Numba-jitted VFI kernel for pre-scattered data chunks in MPI.
+"""
 import os, time, numba, numpy as np
 import logging
 import gc
@@ -20,7 +60,7 @@ logger = logging.getLogger(__name__)
 if logger.isEnabledFor(logging.INFO):
     logger.info(f"NUMBA threads: {numba.get_num_threads()}, OMP_NUM_THREADS: {os.getenv('OMP_NUM_THREADS')}")
 
-# --- Operator Factory for OWNC Consumption Choice ---
+# --- Operator Factory for OWNC Consumption Choice ------
 
 def F_ownc_cntn_to_dcsn(mover, use_mpi=False, comm=None):
     """Create operator for ownc_cntn_to_dcsn mover.
@@ -207,6 +247,89 @@ def F_rntc_cntn_to_dcsn_gpu(mover, use_mpi=False, comm=None):
     This is a simple wrapper around the owner's GPU factory.
     """
     return F_ownc_cntn_to_dcsn_gpu(mover, use_mpi=use_mpi, comm=comm)
+
+
+def F_ownc_dcsn_to_cntn(mover):
+    """Create operator for ownc_dcsn_to_cntn mover (Forward step).
+
+    Calculates end-of-period assets based on decision-period state and policy.
+    Maps (w, H_nxt, y) -> a_nxt.
+    The value/lambda mapping is usually handled by backward steps or identity.
+    This primarily calculates the implied asset state.
+    NOTE: This simple version doesn't map values/lambda, assumes handled elsewhere.
+    """
+    # Extract model and stage
+    model = mover.model
+
+    # In StageCraft, Movers have source_name and target_name, not perch objects
+    # We need to access the stage to get the perches
+    source_name = mover.source_name  # Should be 'dcsn'
+    target_name = mover.target_name  # Should be 'cntn'
+
+    # Get the stage to access perches
+
+    def operator(perch_data):
+        """Transforms decision state & policy to continuation state (assets).
+
+        This operator calculates the end-of-period assets based on the
+        decision-period state and the consumption policy. The primary purpose
+        is to map the decision state (w, H_nxt, y) and policy C(w, H_nxt, y)
+        to the next-period asset state a_nxt.
+
+        In this simplified version, it's assumed that the value and marginal
+        utility (lambda) propagation is handled by other parts of the model
+        framework, particularly the backward solution steps. Therefore, this
+        operator focuses solely on the state transformation for assets.
+
+        Args:
+            perch_data: A dictionary or Solution object containing data from
+                        the source 'dcsn' perch. Expected to hold the
+                        consumption 'policy' and relevant state grids if needed
+                        (though currently commented out as it returns an empty dict).
+
+        Returns:
+            dict: An empty dictionary. This operator, in its current form,
+                  does not populate any fields in the target 'cntn' perch
+                  as it assumes value/lambda mapping is done elsewhere.
+                  A more complete implementation might return {'a_nxt': a_nxt_array}.
+        """
+        # policy = perch_data["policy"] # Consumption policy C(w, H_nxt, y)
+        # w_grid = stage.dcsn.grid.w
+
+        # Minimal implementation: returns empty dict assuming value/lambda
+        # mapping is not done by this specific forward operator.
+        # The framework connects states, value calculation happens in backward steps.
+        return {}
+
+    return operator
+
+def F_ownc_cntn_to_dcsn_gpu(mover, use_mpi=False, comm=None):
+    """
+    Operator factory for the GPU-based VFI solver.
+    """
+    model = mover.model
+    model.stage_name = mover.stage_name
+
+    def operator(perch_data):
+        """
+        Launches the GPU VFI solver.
+        """
+        vlu_cntn = perch_data.vlu
+        
+        # This call offloads the heavy computation to the GPU
+        policy, policy_a, Q_dcsn, V_cntn, lambda_cntn = solve_vfi_gpu(
+            vlu_cntn, model
+        )
+
+        sol = Solution()
+        sol.policy["c"] = policy
+        sol.policy["a"] = policy_a
+        sol.vlu = V_cntn # Note: We use V_cntn from the GPU run
+        sol.lambda_ = lambda_cntn
+        sol.Q = Q_dcsn
+        return sol
+
+    return operator
 
 
 # --- Private Solver Loop Helpers ---
@@ -1085,85 +1208,4 @@ def _solve_vfi_block_local(h_idx, y_idx, V_slices, w_grid, a_grid, H_grid,
 # Need F_ownc_dcsn_to_cntn - If it exists, move it here.
 # Otherwise, it needs to be defined. Let's assume it needs definition:
 
-def F_ownc_dcsn_to_cntn(mover):
-    """Create operator for ownc_dcsn_to_cntn mover (Forward step).
-
-    Calculates end-of-period assets based on decision-period state and policy.
-    Maps (w, H_nxt, y) -> a_nxt.
-    The value/lambda mapping is usually handled by backward steps or identity.
-    This primarily calculates the implied asset state.
-    NOTE: This simple version doesn't map values/lambda, assumes handled elsewhere.
-    """
-    # Extract model and stage
-    model = mover.model
-
-    # In StageCraft, Movers have source_name and target_name, not perch objects
-    # We need to access the stage to get the perches
-    source_name = mover.source_name  # Should be 'dcsn'
-    target_name = mover.target_name  # Should be 'cntn'
-
-    # Get the stage to access perches
-
-    def operator(perch_data):
-        """Transforms decision state & policy to continuation state (assets).
-
-        This operator calculates the end-of-period assets based on the
-        decision-period state and the consumption policy. The primary purpose
-        is to map the decision state (w, H_nxt, y) and policy C(w, H_nxt, y)
-        to the next-period asset state a_nxt.
-
-        In this simplified version, it's assumed that the value and marginal
-        utility (lambda) propagation is handled by other parts of the model
-        framework, particularly the backward solution steps. Therefore, this
-        operator focuses solely on the state transformation for assets.
-
-        Args:
-            perch_data: A dictionary or Solution object containing data from
-                        the source 'dcsn' perch. Expected to hold the
-                        consumption 'policy' and relevant state grids if needed
-                        (though currently commented out as it returns an empty dict).
-
-        Returns:
-            dict: An empty dictionary. This operator, in its current form,
-                  does not populate any fields in the target 'cntn' perch
-                  as it assumes value/lambda mapping is done elsewhere.
-                  A more complete implementation might return {'a_nxt': a_nxt_array}.
-        """
-        # policy = perch_data["policy"] # Consumption policy C(w, H_nxt, y)
-        # w_grid = stage.dcsn.grid.w
-
-        # Minimal implementation: returns empty dict assuming value/lambda
-        # mapping is not done by this specific forward operator.
-        # The framework connects states, value calculation happens in backward steps.
-        return {}
-
-    return operator
-
-def F_ownc_cntn_to_dcsn_gpu(mover, use_mpi=False, comm=None):
-    """
-    Operator factory for the GPU-based VFI solver.
-    """
-    model = mover.model
-    model.stage_name = mover.stage_name
-
-    def operator(perch_data):
-        """
-        Launches the GPU VFI solver.
-        """
-        vlu_cntn = perch_data.vlu
-        
-        # This call offloads the heavy computation to the GPU
-        policy, policy_a, Q_dcsn, V_cntn, lambda_cntn = solve_vfi_gpu(
-            vlu_cntn, model
-        )
-
-        sol = Solution()
-        sol.policy["c"] = policy
-        sol.policy["a"] = policy_a
-        sol.vlu = V_cntn # Note: We use V_cntn from the GPU run
-        sol.lambda_ = lambda_cntn
-        sol.Q = Q_dcsn
-        return sol
-
-    return operator
 

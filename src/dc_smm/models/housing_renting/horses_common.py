@@ -703,31 +703,31 @@ def bellman_obj_gpu(a_prime, w, H, beta, delta, a_grid, V_next,
     
     return util + beta * delta * v_interp
 
-# --- NEW FUNCTIONS FOR EULER ERROR CALCULATION ---
+# --- NEW FUNCTIONS FOR EULER ERROR CALCULATION GPU LOG UTILITY ---
 
 @cuda.jit(device=True)
-def uc_owner_gpu(c, H, theta, iota, kappa, rho):
+def uc_owner_gpu(c, H, alpha):
     """
     GPU device function for the owner's marginal utility.
     """
     if c <= 0: 
-        return 1e12
-    return theta * c**(-rho) * (H**kappa * iota)**(1.0 - rho)
+        return 1e112
+    return alpha/c
 
 @cuda.jit(device=True)
-def uc_renter_gpu(c, H, theta, rho):
+def uc_renter_gpu(c, S, alpha):
     """
     GPU device function for the renter's marginal utility (H represents S).
     """
     if c <= 0: 
-        return 1e12
-    return theta * c**(-rho) * H**(1.0 - rho)
+        return 1e112
+    return alpha/c
     
 @cuda.jit(device=True)
-def inv_uc_owner_gpu(lambda_e, H, theta, iota, kappa, rho):
+def inv_uc_owner_gpu(lambda_e, H, alpha):
     """
     GPU device function for the owner's inverse marginal utility.
     """
     if lambda_e <= 0: 
         return 1e-12
-    return (lambda_e / (theta * (H**kappa * iota)**(1.0-rho)))**(-1.0/rho)
+    return alpha/lambda_e
