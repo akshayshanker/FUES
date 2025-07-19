@@ -158,7 +158,7 @@ def _calculate_euler_error_jit(
     z_vals, H_grid, w_dcsn_now, c_now, tenure_pol, H_pol, S_pol,
     c_owner_n, c_renter_n, tenure_a_grid, owner_a_grid, renter_a_grid,
     H_nxt_grid, S_grid, w_dcsn_o, w_dcsn_r, Pi, beta, R, Pr, tau_phi,
-    uc_owner, uc_rent, uc_inv
+    uc_owner, uc_rent, uc_inv, c_min=1e-12, a_min=1e-6
 ):
     """
     This is the core numerical kernel, compiled with Numba for high performance (CPU fallback).
@@ -170,11 +170,11 @@ def _calculate_euler_error_jit(
             for iw, w_now in enumerate(w_dcsn_now):
 
                 c0 = c_now[iw, ih, iy]
-                if c0 <= 1e-12:
+                if c0 <= c_min:
                     continue
 
                 a_next = w_now - c0
-                if a_next <= 0.1:
+                if a_next <= a_min:
                     continue
 
                 E_lam = 0.0
@@ -213,7 +213,7 @@ def _calculate_euler_error_jit(
 
     return np.array(logs)
 
-def calculate_euler_error_cpu(model):
+def calculate_euler_error_cpu(model, debug=True):
     """
     CPU-based Euler error calculation using the original approach.
     """
@@ -255,19 +255,50 @@ def calculate_euler_error_cpu(model):
     uc_inv_expr = ownc.model.math["functions"]["inv_marginal_utility"]["expr"]
     uc_inv = build_njit_utility(uc_inv_expr, par_dict_for_njit_builder, arg1_name="lambda_e", arg2_name="H_nxt")
     
+    # Debug: Check policy function ranges before calculation
+    if debug:
+        print(f"Debug Euler Error Calculation:")
+        print(f"  c_now range: [{np.min(c_now):.6f}, {np.max(c_now):.6f}]")
+        print(f"  w_dcsn_now range: [{np.min(w_dcsn_now):.6f}, {np.max(w_dcsn_now):.6f}]")
+        print(f"  Minimum a_next (w - c): {np.min(w_dcsn_now[..., np.newaxis, np.newaxis] - c_now):.6f}")
+        print(f"  Number of valid states (c > 1e-12): {np.sum(c_now > 1e-12)}")
+        print(f"  Number of valid states (a_next > 0.1): {np.sum((w_dcsn_now[..., np.newaxis, np.newaxis] - c_now) > 0.1)}")
+
+    # Use borrowing constraint from model as minimum asset threshold
+    b = getattr(par, 'b', 1e-6)
+    a_min_threshold = max(b, 1e-6)  # At least 1e-6 to avoid numerical issues
+    
     # Call the JIT-compiled kernel with the newly compiled functions
     logs_array = _calculate_euler_error_jit(
         z_vals, H_grid, w_dcsn_now, c_now, tenure_pol, H_pol, S_pol,
         c_owner_n, c_renter_n, tenure_a_grid, owner_a_grid, renter_a_grid,
         H_nxt_grid, S_grid, w_dcsn_o, w_dcsn_r, Pi, beta, R, Pr, tau_phi,
-        uc_owner, uc_rent, uc_inv
+        uc_owner, uc_rent, uc_inv, c_min=1e-12, a_min=a_min_threshold
     )
+
+    if debug:
+        print(f"  Logs array size: {logs_array.size}")
+        if logs_array.size > 0:
+            print(f"  Euler error range: [{np.min(logs_array):.6f}, {np.max(logs_array):.6f}]")
+        else:
+            print("  No valid states found for Euler error calculation")
 
     return float(np.mean(logs_array)) if logs_array.size > 0 else np.nan
 
-def euler_error_metric(model, use_gpu=True):
+def euler_error_metric(model, use_gpu=True, debug=True, **kwargs):
     """
     Metric wrapper. Set use_gpu=False to use the CPU version.
+    
+    Parameters
+    ----------
+    model : Model
+        The solved model to calculate Euler errors for
+    use_gpu : bool
+        Whether to attempt GPU calculation (falls back to CPU if unavailable)
+    debug : bool
+        Whether to print debug information
+    **kwargs : dict
+        Additional arguments (for compatibility with CircuitRunner)
     """
     if use_gpu and cuda.is_available():
         try:
@@ -275,8 +306,8 @@ def euler_error_metric(model, use_gpu=True):
         except Exception as e:
             print(f"Warning: GPU Euler error calculation failed: {e}")
             print("Falling back to CPU implementation...")
-            return calculate_euler_error_cpu(model)
+            return calculate_euler_error_cpu(model, debug=debug)
     else:
         if use_gpu: 
             print("Warning: GPU not available, falling back to CPU for Euler error.")
-        return calculate_euler_error_cpu(model)
+        return calculate_euler_error_cpu(model, debug=debug)

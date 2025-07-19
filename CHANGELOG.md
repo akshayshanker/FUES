@@ -158,6 +158,15 @@ All notable changes to this project will be documented in this file.
   - Workers now receive lightweight stub `Solution` objects for non-MPI stages, preventing deadlocks and memory bloat.
   - No heavy `.sol` objects are ever broadcast back to workers.
 
+* **Configurable plotting comparison system**
+  - New `plot_comparison_factory()` function in `helpers/metrics.py` creates configurable plotting metrics for comparing fast methods against baseline solutions.
+  - Generates difference plots between policy/value functions of different solution methods (e.g., FUES vs VFI_HDGRID).
+  - Configurable state-space slicing allows plotting specific indices of multi-dimensional arrays.
+  - Supports both consumption policies (`c`) and value functions (`vlu`) with automatic detection of solution attributes.
+  - Integrated with CircuitRunner's metric system for seamless workflow integration.
+  - Uses existing `_extract_policy()` function for robust data extraction from complex model structures.
+  - Memory-efficient design stores baseline model temporarily and cleans up automatically.
+
 ### Changed
 * **Streamlined terminal value initialization**
   - The `initialize_terminal_values` function in `whisperer.py` now only processes consumption stages (`OWNC` and `RNTC`), eliminating wasteful placeholder grids for housing and tenure stages.
@@ -174,6 +183,10 @@ All notable changes to this project will be documented in this file.
 * **Deadlocks** caused by workers returning `None` instead of lightweight stubs for non-MPI stages.
 * **Unnecessary recomputation** of fast methods when a baseline was loaded.
 * **Timing metrics** now correctly captured and displayed in the summary tables.
+* **Plot comparison function scope issues** where parameter variables from factory function weren't properly captured in closure.
+* **Array indexing errors** in plotting configuration by using 0-indexed bounds instead of array size.
+* **Value function extraction** by using correct model attribute names (`vlu` instead of `v`) and solution types.
+* **Euler error calculation thresholds** made more flexible and based on model's borrowing constraint to prevent NaN results for FUES methods.
 
 ## [0.2.0 dev4] - 2025-06-09 – **MPI-safe baseline & lean workers**
 

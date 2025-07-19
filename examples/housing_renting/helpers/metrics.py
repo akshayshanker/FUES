@@ -6,6 +6,8 @@ from __future__ import annotations
 from typing import Any, Callable, Literal, Optional
 
 import numpy as np
+import matplotlib.pyplot as plt
+import itertools
 from dynx.runner.circuit_runner import CircuitRunner
 from dynx.runner.reference_utils import load_reference_model
 
@@ -222,3 +224,131 @@ dev_v_L2   = make_policy_dev_metric("v",   "L2",  sol_attr="value")
 dev_v_Linf = make_policy_dev_metric("v",   "Linf", sol_attr="value")
 dev_pol_L2   = make_policy_dev_metric("pol", "L2")
 dev_pol_Linf = make_policy_dev_metric("pol", "Linf")
+
+
+# ─────────────────────────── plotting comparison factory ──────────────────────
+def plot_comparison_factory(
+    decision_variable: str, 
+    dim_labels: dict, 
+    plot_axis_label: str, 
+    slice_config: dict = None,
+    stage: str = "OWNC",
+    sol_attr: str = None,
+    period_idx: int = 0
+):
+    """
+    A factory that creates a configurable metric function for plotting comparisons.
+
+    Args:
+        decision_variable (str): The model attribute to plot (e.g., 'v', 'c').
+        dim_labels (dict): Maps every dimension index to a label (e.g., {0: 'k_idx', 1: 'a_idx'}).
+        plot_axis_label (str): The label for the plot's x-axis (e.g., 'a_idx').
+        slice_config (dict, optional): Maps a dimension label to a list of specific
+                                       indices to plot. E.g., {'k_idx': [5, 15]}.
+                                       If None, a plot for every index is generated.
+        stage (str): The stage to extract data from (default: "OWNC").
+        sol_attr (str): The solution attribute ('policy' or 'value'). If None, 
+                        automatically determined based on decision_variable.
+        period_idx (int): The period index to extract data from (default: 0).
+    """
+    def _plotter(model, _runner, _x):
+        if not hasattr(_runner, 'ref_model_for_plotting'):
+            return np.nan
+
+        baseline_model = _runner.ref_model_for_plotting
+        img_dir = _runner.output_root / "images"
+        img_dir.mkdir(exist_ok=True)
+        params_dict = _runner.unpack(_x)
+        method_name = params_dict.get("master.methods.upper_envelope", "unknown_method")
+
+        try:
+            # Extract data using the existing _extract_policy function for consistency
+            # Determine the correct sol_attr if not provided
+            _sol_attr = sol_attr if sol_attr is not None else ("policy" if decision_variable in ("c", "a", "h", "pol") else "value")
+            
+            fast_data, fast_grid = _extract_policy(
+                model, 
+                key=decision_variable, 
+                sol_attr=_sol_attr,
+                stage=stage,
+                period_idx=period_idx
+            )
+            baseline_data, baseline_grid = _extract_policy(
+                baseline_model, 
+                key=decision_variable, 
+                sol_attr=_sol_attr,
+                stage=stage,
+                period_idx=period_idx
+            )
+            
+            if fast_data is None or baseline_data is None:
+                print(f"[warn] Could not extract {decision_variable} data for plotting")
+                return np.nan
+            
+            # Handle choice dimension by taking max if it exists
+            if fast_data.ndim > 2 and str(dim_labels.get(fast_data.ndim - 1, '')).lower() == 'choice':
+                fast_data = fast_data.max(axis=-1)
+                baseline_data = baseline_data.max(axis=-1)
+            
+            diff_data = fast_data - baseline_data
+
+            # Find the plot axis index
+            plot_axis_index = -1
+            slice_dims = {}
+            for index, label in dim_labels.items():
+                if label == plot_axis_label:
+                    plot_axis_index = index
+                elif label.lower() != 'choice' and index < diff_data.ndim:
+                    slice_dims[index] = label
+
+            if plot_axis_index == -1:
+                raise ValueError(f"plot_axis_label '{plot_axis_label}' not found in dim_labels.")
+
+            slice_indices = sorted(slice_dims.keys())
+            
+            # Determine which slices to plot
+            if slice_config:
+                slice_ranges = []
+                for i in slice_indices:
+                    dim_label = dim_labels[i]
+                    if dim_label in slice_config:
+                        slice_ranges.append(slice_config[dim_label])
+                    else:
+                        slice_ranges.append(range(diff_data.shape[i]))
+            else:
+                slice_ranges = [range(diff_data.shape[i]) for i in slice_indices]
+
+            # Generate plots for each slice combination
+            for slice_vals in itertools.product(*slice_ranges):
+                slicer = [slice(None)] * diff_data.ndim
+                for i, val in enumerate(slice_vals):
+                    slicer[slice_indices[i]] = val
+                
+                plot_data = diff_data[tuple(slicer)]
+
+                label_parts = [f"{slice_dims[idx]}={val}" for idx, val in zip(slice_indices, slice_vals)]
+                title = f"{decision_variable.title()} Diff: {method_name} vs. Baseline\n({', '.join(label_parts)})"
+                filename = f"{decision_variable}_diff_{method_name}_{'_'.join(label_parts)}.png"
+
+                fig, ax = plt.subplots()
+                ax.set_title(title)
+                ax.set_xlabel(plot_axis_label)
+                ax.set_ylabel("Difference")
+                ax.plot(plot_data)
+                ax.grid(True)
+                
+                plt.savefig(img_dir / filename)
+                plt.close(fig)
+
+        except Exception as err:
+            import traceback
+            print(f"[warn] Plotting for '{decision_variable}' failed on '{method_name}': {err}\n{traceback.format_exc()}")
+
+        return np.nan
+
+    _plotter.__name__ = f"plot_{decision_variable}_comparison"
+    _plotter.__doc__ = (
+        f"Plot comparison of '{decision_variable}' between fast method and baseline reference.\n"
+        f"Extracts data from stage '{stage}' using sol_attr '{sol_attr or "auto"}' at period {period_idx}."
+    )
+    return _plotter

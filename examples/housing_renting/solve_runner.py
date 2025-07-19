@@ -99,17 +99,17 @@ try:
     from helpers.euler_error import euler_error_metric
     from helpers.plots import generate_plots
     from helpers.tables import print_summary, generate_latex_table
-    from helpers.metrics import dev_c_L2, dev_v_L2
+    from helpers.metrics import dev_c_L2, dev_v_L2, plot_comparison_factory
 except ImportError:
     from .whisperer import build_operators_for_circuit, run_time_iteration
     from .helpers.euler_error import euler_error_metric
     from .helpers.plots import generate_plots
     from .helpers.tables import print_summary, generate_latex_table
-    from .helpers.metrics import dev_c_L2, dev_v_L2
+    from .helpers.metrics import dev_c_L2, dev_v_L2, plot_comparison_factory
 
 
 CFG_DIR = Path(__file__).parent / "config_HR"
-BASE = "VFI_HDGRID_GPU"
+BASE = "VFI_HDGRID"
 ALL_METHODS = ["VFI_HDGRID", "VFI_HDGRID_GPU", "FUES", "FUES2DEV", "CONSAV", "DCEGM"]
 FAST_METHODS = ["FUES2DEV", "CONSAV"] # Added CONSAV for easier comparison
 PRE_COMPILE_PARAMS = np.array(["VFI_HDGRID", 500, 500, 500], dtype=object)
@@ -321,6 +321,38 @@ def main(argv=None):
     if comm is not None:
         comm.Barrier()
 
+    #  set-up plotting configuration -----------------------------------------------
+    # Define the dimension labels for the model's policy arrays
+    asset_dims = {
+        0: 'w_idx',    # wealth capital (housing)
+        1: 'h_idx',    # Liquid assets
+        2: 'y_idx'    # The decision/choice axis
+    }
+
+    # Define which specific indices to generate plots for
+    plots_of_interest = {
+        'h_idx': [5, 10, 14]  # Generate plots only for these h indices (0-indexed)
+    }
+
+    # Create plotting metrics if plots are requested
+    metric_fns = {"euler_error": euler_error_metric}
+    if args.plots:
+        metric_fns.update({
+            "plot_c_comparison": plot_comparison_factory(
+                decision_variable='c',
+                dim_labels=asset_dims,
+                plot_axis_label='w_idx',
+                slice_config=plots_of_interest
+            ),
+            "plot_v_comparison": plot_comparison_factory(
+                decision_variable='vlu',
+                dim_labels=asset_dims,
+                plot_axis_label='w_idx',
+                slice_config=plots_of_interest,
+                sol_attr='value'
+            ),
+        })
+
     #  set-up main runner ------------------------------------------------------
     runner = CircuitRunner(
         base_cfg=cfg_container,
@@ -333,9 +365,7 @@ def main(argv=None):
         ],
         model_factory=lambda cfg: make_housing_model(args,cfg, args.periods, vf_ngrid, comm),
         solver=make_housing_solver(args, args.mpi, comm),
-        metric_fns={
-            "euler_error": euler_error_metric,
-        },
+        metric_fns=metric_fns,
         output_root=output_root,
         bundle_prefix=args.bundle_prefix,
         save_by_default=save_by_default,
@@ -374,6 +404,10 @@ def main(argv=None):
         ref_metrics["latest_time_id"] = args.RUN_ID 
         all_metrics.append(ref_metrics)
 
+        # Store the baseline model for plotting comparisons
+        if is_root and ref_model is not None:
+            runner.ref_model_for_plotting = ref_model
+
         # Generate plots immediately and delete model
         if is_root and args.plots and ref_model is not None:
             img_dir = output_root / "images" 
@@ -396,10 +430,22 @@ def main(argv=None):
     
     if fast_methods_to_run:
         runner.load_if_exists = not args.fresh_fast
-        runner.metric_fns = {
+        
+        # Update metrics for fast methods to include plotting comparisons
+        fast_metric_fns = {
             "euler_error": euler_error_metric,
             "dev_c_L2": dev_c_L2,
         }
+        if args.plots:
+            fast_metric_fns.update({
+                "plot_c_comparison": plot_comparison_factory(
+                    decision_variable='c',
+                    dim_labels=asset_dims,
+                    plot_axis_label='w_idx',
+                    slice_config=plots_of_interest
+                ),
+            })
+        runner.metric_fns = fast_metric_fns
         # Ensure ref_params is defined, even if baseline wasn't run
         if 'ref_params' not in locals():
              ref_params = np.array([BASE, HD_POINTS, HD_POINTS, HD_POINTS,pb_delta], dtype=object)
@@ -452,6 +498,11 @@ def main(argv=None):
             write_design_matrix_csv(runner, design_matrix)
             if is_root:
                 print(f"  Design matrix saved to {output_root}/design_matrix.csv")
+
+    # Clean up the stored baseline model
+    if hasattr(runner, 'ref_model_for_plotting'):
+        del runner.ref_model_for_plotting
+        gc.collect()
 
 if __name__ == "__main__":
     main()

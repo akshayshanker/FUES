@@ -21,8 +21,25 @@ cd "$FUES_HOME"
 
 # --- MPI and Numba Configuration ---
 export OMPI_MCA_btl_base_warn_component_unused=0
-export NUMBA_DISABLE_CACHE=1
+
+# Numba settings - use persistent cache to avoid recompilation issues
+export NUMBA_CACHE_DIR=/scratch/tp66/$USER/numba_cache
+
+# Optional: Clear cache if passed as argument
+if [[ "${1:-}" == "--clear-cache" ]]; then
+    echo "Clearing Numba cache at $NUMBA_CACHE_DIR..."
+    rm -rf $NUMBA_CACHE_DIR
+    shift  # Remove the argument
+fi
+
+mkdir -p $NUMBA_CACHE_DIR
+# export NUMBA_DISABLE_CACHE=1  # Commented out - allow caching to prevent LLVM errors
 export NUMBA_NUM_THREADS=1
+
+# Hide GPUs from Numba to prevent CUDA initialization errors
+export CUDA_VISIBLE_DEVICES=""
+export NUMBA_CUDA_LOG_LEVEL=WARNING
+export NUMBA_DISABLE_CUDA=1
 
 # ---  errors 
 
@@ -43,9 +60,21 @@ export OMPI_MCA_btl_openib_warn_no_device_params_found=0
 export OMPI_MCA_coll_ml_priority=0
 export OMPI_MCA_coll_hcoll_enable=0
 
-# Numba settings for MPI safety
-export NUMBA_CACHE_DIR=/tmp/numba_cache_$$  # Use process-specific cache dir
-export NUMBA_NUM_THREADS=1          # Prevent thread conflicts
+# Note: Numba settings already configured above
+# Using shared cache directory instead of process-specific to avoid recompilation
+
+# --- Pre-run checks ---
+echo "Checking environment..."
+echo "Python: $(which python3)"
+echo "MPI: $(which mpiexec)"
+echo "NUMBA_CACHE_DIR: $NUMBA_CACHE_DIR"
+echo "CUDA_VISIBLE_DEVICES: $CUDA_VISIBLE_DEVICES"
+
+# Test import of critical packages
+python3 -c "import numba; import quantecon; print('Numba version:', numba.__version__); print('Quantecon loaded successfully')" || {
+    echo "ERROR: Failed to import required packages" >&2
+    exit 1
+}
 
 # --- Loop Through and Execute Each Configuration ---
 for CONFIG_NAME in "${CONFIG_TO_RUN[@]}"; do
@@ -74,7 +103,7 @@ for CONFIG_NAME in "${CONFIG_TO_RUN[@]}"; do
 
     mpiexec -np 45 python3 -m examples.housing_renting.solve_runner \
       --periods "${CONFIG_REF[periods]}" \
-      --ue-method "VFI_HDGRID,FUES" \
+      --ue-method "VFI_HDGRID,FUES2DEV" \
       --output-root "$OUTPUT_DIR" \
       --bundle-prefix "${VERSION_TAG}" \
       --RUN-ID "${VERSION_TAG}_${TIMESTAMP}" \
@@ -91,11 +120,22 @@ for CONFIG_NAME in "${CONFIG_TO_RUN[@]}"; do
 
     EXIT_CODE=$?
     if [ $EXIT_CODE -ne 0 ]; then
-        echo "Run for ${CONFIG_NAME} failed with exit code: $EXIT_CODE" >&2
+        echo "ERROR: Run for ${CONFIG_NAME} failed with exit code: $EXIT_CODE" >&2
+        echo "Check error log at: ${LOG_DIR}/run.err" >&2
+        
+        # Check for common errors in the log
+        if grep -q "LLVM ERROR" "${LOG_DIR}/run.err"; then
+            echo "HINT: LLVM error detected. Try running with --clear-cache flag" >&2
+        fi
+        if grep -q "CUDA_ERROR" "${LOG_DIR}/run.err"; then
+            echo "HINT: CUDA errors detected (these can be ignored on CPU nodes)" >&2
+        fi
+        
         # Decide if you want to exit immediately or continue with next config
-        # exit $EXIT_CODE  # Uncomment to stop on first failure
+        exit $EXIT_CODE  # Exit on first failure
     else
         echo "Run for ${CONFIG_NAME} completed successfully."
+        echo "Results saved to: $OUTPUT_DIR"
     fi
     
 done
