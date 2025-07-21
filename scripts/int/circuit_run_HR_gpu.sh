@@ -18,7 +18,7 @@ source ../lib/job_configs.sh
 
 # --- 2. Define the Sequence of Configurations to Run ---
 CONFIG_TO_RUN=(
-    "STD_RES_SETTINGS_PB"
+    "HIGH_RES_SETTINGS_A"
 )
 
 # --- 3. Environment Setup ---
@@ -69,13 +69,20 @@ for CONFIG_NAME in "${CONFIG_TO_RUN[@]}"; do
     # --- Logging and Paths ---
     TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
     VERSION_TAG="${CONFIG_REF[version_suffix]}"
-    TRIAL_ID="gpu_test"
-    RUN_ID="${VERSION_TAG}_${TIMESTAMP}"
-    LOG_DIR="logs/${RUN_ID}_${TRIAL_ID}"
+    # TRIAL_ID can be set as environment variable or default to empty
+    TRIAL_ID="${TRIAL_ID:-}"
+    
+    # Build paths based on whether TRIAL_ID is set
+    if [[ -n "$TRIAL_ID" ]]; then
+        RUN_ID="${VERSION_TAG}_${TIMESTAMP}_${TRIAL_ID}"
+        LOG_DIR="logs/${VERSION_TAG}_${TRIAL_ID}"
+        OUTPUT_DIR="/scratch/tp66/$USER/FUES/solutions/housing_renting/${VERSION_TAG}_${TRIAL_ID}"
+    else
+        RUN_ID="${VERSION_TAG}_${TIMESTAMP}"
+        LOG_DIR="logs/${VERSION_TAG}"
+        OUTPUT_DIR="/scratch/tp66/$USER/FUES/solutions/housing_renting/${VERSION_TAG}"
+    fi
     mkdir -p "$LOG_DIR"
-
-    SOLUTION_ROOT="/scratch/tp66/$USER/FUES/solutions/housing_renting/"
-    OUTPUT_DIR="$SOLUTION_ROOT/${VERSION_TAG}_${TRIAL_ID}"
     
     #PROFILE_OUTPUT_FILE="${FUES_HOME}/profile_${RUN_ID}.pstats"
 

@@ -527,6 +527,7 @@ def plot_endogenous_grids(first_period, image_dir):
     # Close all figures
     plt.close('all') 
 
+# Add debugging information to plot_egm_grids function
 def plot_egm_grids(period, H_idx, y_idx, method, image_dir, bounds=None, sol_override=None):
     """
     Plot endogenous grids before and after upper envelope refinement in the style of example_egm_plot.py.
@@ -564,14 +565,18 @@ def plot_egm_grids(period, H_idx, y_idx, method, image_dir, bounds=None, sol_ove
     else:
         # If no period, we need sol_override
         if sol_override is None:
-            # No data to plot
+            print(f"[DEBUG] {method}: No period and no sol_override provided")
             return
         ownc_stage = None
     
     # Check if EGM grids are available
-    egm_data = _get_sol_field(sol_override if sol_override else (ownc_stage.dcsn.sol if ownc_stage else None), "EGM")
+    egm_data = _get_sol_field(sol_override or ownc_stage.dcsn.sol, "EGM")
     if egm_data is None or not egm_data:
-        #print(f"EGM grid data not available for period {period.time_index}. Skipping plot.")
+        print(f"[DEBUG] {method}: EGM grid data not available. EGM data: {egm_data}")
+        if sol_override:
+            print(f"[DEBUG] {method}: Solution override keys: {list(sol_override.__dict__.keys()) if hasattr(sol_override, '__dict__') else 'No __dict__'}")
+            if hasattr(sol_override, 'EGM'):
+                print(f"[DEBUG] {method}: EGM keys: {list(sol_override.EGM.__dict__.keys()) if hasattr(sol_override.EGM, '__dict__') else 'EGM has no __dict__'}")
         return
     
     # Extract grid data
@@ -579,18 +584,29 @@ def plot_egm_grids(period, H_idx, y_idx, method, image_dir, bounds=None, sol_ove
     
     unrefined_e = _get_sol_field(sol_override or ownc_stage.dcsn.sol, "EGM", "unrefined.e")
     if unrefined_e is None or grid_key not in unrefined_e:
-        #print(f"Grid key {grid_key} not found in EGM data. Available keys: {list(unrefined_e.keys()) if unrefined_e else []}")
+        print(f"[DEBUG] {method}: Grid key {grid_key} not found in EGM data.")
+        if unrefined_e:
+            print(f"[DEBUG] {method}: Available unrefined EGM keys: {list(unrefined_e.keys())}")
+        else:
+            print(f"[DEBUG] {method}: No unrefined EGM data found")
         return
     
-    # Unrefined grids
+    # Check if we have valid data
     e_grid_unrefined = _get_sol_field(sol_override or ownc_stage.dcsn.sol, "EGM", "unrefined.e")[grid_key]
+    if len(e_grid_unrefined) == 0:
+        print(f"[DEBUG] {method}: Empty unrefined EGM grid for key {grid_key}")
+        return
+    
+    print(f"[DEBUG] {method}: Found valid EGM data for {grid_key}, grid size: {len(e_grid_unrefined)}")
+    
+    # Continue with rest of existing function...
     vf_unrefined = _get_sol_field(sol_override or ownc_stage.dcsn.sol, "EGM", "unrefined.Q")[grid_key]
     c_unrefined = _get_sol_field(sol_override or ownc_stage.dcsn.sol, "EGM", "unrefined.c")[grid_key]
     a_unrefined = _get_sol_field(sol_override or ownc_stage.dcsn.sol, "EGM", "unrefined.a")[grid_key]
     
     # Skip if we don't have grid information
     if ownc_stage is None:
-        # Can't plot without grid information
+        print(f"[DEBUG] {method}: No ownc_stage available, cannot determine H_nxt value")
         return
     
     h_unrefined = np.ones_like(e_grid_unrefined) * ownc_stage.dcsn.grid.H_nxt[H_idx]
@@ -605,6 +621,8 @@ def plot_egm_grids(period, H_idx, y_idx, method, image_dir, bounds=None, sol_ove
     # Get housing and income values for labels
     h_value = ownc_stage.dcsn.grid.H_nxt[H_idx]
     y_value = y_idx  # This is the index, not the actual value
+    
+    print(f"[DEBUG] {method}: Creating plots for H={h_value:.2f}, y_idx={y_value}")
     
     # Set up seaborn style similar to example_egm_plot.py
     sns.set(style="white", rc={"font.size": 9, "axes.titlesize": 9, "axes.labelsize": 9})
@@ -953,7 +971,36 @@ def _get_sol_field(sol, *keys):
             if isinstance(sol, dict):
                 sol = sol.get(key)
             else:
-                sol = getattr(sol, key)
+                # Handle special case for EGM data which uses prefixed keys
+                if hasattr(sol, 'EGM') and key == "EGM":
+                    sol = sol.EGM
+                elif hasattr(sol, key):
+                    sol = getattr(sol, key)
+                else:
+                    # Handle EGM keys with prefixes (e.g., "unrefined.e" -> EGM.unrefined["e_..."])
+                    if "." in key:
+                        parts = key.split(".", 1)
+                        if len(parts) == 2:
+                            base_key, field = parts
+                            if hasattr(sol, base_key):
+                                base_obj = getattr(sol, base_key)
+                                if isinstance(base_obj, dict):
+                                    # Look for keys that start with the field prefix
+                                    prefix = f"{field}_"
+                                    matching_keys = {k[len(prefix):]: v for k, v in base_obj.items() 
+                                                   if k.startswith(prefix)}
+                                    if matching_keys:
+                                        sol = matching_keys
+                                    else:
+                                        return None
+                                else:
+                                    return None
+                            else:
+                                return None
+                        else:
+                            return None
+                    else:
+                        return None
             if sol is None:
                 return None
         return sol

@@ -509,13 +509,26 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
                 })
 
             # Get upper envelope solution and timing
-            refined, _, _ = EGM_UE(
-                m_egm_unique, vlu_q_egm_unique, q_nxt_raw, c_egm_unique,
-                a_nxt_grid_unique, w_grid, partial_uc,
-                u_func={"func": utility_func, "args": H_val},
-                ue_method=ue_method, m_bar=m_bar, lb=lb,
-                rfc_radius=rfc_radius, rfc_n_iter=rfc_n_iter
-            )
+            try:
+                refined, _, _ = EGM_UE(
+                    m_egm_unique, vlu_q_egm_unique, q_nxt_raw, c_egm_unique,
+                    a_nxt_grid_unique, w_grid, partial_uc,
+                    u_func={"func": utility_func, "args": {"H_nxt": H_val}},
+                    ue_method=ue_method, m_bar=m_bar, lb=lb,
+                    rfc_radius=rfc_radius, rfc_n_iter=rfc_n_iter
+                )
+            except Exception as e:
+                print(f"[DEBUG] {ue_method}: EGM_UE failed for grid key {grid_key}: {e}")
+                print(f"[DEBUG] {ue_method}: Input shapes - m_egm: {m_egm_unique.shape}, vf: {vlu_q_egm_unique.shape}")
+                # Create fallback empty refined results
+                refined = {
+                    "x_dcsn_ref": np.array([]),
+                    "v_dcsn_ref": np.array([]),
+                    "kappa_ref": np.array([]),
+                    "x_cntn_ref": np.array([]),
+                    "lambda_ref": np.array([]),
+                    "ue_time": 0.0
+                }
 
             # Unpack the results from the refined dictionary
             # Prefer *_ref keys, fallback to non-suffixed for broader compatibility
@@ -572,11 +585,24 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
             # using consistently retrieved variables
             # for consav, refined grids are just the interpolants (consav package returns)
             # cash-on-hand / endogenous grid
-            refined_grids['e'][grid_key] = m_refined
-            refined_grids['Q'][grid_key] = q_refined  # value function
-            refined_grids['c'][grid_key] = c_refined  # consumption policy
-            refined_grids['a'][grid_key] = a_refined  # asset policy
-            refined_grids['lambda_'][grid_key] = lambda_refined
+
+            # Debug: Check if refined results are valid
+            if len(m_refined) == 0 or np.all(np.isnan(m_refined)):
+                print(f"[DEBUG] {ue_method}: Empty refined grids for grid key {grid_key}")
+                print(f"[DEBUG] {ue_method}: Input m_egm_unique shape: {m_egm_unique.shape}")
+                print(f"[DEBUG] {ue_method}: Input vlu_q_egm_unique shape: {vlu_q_egm_unique.shape}")
+                # Store empty grids as fallback
+                refined_grids['e'][grid_key] = np.array([])
+                refined_grids['Q'][grid_key] = np.array([])
+                refined_grids['c'][grid_key] = np.array([])
+                refined_grids['a'][grid_key] = np.array([])
+                refined_grids['lambda_'][grid_key] = np.array([])
+            else:
+                refined_grids['e'][grid_key] = m_refined
+                refined_grids['Q'][grid_key] = q_refined  # value function
+                refined_grids['c'][grid_key] = c_refined  # consumption policy
+                refined_grids['a'][grid_key] = a_refined  # asset policy
+                refined_grids['lambda_'][grid_key] = lambda_refined
 
             # Track upper envelope time
             total_ue_time += ue_time
@@ -724,7 +750,7 @@ def _solve_vfi_numerical(V_next, w_grid, a_grid, H_grid,
             for iw in range(n_W):
                 w_val = w_grid[iw]
                 a_low = a_grid[0]
-                a_high = min(w_val - 1e-12, a_grid[-1])
+                a_high = min(w_val - 1e-12, a_grid[-1]+30) #TODO: HARDWIRE THIS
 
                 a_star, Q_star, _ = brent_max(
                     bellman_obj,
@@ -1067,7 +1093,7 @@ def _solve_vfi_block(h_idx, y_idx, V_next, w_grid, a_grid, H_grid,
         for iw in range(n_W):
             w_val = w_grid[iw]
             a_low = a_grid[0]
-            a_high = min(w_val - 1e-12, a_grid[-1])
+            a_high = min(w_val - 1e-12, a_grid[-1]+30) #TODO: HARDWIRE THIS
             
             if a_high <= a_low + 1e-14:
                 a_high = a_low
@@ -1165,7 +1191,7 @@ def _solve_vfi_block_local(h_idx, y_idx, V_slices, w_grid, a_grid, H_grid,
         for iw in range(n_W):
             w_val = w_grid[iw]
             a_low = a_grid[0]
-            a_high = min(w_val - 1e-12, a_grid[-1]+10) #TODO: HARDWIRE THIS
+            a_high = min(w_val - 1e-12, a_grid[-1]+30) #TODO: HARDWIRE THIS
             
             if a_high <= a_low + 1e-14:
                 a_high = a_low

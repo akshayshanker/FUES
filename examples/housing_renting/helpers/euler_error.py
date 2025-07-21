@@ -202,6 +202,7 @@ def _calculate_euler_error_jit(
                         w_dcsn_vals = (R * a_next + y_next + H_now - Pr * S1)
                         c1_arr = interp_as(w_dcsn_r, c_renter_n[:, s_idx, jy], np.array([w_dcsn_vals]))
                         c1 = c1_arr[0]
+                        #print(c1)
                         # Call the jitted utility function
                         lam_next = uc_rent(c1, S1)
 
@@ -209,6 +210,7 @@ def _calculate_euler_error_jit(
                 
                 # Call the jitted inverse utility function
                 c_star = uc_inv(beta*R*E_lam, H_now)
+                #print(c_star)
                 logs.append(np.log10(abs((c_star - c0) / c0) + 1e-16))
 
     return np.array(logs)

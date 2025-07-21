@@ -36,7 +36,7 @@ def bellman_obj(a_nxt, w_val, H_val, beta, delta,
     if c <= 0.0:
         return -np.inf
 
-    V_nxt = interp_as(a_grid, V_slice, np.array([a_nxt]))[0]
+    V_nxt = interp_as(a_grid, V_slice, np.array([a_nxt]), extrap=True)[0]
 
     return u_func(c, H_val) + beta * delta * V_nxt
 
@@ -267,75 +267,77 @@ def F_id(mover):
     return operator
 
 @njit
-def interp_as(x_points, y_points, x_query, extrap=False):
-    """Fast interpolation for array queries with optional extrapolation.
-    
-    This is a jitted version of the interpolation function used in the Fella model.
-    
+def interp_as(x_points: np.ndarray,
+              y_points: np.ndarray,
+              x_query: np.ndarray,
+              extrap: bool = False) -> np.ndarray:
+    """
+    Fast 1‑D interpolation (Numba‑jitted).
+
     Parameters
     ----------
     x_points : ndarray
-        X-values of the known points
+        Strictly increasing grid of x‑coordinates.
     y_points : ndarray
-        Y-values of the known points
+        Function values at ``x_points``.
     x_query : ndarray
-        X-values to query
-    extrap : bool, optional
-        Whether to extrapolate for out-of-bounds values, by default True
-    
+        Points at which to evaluate the interpolant.
+    extrap : bool, default False
+        * True  – linear extrapolation beyond the grid.
+        * False – constant (flat) extension; no NaNs are returned.
+
     Returns
     -------
     ndarray
-        Interpolated y-values at x_query points
+        Interpolated (or extrapolated/extended) values at ``x_query``.
     """
-    # Initialize output array
-    n_query = len(x_query)
-    y_query = np.zeros(n_query)
-    
-    # Boundary checks for extrapolation
-    x_min = x_points[0]
-    x_max = x_points[-1]
-    y_min = y_points[0]
-    y_max = y_points[-1]
-    
-    # Iterate through query points
+    n_query = x_query.size
+    yq = np.empty(n_query)
+
+    x_min, x_max = x_points[0],  x_points[-1]
+    y_min, y_max = y_points[0],  y_points[-1]
+
+    # Pre‑compute boundary slopes for linear extrapolation
+    if x_points.size >= 2:
+        slope_left  = (y_points[1]    - y_min) / (x_points[1]   - x_min)
+        slope_right = (y_max          - y_points[-2]) / (x_max - x_points[-2])
+    else:                         # degenerate (single point) grid
+        slope_left = slope_right = 0.0
+
     for i in range(n_query):
         x = x_query[i]
-        
-        # Handle out-of-bounds
+
+        # ---------- Left of the grid ----------
         if x <= x_min:
-            y_query[i] = y_min if extrap else np.nan
+            if extrap:
+                yq[i] = y_min + slope_left * (x - x_min)   # linear
+            else:
+                yq[i] = y_min                              # constant
             continue
-        elif x >= x_max:
-            y_query[i] = y_max if extrap else np.nan
+
+        # ---------- Right of the grid ----------
+        if x >= x_max:
+            if extrap:
+                yq[i] = y_max + slope_right * (x - x_max)  # linear
+            else:
+                yq[i] = y_max                              # constant
             continue
-            
-        # Find position using binary search
-        # This is much faster than a linear search for large arrays
-        left = 0
-        right = len(x_points) - 1
-        
+
+        # ---------- Inside the grid : binary search ----------
+        left, right = 0, x_points.size - 1
         while right - left > 1:
             mid = (left + right) // 2
             if x_points[mid] <= x:
                 left = mid
             else:
                 right = mid
-                
-        # Linear interpolation
-        x_left = x_points[left]
-        x_right = x_points[right]
-        y_left = y_points[left]
-        y_right = y_points[right]
-        
-        # Compute interpolated value
-        if x_right > x_left:  # Avoid division by zero
-            t = (x - x_left) / (x_right - x_left)
-            y_query[i] = y_left + t * (y_right - y_left)
-        else:
-            y_query[i] = y_left
-            
-    return y_query
+
+        x_L, x_R = x_points[left],  x_points[right]
+        y_L, y_R = y_points[left], y_points[right]
+        t = (x - x_L) / (x_R - x_L)
+        yq[i] = y_L + t * (y_R - y_L)
+
+    return yq
 
 @njit
 def fast_vectorized_interpolation(values_grid, policies_grid, wealth_grid, valid_mask=None):

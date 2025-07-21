@@ -467,7 +467,12 @@ def _consav_engine(
     v_dcsn = np.empty_like(X_dcsn)
 
     # Convert the dictionary of arguments into a tuple of values.
-    args_as_tuple = tuple(u_func["args"].values())
+    # Handle both dict and single value cases for backward compatibility
+    if isinstance(u_func["args"], dict):
+        args_as_tuple = tuple(u_func["args"].values())
+    else:
+        # Single value case (backward compatibility)
+        args_as_tuple = (u_func["args"],)
 
     # Call the compiled Numba kernel, unpacking the arguments correctly.
     env(X_cntn, x_dcsn_hat, kappa_hat, v_cntn_hat, X_dcsn, kappa_pol, v_dcsn, *args_as_tuple)

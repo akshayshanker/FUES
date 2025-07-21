@@ -2,6 +2,43 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.0dev3] - 2025-07-20 – Streamlined Method Configuration & CONSAV Fix
+
+### Added
+* **Dynamic baseline method selection** via `--baseline-method` flag with auto-detection based on `--gpu` flag
+* **Configurable fast methods** via `--fast-methods` flag (default: FUES2DEV,CONSAV)
+* **Automatic baseline inclusion** via `--include-baseline` flag for cleaner single-core workflows
+* **Enhanced module docstring** with comprehensive examples for GPU, MPI, and baseline loading workflows
+
+### Changed
+* **Method configuration** no longer requires editing source code - all methods configurable via command-line flags
+* **Backward compatibility** maintained - existing scripts work without modification
+
+### Fixed
+* **CONSAV engine argument handling** - fixed `AttributeError` when `u_func["args"]` expects dictionary format
+* **Method selection logic** streamlined to eliminate hardcoded baseline/fast method lists
+
+## [0.4.0dev2] - 2025-07-20 – Metric Accuracy
+
+### Added
+* **Professional, publication-quality comparison plots** for policy and value functions via `plot_comparison_factory` in `helpers/metrics.py`.
+* **Plots now use proper interpolation**: Both fast and baseline methods are compared on a common grid, matching the logic used in L2 error metrics.
+* **Plots are saved in the bundle directory** for each parameter/method, keeping results organized and reproducible.
+* **X-axis uses real economic grid values** (e.g., wealth, housing) instead of indices, for interpretability.
+* **Error plot features**: Zero reference line, error bars, statistics box (max/mean error), and improved styling for publication-quality output.
+* **Docstrings for all metrics and plotting functions** updated to explain interpolation, grid handling, and scientific accuracy.
+* **Example usage and configuration** included in docstrings for both plotting and L2 metrics.
+
+### Changed
+* **L2 error and plotting metrics** now always compare on a common grid, ensuring scientifically accurate, like-for-like comparisons regardless of discretization.
+* **Improved error handling and warnings** for grid mismatches, shape incompatibilities, and extraction failures.
+* **All changes are fully integrated with CircuitRunner** and its bundle management system, so plots and metrics are always associated with the correct parameter set.
+
+### Fixed
+* **Bugfixes to Euler error metric**: Improved threshold handling and interpolation logic to avoid NaN results and ensure robust error calculation for all methods.
+* **Plotting function scope issues**: Fixed closure variable capture and array indexing errors in plotting configuration.
+* **Value function extraction**: Now uses correct model attribute names (`vlu` instead of `v`) and solution types for robust extraction.
+
 ## [0.4.0] - 2025-06-16 – GPU-Accelerated VFI Solver
 
 ### Added

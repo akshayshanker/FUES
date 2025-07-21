@@ -36,7 +36,7 @@ def vfi_gpu_kernel(
         # V_slice is not created explicitly; we pass indices to bellman_obj_gpu
         
         a_low = a_grid[0]
-        a_high = min(w_val - 1e-12, a_grid[-1])
+        a_high = min(w_val - 1e-12, a_grid[-1]+30) #TODO: HARDWIRE THIS
         
         if a_high <= a_low + 1e-14:
             a_high = a_low

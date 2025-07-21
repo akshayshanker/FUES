@@ -74,9 +74,113 @@ computation.
         The solvers currently require that the number of housing × income
         grid points be ≥ the number of MPI cores.
 
+**GPU Execution**
+
+For GPU-accelerated baseline computation:
+
+.. code-block:: bash
+
+    python3 -m examples.housing_renting.solve_runner \\
+        --periods 3 \\
+        --ue-method ALL \\
+        --output-root solutions/HR_gpu \\
+        --bundle-prefix HR_gpu \\
+        --vfi-ngrid 10000 \\
+        --HD-points 10000 \\
+        --grid-points 4000 \\
+        --recompute-baseline \\
+        --fresh-fast \\
+        --gpu \\
+        --plots
+
+Baseline Method Configuration
+----------------------------
+The baseline method can be configured in several ways:
+
+1. **Automatic detection** (default):
+   - Uses `VFI_HDGRID_GPU` when `--gpu` flag is present
+   - Uses `VFI_HDGRID` otherwise
+
+2. **Explicit specification**:
+   .. code-block:: bash
+
+       --baseline-method VFI_HDGRID  # Force non-GPU baseline
+       --baseline-method VFI_HDGRID_GPU  # Force GPU baseline
+
+3. **Loading existing baseline**:
+   When running only fast methods with an existing baseline:
+   
+   .. code-block:: bash
+
+       python3 -m examples.housing_renting.solve_runner \\
+           --ue-method "FUES2DEV,CONSAV" \\
+           --baseline-method VFI_HDGRID \\
+           --include-baseline \\
+           --fresh-fast
+
+   The `--include-baseline` flag automatically adds the baseline method to the
+   method list, enabling the runner to load the existing baseline bundle.
+
+4. **Loading GPU baseline on CPU nodes**:
+   To load a GPU-computed baseline when running on CPU-only nodes:
+   
+   .. code-block:: bash
+
+       python3 -m examples.housing_renting.solve_runner \\
+           --ue-method "FUES2DEV,CONSAV" \\
+           --baseline-method VFI_HDGRID_GPU \\
+           --include-baseline \\
+           --fresh-fast
+
+   This allows single-core jobs to leverage GPU-computed baselines without
+   requiring GPU access.
+
+Fast Methods Configuration
+-------------------------
+Custom fast methods can be specified using:
+
+.. code-block:: bash
+
+    --fast-methods "FUES,FUES2DEV,CONSAV,DCEGM"
+
+If not specified, defaults to: `FUES2DEV,CONSAV`
+
+Command-Line Arguments
+---------------------
+Key arguments for method configuration:
+
+- ``--baseline-method``: Explicitly set baseline method (auto-detects based on --gpu if omitted)
+- ``--fast-methods``: Comma-separated list of fast methods to compare
+- ``--include-baseline``: Automatically include baseline in method list for loading
+- ``--gpu``: Enable GPU acceleration (also affects baseline auto-detection)
+- ``--mpi``: Enable MPI parallelization
+- ``--recompute-baseline``: Force recomputation of baseline even if bundle exists
+- ``--fresh-fast``: Force recomputation of fast methods
+
+Directory Organization
+---------------------
+The runner uses a standardized directory structure for outputs:
+
+- Base path: ``{output-root}/{bundle-prefix}/``
+- With TRIAL_ID: ``{output-root}/{bundle-prefix}_{TRIAL_ID}/``
+
+This allows organizing different experimental runs (e.g., GPU vs CPU baselines)
+by setting the TRIAL_ID environment variable in job scripts.
+
 """
 
 from __future__ import annotations
+
+# Global trace flag - check for --trace in command line args early
+import sys
+_TRACE_ENABLED = '--trace' in sys.argv
+
+def trace_print(message):
+    """Print trace message only if tracing is enabled"""
+    if _TRACE_ENABLED:
+        print(f"[TRACE] {message}", flush=True)
+
+trace_print("0.1: Starting imports")
 import argparse
 import copy
 import sys
@@ -84,12 +188,16 @@ import time
 from pathlib import Path
 import gc
 
+trace_print("0.2: Basic imports done")
 import numpy as np
 import pandas as pd
 
+trace_print("0.3: Numpy/Pandas imported")
 from dynx.runner import CircuitRunner, write_design_matrix_csv
 from dynx.stagecraft.io import load_config
 from dynx.stagecraft.makemod import initialize_model_Circuit, compile_all_stages
+
+trace_print("0.4: DynX imports done")
 
 # ────────────────────────────────────────────────────────────────────────────
 #  local helpers (imported lazily to keep fall-back stubs tiny)
@@ -100,19 +208,28 @@ try:
     from helpers.plots import generate_plots
     from helpers.tables import print_summary, generate_latex_table
     from helpers.metrics import dev_c_L2, dev_v_L2, plot_comparison_factory
+    from helpers.memory_utils import MemoryMonitor, log_memory_usage, cleanup_if_needed, get_memory_config
 except ImportError:
     from .whisperer import build_operators_for_circuit, run_time_iteration
     from .helpers.euler_error import euler_error_metric
     from .helpers.plots import generate_plots
     from .helpers.tables import print_summary, generate_latex_table
     from .helpers.metrics import dev_c_L2, dev_v_L2, plot_comparison_factory
+    from .helpers.memory_utils import MemoryMonitor, log_memory_usage, cleanup_if_needed, get_memory_config
 
+trace_print("0.5: Local helpers imported")
 
 CFG_DIR = Path(__file__).parent / "config_HR"
-BASE = "VFI_HDGRID"
+# Default baseline method - can be overridden by --baseline-method
+DEFAULT_BASE = "VFI_HDGRID_GPU"
+# All available methods
 ALL_METHODS = ["VFI_HDGRID", "VFI_HDGRID_GPU", "FUES", "FUES2DEV", "CONSAV", "DCEGM"]
-FAST_METHODS = ["FUES2DEV", "CONSAV"] # Added CONSAV for easier comparison
-PRE_COMPILE_PARAMS = np.array(["VFI_HDGRID", 500, 500, 500], dtype=object)
+# Fast methods that are compared against baseline
+DEFAULT_FAST_METHODS = ["FUES2DEV", "CONSAV"]
+# Pre-compilation parameters
+PRE_COMPILE_PARAMS = np.array(["VFI_HDGRID_GPU", 500, 500, 500], dtype=object)
+
+trace_print("0.6: Constants and globals set")
 
 
 def patch_cfg(args,cfg_container: dict, periods: int, vf_ngrid: int) -> dict:
@@ -201,7 +318,7 @@ def make_housing_solver(args, use_mpi: bool, comm):
     """
     def _solve(mc, recorder=None):
         """
-        This closure correctly uses the MPI settings passed to the factory.
+        This closure correctly uses the MPI settings passed to the factory's scope
         """
         # Correctly use the use_mpi flag from the factory's scope
         build_operators_for_circuit(mc, use_mpi=use_mpi, comm=comm)
@@ -231,6 +348,10 @@ def main(argv=None):
     """
     Command-line interface for solving and benchmarking the Housing–Renting model.
     """
+    global _TRACE_ENABLED
+    
+    trace_print("1: Starting main()")
+    
     p = argparse.ArgumentParser(
         prog="solve_runner.py",
         description="Solve baseline and fast UE methods for the HR model"
@@ -252,11 +373,35 @@ def main(argv=None):
     p.add_argument("--stages-L2dev", default="OWNC")
     p.add_argument("--delta-pb", default="1")
     p.add_argument("--gpu", action="store_true")
+    p.add_argument("--baseline-method", default=None, 
+                   help="Baseline method to use (default: auto-detect based on --gpu flag)")
+    p.add_argument("--fast-methods", default=None,
+                   help="Comma-separated list of fast methods (default: FUES2DEV,CONSAV)")
+    p.add_argument("--include-baseline", action="store_true",
+                   help="Automatically include baseline method in the method list")
+    p.add_argument("--trace", action="store_true",
+                   help="Enable debug trace statements to help diagnose memory issues")
+    p.add_argument("--metrics", default="all",
+                   help="Comma-separated list of metrics to compute: euler_error, dev_c_L2, plots, all (default: all)")
+    
     args = p.parse_args(argv or sys.argv[1:])
+    
+    # Enable tracing based on command line flag
+    _TRACE_ENABLED = args.trace
+    
+    # Configure memory management based on environment
+    memory_config = get_memory_config("cluster")  # Default to cluster settings
+    
+    # Log initial memory usage
+    log_memory_usage("at start of solve_runner")
+    
+    trace_print("2: Args parsed")
 
     #  MPI communicator
     from dc_smm.helpers.mpi_utils import get_comm
     comm = get_comm(args.mpi)
+    trace_print(f"3: MPI comm created, rank={comm.rank if comm else 0}")
+    
     if comm.size > 1 and not args.mpi and comm.rank != 0:
         comm.Barrier()
         sys.exit(0)
@@ -264,28 +409,52 @@ def main(argv=None):
     #  parse grid size
     vf_ngrid = int(float(args.vfi_ngrid))
     pb_delta = float(args.delta_pb)
+    trace_print("4: Grid sizes parsed")
+
+    # Determine baseline method
+    if args.baseline_method:
+        BASE = args.baseline_method.upper()
+    else:
+        # Auto-detect based on GPU flag
+        BASE = "VFI_HDGRID_GPU" if args.gpu else "VFI_HDGRID"
+    trace_print(f"5: Baseline method: {BASE}")
+    
+    # Determine fast methods
+    if args.fast_methods:
+        FAST_METHODS = [m.strip().upper() for m in args.fast_methods.split(",")]
+    else:
+        FAST_METHODS = DEFAULT_FAST_METHODS
+    trace_print(f"6: Fast methods: {FAST_METHODS}")
 
     #  method list
     methods = ALL_METHODS if args.ue_method.upper() == "ALL" \
         else [m.strip().upper() for m in args.ue_method.split(",")]
+    
+    # Automatically include baseline if requested and not already present
+    if args.include_baseline and BASE not in methods:
+        methods.insert(0, BASE)
+    trace_print(f"7: Methods to run: {methods}")
 
     #  IO paths
     packroot = Path.cwd()
     output_root = packroot / f"{args.output_root}"
     output_root.mkdir(parents=True, exist_ok=True)
     cfg_dir_bundle = CFG_DIR /  f"{args.bundle_prefix}"
+    trace_print("8: Paths created")
+    
     #  set-up runner ------------------------------------------------------
     cfg_container = load_config(cfg_dir_bundle)
+    trace_print("9: Config loaded")
+    
     save_by_default = (comm is None) or (comm.rank == 0)
     is_root = (comm is None) or (comm.rank == 0)
     solver_rank = comm.rank if comm is not None else 0
+    trace_print(f"10: is_root={is_root}, solver_rank={solver_rank}")
 
     # --- Optional Pre-compilation Step ---
     if args.precompile and is_root:
+        trace_print("11: Starting precompilation")
         print("\n--- Running Numba Pre-compilation ---")
-        
-        #is_gpu_run = "VFI_HDGRID_GPU" in methods
-        #precompile_method = "VFI_HDGRID_GPU" if is_gpu_run else "VFI_HDGRID"
         
         # --- Create a minimal config for the pre-compilation run ---
         precompile_cfg = copy.deepcopy(cfg_container)
@@ -293,6 +462,7 @@ def main(argv=None):
         precompile_cfg['master']['settings']['w_points'] = 100
         precompile_cfg['master']['settings']['a_nxt_points'] = 100
         
+        # Use the determined baseline method for precompilation
         precompile_params = np.array([BASE, 100, 100, 100,pb_delta ], dtype=object)
 
         precompile_runner = CircuitRunner(
@@ -317,10 +487,13 @@ def main(argv=None):
         except Exception as e:
             if is_root:
                 print(f"--- Pre-compilation Failed: {e} ---", file=sys.stderr)
+        
+        trace_print("12: Precompilation complete")
 
     if comm is not None:
         comm.Barrier()
 
+    trace_print("13: Setting up metric functions")
     #  set-up plotting configuration -----------------------------------------------
     # Define the dimension labels for the model's policy arrays
     asset_dims = {
@@ -334,25 +507,47 @@ def main(argv=None):
         'h_idx': [5, 10, 14]  # Generate plots only for these h indices (0-indexed)
     }
 
-    # Create plotting metrics if plots are requested
-    metric_fns = {"euler_error": euler_error_metric}
-    if args.plots:
-        metric_fns.update({
-            "plot_c_comparison": plot_comparison_factory(
-                decision_variable='c',
-                dim_labels=asset_dims,
-                plot_axis_label='w_idx',
-                slice_config=plots_of_interest
-            ),
-            "plot_v_comparison": plot_comparison_factory(
-                decision_variable='vlu',
-                dim_labels=asset_dims,
-                plot_axis_label='w_idx',
-                slice_config=plots_of_interest,
-                sol_attr='value'
-            ),
-        })
+    # Available metrics mapping
+    AVAILABLE_METRICS = {
+        "euler_error": euler_error_metric,
+        "dev_c_L2": dev_c_L2,
+        "plot_c_comparison": plot_comparison_factory(
+            decision_variable='c',
+            dim_labels=asset_dims,
+            plot_axis_label='w_idx',
+            slice_config=plots_of_interest
+        ),
+        "plot_v_comparison": plot_comparison_factory(
+            decision_variable='vlu',
+            dim_labels=asset_dims,
+            plot_axis_label='w_idx',
+            slice_config=plots_of_interest,
+            sol_attr='value'
+        ),
+    }
 
+    # Parse requested metrics
+    if args.metrics.lower() == "all":
+        requested_metrics = list(AVAILABLE_METRICS.keys())
+    else:
+        requested_metrics = [m.strip() for m in args.metrics.split(",")]
+        # Handle special case: "plots" adds all plot metrics
+        if "plots" in requested_metrics:
+            requested_metrics.remove("plots")
+            requested_metrics.extend([k for k in AVAILABLE_METRICS.keys() if k.startswith("plot_")])
+
+    # Build metric_fns based on request (plot metrics only included if explicitly requested in metrics)
+    metric_fns = {}
+    for metric in requested_metrics:
+        if metric in AVAILABLE_METRICS:
+            metric_fns[metric] = AVAILABLE_METRICS[metric]
+        else:
+            if is_root:
+                print(f"Warning: Unknown metric '{metric}' requested, ignoring.")
+
+    trace_print(f"14: Selected metrics: {list(metric_fns.keys())}")
+
+    trace_print("15: Creating CircuitRunner")
     #  set-up main runner ------------------------------------------------------
     runner = CircuitRunner(
         base_cfg=cfg_container,
@@ -371,55 +566,81 @@ def main(argv=None):
         save_by_default=save_by_default,
         load_if_exists=True,
     )
+    trace_print("16: CircuitRunner created")
+    
+    # Check if we need baseline loading for comparison metrics
+    comparison_metrics = {"dev_c_L2", "plot_c_comparison", "plot_v_comparison"}
+    needs_baseline = any(metric in metric_fns for metric in comparison_metrics)
+    trace_print(f"17: Needs baseline loading: {needs_baseline}")
+    
     # NOTE: this has to be consistent with whatever the metric L2 actually wants to do!
     # TODO: make this more flexible, so that we can do L2dev on any stage. AND HARdwire it
     runner.stages_to_load = [args.stages_L2dev]
     runner.stages_to_save = [args.stages_L2dev]
+    trace_print(f"18: Stages configured: load={runner.stages_to_load}, save={runner.stages_to_save}")
 
     all_metrics = []
     all_param_vectors = []  # Collect all parameter vectors for design matrix
 
     # --------------------------------------------------------------------
-    #  1) Solve, plot, and process baseline immediately
+    #  1) Solve, plot, and process baseline immediately (only if needed)
     # --------------------------------------------------------------------
     HD_POINTS = int(float(args.HD_points))
     # Use the BASE variable, which could be VFI_HDGRID or VFI_HDGRID_GPU
-    if BASE in methods:
-        runner.load_if_exists = not args.recompute_baseline
-        if is_root:  # print from root only
-            print(f"\n» Baseline ({BASE}):", "recompute" if args.recompute_baseline else "load/solve-if-missing")
+    if BASE in methods and needs_baseline:
+        with MemoryMonitor(f"Baseline computation ({BASE})", log_start=True, log_end=True):
+            trace_print("19: Starting baseline computation")
+            runner.load_if_exists = not args.recompute_baseline
+            if is_root:  # print from root only
+                print(f"\n» Baseline ({BASE}):", "recompute" if args.recompute_baseline else "load/solve-if-missing")
 
-        ref_params = np.array([BASE, HD_POINTS, HD_POINTS, HD_POINTS,pb_delta], dtype=object)
-        runner.ref_params = ref_params
-        all_param_vectors.append(ref_params)  # Add to design matrix
-        
-        ref_metrics, ref_model = runner.run(
-            ref_params,
-            return_model=is_root,
-            rank=solver_rank
-        )
-        ref_metrics["master.methods.upper_envelope"] = BASE
-        ref_metrics["param_hash"] = runner._hash_param_vec(ref_params)
-        ref_metrics["reference_bundle_hash"] = runner._hash_param_vec(ref_params)
-        ref_metrics["latest_time_id"] = args.RUN_ID 
-        all_metrics.append(ref_metrics)
+            ref_params = np.array([BASE, HD_POINTS, HD_POINTS, HD_POINTS,pb_delta], dtype=object)
+            runner.ref_params = ref_params
+            all_param_vectors.append(ref_params)  # Add to design matrix
+            
+            trace_print("20: Running baseline solver")
+            ref_metrics, ref_model = runner.run(
+                ref_params,
+                return_model=is_root,
+                rank=solver_rank
+            )
+            trace_print("21: Baseline solver complete")
+            
+            ref_metrics["master.methods.upper_envelope"] = BASE
+            ref_metrics["param_hash"] = runner._hash_param_vec(ref_params)
+            ref_metrics["reference_bundle_hash"] = runner._hash_param_vec(ref_params)
+            ref_metrics["latest_time_id"] = args.RUN_ID 
+            all_metrics.append(ref_metrics)
 
-        # Store the baseline model for plotting comparisons
-        if is_root and ref_model is not None:
-            runner.ref_model_for_plotting = ref_model
+            # Store the baseline model for plotting comparisons (temporarily)
+            if is_root and ref_model is not None:
+                runner.ref_model_for_plotting = ref_model
 
-        # Generate plots immediately and delete model
-        if is_root and args.plots and ref_model is not None:
-            img_dir = output_root / "images" 
-            img_dir.mkdir(exist_ok=True)
-            try:
-                print(f"  Generating plots for {BASE}...")
-                generate_plots(ref_model, BASE, img_dir)
-            except Exception as err:
-                print(f"[warn] plot-gen for {BASE} failed: {err}")
-            finally:
-                del ref_model
-                gc.collect()
+            # Generate plots immediately and delete model
+            if is_root and args.plots and ref_model is not None:
+                trace_print("22: Generating baseline plots")
+                img_dir = output_root / "images" 
+                img_dir.mkdir(exist_ok=True)
+                try:
+                    print(f"  Generating plots for {BASE}...")
+                    generate_plots(ref_model, BASE, img_dir)
+                except Exception as err:
+                    print(f"[warn] plot-gen for {BASE} failed: {err}")
+                finally:
+                    del ref_model
+                    gc.collect()
+                    trace_print("23: Baseline plots complete, model deleted")
+            
+            # Trigger cleanup if memory usage is high
+            cleanup_if_needed(memory_config["cleanup_threshold_gb"])
+            log_memory_usage("after baseline computation")
+    
+    # If baseline wasn't computed but we still have fast methods, create ref_params for them
+    elif needs_baseline and 'ref_params' not in locals():
+        ref_params = np.array([BASE, HD_POINTS, HD_POINTS, HD_POINTS, pb_delta], dtype=object)
+        if is_root:
+            print(f"\n» Baseline ({BASE}) will be loaded from existing bundles for comparison metrics")
+        trace_print("24: Baseline ref_params created for loading")
 
     # --------------------------------------------------------------------
     #  2) Solve test methods one by one, processing each immediately  
@@ -429,61 +650,75 @@ def main(argv=None):
     fast_methods_to_run = [m for m in FAST_METHODS if m in methods]
     
     if fast_methods_to_run:
+        trace_print(f"25: Starting fast methods: {fast_methods_to_run}")
         runner.load_if_exists = not args.fresh_fast
         
-        # Update metrics for fast methods to include plotting comparisons
-        fast_metric_fns = {
-            "euler_error": euler_error_metric,
-            "dev_c_L2": dev_c_L2,
-        }
-        if args.plots:
-            fast_metric_fns.update({
-                "plot_c_comparison": plot_comparison_factory(
-                    decision_variable='c',
-                    dim_labels=asset_dims,
-                    plot_axis_label='w_idx',
-                    slice_config=plots_of_interest
-                ),
-            })
-        runner.metric_fns = fast_metric_fns
-        # Ensure ref_params is defined, even if baseline wasn't run
-        if 'ref_params' not in locals():
-             ref_params = np.array([BASE, HD_POINTS, HD_POINTS, HD_POINTS,pb_delta], dtype=object)
-        runner.ref_params = ref_params
+        # Use the selected metrics for fast methods
+        runner.metric_fns = metric_fns
+        
+        # Only set ref_params if baseline comparison metrics are needed
+        if needs_baseline:
+            # Ensure ref_params is defined, even if baseline wasn't run
+            if 'ref_params' not in locals():
+                ref_params = np.array([BASE, HD_POINTS, HD_POINTS, HD_POINTS, pb_delta], dtype=object)
+            runner.ref_params = ref_params
+        else:
+            # No baseline needed - don't set ref_params to avoid loading
+            if is_root:
+                print(f"\n» Skipping baseline loading - only computing: {', '.join(metric_fns.keys())}")
+            trace_print("26: Skipping baseline loading")
 
         if is_root:  # print from root only
             print(f"\n» Fast methods: {', '.join(fast_methods_to_run)}")
             
-        for method in fast_methods_to_run:
-            if is_root:
-                print(f"  Solving {method}...")
-            
-            params = np.array([method, STD_POINTS, STD_POINTS, STD_POINTS, pb_delta], dtype=object)
-            all_param_vectors.append(params)  # Add to design matrix
-            
-            metrics, model = runner.run(params, return_model=is_root, rank=solver_rank)
-            metrics["master.methods.upper_envelope"] = method
-            metrics["param_hash"] = runner._hash_param_vec(params)
-            metrics["reference_bundle_hash"] = runner._hash_param_vec(ref_params)
-            metrics["latest_time_id"] = args.RUN_ID 
-            all_metrics.append(metrics)
-            
-            # Generate plots immediately and delete model
-            if is_root and args.plots and model is not None:
-                img_dir = output_root / "images"
-                img_dir.mkdir(exist_ok=True) 
-                try:
-                    print(f"  Generating plots for {method}...")
-                    generate_plots(model, method, img_dir)
-                except Exception as err:
-                    print(f"[warn] plot-gen for {method} failed: {err}")
-                finally:
-                    del model
-                    gc.collect()
+        for i, method in enumerate(fast_methods_to_run):
+            with MemoryMonitor(f"Fast method computation ({method})", log_start=True, log_end=True):
+                trace_print(f"27.{i+1}: Starting {method}")
+                if is_root:
+                    print(f"  Solving {method}...")
+                
+                params = np.array([method, STD_POINTS, STD_POINTS, STD_POINTS, pb_delta], dtype=object)
+                all_param_vectors.append(params)  # Add to design matrix
+                
+                trace_print(f"28.{i+1}: Running {method} solver")
+                metrics, model = runner.run(params, return_model=is_root, rank=solver_rank)
+                trace_print(f"29.{i+1}: {method} solver complete")
+                
+                metrics["master.methods.upper_envelope"] = method
+                metrics["param_hash"] = runner._hash_param_vec(params)
+                if needs_baseline and 'ref_params' in locals():
+                    metrics["reference_bundle_hash"] = runner._hash_param_vec(ref_params)
+                else:
+                    metrics["reference_bundle_hash"] = "no_baseline"
+                metrics["latest_time_id"] = args.RUN_ID 
+                all_metrics.append(metrics)
+                
+                # Generate plots immediately and delete model
+                if is_root and args.plots and model is not None:
+                    trace_print(f"30.{i+1}: Generating {method} plots")
+                    img_dir = output_root / "images"
+                    img_dir.mkdir(exist_ok=True) 
+                    try:
+                        print(f"  Generating plots for {method}...")
+                        generate_plots(model, method, img_dir)
+                    except Exception as err:
+                        print(f"[warn] plot-gen for {method} failed: {err}")
+                    finally:
+                        del model
+                        gc.collect()
+                        trace_print(f"31.{i+1}: {method} plots complete, model deleted")
+                
+                # Trigger cleanup after each method to prevent memory accumulation
+                cleanup_if_needed(memory_config["cleanup_threshold_gb"])
+                
+                # Log memory usage periodically
+                if (i + 1) % 2 == 0:  # Log every 2 methods
+                    log_memory_usage(f"after {i+1} fast methods")
 
     if comm is not None:
         comm.Barrier()
 
+    trace_print("32: Creating final summary")
     # --------------------------------------------------------------------
     #  3) Create final summary table and save design matrix
     # --------------------------------------------------------------------
@@ -499,10 +734,15 @@ def main(argv=None):
             if is_root:
                 print(f"  Design matrix saved to {output_root}/design_matrix.csv")
 
-    # Clean up the stored baseline model
+    # Clean up the stored baseline model and perform final memory cleanup
     if hasattr(runner, 'ref_model_for_plotting'):
         del runner.ref_model_for_plotting
-        gc.collect()
+    
+    # Final aggressive cleanup
+    gc.collect()
+    log_memory_usage("at end of solve_runner")
+    
+    trace_print("33: Main function complete")
 
 if __name__ == "__main__":
     main()
