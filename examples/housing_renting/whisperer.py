@@ -476,33 +476,11 @@ def run_time_iteration(model_circuit, n_periods=None, verbose=False,verbose_timi
         # Skip already-solved VFI_HDGRID stages (from baseline preload)
 
         ownc_stage, ownc_timing = solve_stage(ownc_stage, verbose=verbose, use_mpi=use_mpi, comm=comm)
-        
-        # Debug: Check if EGM grids are present after solving
-        if hasattr(ownc_stage.dcsn.sol, 'EGM') and (not use_mpi or comm is None or comm.rank == 0):
-            unrefined_keys = list(ownc_stage.dcsn.sol.EGM.unrefined.keys()) if hasattr(ownc_stage.dcsn.sol.EGM, 'unrefined') else []
-            refined_keys = list(ownc_stage.dcsn.sol.EGM.refined.keys()) if hasattr(ownc_stage.dcsn.sol.EGM, 'refined') else []
-            if unrefined_keys or refined_keys:
-                print(f"[DEBUG] After solve_stage: {ownc_stage.name}.dcsn has EGM grids: "
-                      f"unrefined={len(unrefined_keys)}, refined={len(refined_keys)}")
-            else:
-                print(f"[DEBUG] After solve_stage: {ownc_stage.name}.dcsn has NO EGM grids!")
-        
         _sync_perch_solutions(ownc_stage, use_mpi, comm)
         stage_timings.append(ownc_timing)
         period_ue_time += ownc_timing.get("ue_time", 0)
         
         rntc_stage, rntc_timing = solve_stage(rntc_stage, verbose=verbose, use_mpi=use_mpi, comm=comm)
-        
-        # Debug: Check if EGM grids are present after solving
-        if hasattr(rntc_stage.dcsn.sol, 'EGM') and (not use_mpi or comm is None or comm.rank == 0):
-            unrefined_keys = list(rntc_stage.dcsn.sol.EGM.unrefined.keys()) if hasattr(rntc_stage.dcsn.sol.EGM, 'unrefined') else []
-            refined_keys = list(rntc_stage.dcsn.sol.EGM.refined.keys()) if hasattr(rntc_stage.dcsn.sol.EGM, 'refined') else []
-            if unrefined_keys or refined_keys:
-                print(f"[DEBUG] After solve_stage: {rntc_stage.name}.dcsn has EGM grids: "
-                      f"unrefined={len(unrefined_keys)}, refined={len(refined_keys)}")
-            else:
-                print(f"[DEBUG] After solve_stage: {rntc_stage.name}.dcsn has NO EGM grids!")
-        
         _sync_perch_solutions(rntc_stage, use_mpi, comm)
         stage_timings.append(rntc_timing)
         period_ue_time += rntc_timing.get("ue_time", 0)
@@ -660,24 +638,6 @@ def _sync_perch_solutions(stage, use_mpi, comm):
     for perch_name in ("cntn", "dcsn", "arvl"):
         perch = getattr(stage, perch_name, None)
         if perch is not None:
-            # Debug: Check EGM grids before broadcast
-            if hasattr(perch.sol, 'EGM') and comm.rank == 0:
-                unrefined_keys = list(perch.sol.EGM.unrefined.keys()) if hasattr(perch.sol.EGM, 'unrefined') else []
-                refined_keys = list(perch.sol.EGM.refined.keys()) if hasattr(perch.sol.EGM, 'refined') else []
-                if unrefined_keys or refined_keys:
-                    print(f"[DEBUG] Before MPI bcast: {stage.name}.{perch_name} has EGM grids: "
-                          f"unrefined={len(unrefined_keys)}, refined={len(refined_keys)}")
-            
-            perch.sol = comm.bcast(perch.sol if comm.rank == 0 else None, root=0)
-            
-            # Debug: Check EGM grids after broadcast (all ranks)
-            if hasattr(perch.sol, 'EGM'):
-                unrefined_keys = list(perch.sol.EGM.unrefined.keys()) if hasattr(perch.sol.EGM, 'unrefined') else []
-                refined_keys = list(perch.sol.EGM.refined.keys()) if hasattr(perch.sol.EGM, 'refined') else []
-                if unrefined_keys or refined_keys:
-                    print(f"[DEBUG] After MPI bcast (rank {comm.rank}): {stage.name}.{perch_name} has EGM grids: "
-                          f"unrefined={len(unrefined_keys)}, refined={len(refined_keys)}")
-                elif comm.rank == 0:  # Only log missing grids on rank 0 to avoid spam
-                    print(f"[DEBUG] After MPI bcast: {stage.name}.{perch_name} EGM grids LOST!")
-    
+            perch.sol = comm.bcast(perch.sol if comm.rank == 0 else None,
+                                   root=0)
     comm.Barrier()                    # keep ranks aligned

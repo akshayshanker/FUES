@@ -572,37 +572,47 @@ def plot_egm_grids(period, H_idx, y_idx, method, image_dir, bounds=None, sol_ove
     # Check if EGM grids are available
     egm_data = _get_sol_field(sol_override or ownc_stage.dcsn.sol, "EGM")
     if egm_data is None or not egm_data:
-        print(f"[DEBUG] {method}: EGM grid data not available. EGM data: {egm_data}")
-        if sol_override:
-            print(f"[DEBUG] {method}: Solution override keys: {list(sol_override.__dict__.keys()) if hasattr(sol_override, '__dict__') else 'No __dict__'}")
-            if hasattr(sol_override, 'EGM'):
-                print(f"[DEBUG] {method}: EGM keys: {list(sol_override.EGM.__dict__.keys()) if hasattr(sol_override.EGM, '__dict__') else 'EGM has no __dict__'}")
+        print(f"[DEBUG] {method}: No EGM grid data available")
+
         return
+    
+
     
     # Extract grid data
     grid_key = f"{y_idx}-{H_idx}"
     
-    unrefined_e = _get_sol_field(sol_override or ownc_stage.dcsn.sol, "EGM", "unrefined.e")
-    if unrefined_e is None or grid_key not in unrefined_e:
-        print(f"[DEBUG] {method}: Grid key {grid_key} not found in EGM data.")
-        if unrefined_e:
-            print(f"[DEBUG] {method}: Available unrefined EGM keys: {list(unrefined_e.keys())}")
-        else:
+    # Get the EGM data structure
+    egm_struct = _get_sol_field(sol_override or ownc_stage.dcsn.sol, "EGM")
+    if egm_struct is None:
+        print(f"[DEBUG] {method}: No EGM structure found")
+        return
+    
+    # Check if we have the unrefined data with the correct prefixed key
+    unrefined_dict = egm_struct.get("unrefined", {}) if isinstance(egm_struct, dict) else getattr(egm_struct, 'unrefined', {})
+    prefixed_e_key = f"e_{grid_key}"
+    
+    if prefixed_e_key not in unrefined_dict:
+        print(f"[DEBUG] {method}: Grid key {prefixed_e_key} not found in EGM data.")
+        if unrefined_dict:
             print(f"[DEBUG] {method}: No unrefined EGM data found")
         return
     
-    # Check if we have valid data
-    e_grid_unrefined = _get_sol_field(sol_override or ownc_stage.dcsn.sol, "EGM", "unrefined.e")[grid_key]
-    if len(e_grid_unrefined) == 0:
-        print(f"[DEBUG] {method}: Empty unrefined EGM grid for key {grid_key}")
+    # Check if we have valid data - use prefixed keys
+    e_grid_unrefined = unrefined_dict.get(f"e_{grid_key}")
+    if e_grid_unrefined is None or len(e_grid_unrefined) == 0:
+        print(f"[DEBUG] {method}: Empty or missing unrefined EGM grid for key e_{grid_key}")
         return
     
     print(f"[DEBUG] {method}: Found valid EGM data for {grid_key}, grid size: {len(e_grid_unrefined)}")
     
-    # Continue with rest of existing function...
-    vf_unrefined = _get_sol_field(sol_override or ownc_stage.dcsn.sol, "EGM", "unrefined.Q")[grid_key]
-    c_unrefined = _get_sol_field(sol_override or ownc_stage.dcsn.sol, "EGM", "unrefined.c")[grid_key]
-    a_unrefined = _get_sol_field(sol_override or ownc_stage.dcsn.sol, "EGM", "unrefined.a")[grid_key]
+    # Get other unrefined data with prefixed keys
+    vf_unrefined = unrefined_dict.get(f"Q_{grid_key}")
+    c_unrefined = unrefined_dict.get(f"c_{grid_key}")
+    a_unrefined = unrefined_dict.get(f"a_{grid_key}")
+    
+    if any(x is None for x in [vf_unrefined, c_unrefined, a_unrefined]):
+        print(f"[DEBUG] {method}: Missing some unrefined data components")
+        return
     
     # Skip if we don't have grid information
     if ownc_stage is None:
@@ -611,11 +621,16 @@ def plot_egm_grids(period, H_idx, y_idx, method, image_dir, bounds=None, sol_ove
     
     h_unrefined = np.ones_like(e_grid_unrefined) * ownc_stage.dcsn.grid.H_nxt[H_idx]
     
-    # Refined grids
-    e_grid_refined = _get_sol_field(sol_override or ownc_stage.dcsn.sol, "EGM", "refined.e")[grid_key]
-    vf_refined = _get_sol_field(sol_override or ownc_stage.dcsn.sol, "EGM", "refined.Q")[grid_key]
-    c_refined = _get_sol_field(sol_override or ownc_stage.dcsn.sol, "EGM", "refined.c")[grid_key]
-    a_refined = _get_sol_field(sol_override or ownc_stage.dcsn.sol, "EGM", "refined.a")[grid_key]
+    # Refined grids - get with prefixed keys
+    refined_dict = egm_struct.get("refined", {}) if isinstance(egm_struct, dict) else getattr(egm_struct, 'refined', {})
+    e_grid_refined = refined_dict.get(f"e_{grid_key}")
+    vf_refined = refined_dict.get(f"Q_{grid_key}")
+    c_refined = refined_dict.get(f"c_{grid_key}")
+    a_refined = refined_dict.get(f"a_{grid_key}")
+    
+    if any(x is None for x in [e_grid_refined, vf_refined, c_refined, a_refined]):
+        print(f"[DEBUG] {method}: Missing some refined data components")
+        return
     h_refined = np.ones_like(e_grid_refined) * ownc_stage.dcsn.grid.H_nxt[H_idx]
     
     # Get housing and income values for labels

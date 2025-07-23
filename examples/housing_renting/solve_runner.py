@@ -700,6 +700,20 @@ def main(argv=None):
                     img_dir.mkdir(exist_ok=True) 
                     try:
                         print(f"  Generating plots for {method}...")
+                        
+                        # Debug: Check if this model has EGM grids
+                        first_period = model.get_period(0)
+                        ownc_stage = first_period.get_stage("OWNC")
+                        if hasattr(ownc_stage.dcsn.sol, 'EGM'):
+                            unrefined_keys = list(ownc_stage.dcsn.sol.EGM.unrefined.keys()) if hasattr(ownc_stage.dcsn.sol.EGM, 'unrefined') else []
+                            refined_keys = list(ownc_stage.dcsn.sol.EGM.refined.keys()) if hasattr(ownc_stage.dcsn.sol.EGM, 'refined') else []
+                            print(f"[DEBUG] Model passed to plotting for {method}: "
+                                  f"unrefined={len(unrefined_keys)}, refined={len(refined_keys)}")
+                            print(f"[DEBUG] Model object id: {id(model)}, ownc_stage.dcsn.sol id: {id(ownc_stage.dcsn.sol)}")
+                        else:
+                            print(f"[DEBUG] Model passed to plotting for {method}: NO EGM grids!")
+                            print(f"[DEBUG] Model object id: {id(model)}, ownc_stage.dcsn.sol id: {id(ownc_stage.dcsn.sol)}")
+                        
                         generate_plots(model, method, img_dir)
                     except Exception as err:
                         print(f"[warn] plot-gen for {method} failed: {err}")

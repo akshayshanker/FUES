@@ -2,6 +2,40 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.0dev4] - 2025-01-28 – EGM Plotting Fix & Memory Management Enhancements
+
+### Fixed
+* **EGM plots generation for all EGM-based methods** 
+  - Fixed key prefix mismatch in `plot_egm_grids()` function where plotting code was looking for unprefixed keys (e.g., "0-7") but EGM data was stored with prefixed keys (e.g., "e_0-7", "Q_0-7")
+  - EGM plots now generate correctly for FUES2DEV, CONSAV, DCEGM, and other EGM-based methods
+  - Updated both unrefined and refined grid access to use proper prefixed key formats
+  - Added proper error handling for missing EGM data components
+
+### Changed
+* **Plot metrics configuration logic** 
+  - Plot metrics are now only included in computation when explicitly requested in `--metrics` list
+  - Removed incorrect behavior where `--plots` flag would automatically include plot metrics in computation
+  - Improved separation between traditional plot generation (`--plots`) and plot-based metric computation (`--metrics plot_c_comparison`)
+
+### Added
+* **Comprehensive debugging for EGM data flow**
+  - Added targeted debugging in `plot_egm_grids()` to verify EGM data availability and key formats
+  - Enhanced error messages for missing or malformed EGM grid data
+  - Created systematic approach for debugging data flow from solution storage to plotting
+
+### Technical Details
+* **Key format changes in plots.py:**
+  ```python
+  # Before (incorrect):
+  e_grid_unrefined = egm_data["unrefined"][grid_key]  # Looking for "0-7"
+  
+  # After (correct):
+  prefixed_e_key = f"e_{grid_key}"  # Looking for "e_0-7"
+  e_grid_unrefined = unrefined_dict.get(prefixed_e_key)
+  ```
+* **Files modified:** `examples/housing_renting/helpers/plots.py`, `examples/housing_renting/solve_runner.py`
+* **Impact:** Visual validation of endogenous grid method upper envelope refinement process now available for all EGM-based methods
+
 ## [0.4.0dev3] - 2025-07-20 – Streamlined Method Configuration & CONSAV Fix
 
 ### Added
