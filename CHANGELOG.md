@@ -2,6 +2,40 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.0dev5] - 2025-01-28 – Enhanced FUES with Intersection Points
+
+### Added
+* **Intersection point tracking in FUES algorithm**
+  - Implemented intersection point detection as described in Dobrescu & Shanker (2023) Section 2.1.3
+  - Added `add_intersections` parameter to `FUES()` function (default: True) for enhanced accuracy around crossing points
+  - Forward scan intersection detection during right-turn jumps identifies where choice-specific value functions cross
+  - Backward scan intersection storage during left-turn elimination captures suboptimal point intersections
+  - Intersection points include interpolated policy values at crossing locations for complete solution representation
+
+* **Memory-efficient intersection storage**
+  - Pre-allocated intersection arrays (10% of grid size) to maintain O(n) complexity
+  - Automatic merging of original EGM points with intersection points, sorted by endogenous grid values
+  - Configurable intersection tracking with backward compatibility when disabled
+
+### Changed
+* **Enhanced `_scan` function with intersection tracking**
+  - Added `track_intersections` and `policy_2` parameters for comprehensive intersection detection
+  - Consistent return format for all code paths to maintain Numba compatibility
+  - Improved boundary checking in forward scan to prevent array index errors
+
+### Technical Details
+* **Intersection detection algorithm:**
+  ```python
+  # Forward scan: detect crossings when jumping to new value function branch
+  inter_point = seg_intersect(p1, p2, p3, p4)  # Line-line intersection
+  # Interpolate policies at intersection point
+  t = (inter_point[0] - e_grid[i+1]) / (e_grid[b_idx] - e_grid[i+1])
+  inter_p1[n_inter] = (1-t) * a_prime[i+1] + t * a_prime[b_idx]
+  ```
+* **Files modified:** `src/dc_smm/fues/fues_2dev1.py`
+* **Performance impact:** Minimal overhead when intersections disabled; ~10% memory increase when enabled
+* **Accuracy improvement:** Better representation of value function upper envelope around choice-specific crossings
+
 ## [0.4.0dev4] - 2025-01-28 – EGM Plotting Fix & Memory Management Enhancements
 
 ### Fixed

@@ -34,7 +34,7 @@ if PROJECT_ROOT not in sys.path:
 #cwd = os.getcwd()
 #sys.path.append('..')
 #os.chdir(cwd)
-from dc_smm.fues.fues import FUES as fues_alg
+from dc_smm.fues.fues_2dev1 import FUES as fues_alg, FUES_sep_intersect
 from dc_smm.models.retirement.retirement import Operator_Factory, RetirementModel, euler
 
 def plot_egrids(age, e_grid, vf_work, c_worker, del_a, g_size, cp, save_path, tag = 'sigma0'):
@@ -81,8 +81,11 @@ def plot_egrids(age, e_grid, vf_work, c_worker, del_a, g_size, cp, save_path, ta
     a_prime = np.array(cp.asset_grid_A)
 
     # 2. Generate refined grid, value function and policy using FUES
-    x_clean, vf_clean, c_clean, a_prime_clean, del_a_clean \
-        = fues_alg(x, vf, c, a_prime,del_a, 0.8)
+    # For plotting, also get intersection points separately
+    fues_result, intersections = FUES_sep_intersect(x, vf, c, a_prime, del_a, m_bar=0.9)
+    print(intersections)
+    x_clean, vf_clean, c_clean, a_prime_clean, del_a_clean = fues_result
+    inter_e, inter_v, inter_p1, inter_p2, inter_d = intersections
 
     # 3. make plots  left 
     pl.close()
@@ -111,10 +114,23 @@ def plot_egrids(age, e_grid, vf_work, c_worker, del_a, g_size, cp, save_path, ta
         color='black',
         linewidth=1,
         label=r'Value function $V_t^{1}$')
+    
+    # Plot intersection points if any
+    if len(inter_e) > 0:
+        ax[0].scatter(
+            inter_e,
+            inter_v * cp.beta - cp.delta,
+            color='green',
+            s=50,
+            marker='*',
+            linewidth=1,
+            edgecolors='black',
+            label='Intersection points',
+            zorder=5)
 
     # formatting     
     ax[0].set_ylabel('Value', fontsize=11)
-    ax[0].set_ylim(7.6, 8.4001)
+    ax[0].set_ylim(9.4, 10.001)
     ax[0].set_xlim(44, 55.01)
     ax[0].spines['right'].set_visible(False)
     ax[0].spines['top'].set_visible(False)
@@ -148,6 +164,21 @@ def plot_egrids(age, e_grid, vf_work, c_worker, del_a, g_size, cp, save_path, ta
         marker='x',
         linewidth=0.75,
         label='FUES optimal points')
+    
+    # Plot intersection points in policy plot if any
+    if len(inter_e) > 0:
+        # Sort intersection points by e_grid
+        sort_idx = np.argsort(inter_e)
+        ax[1].scatter(
+            inter_e[sort_idx],
+            inter_e[sort_idx] - inter_p1[sort_idx],
+            color='green',
+            s=50,
+            marker='*',
+            linewidth=1,
+            edgecolors='black',
+            label='Intersection points',
+            zorder=5)
     
     # fromatting 
     ax[1].set_ylim(20, 40)
@@ -276,7 +307,7 @@ def plot_dcegm_cf(
     time_start_dcegm = time.time()
 
     x_clean, vf_clean, c_clean, a_prime_clean, dela_clean = fues_alg(
-        x, vf, c, a_prime, dela, m_bar=1, endog_mbar=True
+        x, vf, c, a_prime, dela, m_bar=0.8, endog_mbar=True
     )
 
     vf_interp_fues = np.interp(x, x_clean, vf_clean)
