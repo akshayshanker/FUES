@@ -247,8 +247,8 @@ def _scan(e_grid, vf, a_prime, policy_2, del_a,
     inter_d = np.full(max_inter, np.nan)
     n_inter = 0
     
-    # Track if last iteration created an intersection that should be used as j
-    use_intersection_as_j = False
+    # Track if last iteration created an intersection that should be used as k (tail)
+    use_intersection_as_k = False
     intersection_e = 0.0
     intersection_v = 0.0
     intersection_a = 0.0
@@ -278,30 +278,30 @@ def _scan(e_grid, vf, a_prime, policy_2, del_a,
             continue
 
         # ------------- Gradients at current step --------------------
-        # Use intersection values for j if we have one from last iteration
-        if use_intersection_as_j and include_intersections:
-            j_e = intersection_e
-            j_v = intersection_v
-            j_a = intersection_a
-            j_d = intersection_d
+        # Use intersection values for k (tail) if we have one from last iteration
+        if use_intersection_as_k and include_intersections:
+            k_e = intersection_e
+            k_v = intersection_v
+            k_a = intersection_a
+            k_d = intersection_d
         else:
-            j_e = e_grid[j]
-            j_v = vf_full[j]
-            j_a = a_prime[j]
-            j_d = del_a[j]
+            k_e = e_grid[k] if k >= 0 else e_grid[0]
+            k_v = vf_full[k] if k >= 0 else vf_full[0]
+            k_a = a_prime[k] if k >= 0 else a_prime[0]
+            k_d = del_a[k] if k >= 0 else del_a[0]
         
-        de_prev = max(1e-200, j_e - e_grid[idx_grad_base])
-        g_jm1 = (j_v - vf_full[idx_grad_base]) / de_prev
+        de_prev = max(1e-200, e_grid[j] - k_e)
+        g_jm1 = (vf_full[j] - k_v) / de_prev
 
-        de_lead = max(1e-200, e_grid[i+1] - j_e)
-        g_1 = (vf_full[i+1] - j_v) / de_lead
+        de_lead = max(1e-200, e_grid[i+1] - e_grid[j])
+        g_1 = (vf_full[i+1] - vf_full[j]) / de_lead
 
-        M_max = max(np.abs(j_d), np.abs(del_a[i+1])) + padding_mbar
+        M_max = max(np.abs(del_a[j]), np.abs(del_a[i+1])) + padding_mbar
         if not endog_mbar:
             M_max = m_bar
 
-        del_pol = a_prime[i+1] - j_a
-        g_tilde_a = np.abs((a_prime[i+1] - j_a) / de_lead)
+        del_pol = a_prime[i+1] - a_prime[j]
+        g_tilde_a = np.abs((a_prime[i+1] - a_prime[j]) / de_lead)
 
         del_pol_a = (e_grid[i+1] - a_prime[i+1]) - (e_grid[j] - a_prime[j])
 
@@ -364,17 +364,14 @@ def _scan(e_grid, vf, a_prime, policy_2, del_a,
                         if new_n_inter > n_inter:  # Intersection was added
                             n_inter = new_n_inter
                             
-                            # Don't keep i+1, mark it as dropped
-                            vf[i+1] = np.nan
-                            
-                            # Set up intersection to be used as j in next iteration
-                            use_intersection_as_j = True
+                            # Set up intersection to be used as k (tail) in next iteration
+                            use_intersection_as_k = True
                             intersection_e = inter_e_val
                             intersection_v = inter_v_val
                             intersection_a = inter_a_val
                             intersection_d = inter_d_val
                             
-                            k = j
+                            # k will be set to intersection value via flag
                             idx_grad_base = idx_b
                             j = i+1
                             last_turn_left = False
@@ -384,7 +381,7 @@ def _scan(e_grid, vf, a_prime, policy_2, del_a,
                     # Normal case: i+1 is kept without intersection
                     k, idx_grad_base, j = j, j, i+1
                     last_turn_left = False
-                    use_intersection_as_j = False  # Reset flag
+                    use_intersection_as_k = False  # Reset flag
             else:
                 vf[i+1] = np.nan
                 m_head = circ_put(m_buf, m_head, i+1)
@@ -441,9 +438,9 @@ def _scan(e_grid, vf, a_prime, policy_2, del_a,
                 if new_n_inter > n_inter:  # Intersection was added
                     n_inter = new_n_inter
                     
-                    # This intersection becomes j for next iteration
+                    # This intersection becomes k (tail) for next iteration
                     # (Note: e_grid[j] is already set to intr[0] above)
-                    use_intersection_as_j = True
+                    use_intersection_as_k = True
                     intersection_e = inter_e_val
                     intersection_v = inter_v_val
                     intersection_a = inter_a_val
@@ -452,7 +449,7 @@ def _scan(e_grid, vf, a_prime, policy_2, del_a,
             if left_turn:
                 if last_turn_left:
                     vf[j] = np.nan
-                last_turn_left = True
+                
                 
                 # Add intersection for left turn case
                 if include_intersections and not last_turn_left and k >= 0:
@@ -481,19 +478,20 @@ def _scan(e_grid, vf, a_prime, policy_2, del_a,
                         if new_n_inter > n_inter:  # Intersection was added
                             n_inter = new_n_inter
                             
-                            # This intersection becomes j for next iteration
-                            use_intersection_as_j = True
+                            # This intersection becomes k (tail) for next iteration
+                            use_intersection_as_k = True
                             intersection_e = inter_e_val
                             intersection_v = inter_v_val
                             intersection_a = inter_a_val
                             intersection_d = inter_d_val
+                last_turn_left = True
             else:
                 last_turn_left = False
             # update anchors and advance leader
             k = j
             idx_grad_base = k
             if not left_turn:
-                use_intersection_as_j = False  # Reset flag only if not left turn
+                use_intersection_as_k = False  # Reset flag only if not left turn
         # set new leading optimal index
         j = i + 1
 

@@ -15,11 +15,12 @@ Todo
 
 import numpy as np
 import time
-from numba import njit
+from numba import njit, types
+from numba.typed import Dict
 import matplotlib.pyplot as plt
 
 
-from dc_smm.fues.helpers.math_funcs import interp_as
+from dc_smm.fues.helpers.math_funcs import interp_as, correct_jumps1d
 from dc_smm.uenvelope import EGM_UE as egm_ue_global
 
 
@@ -211,7 +212,7 @@ def Operator_Factory(cp):
             {"func": u, "args": {}}, # u_func placeholder
             ue_method=method.upper(),
             m_bar=m_bar,
-            lb=3,
+            lb=6,
             rfc_radius=0.75,
             rfc_n_iter=40,
         )
@@ -299,6 +300,22 @@ def Operator_Factory(cp):
         vf_work_t = interp_as(egrid1, vf_clean, asset_grid_wealth)
         sigma_work_t = interp_as(egrid1, sigma_clean, asset_grid_wealth)
         dela_work_t = interp_as(egrid1, dela_clean, asset_grid_wealth)
+        
+        # Apply jump correction to smooth out discontinuities
+        gradient_jump_threshold = 0.8  # This threshold can be adjusted
+        policy_value_dict = Dict.empty(
+            key_type=types.unicode_type,
+            value_type=types.float64[:]
+        )
+        policy_value_dict['sigma'] = sigma_work_t
+        policy_value_dict['dela'] = dela_work_t
+        
+        vf_work_t_corrected, corrected_policies = correct_jumps1d(
+            vf_work_t, asset_grid_wealth, gradient_jump_threshold, policy_value_dict
+        )
+        vf_work_t = vf_work_t_corrected
+        sigma_work_t = corrected_policies['sigma']
+        dela_work_t = corrected_policies['dela']
 
         constrained_indices = np.where(asset_grid_wealth < min_a_val)
         sigma_work_t[constrained_indices] = asset_grid_wealth[constrained_indices] - asset_grid_A[0]
@@ -346,7 +363,7 @@ def Operator_Factory(cp):
         time_start_fues = time.time()
         egrid1, vf_clean, sigma_clean, a_prime_clean, dela_clean = EGM_UE(
             endog_grid, vf_work_t_inv, beta * VF_prime_work - delta, sigma_work_t_inv, 
-            asset_grid_A, del_a_unrefined, m_bar=1.01, method=method, padding_mbar=padding_mbar)
+            asset_grid_A, del_a_unrefined, m_bar=1.2, method=method, padding_mbar=padding_mbar)
         time_end_fues = time.time()
         
         # Step 3: JIT-compiled final interpolation and discrete choice
