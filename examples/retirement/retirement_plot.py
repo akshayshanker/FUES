@@ -82,7 +82,7 @@ def plot_egrids(age, e_grid, vf_work, c_worker, del_a, g_size, cp, save_path, ta
 
     # 2. Generate refined grid, value function and policy using FUES
     # For plotting, also get intersection points separately
-    fues_result, intersections = FUES_sep_intersect(x, vf, c, a_prime, del_a, m_bar=0.9)
+    fues_result, intersections = FUES_sep_intersect(x, vf, c, a_prime, del_a, m_bar=1.2)
     print(intersections)
     x_clean, vf_clean, c_clean, a_prime_clean, del_a_clean = fues_result
     inter_e, inter_v, inter_p1, inter_p2, inter_d = intersections
@@ -130,8 +130,8 @@ def plot_egrids(age, e_grid, vf_work, c_worker, del_a, g_size, cp, save_path, ta
 
     # formatting     
     ax[0].set_ylabel('Value', fontsize=11)
-    ax[0].set_ylim(9.4, 10.001)
-    ax[0].set_xlim(44, 55.01)
+    ax[0].set_ylim(30.5, 30.8)
+    ax[0].set_xlim(55,58.01)
     ax[0].spines['right'].set_visible(False)
     ax[0].spines['top'].set_visible(False)
     ax[0].legend(frameon=False, prop={'size': 10})
@@ -307,7 +307,7 @@ def plot_dcegm_cf(
     time_start_dcegm = time.time()
 
     x_clean, vf_clean, c_clean, a_prime_clean, dela_clean = fues_alg(
-        x, vf, c, a_prime, dela, m_bar=0.8, endog_mbar=True
+        x, vf, c, a_prime, dela, m_bar=1.2, endog_mbar=True
     )
 
     vf_interp_fues = np.interp(x, x_clean, vf_clean)
@@ -452,8 +452,8 @@ def plot_dcegm_cf(
         labels0.append('DC-EGM segments')
 
         # Set lims
-        ax[0].set_ylim(7.6, 8.4001)
-        ax[0].set_xlim(44, 55.1)
+        ax[0].set_ylim(30.5, 30.8)
+        ax[0].set_xlim(55,58.01)
         ax[1].set_ylim(20, 40)
         ax[1].set_xlim(44, 55.1)
         
@@ -804,7 +804,7 @@ if __name__ == "__main__":
     
     grid_sizes = [500, 1000, 2000, 3000,10000]  # Test different grid sizes
     delta_values = [0.25, 0.5, 1, 2]  # Test different delta values
-    egrid_plot_age = 17
+    egrid_plot_age = 3
     run_performance_tests = False
 
     # Define save path for plots and create directory if it doesn't exist

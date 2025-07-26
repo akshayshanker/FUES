@@ -212,7 +212,7 @@ def Operator_Factory(cp):
             {"func": u, "args": {}}, # u_func placeholder
             ue_method=method.upper(),
             m_bar=m_bar,
-            lb=6,
+            lb=10,
             rfc_radius=0.75,
             rfc_n_iter=40,
         )
@@ -302,7 +302,7 @@ def Operator_Factory(cp):
         dela_work_t = interp_as(egrid1, dela_clean, asset_grid_wealth)
         
         # Apply jump correction to smooth out discontinuities
-        gradient_jump_threshold = 0.8  # This threshold can be adjusted
+        gradient_jump_threshold = 10  # This threshold can be adjusted
         policy_value_dict = Dict.empty(
             key_type=types.unicode_type,
             value_type=types.float64[:]
@@ -363,7 +363,7 @@ def Operator_Factory(cp):
         time_start_fues = time.time()
         egrid1, vf_clean, sigma_clean, a_prime_clean, dela_clean = EGM_UE(
             endog_grid, vf_work_t_inv, beta * VF_prime_work - delta, sigma_work_t_inv, 
-            asset_grid_A, del_a_unrefined, m_bar=1.2, method=method, padding_mbar=padding_mbar)
+            asset_grid_A, del_a_unrefined, m_bar=1, method=method, padding_mbar=padding_mbar)
         time_end_fues = time.time()
         
         # Step 3: JIT-compiled final interpolation and discrete choice
