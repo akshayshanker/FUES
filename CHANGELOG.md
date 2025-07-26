@@ -2,6 +2,50 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.0dev6] - 2025-07-26 – FUES Code Cleanup and Optimization
+
+### Changed
+* **Refactored FUES scan logic for better code organization**
+  - Extracted forward scan logic into dedicated `forward_scan_case_a()` function
+  - Combined backward scan and find_backward_same_branch into unified `backward_scan_combined()` function
+  - Eliminated nested loops in favor of cleaner function calls while maintaining exact algorithm behavior
+  - Removed redundant pre-allocated arrays (g_f_vf, g_f_a, g_m_vf, g_m_a) with on-the-fly computation
+  - Memory savings of 4*N floats per scan operation
+
+* **Fixed circular buffer iteration order**
+  - Discovered that fues_2dev1 had incorrect backward scan order (oldest to newest instead of newest to oldest)
+  - fues_2dev4 correctly implements the intended behavior: selecting the closest (most recent) point
+  - Both versions kept for comparison purposes with documented behavioral differences
+
+* **Improved numerical stability for intersection points**
+  - Changed intersection point separation from 1e-50 to 1e-8
+  - Prevents divide-by-zero errors in numpy gradient calculations
+  - Maintains accuracy while avoiding numerical precision issues
+
+### Fixed
+* **Index consistency bug**
+  - Fixed idx_f being used as both loop counter and grid index
+  - Now correctly stores actual grid index: `idx_f = i+2+f`
+  - Ensures correct segment selection for intersection calculations
+
+* **Missing circular buffer updates**
+  - Added missing `m_head = circ_put(m_buf, m_head, j)` when j is dropped
+  - Fixed consecutive left turn handling to properly maintain buffer state
+  - Added prev_j tracking for correct j restoration
+
+* **Spurious intersection handling**  
+  - Added `added_intersection_last_iter` flag to track intersection creation
+  - Remove last intersection on consecutive left turns to avoid spurious points
+  - Improved intersection point management for discrete choice switches
+
+### Technical Details
+* **Files modified:** 
+  - `src/dc_smm/fues/fues_2dev4.py` - Refactored version with correct backward scan
+  - `src/dc_smm/fues/fues_2dev1.py` - Original version with backward scan bug (kept for comparison)
+  - `src/dc_smm/fues/fues_2dev1_working_backup_dev1.py` - Backup of working version
+* **Performance impact:** Reduced memory allocation and improved cache locality
+* **Backward compatibility:** Both versions produce valid upper envelopes, just with different point selection in edge cases
+
 ## [0.4.0dev5] - 2025-01-28 – Enhanced FUES with Intersection Points
 
 ### Added
