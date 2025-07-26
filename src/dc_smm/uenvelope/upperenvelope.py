@@ -303,7 +303,7 @@ def _fues2dev_engine(
     """
 
     try:
-        from dc_smm.fues.fues_2dev1 import FUES as fues2dev_alg  # noqa: WPS433  (runtime import)
+        from dc_smm.fues.fues_2dev4 import FUES as fues2dev_alg  # noqa: WPS433  (runtime import)
     except ImportError as err:
         raise ImportError("FUES2DEV algorithm not importable") from err
 
