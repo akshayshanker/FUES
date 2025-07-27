@@ -1,20 +1,36 @@
-"""Fast Upper‑Envelope Scan (FUES)
-Optimised baseline with pre‑allocated scratch buffers and a true
-circular drop list (LB‑length) — no shifting, no repeated small
-allocations.
+"""Fast Upper-Envelope Scan (FUES) Algorithm Implementation
 
-Implements speed ideas **#1** and **#2** from the tuning menu while
-keeping logic, comments and notation identical to Dobrescu & Shanker
-(2023).
+This module implements the FUES algorithm from Dobrescu & Shanker (2023) for solving 
+discrete-continuous dynamic programming problems. FUES efficiently computes the upper 
+envelope of value correspondences without requiring policy function monotonicity.
 
-NB: Generators are not supported in Numba nopython mode.  The previous
-commit used a `circ_iter_last()` generator which caused a typing error.
-This revision inlines the reverse‑iteration logic with simple index
-arithmetic to stay fully nopython‑compliant.
+Key Concepts:
+- The upper envelope consists of segments from different choice-specific value functions
+- Points on the envelope are identified using local convexity tests
+- A single linear pass (O(n) complexity) suffices to find all envelope points
+
+Algorithm Overview:
+1. Sort endogenous grid points and associated values/policies
+2. Scan through points testing for three cases:
+   - Case A: Right-turn with jump → potential drop (requires forward validation)
+   - Case B: Value fall → always drop
+   - Case C: Left-turn or right-turn without jump → check via backward scan
+3. Optionally compute intersection points where value functions cross
+
+Performance optimizations:
+- Constants for epsilon values to avoid repeated allocations
+- Reciprocals used in hot loop to replace expensive divisions
+- Circular buffer for efficient backward scanning
+- Pre-allocated arrays for intersection tracking
 """
 
 from numba import njit
 import numpy as np
+
+# Constants for better performance
+EPS_D = 1e-200  # Epsilon for division protection
+EPS_A = 1e-100  # Epsilon for gradient calculations
+EPS_SEP = 1e-8  # Epsilon for intersection separation
 
 # ---------------------------------------------------------------------
 # Helpers that remain identical ---------------------------------------
@@ -45,7 +61,7 @@ def circ_put(buf, head, value):
 @njit
 def linear_interp(x, x1, x2, y1, y2):
     """Linear interpolation helper."""
-    if np.abs(x2 - x1) < 1e-200:
+    if np.abs(x2 - x1) < EPS_D:
         return y1
     return y1 + (y2 - y1) * (x - x1) / (x2 - x1)
 
@@ -75,11 +91,11 @@ def add_intersection(inter_e, inter_v, inter_p1, inter_p2, inter_d, n_inter, max
     """
     if not np.isnan(intr_point[0]) and n_inter + 1 < max_inter:
         # Add left branch point (slightly before intersection)
-        inter_e[n_inter] = intr_point[0] - 1e-8
+        inter_e[n_inter] = intr_point[0] - EPS_SEP
         inter_v[n_inter] = intr_point[1]
         
         # Interpolate policies along the left branch segment (idx1 to idx2)
-        if e_grid[idx2] - e_grid[idx1] > 1e-200:
+        if e_grid[idx2] - e_grid[idx1] > EPS_D:
             t = (intr_point[0] - e_grid[idx1]) / (e_grid[idx2] - e_grid[idx1])
         else:
             t = 0.0
@@ -89,11 +105,11 @@ def add_intersection(inter_e, inter_v, inter_p1, inter_p2, inter_d, n_inter, max
         inter_d[n_inter] = del_a[idx1] + t * (del_a[idx2] - del_a[idx1])
         
         # Add right branch point (slightly after intersection)
-        inter_e[n_inter + 1] = intr_point[0] + 1e-8
+        inter_e[n_inter + 1] = intr_point[0] + EPS_SEP
         inter_v[n_inter + 1] = intr_point[1]
         
         # Interpolate policies along the right branch segment (idx3 to idx4)
-        if e_grid[idx4] - e_grid[idx3] > 1e-200:
+        if e_grid[idx4] - e_grid[idx3] > EPS_D:
             t = (intr_point[0] - e_grid[idx3]) / (e_grid[idx4] - e_grid[idx3])
         else:
             t = 0.0
@@ -110,19 +126,45 @@ def add_intersection(inter_e, inter_v, inter_p1, inter_p2, inter_d, n_inter, max
 def backward_scan_combined(m_buf, m_head, LB, e_grid, vf_full, a_prime, 
                           i, j, i_plus_1, left_turn, g_tilde_a, 
                           last_turn_left, g_1, m_bar, check_drop=True):
-    """Combined backward scan that can be used for both Case C and intersection finding.
+    """Backward scan to find previous point on same branch and check optimality.
     
-    Parameters:
-    -----------
+    This function searches through recently dropped points (stored in circular buffer)
+    to find point m that is on the same branch as i+1 (i.e., policy gradient < m_bar).
+    
+    In Case C with left turn, it checks if j should be dropped by comparing gradients:
+    - If gradient from m to j < gradient from j to i+1, then j is suboptimal
+    
+    Parameters
+    ----------
+    m_buf : array
+        Circular buffer storing indices of recently dropped points
+    m_head : int
+        Current write position in circular buffer
+    LB : int
+        Buffer size (lookback limit)
+    e_grid, vf_full, a_prime : arrays
+        Grid points, values, and policies
+    i, j, i_plus_1 : int
+        Indices: i (loop counter), j (last kept), i+1 (current point)
+    left_turn : bool
+        True if g_1 > g_jm1 (convex turn)
+    g_tilde_a : float
+        Policy gradient between j and i+1
+    last_turn_left : bool
+        Whether previous iteration was also a left turn
+    g_1 : float
+        Value gradient from j to i+1
+    m_bar : float
+        Jump threshold
     check_drop : bool
-        If True, performs drop check for Case C. If False, just finds the index.
+        If True, check whether to drop j. If False, only find m.
     
-    Returns:
-    --------
+    Returns
+    -------
     keep_j : bool
-        Whether to keep j (always True if check_drop=False)
+        Whether to keep point j
     m_ind : int
-        Index of found point on same branch (-1 if not found)
+        Index of point m on same branch as i+1 (-1 if not found)
     """
     keep_j = True
     m_ind = -1
@@ -135,7 +177,7 @@ def backward_scan_combined(m_buf, m_head, LB, e_grid, vf_full, a_prime,
         # For Case C (check_drop=True), use original conditions
         if check_drop:
             if m_idx != -1:
-                de = max(1e-100, e_grid[j] - e_grid[m_idx])
+                de = max(EPS_A, e_grid[j] - e_grid[m_idx])
                 g_m_a = np.abs((a_prime[i_plus_1] - a_prime[m_idx]) / de)
                 if g_m_a < m_bar:
                     m_ind = m_idx
@@ -148,7 +190,7 @@ def backward_scan_combined(m_buf, m_head, LB, e_grid, vf_full, a_prime,
         else:
             # For intersection finding (check_drop=False), use original find_backward_same_branch logic
             if m_idx != -1 and m_idx < i_plus_1:
-                de = max(1e-200, e_grid[i_plus_1] - e_grid[m_idx])
+                de = max(EPS_D, e_grid[i_plus_1] - e_grid[m_idx])
                 grad_a = np.abs((a_prime[i_plus_1] - a_prime[m_idx]) / de)
                 if grad_a < m_bar:
                     m_ind = m_idx
@@ -165,7 +207,7 @@ def find_forward_same_branch(e_grid, a_prime, start_idx, j_idx, N, LB, m_bar):
     for f in range(min(LB, N - start_idx - 1)):
         if start_idx + 1 + f >= N:
             break
-        de = max(1e-200, e_grid[start_idx + 1 + f] - e_grid[j_idx])
+        de = max(EPS_D, e_grid[start_idx + 1 + f] - e_grid[j_idx])
         g_a = np.abs((a_prime[start_idx + 1 + f] - a_prime[j_idx]) / de)
         if g_a < m_bar:
             return True, start_idx + 1 + f
@@ -173,9 +215,37 @@ def find_forward_same_branch(e_grid, a_prime, start_idx, j_idx, N, LB, m_bar):
 
 @njit
 def forward_scan_case_a(e_grid, vf_full, a_prime, i, j, N, LB, m_bar, g_1):
-    """
-    Forward scan specifically for Case A (right-turn jump).
-    Returns (keep_i1, idx_f) exactly matching the original logic.
+    """Forward scan validation for Case A (right-turn jump).
+    
+    When we detect a right-turn jump, point i+1 might be jumping from a dominated
+    branch. This function checks if i+1 should be kept by:
+    1. Finding a future point f on the same branch as j
+    2. Checking if the value gradient from j to i+1 dominates the gradient from i+1 to f
+    
+    If g_1 > g_f (gradient j→i+1 > gradient i+1→f), then i+1 lies above the 
+    extrapolated line from j to f, so we keep it.
+    
+    Parameters
+    ----------
+    e_grid, vf_full, a_prime : arrays
+        Grid points, values, and policies
+    i, j : int
+        Indices: i (loop counter), j (last kept point)
+    N : int
+        Total number of grid points
+    LB : int
+        Lookback/forward buffer size
+    m_bar : float
+        Jump threshold for same-branch detection
+    g_1 : float
+        Value gradient from j to i+1
+    
+    Returns
+    -------
+    keep_i1 : bool
+        Whether to keep point i+1
+    idx_f : int
+        Index of forward point on same branch as j (-1 if not found)
     """
     idx_f = -1
     keep_i1 = False
@@ -183,7 +253,7 @@ def forward_scan_case_a(e_grid, vf_full, a_prime, i, j, N, LB, m_bar, g_1):
     for f in range(LB):
         if i+2+f >= N:  # CRITICAL: Add bounds check
             break
-        de = max(1e-200, e_grid[i+1] - e_grid[i+2+f])
+        de = max(EPS_D, e_grid[i+1] - e_grid[i+2+f])
         g_f_a = np.abs((a_prime[j] - a_prime[i+2+f]) / de)
         if g_f_a < m_bar:
             idx_f = i+2+f  # Store actual grid index
@@ -304,12 +374,54 @@ def FUES_sep_intersect(e_grid, vf, policy_1, policy_2, del_a,
 def _scan(e_grid, vf, a_prime, policy_2, del_a,
           m_bar, LB, fwd_scan_do,
           endog_mbar, padding_mbar, ID_NM = True, include_intersections = True):
-    """FUES single‑pass scan (no consecutive left turns).
-
-    Implements:
-    1. Pre‑allocated scratch arrays for gradient scans (idea #1).
-    2. Circular buffer `m_buf` for last‑dropped indices (idea #2).
-    3. Optional intersection tracking when include_intersections=True.
+    """Core FUES algorithm: Single-pass scan to identify upper envelope points.
+    
+    The algorithm maintains three key indices as it scans:
+    - k: "tail" - second-to-last kept point 
+    - j: "head" - last kept point
+    - i+1: current point being evaluated
+    
+    For each triplet (k, j, i+1), we compute:
+    - g_jm1: value gradient from k to j (slope of previous segment)
+    - g_1: value gradient from j to i+1 (slope of current segment)
+    - g_tilde_a: policy gradient (for jump detection)
+    
+    Parameters
+    ----------
+    e_grid : array
+        Sorted endogenous grid points
+    vf : array
+        Value function at each grid point (modified in-place, NaN marks dropped points)
+    a_prime : array
+        Next-period assets (policy function)
+    policy_2 : array
+        Secondary policy variable
+    del_a : array
+        Policy gradient
+    m_bar : float
+        Jump threshold (maximum marginal propensity to save)
+    LB : int
+        Lookback buffer size for backward/forward scans
+    fwd_scan_do : bool
+        Whether to perform forward scan validation in Case A
+    endog_mbar : bool
+        Use endogenous jump threshold based on policy gradients
+    padding_mbar : float
+        Additional padding for endogenous threshold
+    ID_NM : bool
+        Check for non-monotone policies
+    include_intersections : bool
+        Track intersection points where value functions cross
+    
+    Returns
+    -------
+    e_grid : array
+        Original grid (unchanged)
+    vf : array
+        Value function with dropped points marked as NaN
+    intersections : tuple or None
+        If include_intersections=True, returns (inter_e, inter_v, inter_p1, inter_p2, inter_d)
+        containing intersection points and interpolated policies
     """
 
     N = e_grid.size
@@ -345,6 +457,9 @@ def _scan(e_grid, vf, a_prime, policy_2, del_a,
     last_turn_left = False
     prev_j = 0  # Track previous j value for consecutive left turn handling
 
+    # ==================== MAIN SCAN LOOP ====================
+    # Process each point i+1 to determine if it lies on the upper envelope.
+    # We maintain a growing envelope with points k (tail) and j (head).
     for i in range(N - 2):
 
         if i <= 1:                 # first two points always kept
@@ -353,9 +468,12 @@ def _scan(e_grid, vf, a_prime, policy_2, del_a,
             added_intersection_last_iter = False
             continue
 
-        # ------------- Gradients at current step --------------------
-        # Use intersection values for k (tail) if we have one from last iteration
+        # ============= STEP 1: Compute Gradients =============
+        # We need gradients to determine the "turn" direction:
+        # - Right turn (g_1 < g_jm1): value function is concave
+        # - Left turn (g_1 > g_jm1): value function is convex
         
+        # Use intersection values for k (tail) if we have one from last iteration
         if use_intersection_as_k and include_intersections:
             k_e = intersection_e
             k_v = intersection_v
@@ -367,37 +485,39 @@ def _scan(e_grid, vf, a_prime, policy_2, del_a,
             k_a = a_prime[k] if k >= 0 else a_prime[0]
             k_d = del_a[k] if k >= 0 else del_a[0]
         
-        de_prev = max(1e-200, e_grid[j] - k_e)
-        g_jm1 = (vf_full[j] - k_v) / de_prev
+        # Gradient from tail (k) to head (j) - slope of previous segment
+        de_prev = max(EPS_D, e_grid[j] - k_e)
+        inv_de_prev = 1.0 / de_prev  # Optimization: multiply is faster than divide
+        g_jm1 = (vf_full[j] - k_v) * inv_de_prev
 
-        de_lead = max(1e-200, e_grid[i+1] - e_grid[j])
-        g_1 = (vf_full[i+1] - vf_full[j]) / de_lead
+        # Gradient from head (j) to current point (i+1) - slope of current segment
+        de_lead = max(EPS_D, e_grid[i+1] - e_grid[j])
+        inv_de_lead = 1.0 / de_lead
+        g_1 = (vf_full[i+1] - vf_full[j]) * inv_de_lead
 
+        # Jump threshold: either fixed (m_bar) or endogenous based on policy gradients
         M_max = max(np.abs(del_a[j]), np.abs(del_a[i+1])) + padding_mbar
         if not endog_mbar:
             M_max = m_bar
 
+        # Policy gradient for jump detection
         del_pol = a_prime[i+1] - a_prime[j]
-        g_tilde_a = np.abs((a_prime[i+1] - a_prime[j]) / de_lead)
+        g_tilde_a = np.abs(del_pol * inv_de_lead)
 
         del_pol_a = (e_grid[i+1] - a_prime[i+1]) - (e_grid[j] - a_prime[j])
 
-        #if ID_NM:
-        #    right_turn_jump = ((g_1 < g_jm1) and (g_tilde_a > M_max)) or (del_pol_a<0 and g_1 < g_jm1)
-            #left_turn = del_pol> 0 and g_1 > g_jm1
-        #else:
+        # ============= STEP 2: Classify Current Situation =============
+        # Determine if we have a right turn with jump or left turn
         right_turn_jump = (g_1 < g_jm1) and (g_tilde_a > M_max)
-            #left_turn = g_1 > g_jm1
-
-        # ------------- Case A: right‑turn jump ----------------------
-            
-        #right_turn_jump = (g_1 < g_jm1) and (g_tilde_a > M_max)
         left_turn = g_1 > g_jm1
 
         # Reset intersection tracking flag at start of each iteration
         added_intersection_last_iter = False
         
-        # ------------- Case A: right‑turn jump ----------------------
+        # ============= CASE A: Right-Turn with Jump =============
+        # This indicates a potential jump to a different discrete choice.
+        # The point might be suboptimal (jumping from a dominated branch).
+        # We need forward scan to check if this jump is valid.
         if right_turn_jump:
             keep_i1 = False
             if fwd_scan_do:
@@ -475,14 +595,19 @@ def _scan(e_grid, vf, a_prime, policy_2, del_a,
             continue
     
 
-        # ------------- Case C: left turn or right w/o jump ----------
-        # Use the combined backward scan function with drop check
+        # ============= CASE C: Left Turn or Right Turn without Jump =============
+        # Either:
+        # - Left turn (g_1 > g_jm1): potential crossing point, j might be suboptimal
+        # - Right turn without jump: normal concave segment continuation
+        # Use backward scan to find previous point m on same branch as i+1
         keep_j, m_ind = backward_scan_combined(
             m_buf, m_head, LB, e_grid, vf_full, a_prime,
             i, j, i+1, left_turn, g_tilde_a, last_turn_left, g_1, m_bar, check_drop=True
         )
 
-        ## CASE C.1.A Left Turn and drop j'th point 
+        # --- CASE C.1: Left Turn with j Dropped ---
+        # The backward scan determined that j is suboptimal (lies below the 
+        # envelope formed by points m and i+1 on the same branch)
         if not keep_j:
             vf[j] = np.nan
             m_head = circ_put(m_buf, m_head, j)  # Add dropped j to circular buffer
