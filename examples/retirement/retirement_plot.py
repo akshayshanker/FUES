@@ -34,7 +34,7 @@ if PROJECT_ROOT not in sys.path:
 #cwd = os.getcwd()
 #sys.path.append('..')
 #os.chdir(cwd)
-from dc_smm.fues.fues_2dev4 import FUES as fues_alg, FUES_sep_intersect
+from dc_smm.fues.fues_2dev8 import FUES as fues_alg, FUES_sep_intersect
 from dc_smm.models.retirement.retirement import Operator_Factory, RetirementModel, euler
 
 def plot_egrids(age, e_grid, vf_work, c_worker, del_a, g_size, cp, save_path, tag = 'sigma0'):
@@ -83,7 +83,7 @@ def plot_egrids(age, e_grid, vf_work, c_worker, del_a, g_size, cp, save_path, ta
     # 2. Generate refined grid, value function and policy using FUES
     # For plotting, also get intersection points separately
     fues_result, intersections = FUES_sep_intersect(x, vf, c, a_prime, del_a, m_bar=1.2)
-    print(intersections)
+    #print(intersections)
     x_clean, vf_clean, c_clean, a_prime_clean, del_a_clean = fues_result
     inter_e, inter_v, inter_p1, inter_p2, inter_d = intersections
 
@@ -845,6 +845,10 @@ if __name__ == "__main__":
     _, _, _, _, c_refined_FUES, _, time_end_FUES = iter_bell(cp, method='FUES2DEV')
 
     # precompile numba functions
+    _ = iter_bell(cp, method='FUES2DEV4')
+    _, _, _, _, c_refined_FUES4, _, time_end_FUES4 = iter_bell(cp, method='FUES2DEV4')
+
+    # precompile numba functions
     _ = iter_bell(cp, method='DCEGM')
     _, _, _, _, c_refined_DCEGM, _, time_end_DCEGM = iter_bell(cp, method='DCEGM')
 
@@ -856,11 +860,13 @@ if __name__ == "__main__":
     Euler_error_FUES = euler(cp, c_refined_FUES)
     Euler_error_DCEGM = euler(cp, c_refined_DCEGM)
     Euler_error_CONSAV = euler(cp, c_refined_CONSAV)
+    Euler_error_FUES4 = euler(cp, c_refined_FUES4)
     print(
         "| Method | Euler Error    | Avg. upper env. time(ms) | Total solution time(ms) |\n"
         "|--------|----------------|--------------------------|-------------------------|\n"
         f"| RFC    | {Euler_error_RFC: <14.6f} | {time_end_RFC[0]*1000: <24.6f} | {time_end_RFC[1]*1000: <23.6f} |\n"
         f"| FUES   | {Euler_error_FUES: <14.6f} | {time_end_FUES[0]*1000: <24.6f} | {time_end_FUES[1]*1000: <23.6f} |\n"
+        f"| FUES4  | {Euler_error_FUES4: <14.6f} | {time_end_FUES4[0]*1000: <24.6f} | {time_end_FUES4[1]*1000: <23.6f} |\n"
         f"| DCEGM  | {Euler_error_DCEGM: <14.6f} | {time_end_DCEGM[0]*1000: <24.6f} | {time_end_DCEGM[1]*1000: <23.6f} |\n"
         f"| CONSAV | {Euler_error_CONSAV: <14.6f} | {time_end_CONSAV[0]*1000: <24.6f} | {time_end_CONSAV[1]*1000: <23.6f} |\n"
         "---------------------------------------------------------------------------------\n"

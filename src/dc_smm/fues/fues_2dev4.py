@@ -287,7 +287,7 @@ def FUES_sep_intersect(e_grid, vf, policy_1, policy_2, del_a,
         m_bar, LB, True, endog_mbar, padding_mbar, True)
     
     # Extract kept points for FUES result
-    print(intersections)
+    #print(intersections)
     keep = ~np.isnan(vf_marked)
     fues_result = (e_grid_out[keep], vf_sorted[keep],
                    policy_1_sorted[keep], policy_2_sorted[keep], del_a_sorted[keep])
@@ -446,8 +446,10 @@ def _scan(e_grid, vf, a_prime, policy_2, del_a,
                             intersection_a = inter_a_val
                             intersection_d = inter_d_val
                             
-                            # k will be set to intersection value via flag
-                            prev_j = j  # Save current j
+                            # tail value will be set to intersection value via flag
+                            # for next iteration, k will have been advanced (but not used)
+                            k = j
+                            prev_j = j
                             j = i+1
                             last_turn_left = False
                             created_intersection = True
@@ -455,18 +457,20 @@ def _scan(e_grid, vf, a_prime, policy_2, del_a,
                 if not created_intersection:
                     # Normal case: i+1 is kept without intersection
                     k = j
-                    prev_j = j  # Save current j
+                    prev_j = j
                     j = i+1
                     last_turn_left = False
                     use_intersection_as_k = False  # Reset flag
             else:
                 vf[i+1] = np.nan
                 m_head = circ_put(m_buf, m_head, i+1)
+                use_intersection_as_k = False  # Reset flag
             continue
 
         # ------------- Case B: drop due to value fall / monotone ----
         if (vf_full[i+1] - vf_full[j] < 0) or (ID_NM and (del_pol_a<0)):
             vf[i+1] = np.nan
+            use_intersection_as_k = False  # Reset flag
             m_head = circ_put(m_buf, m_head, i+1)
             continue
     
@@ -478,6 +482,7 @@ def _scan(e_grid, vf, a_prime, policy_2, del_a,
             i, j, i+1, left_turn, g_tilde_a, last_turn_left, g_1, m_bar, check_drop=True
         )
 
+        ## CASE C.1.A Left Turn and drop j'th point 
         if not keep_j:
             vf[j] = np.nan
             m_head = circ_put(m_buf, m_head, j)  # Add dropped j to circular buffer
@@ -485,6 +490,7 @@ def _scan(e_grid, vf, a_prime, policy_2, del_a,
             # Compute intersection only if not a consecutive left turn
             #include_intersections_1 = False
             use_intersection_as_k = False
+            created_intersection = False
             if include_intersections and not last_turn_left:
                 pj = np.array([e_grid[j], vf_full[j]])
                 pi1 = np.array([e_grid[i+1], vf_full[i+1]])
@@ -509,11 +515,18 @@ def _scan(e_grid, vf, a_prime, policy_2, del_a,
                     intersection_v = inter_v_val
                     intersection_a = inter_a_val
                     intersection_d = inter_d_val
+                    j = i+1 # advance j 
+                    created_intersection = True
             
             # Mark this as a left turn after processing
             last_turn_left = True
-            j = i+1 # advance j 
-
+            if created_intersection == False:
+                j = i+1 # advance j 
+                use_intersection_as_k = False  # Reset flag
+                k  = prev_j
+                #prev_j = j
+       
+        ## CASE C.1.B Left Turn and keep j'th point 
         else:
             if left_turn:
                 if last_turn_left:
@@ -570,13 +583,16 @@ def _scan(e_grid, vf, a_prime, policy_2, del_a,
                             intersection_v = inter_v_val
                             intersection_a = inter_a_val
                             intersection_d = inter_d_val
-                        k = j
+                            #j = i+1 # advance j 
+                            #k = j
                 last_turn_left = True
                 # For left turn case where j is kept, advance j
                 #if j != prev_j:  # Only advance if we didn't reset j <- 
                 k = j  # Update k before advancing j
                 prev_j = j
                 j = i + 1
+            
+            ## CASE C.1.C Right Turn and keep j'th point 
             else:
                 last_turn_left = False
                 # For right turn without jump, advance j normally

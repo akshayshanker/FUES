@@ -212,7 +212,7 @@ def Operator_Factory(cp):
             {"func": u, "args": {}}, # u_func placeholder
             ue_method=method.upper(),
             m_bar=m_bar,
-            lb=10,
+            lb=4,
             rfc_radius=0.75,
             rfc_n_iter=40,
         )
@@ -444,7 +444,7 @@ def Operator_Factory(cp):
             next_worker_cons_derivative = worker_cons_derivative
             next_worker_value = worker_value
             next_euler_derivative = euler_derivative
-            if i>1:
+            if i>2:
                 UE_times[age] = EU_time
                 all_times[age] = total_time
 

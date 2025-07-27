@@ -303,7 +303,7 @@ def _fues2dev_engine(
     """
 
     try:
-        from dc_smm.fues.fues_2dev4 import FUES as fues2dev_alg  # noqa: WPS433  (runtime import)
+        from dc_smm.fues.fues_2dev8 import FUES as fues2dev_alg  # noqa: WPS433  (runtime import)
     except ImportError as err:
         raise ImportError("FUES2DEV algorithm not importable") from err
 
@@ -323,7 +323,7 @@ def _fues2dev_engine(
     }
 
 
-@register("FUES2DEV3")
+@register("FUES2DEV4")
 def _fues2dev3_engine(
     x_dcsn_hat: np.ndarray,
     qf_hat: np.ndarray,
@@ -345,7 +345,7 @@ def _fues2dev3_engine(
     """
 
     try:
-        from dc_smm.fues.fues_2dev3 import FUES as fues2dev3_alg  # noqa: WPS433  (runtime import)
+        from dc_smm.fues.fues_2dev4 import FUES as fues2dev4_alg  # noqa: WPS433  (runtime import)
         from dc_smm.fues.helpers import correct_jumps1d
     except ImportError as err:
         raise ImportError("FUES2DEV3 algorithm not importable") from err
@@ -353,7 +353,7 @@ def _fues2dev3_engine(
     # Guard against lb being a list (edge-case seen in original code)
     lb_int = int(lb[0]) if isinstance(lb, (list, tuple)) else int(lb)
 
-    x_dcsn_ref, qf_ref, kappa_ref, x_cntn_ref, _ = fues2dev3_alg(
+    x_dcsn_ref, qf_ref, kappa_ref, x_cntn_ref, _ = fues2dev4_alg(
         x_dcsn_hat, qf_hat, kappa_hat, X_cntn, X_cntn, m_bar=m_bar, LB=lb_int
     )
 
