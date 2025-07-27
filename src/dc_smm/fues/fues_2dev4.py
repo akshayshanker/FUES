@@ -310,12 +310,28 @@ def FUES(e_grid, vf, policy_1, policy_2, del_a,
         
         # If we have intersections, merge them with kept points
         if len(inter_e) > 0:
-            # Combine arrays
-            all_e = np.concatenate((e_kept, inter_e))
-            all_v = np.concatenate((v_kept, inter_v))
-            all_p1 = np.concatenate((p1_kept, inter_p1))
-            all_p2 = np.concatenate((p2_kept, inter_p2))
-            all_d = np.concatenate((d_kept, inter_d))
+            n_kept = len(e_kept)
+            n_inter = len(inter_e)
+            n_total = n_kept + n_inter
+            
+            # Pre-allocate output arrays (faster than concatenate)
+            all_e = np.empty(n_total, dtype=e_kept.dtype)
+            all_v = np.empty(n_total, dtype=v_kept.dtype)
+            all_p1 = np.empty(n_total, dtype=p1_kept.dtype)
+            all_p2 = np.empty(n_total, dtype=p2_kept.dtype)
+            all_d = np.empty(n_total, dtype=d_kept.dtype)
+            
+            # Fill arrays (memory-efficient copy)
+            all_e[:n_kept] = e_kept
+            all_e[n_kept:] = inter_e
+            all_v[:n_kept] = v_kept
+            all_v[n_kept:] = inter_v
+            all_p1[:n_kept] = p1_kept
+            all_p1[n_kept:] = inter_p1
+            all_p2[:n_kept] = p2_kept
+            all_p2[n_kept:] = inter_p2
+            all_d[:n_kept] = d_kept
+            all_d[n_kept:] = inter_d
             
             # Sort by e_grid to maintain order
             sort_idx = np.argsort(all_e)
@@ -370,7 +386,7 @@ def FUES_sep_intersect(e_grid, vf, policy_1, policy_2, del_a,
 # Core scan ------------------------------------------------------------
 # ---------------------------------------------------------------------
 
-@njit
+@njit(cache=True, fastmath=True)
 def _scan(e_grid, vf, a_prime, policy_2, del_a,
           m_bar, LB, fwd_scan_do,
           endog_mbar, padding_mbar, ID_NM = True, include_intersections = True):

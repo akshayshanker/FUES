@@ -27,6 +27,37 @@ from consav import upperenvelope
 
 import numpy as np
 
+# Algorithm imports with error handling
+try:
+    from dc_smm.fues.fues import FUES as fues_alg
+except ImportError:
+    fues_alg = None
+
+try:
+    from dc_smm.fues.dcegm import dcegm
+except ImportError:
+    dcegm = None
+
+try:
+    from dc_smm.fues.rfc_simple import rfc
+except ImportError:
+    rfc = None
+
+try:
+    from dc_smm.fues.fues_2dev8 import FUES as fues2dev_alg
+except ImportError:
+    fues2dev_alg = None
+
+try:
+    from dc_smm.fues.fues_2dev4 import FUES as fues2dev4_alg
+    from dc_smm.fues.helpers import correct_jumps1d
+except ImportError:
+    fues2dev4_alg = None
+    correct_jumps1d = None
+
+# Common post-processing helpers import
+from dc_smm.fues.helpers import interp_as
+
 # ---------------------------------------------------------------------
 # Registry helpers
 # ---------------------------------------------------------------------
@@ -58,7 +89,6 @@ def available() -> list[str]:
 # ---------------------------------------------------------------------
 #  Common post-processing helpers
 # ---------------------------------------------------------------------
-from dc_smm.fues.helpers import interp_as  # noqa: E402  (after np import)
 
 
 def EGM_UE(
@@ -186,10 +216,8 @@ def _fues_engine(
     entire **kwargs without filtering.
     """
 
-    try:
-        from dc_smm.fues.fues import FUES as fues_alg  # noqa: WPS433  (runtime import)
-    except ImportError as err:
-        raise ImportError("FUES algorithm not importable") from err
+    if fues_alg is None:
+        raise ImportError("FUES algorithm not importable")
 
     # Guard against lb being a list (edge-case seen in original code)
     lb_int = int(lb[0]) if isinstance(lb, (list, tuple)) else int(lb)
@@ -222,10 +250,8 @@ def _dcegm_engine(
 ) -> Dict[str, np.ndarray]:
     """Wrapper around Iskhakov-et-al DCEGM."""
 
-    try:
-        from dc_smm.fues.dcegm import dcegm  # noqa: WPS433
-    except ImportError as err:
-        raise ImportError("DCEGM algorithm not importable") from err
+    if dcegm is None:
+        raise ImportError("DCEGM algorithm not importable")
 
     x_cntn_ref, x_dcsn_ref, kappa_ref, qf_ref, _ = dcegm(kappa_hat, kappa_hat, qf_hat, X_cntn, x_dcsn_hat)
 
@@ -255,10 +281,8 @@ def _rfc_engine(
 ) -> Dict[str, np.ndarray]:
     """Fast RFC wrapper (1-D case)."""
 
-    try:
-        from dc_smm.fues.rfc_simple import rfc  # noqa: WPS433
-    except ImportError as err:
-        raise ImportError("RFC algorithm not importable") from err
+    if rfc is None:
+        raise ImportError("RFC algorithm not importable")
 
     lambda_egm = uc_func_partial(kappa_hat)
 
@@ -302,10 +326,8 @@ def _fues2dev_engine(
     Uses the same interface as the original FUES implementation.
     """
 
-    try:
-        from dc_smm.fues.fues_2dev8 import FUES as fues2dev_alg  # noqa: WPS433  (runtime import)
-    except ImportError as err:
-        raise ImportError("FUES2DEV algorithm not importable") from err
+    if fues2dev_alg is None:
+        raise ImportError("FUES2DEV algorithm not importable")
 
     # Guard against lb being a list (edge-case seen in original code)
     lb_int = int(lb[0]) if isinstance(lb, (list, tuple)) else int(lb)
@@ -344,11 +366,8 @@ def _fues2dev3_engine(
     Uses the same interface as the original FUES implementation.
     """
 
-    try:
-        from dc_smm.fues.fues_2dev4 import FUES as fues2dev4_alg  # noqa: WPS433  (runtime import)
-        from dc_smm.fues.helpers import correct_jumps1d
-    except ImportError as err:
-        raise ImportError("FUES2DEV3 algorithm not importable") from err
+    if fues2dev4_alg is None or correct_jumps1d is None:
+        raise ImportError("FUES2DEV3 algorithm not importable")
 
     # Guard against lb being a list (edge-case seen in original code)
     lb_int = int(lb[0]) if isinstance(lb, (list, tuple)) else int(lb)
@@ -489,4 +508,4 @@ def _consav_engine(
 
 # ------------------------------------------------------------------
 #  End of file
-# ------------------------------------------------------------------ 
+# ------------------------------------------------------------------
