@@ -326,13 +326,13 @@ def _fues2dev_engine(
     Uses the same interface as the original FUES implementation.
     """
 
-    if fues2dev_alg is None:
+    if fues2dev4_alg is None:
         raise ImportError("FUES2DEV algorithm not importable")
 
     # Guard against lb being a list (edge-case seen in original code)
     lb_int = int(lb[0]) if isinstance(lb, (list, tuple)) else int(lb)
 
-    x_dcsn_ref, qf_ref, kappa_ref, x_cntn_ref, _ = fues2dev_alg(
+    x_dcsn_ref, qf_ref, kappa_ref, x_cntn_ref, _ = fues2dev4_alg(
         x_dcsn_hat, qf_hat, kappa_hat, X_cntn, X_cntn, m_bar=m_bar, LB=lb_int
     )
 

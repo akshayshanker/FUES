@@ -97,7 +97,7 @@ class RetirementModel:
 
             return 1 / x
 
-        @njit(cache=True, fastmath=True)
+        @njit(cache=True)
         def u(x):
 
             cons_u = np.log(x)

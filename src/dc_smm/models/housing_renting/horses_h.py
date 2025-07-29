@@ -120,7 +120,7 @@ def _interp_scalar_cpu(x_grid, y_grid, x):
     w_hi  = (x - x_lo) * inv_dx
     return (1.0 - w_hi) * y_grid[lo] + w_hi * y_grid[hi]
 
-@njit(cache=True, fastmath=True, parallel=True)
+@njit(cache=True, parallel=True)
 def housing_choice_solver_owner_cpu(resources_liquid_3d, H_grid, H_nxt_grid,
                                     w_grid, Q_cntn, v_cntn, lambda_cntn,
                                     tau, min_wealth):

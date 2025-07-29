@@ -1,11 +1,32 @@
+"""Plotting utilities for housing renting model analysis.
+
+This module provides functions to generate various plots for analyzing
+the housing renting model solutions, including:
+- EGM (Endogenous Grid Method) grid plots
+- Policy function plots
+- Value and Q function comparisons
+
+Main Functions
+--------------
+generate_plots : Generate all plots for a given solution method
+plot_egm_grids : Plot refined vs unrefined EGM grids
+plot_dcsn_policy : Plot policy functions (consumption, housing, tenure)
+plot_compare_value_Q : Compare value/Q functions across methods
+"""
+
+import os
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.ticker as mticker
+from matplotlib.ticker import FormatStrFormatter
 from matplotlib.gridspec import GridSpec
+from matplotlib.colors import TABLEAU_COLORS
 import seaborn as sns
 from dynx.stagecraft.solmaker import Solution
 
 def generate_plots(model, method, image_dir, plot_period=0, bounds=None,
-                  save_dir=None, load_dir=None):
+                  save_dir=None, load_dir=None, plot_all_H_idx=False, 
+                  y_idx_list=None, egm_bounds=None):
     """
     Generate both EGM grid plots and policy function plots for a model using a specific method.
     
@@ -20,20 +41,28 @@ def generate_plots(model, method, image_dir, plot_period=0, bounds=None,
     plot_period : int
         Period to plot policy functions for
     bounds : dict
-        Dictionary containing bounds for plots
+        Dictionary containing bounds for policy function plots
     save_dir : str, optional
         If provided and model is not None, save Solution objects to this directory
     load_dir : str, optional
         If provided and model is None, load Solution objects from this directory
+    plot_all_H_idx : bool, optional
+        If True, plot EGM grids for all H_idx values. If False (default),
+        plot only low, middle, and high housing values.
+    y_idx_list : list of int, optional
+        List of income indices to plot for EGM grids. If None, defaults to [0].
+    egm_bounds : dict, optional
+        Dictionary specifying bounds for EGM plots. Keys can be:
+        - 'value': (xmin, xmax, ymin, ymax) for value function panel
+        - 'assets': (xmin, xmax, ymin, ymax) for assets panel
+        - 'he_space': (xmin, xmax, ymin, ymax) for h-e space plot
+        Can also specify per y_idx: 'value_y0', 'assets_y1', etc.
         
     Notes
     -----
     If both save_dir and load_dir are None, behavior is unchanged (plots from live model).
     If model is None, load_dir must be provided to load saved solutions.
     """
-    # Import plotting functions
-    import os
-    
     # Base directory for this method
     method_dir = os.path.join(image_dir, method)
 
@@ -63,6 +92,8 @@ def generate_plots(model, method, image_dir, plot_period=0, bounds=None,
             raise FileNotFoundError(f"Solution file not found: {fname}.npz")
         ownc_sol = Solution.load(fname)
         print(f"Loaded Solution ← {fname}.npz")
+        first_period = None
+        ownc_stage = None
     else:
         # Get solution from live model
         first_period = model.get_period(plot_period)
@@ -71,7 +102,7 @@ def generate_plots(model, method, image_dir, plot_period=0, bounds=None,
         
         # Save solution if requested
         if method_dir_save is not None:
-            os.makedirs(save_dir, exist_ok=True)
+            os.makedirs(method_dir_save, exist_ok=True)
             fname = f"{method_dir_save}/OWNC_dcsn_period{plot_period}"  # Remove .npz extension
             ownc_sol.save(fname)
             print(f"Saved Solution → {fname}.npz")
@@ -80,18 +111,28 @@ def generate_plots(model, method, image_dir, plot_period=0, bounds=None,
     #print(f"\nGenerating EGM grid plots for {method}...")
     
     # Get the grid dimensions from the solution
-    H_grid = ownc_stage.dcsn.grid.H_nxt if model else None  # TODO: Store grid in Solution
+    H_grid = ownc_stage.dcsn.grid.H_nxt if ownc_stage else None  # TODO: Store grid in Solution
     
-    # Select 3 housing values spread across the grid
-    if H_grid is not None:
+    # Select housing values to plot
+    if plot_all_H_idx and H_grid is not None:
+        # Plot all H_idx values - useful for detailed analysis
+        H_indices = list(range(len(H_grid)))
+        print(f"Plotting EGM grids for all {len(H_grid)} housing values")
+    elif H_grid is not None:
+        # Select 3 housing values spread across the grid (default behavior)
         H_indices = [0, len(H_grid) // 2, len(H_grid) - 1]  # Low, middle, and high housing values
     else:
         H_indices = [0, 1, 2]  # Default indices if grid not available
-    y_idx = 0  # First income state
     
-    # Plot EGM grid for three different housing values
-    for H_idx in H_indices:
-        plot_egm_grids(first_period if model else None, H_idx, y_idx, method, egm_dir, bounds, sol_override=ownc_sol)
+    # Default to first income state if not specified
+    if y_idx_list is None:
+        y_idx_list = [0]
+    
+    # Plot EGM grid for selected housing and income values
+    for y_idx in y_idx_list:
+        for H_idx in H_indices:
+            plot_egm_grids(first_period, H_idx, y_idx, method, egm_dir, 
+                          egm_bounds, sol_override=ownc_sol)
     
     #print(f"EGM grid plots for {method} saved to {egm_dir}")
     
@@ -105,11 +146,7 @@ def generate_plots(model, method, image_dir, plot_period=0, bounds=None,
 def plot_dcsn_policy(first_period, image_dir, bounds=None, sol_override=None):
     """Plot policy functions for the renting model, matching fella plot style."""
     
-    import matplotlib.pyplot as plt
-    import os
-    import matplotlib.ticker as mticker
-    from matplotlib.ticker import FormatStrFormatter
-    import seaborn as sns
+    # Imports are at module level
 
     if bounds is None:
         bounds = {}
@@ -315,218 +352,6 @@ def plot_dcsn_policy(first_period, image_dir, bounds=None, sol_override=None):
     
     plt.close('all')
 
-def plot_endogenous_grids(first_period, image_dir):
-    """Plot refined vs. unrefined endogenous grids for consumption stages.
-    
-    This function visualizes the endogenous grids before and after applying the 
-    upper envelope method, helping to understand how the method refines the grids.
-    
-    Parameters
-    ----------
-    first_period : dict
-        Dictionary containing the stages for the first period
-    image_dir : str
-        Directory to save the output images
-    """
-    # Get the owner and renter consumption stages
-    ownc_stage = first_period.get_stage("OWNC")
-    rntc_stage = first_period.get_stage("RNTC")
-    
-    # Check if EGM grids are available in the stages
-    if _get_sol_field(ownc_stage.dcsn.sol, "EGM") is None or _get_sol_field(rntc_stage.dcsn.sol, "EGM") is None:
-        print("EGM grid data not available. Please run the model with EGM solution method.")
-        return
-    
-    import matplotlib.pyplot as plt
-    import seaborn as sns
-    import numpy as np
-    import matplotlib.ticker as mticker
-    from matplotlib.colors import TABLEAU_COLORS
-    
-    # Use a color cycle from Tableau colors
-    color_cycle = list(TABLEAU_COLORS.values())[:3]  # Get first three colors
-    
-    # Set seaborn style
-    sns.set(style="white", rc={"font.size": 11, "axes.titlesize": 11, "axes.labelsize": 11})
-    
-    # 1. Plot unrefined vs refined grids for owner consumption
-    fig1, axes1 = plt.subplots(1, 2, figsize=(12, 6))
-    
-    # Set common styling for both subplots
-    for ax in axes1:
-        ax.set_xlabel('Cash-on-Hand (w)', fontsize=11)
-        ax.spines['right'].set_visible(False)
-        ax.spines['top'].set_visible(False)
-        ax.grid(True)
-        # Use a proper formatter instead of manually setting tick labels
-        ax.yaxis.set_major_formatter(mticker.FormatStrFormatter("%.2f"))
-    
-    # Left plot: Value function
-    axes1[0].set_ylabel('Value Function', fontsize=11)
-    axes1[0].set_title("OWNC: Value Function Grids", fontsize=11)
-    
-    # Right plot: Consumption policy
-    axes1[1].set_ylabel('Consumption (c)', fontsize=11)
-    axes1[1].set_title("OWNC: Consumption Policy Grids", fontsize=11)
-    
-    # Income index for plotting (middle income level)
-    y_idx = 1
-    
-    # Plot for a few representative housing values
-    H_nxt_grid = ownc_stage.dcsn.grid.H_nxt
-    if len(H_nxt_grid) >= 5:
-        H_indices = [0, len(H_nxt_grid)//2, len(H_nxt_grid)-1]  # Low, medium, high
-    else:
-        H_indices = list(range(len(H_nxt_grid)))  # Use all available indices
-    
-    # Plot owner consumption grids
-    for i, H_idx in enumerate(H_indices):
-        h_val = H_nxt_grid[H_idx]
-        color = color_cycle[i % len(color_cycle)]
-        grid_key = f"{y_idx}-{H_idx}"
-        
-        # Check if this grid key exists
-        unrefined_e = _get_sol_field(ownc_stage.dcsn.sol, "EGM", "unrefined.e")
-        if grid_key in unrefined_e:
-            # Unrefined grids (empty circles)
-            axes1[0].scatter(
-                            _get_sol_field(ownc_stage.dcsn.sol, "EGM", "unrefined.e")[grid_key],
-            _get_sol_field(ownc_stage.dcsn.sol, "EGM", "unrefined.Q")[grid_key],
-                edgecolors=color, facecolors='none', s=30, label=f"Unrefined H={h_val:.2f}"
-            )
-            axes1[1].scatter(
-                            _get_sol_field(ownc_stage.dcsn.sol, "EGM", "unrefined.e")[grid_key],
-            _get_sol_field(ownc_stage.dcsn.sol, "EGM", "unrefined.c")[grid_key],
-                color=color, label=f"Unrefined H={h_val:.2f}"
-            )
-            
-            # Refined grids (filled markers)
-            axes1[0].plot(
-                            _get_sol_field(ownc_stage.dcsn.sol, "EGM", "refined.e")[grid_key],
-            _get_sol_field(ownc_stage.dcsn.sol, "EGM", "refined.Q")[grid_key],
-                color='black', label=f"Refined H={h_val:.2f}"
-            )
-            axes1[1].plot(
-                            _get_sol_field(ownc_stage.dcsn.sol, "EGM", "refined.e")[grid_key],
-            _get_sol_field(ownc_stage.dcsn.sol, "EGM", "refined.c")[grid_key],
-                color='black', label=f"Refined H={h_val:.2f}"
-            )
-    
-    # Add legend to the first subplot only
-    handles, labels = axes1[0].get_legend_handles_labels()
-    
-    # Filter to show only one set of labels per housing value
-    filtered_handles = []
-    filtered_labels = []
-    seen_h_values = set()
-    
-    for h, l in zip(handles, labels):
-        if "Unrefined" in l:
-            h_value = l.split("=")[1]
-            if h_value not in seen_h_values:
-                seen_h_values.add(h_value)
-                filtered_handles.append(h)
-                filtered_labels.append(l)
-        elif "Refined" in l and l.split("=")[1] in seen_h_values:
-            filtered_handles.append(h)
-            filtered_labels.append(l)
-    
-    axes1[0].legend(filtered_handles, filtered_labels, loc='best', frameon=False, prop={'size': 9})
-    
-    plt.tight_layout()
-    fig1.savefig(os.path.join(image_dir, "ownc_endogenous_grids.png"))
-    #print(f"Owner consumption endogenous grids plot saved to {os.path.join(image_dir, 'ownc_endogenous_grids.png')}")
-    
-    # 2. Plot unrefined vs refined grids for renter consumption
-    fig2, axes2 = plt.subplots(1, 2, figsize=(12, 6))
-    
-    # Set common styling for both subplots
-    for ax in axes2:
-        ax.set_xlabel('Cash-on-Hand (w)', fontsize=11)
-        ax.spines['right'].set_visible(False)
-        ax.spines['top'].set_visible(False)
-        ax.grid(True)
-        # Use a proper formatter instead of manually setting tick labels
-        ax.yaxis.set_major_formatter(mticker.FormatStrFormatter("%.2f"))
-    
-    # Left plot: Value function
-    axes2[0].set_ylabel('Value Function', fontsize=11)
-    axes2[0].set_title("RNTC: Value Function Grids", fontsize=11)
-    
-    # Right plot: Consumption policy
-    axes2[1].set_ylabel('Consumption (c)', fontsize=11)
-    axes2[1].set_title("RNTC: Consumption Policy Grids", fontsize=11)
-    
-    # Income index for plotting (middle income level)
-    y_idx = 1
-    
-    # Plot for a few representative service values
-    S_grid = rntc_stage.dcsn.grid.H_nxt  # Note: H_nxt is used for rental services
-    if len(S_grid) >= 5:
-        S_indices = [0, len(S_grid)//2, len(S_grid)-1]  # Low, medium, high
-    else:
-        S_indices = list(range(len(S_grid)))  # Use all available indices
-    
-    # Plot renter consumption grids
-    for i, S_idx in enumerate(S_indices):
-        s_val = S_grid[S_idx]
-        color = color_cycle[i % len(color_cycle)]
-        grid_key = f"{y_idx}-{S_idx}"
-        
-        # Check if this grid key exists
-        if grid_key in rntc_stage.dcsn.sol["EGM"]["unrefined"]["e"]:
-            # Unrefined grids (empty circles)
-            axes2[0].scatter(
-                rntc_stage.dcsn.sol["EGM"]["unrefined"]["e"][grid_key],
-                rntc_stage.dcsn.sol["EGM"]["unrefined"]["Q"][grid_key],
-                edgecolors=color, facecolors='none', s=30, label=f"Unrefined S={s_val:.2f}"
-            )
-            axes2[1].scatter(
-                rntc_stage.dcsn.sol["EGM"]["unrefined"]["e"][grid_key],
-                rntc_stage.dcsn.sol["EGM"]["unrefined"]["c"][grid_key],
-                edgecolors=color, facecolors='none', s=30, label=f"Unrefined S={s_val:.2f}"
-            )
-            
-            # Refined grids (filled markers)
-            axes2[0].scatter(
-                rntc_stage.dcsn.sol["EGM"]["refined"]["e"][grid_key],
-                rntc_stage.dcsn.sol["EGM"]["refined"]["Q"][grid_key],
-                color=color, marker='x', s=30, label=f"Refined S={s_val:.2f}"
-            )
-            axes2[1].scatter(
-                rntc_stage.dcsn.sol["EGM"]["refined"]["e"][grid_key],
-                rntc_stage.dcsn.sol["EGM"]["refined"]["c"][grid_key],
-                color=color, marker='x', s=30, label=f"Refined S={s_val:.2f}"
-            )
-    
-    # Add legend to the first subplot only
-    handles, labels = axes2[0].get_legend_handles_labels()
-    
-    # Filter to show only one set of labels per service value
-    filtered_handles = []
-    filtered_labels = []
-    seen_s_values = set()
-    
-    for h, l in zip(handles, labels):
-        if "Unrefined" in l:
-            s_value = l.split("=")[1]
-            if s_value not in seen_s_values:
-                seen_s_values.add(s_value)
-                filtered_handles.append(h)
-                filtered_labels.append(l)
-        elif "Refined" in l and l.split("=")[1] in seen_s_values:
-            filtered_handles.append(h)
-            filtered_labels.append(l)
-    
-    axes2[0].legend(filtered_handles, filtered_labels, loc='best', frameon=False, prop={'size': 9})
-    
-    plt.tight_layout()
-    fig2.savefig(os.path.join(image_dir, "rntc_endogenous_grids.png"))
-    #print(f"Renter consumption endogenous grids plot saved to {os.path.join(image_dir, 'rntc_endogenous_grids.png')}")
-    
-    # Close all figures
-    plt.close('all') 
-
 # Add debugging information to plot_egm_grids function
 def plot_egm_grids(period, H_idx, y_idx, method, image_dir, bounds=None, sol_override=None):
     """
@@ -545,16 +370,23 @@ def plot_egm_grids(period, H_idx, y_idx, method, image_dir, bounds=None, sol_ove
     image_dir : str
         Directory to save the output images
     bounds : dict
-        Dictionary containing bounds for plots
+        Dictionary containing bounds for plots. Keys can be:
+        - 'value': (xmin, xmax, ymin, ymax) for value function panel
+        - 'assets': (xmin, xmax, ymin, ymax) for assets panel  
+        - 'he_space': (xmin, xmax, ymin, ymax) for h-e space plot
+        - 'value_y{idx}': bounds specific to income index
+        - 'assets_y{idx}': bounds specific to income index
+        - 'he_space_y{idx}': bounds specific to income index
+        - 'value_h{idx}': bounds specific to housing index
+        - 'assets_h{idx}': bounds specific to housing index
+        - 'he_space_h{idx}': bounds specific to housing index
+        - 'value_y{y_idx}_h{h_idx}': bounds specific to both indices
+        - 'assets_y{y_idx}_h{h_idx}': bounds specific to both indices
+        - 'he_space_y{y_idx}_h{h_idx}': bounds specific to both indices
     sol_override : dict, optional
         If provided, use this solution instead of the one from the period
     """
-    import matplotlib.pyplot as plt
-    import seaborn as sns
-    import numpy as np
-    import matplotlib.ticker as mticker
-    from matplotlib.colors import TABLEAU_COLORS
-    import os
+    # Imports are at module level
     
     if bounds is None:
         bounds = {}
@@ -677,9 +509,28 @@ def plot_egm_grids(period, H_idx, y_idx, method, image_dir, bounds=None, sol_ove
     )
     
     # Apply custom bounds for value panel
-    if "egm_value" in bounds:
-        xmin,xmax,ymin,ymax = bounds["egm_value"]
-        ax[0].set_xlim([xmin,xmax]); ax[0].set_ylim([ymin,ymax])
+    # Check bounds in order of specificity: y+h specific, then h-specific, then y-specific, then general
+    value_yh_key = f"value_y{y_idx}_h{H_idx}"
+    value_h_key = f"value_h{H_idx}"
+    value_y_key = f"value_y{y_idx}"
+    
+    if value_yh_key in bounds:
+        xmin, xmax, ymin, ymax = bounds[value_yh_key]
+    elif value_h_key in bounds:
+        xmin, xmax, ymin, ymax = bounds[value_h_key]
+    elif value_y_key in bounds:
+        xmin, xmax, ymin, ymax = bounds[value_y_key]
+    elif "value" in bounds:
+        xmin, xmax, ymin, ymax = bounds["value"]
+    elif "egm_value" in bounds:  # Legacy support
+        xmin, xmax, ymin, ymax = bounds["egm_value"]
+    else:
+        xmin = xmax = ymin = ymax = None
+    
+    if xmin is not None or xmax is not None:
+        ax[0].set_xlim([xmin, xmax])
+    if ymin is not None or ymax is not None:
+        ax[0].set_ylim([ymin, ymax])
     
     # Formatting for value function plot
     ax[0].set_ylabel('Value', fontsize=11)
@@ -720,12 +571,31 @@ def plot_egm_grids(period, H_idx, y_idx, method, image_dir, bounds=None, sol_ove
     )
     
     # Apply custom bounds for housing choice panel
-    if "egm_assets" in bounds:
-        xmin,xmax,ymin,ymax = bounds["egm_assets"]
-        ax[1].set_xlim([xmin,xmax]); ax[1].set_ylim([ymin,ymax])
+    # Check bounds in order of specificity: y+h specific, then h-specific, then y-specific, then general
+    assets_yh_key = f"assets_y{y_idx}_h{H_idx}"
+    assets_h_key = f"assets_h{H_idx}"
+    assets_y_key = f"assets_y{y_idx}"
+    
+    if assets_yh_key in bounds:
+        xmin, xmax, ymin, ymax = bounds[assets_yh_key]
+    elif assets_h_key in bounds:
+        xmin, xmax, ymin, ymax = bounds[assets_h_key]
+    elif assets_y_key in bounds:
+        xmin, xmax, ymin, ymax = bounds[assets_y_key]
+    elif "assets" in bounds:
+        xmin, xmax, ymin, ymax = bounds["assets"]
+    elif "egm_assets" in bounds:  # Legacy support
+        xmin, xmax, ymin, ymax = bounds["egm_assets"]
+    else:
+        xmin = xmax = ymin = ymax = None
+    
+    if xmin is not None or xmax is not None:
+        ax[1].set_xlim([xmin, xmax])
+    if ymin is not None or ymax is not None:
+        ax[1].set_ylim([ymin, ymax])
     
     # Formatting for housing choice plot
-    ax[1].set_ylabel(r'Housing assets at time $t+1$', fontsize=11)
+    ax[1].set_ylabel(r'Liquid savings at time $t+1$', fontsize=11)
     ax[1].set_xlabel(r'Total wealth at time $t$', fontsize=11)
     ax[1].spines['right'].set_visible(False)
     ax[1].spines['top'].set_visible(False)
@@ -748,7 +618,8 @@ def plot_egm_grids(period, H_idx, y_idx, method, image_dir, bounds=None, sol_ove
     fig.tight_layout(rect=[0, 0, 1, 0.95])  # Make room for the suptitle
     
     # Save figure
-    filename = f"egm_grid_H{H_idx}_y{y_idx}_period{period.time_index}_{method}.png"
+    period_idx = period.time_index if period else 0
+    filename = f"egm_grid_H{H_idx}_y{y_idx}_period{period_idx}_{method}.png"
     fig.savefig(os.path.join(image_dir, filename))
     #print(f"EGM grid plot saved to {os.path.join(image_dir, filename)}")
     
@@ -791,6 +662,28 @@ def plot_egm_grids(period, H_idx, y_idx, method, image_dir, bounds=None, sol_ove
     ax2.legend(frameon=False, prop={'size': 11})
     ax2.grid(True)
     
+    # Apply custom bounds for h-e space plot
+    # Check bounds in order of specificity: y+h specific, then h-specific, then y-specific, then general
+    he_yh_key = f"he_space_y{y_idx}_h{H_idx}"
+    he_h_key = f"he_space_h{H_idx}"
+    he_y_key = f"he_space_y{y_idx}"
+    
+    if he_yh_key in bounds:
+        xmin, xmax, ymin, ymax = bounds[he_yh_key]
+    elif he_h_key in bounds:
+        xmin, xmax, ymin, ymax = bounds[he_h_key]
+    elif he_y_key in bounds:
+        xmin, xmax, ymin, ymax = bounds[he_y_key]
+    elif "he_space" in bounds:
+        xmin, xmax, ymin, ymax = bounds["he_space"]
+    else:
+        xmin = xmax = ymin = ymax = None
+    
+    if xmin is not None or xmax is not None:
+        ax2.set_xlim([xmin, xmax])
+    if ymin is not None or ymax is not None:
+        ax2.set_ylim([ymin, ymax])
+    
     # Use locators before formatters to ensure fixed number of ticks
     ax2.xaxis.set_major_locator(mticker.MaxNLocator(6))
     ax2.yaxis.set_major_locator(mticker.MaxNLocator(6))
@@ -801,7 +694,8 @@ def plot_egm_grids(period, H_idx, y_idx, method, image_dir, bounds=None, sol_ove
     ax2.set_title(f"{method} Upper Envelope: H={h_value:.2f}, Income Index={y_value}", fontsize=12)
     
     # Save figure
-    filename2 = f"egm_grid_he_space_H{H_idx}_y{y_idx}_period{period.time_index}_{method}.png"
+    period_idx = period.time_index if period else 0
+    filename2 = f"egm_grid_he_space_H{H_idx}_y{y_idx}_period{period_idx}_{method}.png"
     fig2.savefig(os.path.join(image_dir, filename2))
     #print(f"EGM grid h-e space plot saved to {os.path.join(image_dir, filename2)}")
     
@@ -825,9 +719,7 @@ def plot_compare_value_Q(model_list, methods, image_dir, plot_period=0, bounds=N
         Optional axis‐bounds in the same spirit as the `BOUNDS` dict in ``solve_single_model.py``.
         Keys accepted: ``value`` and ``Q`` – each mapping to (xmin, xmax, ymin, ymax).
     """
-    import os
-    import matplotlib.pyplot as plt
-    from matplotlib.colors import TABLEAU_COLORS
+    # Imports are at module level
 
     if bounds is None:
         bounds = {}

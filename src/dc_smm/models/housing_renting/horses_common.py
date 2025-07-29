@@ -477,8 +477,8 @@ def _egm_preprocess_core(e_old, vf_old, c_old, a_old,
     # -----------------------------------------------------------------------
     # 2.  Borrowing-constraint segment  (always first)
     # -----------------------------------------------------------------------
-    min_c  = np.min(c_old)
-    c_con = np.linspace(1e-100, min_c, n_con).astype(c_old.dtype)
+    min_c  = np.min(e_old)  + 0.3
+    c_con = np.linspace(1e-100, min_c, n_con)
     e_con  = c_con                        # m = c at the constraint
     vf_con = u_func(c_con, h_nxt) + beta * vf_next[0]
     a_con  = np.empty_like(c_con)

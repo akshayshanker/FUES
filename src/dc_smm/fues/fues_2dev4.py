@@ -27,9 +27,10 @@ from numba import njit
 import numpy as np
 
 # Constants for better performance
-EPS_D = 1e-50  # Epsilon for division protection
-EPS_A = 1e-100  # Epsilon for gradient calculations
-EPS_SEP = 1e-08  # Epsilon for intersection separation
+EPS_D = 1e-20  # Epsilon for division protection
+EPS_A = 1e-20  # Epsilon for gradient calculations
+EPS_SEP = 1e-20  # Epsilon for intersection separation
+EPS_fwd_back = 8e-1
 
 # ---------------------------------------------------------------------
 # Helpers that remain identical ---------------------------------------
@@ -72,6 +73,15 @@ def linear_interp(x, x1, x2, y1, y2):
 
 @njit
 def seg_intersect(a1, a2, b1, b2):
+    """Find intersection point of two line segments.
+    
+    Returns the intersection point if segments intersect within their bounds,
+    otherwise returns [nan, nan].
+    
+    Parameters:
+    a1, a2: endpoints of first segment
+    b1, b2: endpoints of second segment
+    """
     da_x, da_y = a2[0] - a1[0], a2[1] - a1[1]
     db_x, db_y = b2[0] - b1[0], b2[1] - b1[1]
     dp_x, dp_y = a1[0] - b1[0], a1[1] - b1[1]
@@ -79,7 +89,27 @@ def seg_intersect(a1, a2, b1, b2):
     denom = dap_x * db_x + dap_y * db_y
     if denom == 0.0:
         return np.array([np.nan, np.nan])
+    
+    # Parameter t for segment b (from b1 to b2)
     t = (dap_x * dp_x + dap_y * dp_y) / denom
+    
+    # Check if intersection point is within segment b bounds
+    if t < 0.0 or t > 1.0:
+        return np.array([np.nan, np.nan])
+    
+    # Calculate parameter s for segment a (from a1 to a2)
+    # We need to solve: a1 + s*(a2-a1) = b1 + t*(b2-b1)
+    # This gives us s from either x or y coordinate (use the one with larger denominator for stability)
+    if abs(da_x) > abs(da_y):
+        s = (b1[0] + t * db_x - a1[0]) / da_x
+    else:
+        s = (b1[1] + t * db_y - a1[1]) / da_y
+    
+    # Check if intersection point is within segment a bounds
+    if s < 0.0 or s > 1.0:
+        return np.array([np.nan, np.nan])
+    
+    # Return the intersection point
     return np.array([t * db_x + b1[0], t * db_y + b1[1]])
 
 
@@ -209,7 +239,7 @@ def backward_scan_combined(
             if m_idx != -1:
                 de = max(EPS_A, e_grid[j] - e_grid[m_idx])
                 g_m_a = np.abs((a_prime[i_plus_1] - a_prime[m_idx]) / de)
-                if g_m_a < m_bar:
+                if g_m_a < m_bar and de < EPS_fwd_back:
                     m_ind = m_idx
                     if left_turn and g_tilde_a and not last_turn_left:
                         # g_m_vf already computed with de
@@ -222,7 +252,7 @@ def backward_scan_combined(
             if m_idx != -1 and m_idx < i_plus_1:
                 de = max(EPS_D, e_grid[i_plus_1] - e_grid[m_idx])
                 grad_a = np.abs((a_prime[i_plus_1] - a_prime[m_idx]) / de)
-                if grad_a < m_bar:
+                if grad_a < m_bar and de < EPS_fwd_back:
                     m_ind = m_idx
                     break
 
@@ -240,7 +270,7 @@ def find_forward_same_branch(e_grid, a_prime, start_idx, j_idx, N, LB, m_bar):
             break
         de = max(EPS_D, e_grid[start_idx + 1 + f] - e_grid[j_idx])
         g_a = np.abs((a_prime[start_idx + 1 + f] - a_prime[j_idx]) / de)
-        if g_a < m_bar:
+        if g_a < m_bar and de < EPS_fwd_back:
             return True, start_idx + 1 + f
     return False, -1
 
@@ -281,21 +311,26 @@ def forward_scan_case_a(e_grid, vf_full, a_prime, i, j, N, LB, m_bar, g_1):
     """
     idx_f = -1
     keep_i1 = False
+    found_forward_same_branch = False
 
     for f in range(LB):
         if i + 2 + f >= N:  # CRITICAL: Add bounds check
             break
         de = max(EPS_D, e_grid[i + 1] - e_grid[i + 2 + f])
         g_f_a = np.abs((a_prime[j] - a_prime[i + 2 + f]) / de)
-        if g_f_a < m_bar:
+        if g_f_a < m_bar and de < EPS_fwd_back:
+            found_forward_same_branch = True
             idx_f = i + 2 + f  # Store actual grid index
             # Compute g_f_vf for this point
             g_f_vf_at_idx = (vf_full[i + 1] - vf_full[i + 2 + f]) / de
             if g_1 > g_f_vf_at_idx:
                 keep_i1 = True
             break
+    
+    if not found_forward_same_branch:
+        keep_i1 = True
 
-    return keep_i1, idx_f
+    return keep_i1, idx_f,found_forward_same_branch
 
 
 # ---------------------------------------------------------------------
@@ -303,7 +338,7 @@ def forward_scan_case_a(e_grid, vf_full, a_prime, i, j, N, LB, m_bar, g_1):
 # ---------------------------------------------------------------------
 
 
-@njit
+#@njit
 def FUES(
     e_grid,
     vf,
@@ -467,7 +502,7 @@ def FUES_sep_intersect(
 # ---------------------------------------------------------------------
 
 
-@njit(cache=True, fastmath=True)
+@njit
 def _scan(
     e_grid,
     vf,
@@ -481,6 +516,7 @@ def _scan(
     padding_mbar,
     ID_NM=True,
     include_intersections=True,
+    not_allow_2lefts=True,
 ):
     """Core FUES algorithm: Single-pass scan to identify upper envelope points.
 
@@ -615,11 +651,21 @@ def _scan(
 
         # ============= STEP 2: Classify Current Situation =============
         # Determine if we have a right turn with jump or left turn
-        right_turn_jump = (g_1 < g_jm1) and (g_tilde_a > M_max)
+        right_turn_jump = (g_1 <= g_jm1) and (g_tilde_a > M_max)
         left_turn = g_1 > g_jm1
+        right_turn_no_jump = (g_1 <= g_jm1) and (g_tilde_a <= M_max)
 
         # Reset intersection tracking flag at start of each iteration
         added_intersection_last_iter = False
+
+        # ============= CASE B: Value Fall or Non-Monotone Policy =============
+        # Drop points that have declining value or violate monotonicity
+        if (vf[i + 1] - vf[j] < 0 ):
+            vf[i + 1] = np.nan
+            use_intersection_as_k = False  # Reset flag
+            last_turn_left = False
+            m_head = circ_put(m_buf, m_head, i + 1)
+            continue
 
         # ============= CASE A: Right-Turn with Jump =============
         # This indicates a jump to a different discrete choice.
@@ -629,14 +675,15 @@ def _scan(
             keep_i1 = False
             if fwd_scan_do:
                 # Use the new forward scan function
-                keep_i1, idx_f = forward_scan_case_a(
+                keep_i1, idx_f, found_forward_same_branch = forward_scan_case_a(
                     e_grid, vf_full, a_prime, i, j, N, LB, m_bar, g_1
                 )
+            #keep_i1 = False
             if keep_i1:
                 created_intersection = False
 
                 # Case A intersection: Add intersection when jumping to new branch
-                if include_intersections and idx_f != -1:
+                if include_intersections and idx_f != -1 and found_forward_same_branch:
                     # Find backward point on same branch from i+1
                     _, idx_b = backward_scan_combined(
                         m_buf,
@@ -706,7 +753,7 @@ def _scan(
                             k = j
                             prev_j = j
                             j = i + 1
-                            last_turn_left = False
+                            last_turn_left = True
                             created_intersection = True
 
                 if not created_intersection:
@@ -714,203 +761,210 @@ def _scan(
                     k = j
                     prev_j = j
                     j = i + 1
-                    last_turn_left = False
+                    last_turn_left = True
                     use_intersection_as_k = False  # Reset flag
             else:
                 vf[i + 1] = np.nan
                 m_head = circ_put(m_buf, m_head, i + 1)
                 use_intersection_as_k = False  # Reset flag
+                last_turn_left = False
             continue
 
-        # ============= CASE B: Value Fall or Non-Monotone Policy =============
-        # Drop points that have declining value or violate monotonicity
-        if (vf_full[i + 1] - vf_full[j] < 0) or (ID_NM and (del_pol_a < 0)):
-            vf[i + 1] = np.nan
-            use_intersection_as_k = False  # Reset flag
-            m_head = circ_put(m_buf, m_head, i + 1)
-            continue
+        
 
         # ============= CASE C: Left Turn or Right Turn without Jump =============
         # Either:
         # - Left turn (g_1 > g_jm1): potential crossing point, j might be suboptimal
         # - Right turn without jump: normal concave segment continuation
         # Use backward scan to find previous point m on same branch as i+1
-        keep_j, m_ind = backward_scan_combined(
-            m_buf,
-            m_head,
-            LB,
-            e_grid,
-            vf_full,
-            a_prime,
-            i,
-            j,
-            i + 1,
-            left_turn,
-            g_tilde_a,
-            last_turn_left,
-            g_1,
-            m_bar,
-            check_drop=True,
-        )
+        if left_turn:
+            keep_j, m_ind = backward_scan_combined(
+                m_buf,
+                m_head,
+                LB,
+                e_grid,
+                vf_full,
+                a_prime,
+                i,
+                j,
+                i + 1,
+                left_turn,
+                g_tilde_a,
+                last_turn_left,
+                g_1,
+                m_bar,
+                check_drop=True,
+            )
 
-        # --- CASE C.1: Left Turn with j Dropped ---
-        # The backward scan determined that j is suboptimal (lies below the
-        # envelope formed by points m and i+1 on the same branch)
-        if not keep_j:
-            vf[j] = np.nan
-            m_head = circ_put(m_buf, m_head, j)  # Add dropped j to circular buffer
+            # --- CASE C.1: Left Turn with j Dropped ---
+            # The backward scan determined that j is suboptimal (lies below the
+            # envelope formed by points m and i+1 on the same branch)
+            if not keep_j:
+                vf[j] = np.nan
+                m_head = circ_put(m_buf, m_head, j)  # Add dropped j to circular buffer
 
-            # Compute intersection only if not a consecutive left turn
-            use_intersection_as_k = False
-            created_intersection = False
-            if include_intersections and not last_turn_left:
-                # Find intersection between old branch (k, j) and new branch (m_ind, i+1)
-                intr = seg_intersect(
-                    np.array([e_grid[j], vf_full[j]]),
-                    np.array([e_grid[k], vf_full[k]]),  # Old branch
-                    np.array([e_grid[i + 1], vf_full[i + 1]]),
-                    np.array([e_grid[m_ind], vf_full[m_ind]]),  # New branch
-                )
+                # Compute intersection only if not a consecutive left turn
+                use_intersection_as_k = False
+                created_intersection = False
+                if include_intersections and not last_turn_left:
+                    # Find intersection between old branch (k, j) and new branch (m_ind, i+1)
+                    intr = seg_intersect(
+                        np.array([e_grid[j], vf_full[j]]),
+                        np.array([e_grid[k], vf_full[k]]),  # Old branch
+                        np.array([e_grid[i + 1], vf_full[i + 1]]),
+                        np.array([e_grid[m_ind], vf_full[m_ind]]),  # New branch
+                    )
 
-                # Add intersection and get updated values
-                # Left branch: new branch (m_ind to i+1)
-                # Right branch: old branch (k to j)
-                new_n_inter, inter_e_val, inter_v_val, inter_a_val, inter_d_val = add_intersection(
-                    inter_e,
-                    inter_v,
-                    inter_p1,
-                    inter_p2,
-                    inter_d,
-                    n_inter,
-                    max_inter,
-                    intr,
-                    e_grid,
-                    a_prime,
-                    policy_2,
-                    del_a,
-                    m_ind,
-                    i + 1,
-                    k,
-                    j,
-                )
+                    # Add intersection and get updated values
+                    # Left branch: new branch (m_ind to i+1)
+                    # Right branch: old branch (k to j)
+                    new_n_inter, inter_e_val, inter_v_val, inter_a_val, inter_d_val = add_intersection(
+                        inter_e,
+                        inter_v,
+                        inter_p1,
+                        inter_p2,
+                        inter_d,
+                        n_inter,
+                        max_inter,
+                        intr,
+                        e_grid,
+                        a_prime,
+                        policy_2,
+                        del_a,
+                        m_ind,
+                        i + 1,
+                        k,
+                        j,
+                    )
 
-                if new_n_inter > n_inter:  # Intersection was added
-                    n_inter = new_n_inter
-                    added_intersection_last_iter = True
+                    if new_n_inter > n_inter:  # Intersection was added
+                        n_inter = new_n_inter
+                        added_intersection_last_iter = True
 
-                    # This intersection becomes k (tail) for next iteration
-                    use_intersection_as_k = True
-                    intersection_e = inter_e_val
-                    intersection_v = inter_v_val
-                    intersection_a = inter_a_val
-                    intersection_d = inter_d_val
+                        # This intersection becomes k (tail) for next iteration
+                        use_intersection_as_k = True
+                        intersection_e = inter_e_val
+                        intersection_v = inter_v_val
+                        intersection_a = inter_a_val
+                        intersection_d = inter_d_val
+                        j = i + 1  # advance j
+                        created_intersection = True
+
+                # Mark this as a left turn after processing
+                last_turn_left = True
+                if created_intersection == False:
                     j = i + 1  # advance j
-                    created_intersection = True
+                    use_intersection_as_k = False  # Reset flag
+                    k = prev_j
+                    # prev_j = j
 
-            # Mark this as a left turn after processing
-            last_turn_left = True
-            if created_intersection == False:
-                j = i + 1  # advance j
-                use_intersection_as_k = False  # Reset flag
-                k = prev_j
-                # prev_j = j
+            # --- CASE C.2: Left Turn but j is Kept ---
+            else:
+                if last_turn_left and not_allow_2lefts:
+                        vf[j] = np.nan
+                        m_head = circ_put(m_buf, m_head, j)  # Add dropped j to circular buffer
 
-        # --- CASE C.2: Left Turn but j is Kept ---
-        else:
-            if left_turn:
-                if last_turn_left:
-                    vf[j] = np.nan
-                    m_head = circ_put(m_buf, m_head, j)  # Add dropped j to circular buffer
+                        # Remove last intersection to avoid spurious intersections
+                        if include_intersections and added_intersection_last_iter and n_inter > 0:
+                            n_inter = n_inter - 1
 
-                    # Remove last intersection to avoid spurious intersections
-                    if include_intersections and added_intersection_last_iter and n_inter > 0:
-                        n_inter = n_inter - 1
-
-                # Add intersection for left turn case
+                    # Add intersection for left turn case
+                
                 use_intersection_as_k = False
                 if include_intersections and not last_turn_left and k >= 0:
-                    # Find forward point on same branch from j
-                    found_fwd, idx_fwd = find_forward_same_branch(
-                        e_grid, a_prime, j, j, N, LB, m_bar
-                    )
-
-                    # Find backward point on same branch from i+1
-                    _, idx_back = backward_scan_combined(
-                        m_buf,
-                        m_head,
-                        LB,
-                        e_grid,
-                        vf_full,
-                        a_prime,
-                        i,
-                        j,
-                        i + 1,
-                        False,
-                        False,
-                        False,
-                        0.0,
-                        m_bar,
-                        check_drop=False,
-                    )
-                    found_back = idx_back != -1
-
-                    if found_fwd and found_back:
-                        # Find intersection between old branch (j, idx_fwd) and new branch (idx_back, i+1)
-                        intr = seg_intersect(
-                            np.array([e_grid[j], vf_full[j]]),
-                            np.array([e_grid[idx_fwd], vf_full[idx_fwd]]),  # Old branch
-                            np.array([e_grid[i + 1], vf_full[i + 1]]),
-                            np.array([e_grid[idx_back], vf_full[idx_back]]),  # New branch
+                        # Find forward point on same branch from j
+                        found_fwd, idx_fwd = find_forward_same_branch(
+                            e_grid, a_prime, j, j, N, LB, m_bar
                         )
 
-                        # Add intersection and get updated values
-                        # Left branch: new branch (idx_back to i+1)
-                        # Right branch: old branch (j to idx_fwd)
-                        new_n_inter, inter_e_val, inter_v_val, inter_a_val, inter_d_val = (
-                            add_intersection(
-                                inter_e,
-                                inter_v,
-                                inter_p1,
-                                inter_p2,
-                                inter_d,
-                                n_inter,
-                                max_inter,
-                                intr,
-                                e_grid,
-                                a_prime,
-                                policy_2,
-                                del_a,
-                                idx_back,
-                                i + 1,
-                                j,
-                                idx_fwd,
+                        # Find backward point on same branch from i+1
+                        _, idx_back = backward_scan_combined(
+                            m_buf,
+                            m_head,
+                            LB,
+                            e_grid,
+                            vf_full,
+                            a_prime,
+                            i,
+                            j,
+                            i + 1,
+                            False,
+                            False,
+                            False,
+                            0.0,
+                            m_bar,
+                            check_drop=False,
+                        )
+                        found_back = idx_back != -1
+
+                        if found_fwd and found_back:
+                            # Find intersection between old branch (j, idx_fwd) and new branch (idx_back, i+1)
+                            intr = seg_intersect(
+                                np.array([e_grid[j], vf_full[j]]),
+                                np.array([e_grid[idx_fwd], vf_full[idx_fwd]]),  # Old branch
+                                np.array([e_grid[i + 1], vf_full[i + 1]]),
+                                np.array([e_grid[idx_back], vf_full[idx_back]]),  # New branch
                             )
-                        )
 
-                        if new_n_inter > n_inter:  # Intersection was added
-                            n_inter = new_n_inter
-                            added_intersection_last_iter = True
+                            # Add intersection and get updated values
+                            # Left branch: new branch (idx_back to i+1)
+                            # Right branch: old branch (j to idx_fwd)
+                            new_n_inter, inter_e_val, inter_v_val, inter_a_val, inter_d_val = (
+                                add_intersection(
+                                    inter_e,
+                                    inter_v,
+                                    inter_p1,
+                                    inter_p2,
+                                    inter_d,
+                                    n_inter,
+                                    max_inter,
+                                    intr,
+                                    e_grid,
+                                    a_prime,
+                                    policy_2,
+                                    del_a,
+                                    idx_back,
+                                    i + 1,
+                                    j,
+                                    idx_fwd,
+                                )
+                            )
 
-                            # This intersection becomes k (tail) for next iteration
-                            use_intersection_as_k = True
-                            intersection_e = inter_e_val
-                            intersection_v = inter_v_val
-                            intersection_a = inter_a_val
-                            intersection_d = inter_d_val
+                            if new_n_inter > n_inter:  # Intersection was added
+                                n_inter = new_n_inter
+                                added_intersection_last_iter = True
+
+                                # This intersection becomes k (tail) for next iteration
+                                use_intersection_as_k = True
+                                intersection_e = inter_e_val
+                                intersection_v = inter_v_val
+                                intersection_a = inter_a_val
+                                intersection_d = inter_d_val
+                
                 last_turn_left = True
                 # Advance indices for next iteration
-                k = j
-                prev_j = j
-                j = i + 1
 
-            # --- CASE C.3: Right Turn without Jump ---
-            else:
-                last_turn_left = False
-                # For right turn without jump, advance j normally
-                k = j  # Update k before advancing j
-                prev_j = j
-                j = i + 1
-                use_intersection_as_k = False  # Reset flag only if not left turn
+                if last_turn_left and not_allow_2lefts:
+                    k = prev_j
+                    #prev_j = j
+                    j = i + 1
+                    last_turn_left = True
+                    use_intersection_as_k = False  # Reset flag
+                else:
+                    k = j
+                    prev_j = j
+                    j = i + 1
+            continue
+
+        # --- CASE C.3: Right Turn without Jump ---
+        if right_turn_no_jump:
+            last_turn_left = False
+            # For right turn without jump, advance j normally
+            k = j  # Update k before advancing j
+            prev_j = j
+            j = i + 1
+            use_intersection_as_k = False  # Reset flag only if not left turn
+            continue
 
     # Package intersection results
     if n_inter > 0:

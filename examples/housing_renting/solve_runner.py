@@ -225,11 +225,17 @@ DEFAULT_BASE = "VFI_HDGRID_GPU"
 # All available methods
 ALL_METHODS = ["VFI_HDGRID", "VFI_HDGRID_GPU", "FUES", "FUES2DEV", "CONSAV", "DCEGM"]
 # Fast methods that are compared against baseline
-DEFAULT_FAST_METHODS = ["FUES2DEV", "CONSAV"]
+DEFAULT_FAST_METHODS = ["FUES2DEV", "CONSAV", "FUES"]
 # Pre-compilation parameters
 PRE_COMPILE_PARAMS = np.array(["VFI_HDGRID_GPU", 500, 500, 500], dtype=object)
 
 trace_print("0.6: Constants and globals set")
+
+egm_bounds = {
+      'value_h14': (0, 6, 2.3, 5),      # Left panel: x-axis 0-5, y-axis 0-3
+      'assets_h14': (0, 6, 0, 8), # Right panel: x-axis 0-5, y-axis auto
+  }
+
 
 
 def patch_cfg(args,cfg_container: dict, periods: int, vf_ngrid: int) -> dict:
@@ -586,6 +592,16 @@ def main(argv=None):
     #  1) Solve, plot, and process baseline immediately (only if needed)
     # --------------------------------------------------------------------
     HD_POINTS = int(float(args.HD_points))
+    STD_POINTS = int(float(args.grid_points))
+    
+    # Determine grid points based on baseline method type
+    # Use HD_POINTS only for VFI_HDGRID methods, STD_POINTS for fast methods
+    if BASE in ["VFI_HDGRID", "VFI_HDGRID_GPU"]:
+        baseline_points = HD_POINTS
+    else:
+        # For fast methods used as baseline (FUES, CONSAV, DCEGM, etc)
+        baseline_points = STD_POINTS
+    
     # Use the BASE variable, which could be VFI_HDGRID or VFI_HDGRID_GPU
     if BASE in methods and needs_baseline:
         with MemoryMonitor(f"Baseline computation ({BASE})", log_start=True, log_end=True):
@@ -594,7 +610,7 @@ def main(argv=None):
             if is_root:  # print from root only
                 print(f"\n» Baseline ({BASE}):", "recompute" if args.recompute_baseline else "load/solve-if-missing")
 
-            ref_params = np.array([BASE, HD_POINTS, HD_POINTS, HD_POINTS,pb_delta], dtype=object)
+            ref_params = np.array([BASE, baseline_points, baseline_points, baseline_points,pb_delta], dtype=object)
             runner.ref_params = ref_params
             all_param_vectors.append(ref_params)  # Add to design matrix
             
@@ -623,7 +639,7 @@ def main(argv=None):
                 img_dir.mkdir(exist_ok=True)
                 try:
                     print(f"  Generating plots for {BASE}...")
-                    generate_plots(ref_model, BASE, img_dir)
+                    generate_plots(ref_model, BASE, img_dir, egm_bounds=egm_bounds)
                 except Exception as err:
                     print(f"[warn] plot-gen for {BASE} failed: {err}")
                 finally:
@@ -637,7 +653,7 @@ def main(argv=None):
     
     # If baseline wasn't computed but we still have fast methods, create ref_params for them
     elif needs_baseline and 'ref_params' not in locals():
-        ref_params = np.array([BASE, HD_POINTS, HD_POINTS, HD_POINTS, pb_delta], dtype=object)
+        ref_params = np.array([BASE, baseline_points, baseline_points, baseline_points, pb_delta], dtype=object)
         if is_root:
             print(f"\n» Baseline ({BASE}) will be loaded from existing bundles for comparison metrics")
         trace_print("24: Baseline ref_params created for loading")
@@ -646,7 +662,6 @@ def main(argv=None):
     #  2) Solve test methods one by one, processing each immediately  
     # --------------------------------------------------------------------
     
-    STD_POINTS = int(float(args.grid_points))
     fast_methods_to_run = [m for m in FAST_METHODS if m in methods]
     
     if fast_methods_to_run:
@@ -660,7 +675,7 @@ def main(argv=None):
         if needs_baseline:
             # Ensure ref_params is defined, even if baseline wasn't run
             if 'ref_params' not in locals():
-                ref_params = np.array([BASE, HD_POINTS, HD_POINTS, HD_POINTS, pb_delta], dtype=object)
+                ref_params = np.array([BASE, baseline_points, baseline_points, baseline_points, pb_delta], dtype=object)
             runner.ref_params = ref_params
         else:
             # No baseline needed - don't set ref_params to avoid loading
@@ -714,7 +729,7 @@ def main(argv=None):
                             print(f"[DEBUG] Model passed to plotting for {method}: NO EGM grids!")
                             print(f"[DEBUG] Model object id: {id(model)}, ownc_stage.dcsn.sol id: {id(ownc_stage.dcsn.sol)}")
                         
-                        generate_plots(model, method, img_dir)
+                        generate_plots(model, method, img_dir, egm_bounds=egm_bounds, y_idx_list = (0,1,2))
                     except Exception as err:
                         print(f"[warn] plot-gen for {method} failed: {err}")
                     finally:
