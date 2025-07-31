@@ -841,8 +841,11 @@ if __name__ == "__main__":
         )
 
     # precompile numba functions
-    _ = iter_bell(cp, method='FUES2DEV4')
-    _, _, _, _, c_refined_FUES, _, time_end_FUES = iter_bell(cp, method='FUES2DEV4')
+    _ = iter_bell(cp, method='FUES2DEV')
+    _, _, _, _, c_refined_FUES, _, time_end_FUES = iter_bell(cp, method='FUES2DEV')
+
+    _ = iter_bell(cp, method='FUES2DEV5')
+    _, _, _, _, c_refined_FUES5, _, time_end_FUES5 = iter_bell(cp, method='FUES2DEV5')
 
     # precompile numba functions
     _ = iter_bell(cp, method='DCEGM')
@@ -854,6 +857,7 @@ if __name__ == "__main__":
 
     Euler_error_RFC = euler(cp, c_refined_RFC)
     Euler_error_FUES = euler(cp, c_refined_FUES)
+    Euler_error_FUES5 = euler(cp, c_refined_FUES5)
     Euler_error_DCEGM = euler(cp, c_refined_DCEGM)
     Euler_error_CONSAV = euler(cp, c_refined_CONSAV)
     print(
@@ -861,6 +865,7 @@ if __name__ == "__main__":
         "|--------|----------------|--------------------------|-------------------------|\n"
         f"| RFC    | {Euler_error_RFC: <14.6f} | {time_end_RFC[0]*1000: <24.6f} | {time_end_RFC[1]*1000: <23.6f} |\n"
         f"| FUES   | {Euler_error_FUES: <14.6f} | {time_end_FUES[0]*1000: <24.6f} | {time_end_FUES[1]*1000: <23.6f} |\n"
+        f"| FUES5  | {Euler_error_FUES5: <14.6f} | {time_end_FUES5[0]*1000: <24.6f} | {time_end_FUES5[1]*1000: <23.6f} |\n"
         f"| DCEGM  | {Euler_error_DCEGM: <14.6f} | {time_end_DCEGM[0]*1000: <24.6f} | {time_end_DCEGM[1]*1000: <23.6f} |\n"
         f"| CONSAV | {Euler_error_CONSAV: <14.6f} | {time_end_CONSAV[0]*1000: <24.6f} | {time_end_CONSAV[1]*1000: <23.6f} |\n"
         "---------------------------------------------------------------------------------\n"

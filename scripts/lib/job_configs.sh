@@ -20,6 +20,14 @@ STD_RES_SETTINGS[grid_points]=1000
 STD_RES_SETTINGS[version_suffix]="test_0.1"
 STD_RES_SETTINGS[delta_pb]=1
 
+declare -A STD_RES_SETTINGS_2
+STD_RES_SETTINGS_2[periods]=5
+STD_RES_SETTINGS_2[vfi_ngrid]=1000
+STD_RES_SETTINGS_2[hd_points]=2000
+STD_RES_SETTINGS_2[grid_points]=2000
+STD_RES_SETTINGS_2[version_suffix]="test_0.1"
+STD_RES_SETTINGS_2[delta_pb]=1
+
 declare -A STD_RES_SETTINGS_PB
 STD_RES_SETTINGS_PB[periods]=5
 STD_RES_SETTINGS_PB[vfi_ngrid]=2000
@@ -106,12 +114,19 @@ HIGH_RES_SETTINGS_G[delta_pb]=1
 
 declare -A HIGH_RES_SETTINGS_H
 HIGH_RES_SETTINGS_H[periods]=5
-HIGH_RES_SETTINGS_H[vfi_ngrid]=2E6
-HIGH_RES_SETTINGS_H[hd_points]=2E4
-HIGH_RES_SETTINGS_H[grid_points]=6000
+HIGH_RES_SETTINGS_H[vfi_ngrid]=3E6
+HIGH_RES_SETTINGS_H[hd_points]=5E4
+HIGH_RES_SETTINGS_H[grid_points]=2000
 HIGH_RES_SETTINGS_H[version_suffix]="test_0.1"
 HIGH_RES_SETTINGS_H[delta_pb]=1
 
+declare -A HIGH_RES_SETTINGS_I
+HIGH_RES_SETTINGS_I[periods]=5
+HIGH_RES_SETTINGS_I[vfi_ngrid]=3E6
+HIGH_RES_SETTINGS_I[hd_points]=2E5
+HIGH_RES_SETTINGS_I[grid_points]=2000
+HIGH_RES_SETTINGS_I[version_suffix]="test_0.1"
+HIGH_RES_SETTINGS_I[delta_pb]=1
 
 # --- Configuration Set 3: Quick Debug Run ---
 # A very small, fast run for debugging purposes.

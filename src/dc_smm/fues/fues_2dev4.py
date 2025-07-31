@@ -29,7 +29,7 @@ import numpy as np
 # Constants for better performance
 EPS_D = 1e-20  # Epsilon for division protection
 EPS_A = 1e-20  # Epsilon for gradient calculations
-EPS_SEP = 1e-20  # Epsilon for intersection separation
+EPS_SEP = 1e-8  # Epsilon for intersection separation
 EPS_fwd_back = 8e-1
 
 # ---------------------------------------------------------------------

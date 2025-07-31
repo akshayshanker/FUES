@@ -18,7 +18,7 @@ source ../lib/job_configs.sh
 
 # --- 2. Define the Sequence of Configurations to Run ---
 CONFIG_TO_RUN=(
-    "HIGH_RES_SETTINGS_A"
+    "HIGH_RES_SETTINGS_H"
 )
 
 # --- 3. Environment Setup ---
@@ -103,10 +103,10 @@ for CONFIG_NAME in "${CONFIG_TO_RUN[@]}"; do
       --grid-points "${CONFIG_REF[grid_points]}" \
       --recompute-baseline \
       --fresh-fast \
-      --precompile \
       --delta-pb "${CONFIG_REF[delta_pb]}" \
       --plots \
       --gpu \
+      --trace \
       2> >(tee "${LOG_DIR}/run.err") \
       1> >(tee "${LOG_DIR}/run.log")
 

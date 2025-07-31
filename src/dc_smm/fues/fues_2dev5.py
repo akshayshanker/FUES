@@ -118,13 +118,8 @@ def seg_intersect(ax1, ay1, ax2, ay2, bx1, by1, bx2, by2):
 
 @njit
 def add_intersection(
-    inter_e,
-    inter_v,
-    inter_p1,
-    inter_p2,
-    inter_d,
+    intersections,
     n_inter,
-    max_inter,
     intr_x,
     intr_y,
     e_grid,
@@ -136,35 +131,35 @@ def add_intersection(
     idx3,
     idx4,
 ):
-    """Add two intersection points to the arrays - one for each policy branch.
+    """Add two intersection points to the 2D array - one for each policy branch.
 
     idx1, idx2: indices for the left branch (new branch)
     idx3, idx4: indices for the right branch (old branch)
 
     Returns updated n_inter and the interpolated values for the intersection.
     """
-    if not np.isnan(intr_x) and n_inter + 1 < max_inter:
+    if not np.isnan(intr_x) and n_inter + 1 < intersections.shape[0]:
         # Left branch point (slightly before intersection)
-        inter_e[n_inter] = intr_x - EPS_SEP
-        inter_v[n_inter] = intr_y
+        intersections[n_inter, 0] = intr_x - EPS_SEP  # e_grid
+        intersections[n_inter, 1] = intr_y            # value
 
         # Interpolate policies along left branch (idx1 to idx2)
         t_left = (intr_x - e_grid[idx1]) / max(EPS_D, e_grid[idx2] - e_grid[idx1])
-        inter_p1[n_inter] = a_prime[idx1] + t_left * (a_prime[idx2] - a_prime[idx1])
-        inter_p2[n_inter] = policy_2[idx1] + t_left * (policy_2[idx2] - policy_2[idx1])
-        inter_d[n_inter] = del_a[idx1] + t_left * (del_a[idx2] - del_a[idx1])
+        intersections[n_inter, 2] = a_prime[idx1] + t_left * (a_prime[idx2] - a_prime[idx1])      # policy_1
+        intersections[n_inter, 3] = policy_2[idx1] + t_left * (policy_2[idx2] - policy_2[idx1])  # policy_2
+        intersections[n_inter, 4] = del_a[idx1] + t_left * (del_a[idx2] - del_a[idx1])      # del_a
 
         # Right branch point (slightly after intersection)
-        inter_e[n_inter + 1] = intr_x + EPS_SEP
-        inter_v[n_inter + 1] = intr_y
+        intersections[n_inter + 1, 0] = intr_x + EPS_SEP  # e_grid
+        intersections[n_inter + 1, 1] = intr_y            # value
 
         # Interpolate policies along right branch (idx3 to idx4)
         t_right = (intr_x - e_grid[idx3]) / max(EPS_D, e_grid[idx4] - e_grid[idx3])
-        inter_p1[n_inter + 1] = a_prime[idx3] + t_right * (a_prime[idx4] - a_prime[idx3])
-        inter_p2[n_inter + 1] = policy_2[idx3] + t_right * (policy_2[idx4] - policy_2[idx3])
-        inter_d[n_inter + 1] = del_a[idx3] + t_right * (del_a[idx4] - del_a[idx3])
+        intersections[n_inter + 1, 2] = a_prime[idx3] + t_right * (a_prime[idx4] - a_prime[idx3])      # policy_1
+        intersections[n_inter + 1, 3] = policy_2[idx3] + t_right * (policy_2[idx4] - policy_2[idx3])  # policy_2
+        intersections[n_inter + 1, 4] = del_a[idx3] + t_right * (del_a[idx4] - del_a[idx3])      # del_a
 
-        return n_inter + 2, intr_x, intr_y, inter_p1[n_inter], inter_d[n_inter]
+        return n_inter + 2, intr_x, intr_y, intersections[n_inter, 2], intersections[n_inter, 4]
 
     return n_inter, 0.0, 0.0, 0.0, 0.0
 
@@ -377,7 +372,6 @@ def FUES(
         del_a,
         m_bar,
         LB,
-        True,
         endog_mbar,
         padding_mbar,
         include_intersections,
@@ -392,13 +386,10 @@ def FUES(
     d_kept = del_a[env_idx]
 
     if include_intersections:
-        # Extract intersection points
-        inter_e, inter_v, inter_p1, inter_p2, inter_d = intersections
-
         # If we have intersections, merge them with kept points
-        if len(inter_e) > 0:
+        if intersections.shape[0] > 0:
             n_kept = len(e_kept)
-            n_inter = len(inter_e)
+            n_inter = intersections.shape[0]
             n_total = n_kept + n_inter
 
             # Pre-allocate output arrays (faster than concatenate)
@@ -410,15 +401,15 @@ def FUES(
 
             # Fill arrays (memory-efficient copy)
             all_e[:n_kept] = e_kept
-            all_e[n_kept:] = inter_e
+            all_e[n_kept:] = intersections[:, 0]  # e_grid
             all_v[:n_kept] = v_kept
-            all_v[n_kept:] = inter_v
+            all_v[n_kept:] = intersections[:, 1]  # value
             all_p1[:n_kept] = p1_kept
-            all_p1[n_kept:] = inter_p1
+            all_p1[n_kept:] = intersections[:, 2]  # policy_1
             all_p2[:n_kept] = p2_kept
-            all_p2[n_kept:] = inter_p2
+            all_p2[n_kept:] = intersections[:, 3]  # policy_2
             all_d[:n_kept] = d_kept
-            all_d[n_kept:] = inter_d
+            all_d[n_kept:] = intersections[:, 4]  # del_a
 
             # Sort by e_grid to maintain order
             sort_idx = np.argsort(all_e)
@@ -479,10 +470,9 @@ def FUES_sep_intersect(
         del_a_sorted,
         m_bar,
         LB,
-        True,
         endog_mbar,
         padding_mbar,
-        True,
+        True,  # include_intersections
     )
 
     # Extract kept points for FUES result using boolean mask
@@ -495,7 +485,20 @@ def FUES_sep_intersect(
         del_a_sorted[env_idx],
     )
 
-    return fues_result, intersections
+    # Convert 2D intersection array to tuple of arrays for backward compatibility
+    if intersections.shape[0] > 0:
+        inter_tuple = (
+            intersections[:, 0].copy(),  # e_grid
+            intersections[:, 1].copy(),  # value
+            intersections[:, 2].copy(),  # policy_1
+            intersections[:, 3].copy(),  # policy_2
+            intersections[:, 4].copy(),  # del_a
+        )
+    else:
+        empty = np.zeros(0, dtype=np.float64)
+        inter_tuple = (empty, empty, empty, empty, empty)
+    
+    return fues_result, inter_tuple
 
 
 # ---------------------------------------------------------------------
@@ -512,10 +515,8 @@ def _scan(
     del_a,
     m_bar,
     LB,
-    fwd_scan_do,
     endog_mbar,
     padding_mbar,
-    ID_NM=True,
     include_intersections=True,
     not_allow_2lefts=True,
 ):
@@ -547,14 +548,10 @@ def _scan(
         Jump threshold (maximum marginal propensity to save)
     LB : int
         Lookback buffer size for backward/forward scans
-    fwd_scan_do : bool
-        Whether to perform forward scan validation in Case A
     endog_mbar : bool
         Use endogenous jump threshold based on policy gradients
     padding_mbar : float
         Additional padding for endogenous threshold
-    ID_NM : bool
-        Check for non-monotone policies
     include_intersections : bool
         Track intersection points where value functions cross
 
@@ -573,13 +570,10 @@ def _scan(
     # Boolean mask to track kept points (instead of vf.copy())
     keep = np.ones(N, dtype=np.bool_)
 
-    # Arrays to track intersection points
+    # 2D array to track intersection points
+    # Column 0: e_grid, 1: value, 2: policy_1, 3: policy_2, 4: del_a
     max_inter = N // 2
-    inter_e = np.full(max_inter, np.nan)
-    inter_v = np.full(max_inter, np.nan)
-    inter_p1 = np.full(max_inter, np.nan)
-    inter_p2 = np.full(max_inter, np.nan)
-    inter_d = np.full(max_inter, np.nan)
+    intersections = np.full((max_inter, 5), np.nan)
     n_inter = 0
 
     # Track if this iteration created an intersection that should be used as k (tail) in next iteration
@@ -674,13 +668,11 @@ def _scan(
         # The point might be suboptimal (jumping from a dominated branch).
         # We need forward scan to check if this jump is valid.
         if right_turn_jump:
-            keep_i1 = False
-            if fwd_scan_do:
-                # Use the new forward scan function
-                keep_i1, idx_f, found_forward_same_branch = forward_scan_case_a(
-                    e_grid, vf, a_prime, i, j, N, LB, m_bar, g_1
-                )
-            #keep_i1 = False
+            # Always perform forward scan for correctness
+            keep_i1, idx_f, found_forward_same_branch = forward_scan_case_a(
+                e_grid, vf, a_prime, i, j, N, LB, m_bar, g_1
+            )
+            
             if keep_i1:
                 created_intersection = False
 
@@ -718,13 +710,8 @@ def _scan(
                         # Right branch: old branch (j to idx_f)
                         new_n_inter, inter_e_val, inter_v_val, inter_a_val, inter_d_val = (
                             add_intersection(
-                                inter_e,
-                                inter_v,
-                                inter_p1,
-                                inter_p2,
-                                inter_d,
+                                intersections,
                                 n_inter,
-                                max_inter,
                                 intr_x,
                                 intr_y,
                                 e_grid,
@@ -818,13 +805,8 @@ def _scan(
                     # Left branch: new branch (m_ind to i+1)
                     # Right branch: old branch (k to j)
                     new_n_inter, inter_e_val, inter_v_val, inter_a_val, inter_d_val = add_intersection(
-                        inter_e,
-                        inter_v,
-                        inter_p1,
-                        inter_p2,
-                        inter_d,
+                        intersections,
                         n_inter,
-                        max_inter,
                         intr_x,
                         intr_y,
                         e_grid,
@@ -871,7 +853,7 @@ def _scan(
                     # Add intersection for left turn case
                 
                 use_intersection_as_k = False
-                if include_intersections and not last_turn_left and k >= 0:
+                if include_intersections and  k >= 0:
                         # Find forward point on same branch from j
                         found_fwd, idx_fwd = find_forward_same_branch(
                             e_grid, a_prime, j, j, N, LB, m_bar
@@ -909,13 +891,8 @@ def _scan(
                             # Right branch: old branch (j to idx_fwd)
                             new_n_inter, inter_e_val, inter_v_val, inter_a_val, inter_d_val = (
                                 add_intersection(
-                                    inter_e,
-                                    inter_v,
-                                    inter_p1,
-                                    inter_p2,
-                                    inter_d,
+                                    intersections,
                                     n_inter,
-                                    max_inter,
                                     intr_x,
                                     intr_y,
                                     e_grid,
@@ -965,17 +942,5 @@ def _scan(
             use_intersection_as_k = False  # Reset flag only if not left turn
             continue
 
-    # Package intersection results
-    if n_inter > 0:
-        intersections = (
-            inter_e[:n_inter].copy(),
-            inter_v[:n_inter].copy(),
-            inter_p1[:n_inter].copy(),
-            inter_p2[:n_inter].copy(),
-            inter_d[:n_inter].copy(),
-        )
-    else:
-        empty = np.zeros(0, dtype=np.float64)
-        intersections = (empty.copy(), empty.copy(), empty.copy(), empty.copy(), empty.copy())
-
-    return e_grid, keep, intersections
+    # Return intersection results as 2D array slice
+    return e_grid, keep, intersections[:n_inter, :]

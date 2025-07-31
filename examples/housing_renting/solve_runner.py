@@ -187,6 +187,7 @@ import sys
 import time
 from pathlib import Path
 import gc
+import resource
 
 trace_print("0.2: Basic imports done")
 import numpy as np
@@ -223,19 +224,59 @@ CFG_DIR = Path(__file__).parent / "config_HR"
 # Default baseline method - can be overridden by --baseline-method
 DEFAULT_BASE = "VFI_HDGRID_GPU"
 # All available methods
-ALL_METHODS = ["VFI_HDGRID", "VFI_HDGRID_GPU", "FUES", "FUES2DEV", "CONSAV", "DCEGM"]
+ALL_METHODS = ["VFI_HDGRID", "VFI_HDGRID_GPU", "FUES", "FUES2DEV", "CONSAV", "DCEGM", "FUES2DEV5"]
 # Fast methods that are compared against baseline
-DEFAULT_FAST_METHODS = ["FUES2DEV", "CONSAV", "FUES"]
+DEFAULT_FAST_METHODS = ["FUES2DEV", "CONSAV", "FUES", "FUES2DEV5"]
 # Pre-compilation parameters
 PRE_COMPILE_PARAMS = np.array(["VFI_HDGRID_GPU", 500, 500, 500], dtype=object)
 
 trace_print("0.6: Constants and globals set")
 
 egm_bounds = {
-      'value_h14': (0, 6, 2.3, 5),      # Left panel: x-axis 0-5, y-axis 0-3
-      'assets_h14': (0, 6, 0, 8), # Right panel: x-axis 0-5, y-axis auto
+      'value_h14': (2, 4, 2.5, 4),      # Left panel: x-axis 0-5, y-axis 0-3
+      'assets_h14': (2, 4, 0.5, 3.5), # Right panel: x-axis 0-5, y-axis auto
   }
 
+
+def cleanup_model(model, aggressive=False):
+    """Clean up model data to free memory.
+    
+    Parameters
+    ----------
+    model : ModelCircuit
+        The model to clean up
+    aggressive : bool
+        If True, clear all solution data. If False, keep only essential data.
+    """
+    if model is None:
+        return
+        
+    try:
+        # Clear large arrays from all periods and stages
+        for period_idx in range(len(model.periods_list)):
+            period = model.get_period(period_idx)
+            for stage_name, stage in period.stages.items():
+                for perch_name, perch in stage.perches.items():
+                    if hasattr(perch, 'sol') and perch.sol is not None:
+                        # Clear Q and lambda arrays which are typically not needed post-solve
+                        if hasattr(perch.sol, '_jit'):
+                            if aggressive:
+                                # Clear everything
+                                perch.sol._jit.Q = np.empty((0,), dtype=np.float64)
+                                perch.sol._jit.lambda_ = np.empty((0,), dtype=np.float64)
+                                perch.sol._jit.vlu = np.empty((0,), dtype=np.float64)
+                            else:
+                                # Just clear Q and lambda
+                                perch.sol._jit.Q = np.empty((0,), dtype=np.float64)
+                                perch.sol._jit.lambda_ = np.empty((0,), dtype=np.float64)
+                        
+                        # Clear EGM intermediate arrays if present
+                        if hasattr(perch.sol, '_jit') and hasattr(perch.sol._jit, 'EGM'):
+                            for layer in ["unrefined", "refined", "interpolated"]:
+                                if layer in perch.sol._jit.EGM:
+                                    perch.sol._jit.EGM[layer].clear()
+    except Exception as e:
+        print(f"Warning: Error during model cleanup: {e}")
 
 
 def patch_cfg(args,cfg_container: dict, periods: int, vf_ngrid: int) -> dict:
@@ -389,6 +430,8 @@ def main(argv=None):
                    help="Enable debug trace statements to help diagnose memory issues")
     p.add_argument("--metrics", default="all",
                    help="Comma-separated list of metrics to compute: euler_error, dev_c_L2, plots, all (default: all)")
+    p.add_argument("--low-memory", action="store_true",
+                   help="Enable low memory mode - clears Q and lambda arrays after solving to save memory")
     
     args = p.parse_args(argv or sys.argv[1:])
     
@@ -637,6 +680,12 @@ def main(argv=None):
                 trace_print("22: Generating baseline plots")
                 img_dir = output_root / "images" 
                 img_dir.mkdir(exist_ok=True)
+                
+                # Clean up non-essential data before plotting if in low-memory mode
+                if args.low_memory:
+                    cleanup_model(ref_model, aggressive=False)
+                    log_memory_usage("after baseline model cleanup")
+                
                 try:
                     print(f"  Generating plots for {BASE}...")
                     generate_plots(ref_model, BASE, img_dir, egm_bounds=egm_bounds)
@@ -712,7 +761,13 @@ def main(argv=None):
                 if is_root and args.plots and model is not None:
                     trace_print(f"30.{i+1}: Generating {method} plots")
                     img_dir = output_root / "images"
-                    img_dir.mkdir(exist_ok=True) 
+                    img_dir.mkdir(exist_ok=True)
+                    
+                    # Clean up non-essential data before plotting if in low-memory mode
+                    if args.low_memory:
+                        cleanup_model(model, aggressive=False)
+                        log_memory_usage(f"after {method} model cleanup")
+                    
                     try:
                         print(f"  Generating plots for {method}...")
                         
@@ -767,8 +822,46 @@ def main(argv=None):
     if hasattr(runner, 'ref_model_for_plotting'):
         del runner.ref_model_for_plotting
     
+    # Clear any cached references in the runner
+    if hasattr(runner, '_cache') and runner._cache is not None:
+        runner._cache.clear()
+    if hasattr(runner, 'ref_params'):
+        del runner.ref_params
+    if hasattr(runner, 'ref_model'):
+        del runner.ref_model
+    
+    # Clear the runner's metric functions which might hold closures
+    runner.metric_fns = {}
+    
     # Final aggressive cleanup
     gc.collect()
+    
+    # Memory usage summary
+    if is_root:
+        print("\n" + "="*60)
+        print("MEMORY USAGE SUMMARY")
+        print("="*60)
+        # These functions are already imported at the top
+        current_mem = get_memory_usage()
+        available_mem = get_available_memory()
+        # Peak memory (platform-specific)
+        try:
+            peak_mem = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+            # Convert to GB (platform-specific: Linux is KB, macOS is bytes)
+            import platform
+            if platform.system() == 'Darwin':  # macOS
+                peak_mem = peak_mem / 1024 / 1024 / 1024
+            else:  # Linux
+                peak_mem = peak_mem / 1024 / 1024
+            print(f"Peak memory usage: {peak_mem:.2f} GB")
+        except:
+            pass
+        print(f"Final memory usage: {current_mem:.2f} GB")
+        print(f"Available memory: {available_mem:.2f} GB")
+        if args.low_memory:
+            print("Low memory mode: ENABLED (Q and lambda arrays cleared)")
+        print("="*60)
+    
     log_memory_usage("at end of solve_runner")
     
     trace_print("33: Main function complete")

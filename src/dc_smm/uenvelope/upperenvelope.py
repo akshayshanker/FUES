@@ -44,7 +44,7 @@ except ImportError:
     rfc = None
 
 try:
-    from dc_smm.fues.fues_2dev8 import FUES as fues2dev_alg
+    from dc_smm.fues.fues_2dev5 import FUES as fues2dev5
 except ImportError:
     fues2dev_alg = None
 
@@ -345,8 +345,8 @@ def _fues2dev_engine(
     }
 
 
-@register("FUES2DEV4")
-def _fues2dev3_engine(
+@register("FUES2DEV5")
+def _fues2dev5_engine(
     x_dcsn_hat: np.ndarray,
     qf_hat: np.ndarray,
     kappa_hat: np.ndarray,
@@ -366,13 +366,13 @@ def _fues2dev3_engine(
     Uses the same interface as the original FUES implementation.
     """
 
-    if fues2dev4_alg is None or correct_jumps1d is None:
-        raise ImportError("FUES2DEV3 algorithm not importable")
+    if fues2dev5 is None or correct_jumps1d is None:
+        raise ImportError("FUES2DEV5 algorithm not importable")
 
     # Guard against lb being a list (edge-case seen in original code)
     lb_int = int(lb[0]) if isinstance(lb, (list, tuple)) else int(lb)
 
-    x_dcsn_ref, qf_ref, kappa_ref, x_cntn_ref, _ = fues2dev4_alg(
+    x_dcsn_ref, qf_ref, kappa_ref, x_cntn_ref, _ = fues2dev5(
         x_dcsn_hat, qf_hat, kappa_hat, X_cntn, X_cntn, m_bar=m_bar, LB=lb_int
     )
 
