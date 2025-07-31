@@ -145,6 +145,15 @@ Custom fast methods can be specified using:
 
 If not specified, defaults to: `FUES2DEV,CONSAV`
 
+Comparison Metrics Optimization
+------------------------------
+When running only the baseline method, comparison metrics (dev_c_L2, plot comparisons) 
+are automatically skipped since comparing a model against itself is meaningless and wastes 
+computational time. This behavior prevents walltime exceeded errors on baseline-only runs.
+
+To customize which metrics are considered comparison metrics, use:
+``--comparison-metrics "dev_c_L2,my_custom_comparison"``
+
 Command-Line Arguments
 ---------------------
 Key arguments for method configuration:
@@ -156,6 +165,7 @@ Key arguments for method configuration:
 - ``--mpi``: Enable MPI parallelization
 - ``--recompute-baseline``: Force recomputation of baseline even if bundle exists
 - ``--fresh-fast``: Force recomputation of fast methods
+- ``--comparison-metrics``: Comma-separated list of metrics requiring baseline comparison (default: dev_c_L2,plot_c_comparison,plot_v_comparison)
 
 Directory Organization
 ---------------------
@@ -432,6 +442,8 @@ def main(argv=None):
                    help="Comma-separated list of metrics to compute: euler_error, dev_c_L2, plots, all (default: all)")
     p.add_argument("--low-memory", action="store_true",
                    help="Enable low memory mode - clears Q and lambda arrays after solving to save memory")
+    p.add_argument("--comparison-metrics", default="dev_c_L2,plot_c_comparison,plot_v_comparison",
+                   help="Comma-separated list of comparison metrics that require baseline loading (default: dev_c_L2,plot_c_comparison,plot_v_comparison)")
     
     args = p.parse_args(argv or sys.argv[1:])
     
@@ -595,6 +607,20 @@ def main(argv=None):
                 print(f"Warning: Unknown metric '{metric}' requested, ignoring.")
 
     trace_print(f"14: Selected metrics: {list(metric_fns.keys())}")
+    
+    # Parse comparison metrics from command line
+    comparison_metrics = set(m.strip() for m in args.comparison_metrics.split(",") if m.strip())
+    trace_print(f"14.5: Comparison metrics: {comparison_metrics}")
+    
+    # If we're only running the baseline method, skip comparison metrics
+    # (comparing against itself is meaningless and wastes time)
+    if len(methods) == 1 and methods[0] == BASE:
+        original_metrics = list(metric_fns.keys())
+        metric_fns = {k: v for k, v in metric_fns.items() if k not in comparison_metrics}
+        removed_metrics = set(original_metrics) - set(metric_fns.keys())
+        if removed_metrics and is_root:
+            print(f"Note: Skipping comparison metrics {removed_metrics} when running only baseline method")
+        trace_print(f"14.6: Filtered metrics (baseline-only mode): {list(metric_fns.keys())}")
 
     trace_print("15: Creating CircuitRunner")
     #  set-up main runner ------------------------------------------------------
@@ -618,7 +644,7 @@ def main(argv=None):
     trace_print("16: CircuitRunner created")
     
     # Check if we need baseline loading for comparison metrics
-    comparison_metrics = {"dev_c_L2", "plot_c_comparison", "plot_v_comparison"}
+    # (comparison_metrics was already parsed from command line args above)
     needs_baseline = any(metric in metric_fns for metric in comparison_metrics)
     trace_print(f"17: Needs baseline loading: {needs_baseline}")
     
