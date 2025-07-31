@@ -289,6 +289,71 @@ def calculate_euler_error_cpu(model, debug=True):
 
     return float(np.mean(logs_array)) if logs_array.size > 0 else np.nan
 
+def precompile_euler_error_cpu():
+    """
+    Precompile the CPU Euler error calculation functions to avoid JIT overhead.
+    This creates dummy data and runs the jitted functions once to compile them.
+    """
+    from dc_smm.models.housing_renting.horses_common import build_njit_utility
+    
+    # Create minimal dummy data matching expected shapes
+    n_a, n_h, n_y = 10, 5, 3  # Small sizes for fast compilation
+    
+    # Create dummy arrays with proper shapes
+    dummy_data = {
+        'z_vals': np.ones(n_y),
+        'H_grid': np.ones(n_h),
+        'w_dcsn_now': np.ones(n_a),
+        'c_now': np.ones((n_a, n_h, n_y)),
+        'tenure_pol': np.ones((n_a, n_h, n_y)),
+        'H_pol': np.ones((n_a, n_h, n_y)),
+        'S_pol': np.ones((n_a, n_y)),
+        'c_owner_n': np.ones((n_a, n_h, n_y)),
+        'c_renter_n': np.ones((n_a, n_h, n_y)),
+        'tenure_a_grid': np.linspace(0, 10, n_a),
+        'owner_a_grid': np.linspace(0, 10, n_a),
+        'renter_a_grid': np.linspace(0, 10, n_a),
+        'H_nxt_grid': np.ones(n_h),
+        'S_grid': np.ones(n_h),
+        'w_dcsn_o': np.linspace(0, 10, n_a),
+        'w_dcsn_r': np.linspace(0, 10, n_a),
+        'Pi': np.ones((n_y, n_y)) / n_y,
+        'beta': 0.95,
+        'R': 1.05,
+        'Pr': 1.0,
+        'tau_phi': 0.05,
+    }
+    
+    # Build dummy utility functions with hardcoded expressions
+    par_dict = {"alpha": 0.7, "kappa": 1.0, "iota": 1.0}
+    
+    # Standard CRRA utility function expressions for housing model
+    uc_owner_expr = "(c**(1-kappa) * H_nxt**alpha)**(1-iota) * (1-kappa) / c"
+    uc_rent_expr = "c**(-kappa)"
+    uc_inv_expr = "lambda_e**(-1/kappa)"
+    
+    uc_owner = build_njit_utility(uc_owner_expr, par_dict, arg1_name="c", arg2_name="H_nxt")
+    uc_rent = build_njit_utility(uc_rent_expr, par_dict, arg1_name="c", arg2_name="H_nxt")
+    uc_inv = build_njit_utility(uc_inv_expr, par_dict, arg1_name="lambda_e", arg2_name="H_nxt")
+    
+    try:
+        # Run the jitted function once with dummy data to compile it
+        _ = _calculate_euler_error_jit(
+            dummy_data['z_vals'], dummy_data['H_grid'], dummy_data['w_dcsn_now'],
+            dummy_data['c_now'], dummy_data['tenure_pol'], dummy_data['H_pol'],
+            dummy_data['S_pol'], dummy_data['c_owner_n'], dummy_data['c_renter_n'],
+            dummy_data['tenure_a_grid'], dummy_data['owner_a_grid'], 
+            dummy_data['renter_a_grid'], dummy_data['H_nxt_grid'], dummy_data['S_grid'],
+            dummy_data['w_dcsn_o'], dummy_data['w_dcsn_r'], dummy_data['Pi'],
+            dummy_data['beta'], dummy_data['R'], dummy_data['Pr'], dummy_data['tau_phi'],
+            uc_owner, uc_rent, uc_inv
+        )
+        return True
+    except Exception as e:
+        print(f"Warning: Failed to precompile Euler error calculation: {e}")
+        return False
+
+
 def euler_error_metric(model, use_gpu=True, debug=True, **kwargs):
     """
     Metric wrapper. Set use_gpu=False to use the CPU version.

@@ -18,7 +18,8 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 * **Smart metric execution based on method selection**
-  - Comparison metrics (dev_c_L2, plot_c_comparison, plot_v_comparison) now only run when multiple methods are present
+  - Baseline method now temporarily excludes comparison metrics during its own execution
+  - Comparison metrics (dev_c_L2, plot_c_comparison, plot_v_comparison) only run for fast methods
   - Prevents meaningless baseline vs baseline comparisons that always return 0
   - Improves walltime efficiency for GPU baseline computations
 
@@ -37,9 +38,18 @@ All notable changes to this project will be documented in this file.
 * **Files modified:** 
   - `examples/housing_renting/solve_runner.py` - Added comparison metrics filtering and loading options
   - `scripts/pbs/run_housing_single_core.sh` - Added selective loading parameters
+  - `examples/housing_renting/helpers/euler_error.py` - Added precompilation function
 * **Euler error requirements:** Only needs Period 0 (OWNC stage) and Period 1 (all stages)
 * **Performance impact:** Prevents walltime exceeded errors, reduces I/O by 76% when loading models
 * **Integration:** Works with DynX v1.7.0 selective loading features
+
+### Performance
+* **Euler error precompilation**
+  - Added `precompile_euler_error_cpu()` function to warm up Numba JIT cache
+  - Eliminates ~30-60 second compilation overhead on first Euler error calculation
+  - Automatically runs during initialization when euler_error metric is requested
+  - Uses minimal dummy data for fast compilation
+  - Fixed utility function expressions to match standard CRRA housing model
 
 ## [0.4.0dev6] - 2025-07-26 – FUES Code Cleanup and Optimization
 

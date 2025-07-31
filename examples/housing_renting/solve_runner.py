@@ -636,6 +636,18 @@ def main(argv=None):
     comparison_metrics = set(m.strip() for m in args.comparison_metrics.split(",") if m.strip())
     trace_print(f"14.5: Comparison metrics: {comparison_metrics}")
     
+    # Precompile Euler error calculation if it's requested
+    if "euler_error" in metric_fns and is_root:
+        try:
+            from helpers.euler_error import precompile_euler_error_cpu
+        except ImportError:
+            from .helpers.euler_error import precompile_euler_error_cpu
+        print("Precompiling Euler error calculation functions...")
+        if precompile_euler_error_cpu():
+            print("  Euler error functions precompiled successfully")
+        else:
+            print("  Warning: Euler error precompilation failed, will compile on first use")
+    
     # Parse loading requirements from command line
     periods_to_load = None
     stages_to_load = None
