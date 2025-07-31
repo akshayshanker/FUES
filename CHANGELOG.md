@@ -51,6 +51,12 @@ All notable changes to this project will be documented in this file.
   - Uses minimal dummy data for fast compilation
   - Fixed utility function expressions to match standard CRRA housing model
 
+* **Metric-specific selective loading for comparison metrics**
+  - Comparison metrics now load only Period 0, OWNC stage from baseline (instead of all 5 periods)
+  - Reduces baseline loading from 75 to 3 pickle files per comparison (96% reduction)
+  - Each fast method saves ~42 seconds on baseline loading for comparisons
+  - Total time saved for 4 fast methods: ~168 seconds
+
 ## [0.4.0dev6] - 2025-07-26 – FUES Code Cleanup and Optimization
 
 ### Changed

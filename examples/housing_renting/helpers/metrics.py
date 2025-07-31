@@ -163,11 +163,37 @@ def _safe_call(fn):
 
 # ─────────────────────────────── memory management ────────────────────────────────
 @contextmanager
-def managed_model_load(runner, x):
-    """Context manager for safe model loading with automatic cleanup."""
+def managed_model_load(runner, x, metric_name=None):
+    """
+    Context manager for safe model loading with automatic cleanup.
+    
+    Args:
+        runner: CircuitRunner instance
+        x: Parameter vector
+        metric_name: Optional name of the metric for selective loading
+    """
+    # Define what each metric needs (only Period 0, OWNC stage)
+    METRIC_REQUIREMENTS = {
+        'dev_c_L2': {
+            'periods_to_load': [0],
+            'stages_to_load': {0: ['OWNC']}
+        },
+        'plot_c_comparison': {
+            'periods_to_load': [0],
+            'stages_to_load': {0: ['OWNC']}
+        },
+        'plot_v_comparison': {
+            'periods_to_load': [0],
+            'stages_to_load': {0: ['OWNC']}
+        }
+    }
+    
     model = None
     try:
-        model = load_reference_model(runner, x)
+        requirements = METRIC_REQUIREMENTS.get(metric_name) if metric_name else None
+        if requirements:
+            print(f"  Loading baseline selectively for {metric_name}: periods={requirements.get('periods_to_load')}, stages={requirements.get('stages_to_load')}")
+        model = load_reference_model(runner, x, metric_requirements=requirements)
         yield model
     finally:
         if model is not None:
@@ -242,9 +268,18 @@ def make_policy_dev_metric(
         lead = None
         out = None
 
+        # Determine metric name based on parameters for selective loading
+        metric_name = None
+        if policy_attr == "c" and norm == "L2":
+            metric_name = "dev_c_L2"
+        elif policy_attr == "c" and norm == "Linf":
+            metric_name = "dev_c_Linf"
+        elif policy_attr == "v" and norm == "L2":
+            metric_name = "dev_v_L2"
+        
         # Use context manager for safe reference model loading
         try:
-            with managed_model_load(_runner, _x) as ref_model:
+            with managed_model_load(_runner, _x, metric_name=metric_name) as ref_model:
                 if ref_model is None:
                     return np.nan
                 
@@ -429,9 +464,16 @@ def plot_comparison_factory(
         lead = None
         out = None
         
+        # Determine metric name based on decision variable for selective loading
+        metric_name = None
+        if decision_variable == 'c':
+            metric_name = 'plot_c_comparison'
+        elif decision_variable in ('vlu', 'v'):
+            metric_name = 'plot_v_comparison'
+        
         # Use context manager for safe baseline model loading
         try:
-            with managed_model_load(_runner, _x) as baseline_model:
+            with managed_model_load(_runner, _x, metric_name=metric_name) as baseline_model:
                 if baseline_model is None:
                     return np.nan
                 

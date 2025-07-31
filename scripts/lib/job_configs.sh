@@ -128,6 +128,15 @@ HIGH_RES_SETTINGS_I[grid_points]=2000
 HIGH_RES_SETTINGS_I[version_suffix]="test_0.1"
 HIGH_RES_SETTINGS_I[delta_pb]=1
 
+
+declare -A HIGH_RES_SETTINGS_J
+HIGH_RES_SETTINGS_I[periods]=5
+HIGH_RES_SETTINGS_I[vfi_ngrid]=4E6
+HIGH_RES_SETTINGS_I[hd_points]=3E5
+HIGH_RES_SETTINGS_I[grid_points]=2000
+HIGH_RES_SETTINGS_I[version_suffix]="test_0.1"
+HIGH_RES_SETTINGS_I[delta_pb]=1
+
 # --- Configuration Set 3: Quick Debug Run ---
 # A very small, fast run for debugging purposes.
 declare -A DEBUG_SETTINGS

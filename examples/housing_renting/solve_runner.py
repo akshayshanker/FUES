@@ -746,6 +746,14 @@ def main(argv=None):
             if is_root and baseline_metrics != original_metrics:
                 print(f"  Using non-comparison metrics for baseline: {list(baseline_metrics.keys())}")
             
+            # Print parameter hash and bundle path for baseline
+            baseline_hash = runner._hash_param_vec(ref_params)
+            baseline_bundle_path = runner._bundle_path(ref_params)
+            if is_root:
+                print(f"  Parameter hash: {baseline_hash}")
+                if baseline_bundle_path:
+                    print(f"  Bundle path: {baseline_bundle_path}")
+            
             trace_print("20: Running baseline solver")
             ref_metrics, ref_model = runner.run(
                 ref_params,
@@ -835,6 +843,14 @@ def main(argv=None):
                 
                 params = np.array([method, STD_POINTS, STD_POINTS, STD_POINTS, pb_delta], dtype=object)
                 all_param_vectors.append(params)  # Add to design matrix
+                
+                # Print parameter hash and bundle path for this method
+                method_hash = runner._hash_param_vec(params)
+                method_bundle_path = runner._bundle_path(params)
+                if is_root:
+                    print(f"  Parameter hash: {method_hash}")
+                    if method_bundle_path:
+                        print(f"  Bundle path: {method_bundle_path}")
                 
                 trace_print(f"28.{i+1}: Running {method} solver")
                 metrics, model = runner.run(params, return_model=is_root, rank=solver_rank)
