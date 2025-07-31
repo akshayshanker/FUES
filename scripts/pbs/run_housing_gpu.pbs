@@ -98,7 +98,6 @@ for CONFIG_NAME in "${CONFIG_TO_RUN[@]}"; do
       --vfi-ngrid "${CONFIG_REF[vfi_ngrid]}" \
       --HD-points "${CONFIG_REF[hd_points]}" \
       --grid-points "${CONFIG_REF[grid_points]}" \
-      --recompute-baseline \
       --baseline-method "VFI_HDGRID_GPU" \
       --include-baseline \
       --fresh-fast \
@@ -107,6 +106,8 @@ for CONFIG_NAME in "${CONFIG_TO_RUN[@]}"; do
       --gpu \
       --trace \
       --low-memory \
+      --load-periods "0,1" \
+      --load-stages '{"0": ["OWNC"], "1": null}' \
       2> >(tee "${LOG_DIR}/run.err") \
       1> >(tee "${LOG_DIR}/run.log")
 
