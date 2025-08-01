@@ -6,13 +6,27 @@ from __future__ import annotations
 from typing import Any, Callable, Literal, Optional
 
 import numpy as np
+import matplotlib
+matplotlib.use('Agg')  # Use non-interactive backend for speed
 import matplotlib.pyplot as plt
 import itertools
 import gc
 from contextlib import contextmanager
 from pathlib import Path
+from scipy import interpolate
 from dynx.runner.circuit_runner import CircuitRunner
 from dynx.runner.reference_utils import load_reference_model
+try:
+    from dynx.runner.metric_requirements import get_metric_requirements
+except ImportError:
+    # Fallback if metric_requirements module not available
+    def get_metric_requirements(metric_names):
+        return None, None
+try:
+    from dynx.runner.reference_cache import get_cached_reference_model
+except ImportError:
+    # Fallback to regular loading if cache not available
+    get_cached_reference_model = load_reference_model
 
 # Import memory utilities for granular logging
 try:
@@ -59,6 +73,21 @@ def _optimize_array_layout(arr):
         return arr  # Already optimal, return view
     else:
         return np.ascontiguousarray(arr)  # Make C-contiguous copy
+
+
+def fast_interp_1d_vectorized(x_new, x_old, y_old_2d):
+    """
+    Vectorized 1D interpolation for 2D arrays.
+    
+    Interpolates each row of y_old_2d from x_old to x_new grid.
+    Uses scipy's interp1d which is much faster than np.interp in loops.
+    """
+    # Create interpolator - this is the expensive operation
+    f = interpolate.interp1d(x_old, y_old_2d, axis=1, 
+                            kind='linear', bounds_error=False, 
+                            fill_value='extrapolate', assume_sorted=True)
+    # Apply to new grid - this is fast
+    return f(x_new)
 
 # ─────────────────────────────────── helpers ────────────────────────────────────
 def _extract_policy(
@@ -172,28 +201,14 @@ def managed_model_load(runner, x, metric_name=None):
         x: Parameter vector
         metric_name: Optional name of the metric for selective loading
     """
-    # Define what each metric needs (only Period 0, OWNC stage)
-    METRIC_REQUIREMENTS = {
-        'dev_c_L2': {
-            'periods_to_load': [0],
-            'stages_to_load': {0: ['OWNC']}
-        },
-        'plot_c_comparison': {
-            'periods_to_load': [0],
-            'stages_to_load': {0: ['OWNC']}
-        },
-        'plot_v_comparison': {
-            'periods_to_load': [0],
-            'stages_to_load': {0: ['OWNC']}
-        }
-    }
-    
     model = None
     try:
-        requirements = METRIC_REQUIREMENTS.get(metric_name) if metric_name else None
-        if requirements:
-            print(f"  Loading baseline selectively for {metric_name}: periods={requirements.get('periods_to_load')}, stages={requirements.get('stages_to_load')}")
-        model = load_reference_model(runner, x, metric_requirements=requirements)
+        # Use superset caching - the cache will load periods 0 and 1 with all required stages
+        # This ensures all metrics share the same cached model
+        if metric_name:
+            print(f"  [Cache] Requesting baseline for {metric_name} (using superset cache: periods 0-1)")
+        
+        model = get_cached_reference_model(runner, x, metric_requirements=None)
         yield model
     finally:
         if model is not None:
@@ -336,21 +351,13 @@ def make_policy_dev_metric(
                             print("Baseline array length: ", refp.shape[ax])
                             return np.nan  # grid lengths and array lengths inconsistent
 
-                        # reshape‑and‑interp using np.interp with chunked processing for memory efficiency
+                        # Use vectorized interpolation for much better performance
                         ref_swapped = np.moveaxis(refp, ax, -1)        # (..., n_old)
                         ref_swapped = _optimize_array_layout(ref_swapped)  # Ensure C-contiguous for optimal access
                         lead = ref_swapped.reshape(-1, g_ref.size, order='C')     # (m, n_old), ensure C-contiguous
-                        out = np.empty((lead.shape[0], g_mod.size), dtype=refp.dtype, order='C')  # C-contiguous output
                         
-                        # Process in chunks to prevent memory spikes with large arrays
-                        CHUNK_SIZE = min(1000, lead.shape[0])  # Process up to 1000 rows at a time
-                        for i in range(0, lead.shape[0], CHUNK_SIZE):
-                            chunk_end = min(i + CHUNK_SIZE, lead.shape[0])
-                            for j in range(i, chunk_end):
-                                out[j] = np.interp(g_mod, g_ref, lead[j])
-                            # Force garbage collection every 10 chunks if dealing with very large arrays
-                            if lead.shape[0] > 10000 and i % (CHUNK_SIZE * 10) == 0:
-                                gc.collect()
+                        # Vectorized interpolation - much faster than loop
+                        out = fast_interp_1d_vectorized(g_mod, g_ref, lead)
                         
                         refp = np.moveaxis(out.reshape(*ref_swapped.shape[:-1], g_mod.size), -1, ax)
                         log_memory_usage("after interpolation", verbose=False)
@@ -541,21 +548,13 @@ def plot_comparison_factory(
                             print(f"[warn] Grid lengths don't match array dimensions for plotting")
                             return np.nan
 
-                        # Interpolate baseline data onto fast method grid (same as L2 metric) with chunked processing
+                        # Use vectorized interpolation for much better performance
                         ref_swapped = np.moveaxis(baseline_data, interp_axis, -1)        # (..., n_old)
                         ref_swapped = _optimize_array_layout(ref_swapped)  # Ensure C-contiguous for optimal access
                         lead = ref_swapped.reshape(-1, baseline_grid.size, order='C')    # (m, n_old), ensure C-contiguous
-                        out = np.empty((lead.shape[0], fast_grid.size), dtype=baseline_data.dtype, order='C')  # C-contiguous output
                         
-                        # Process in chunks to prevent memory spikes with large arrays
-                        CHUNK_SIZE = min(1000, lead.shape[0])  # Process up to 1000 rows at a time
-                        for i in range(0, lead.shape[0], CHUNK_SIZE):
-                            chunk_end = min(i + CHUNK_SIZE, lead.shape[0])
-                            for j in range(i, chunk_end):
-                                out[j] = np.interp(fast_grid, baseline_grid, lead[j])
-                            # Force garbage collection every 10 chunks if dealing with very large arrays
-                            if lead.shape[0] > 10000 and i % (CHUNK_SIZE * 10) == 0:
-                                gc.collect()
+                        # Vectorized interpolation - much faster than loop
+                        out = fast_interp_1d_vectorized(fast_grid, baseline_grid, lead)
                         
                         baseline_data = np.moveaxis(out.reshape(*ref_swapped.shape[:-1], fast_grid.size), -1, interp_axis)
 
@@ -663,9 +662,9 @@ def plot_comparison_factory(
                                    fontsize=9, verticalalignment='top',
                                    bbox=dict(boxstyle='round,pad=0.3', facecolor='lightgray', alpha=0.7))
                             
-                            # Tight layout and save
+                            # Tight layout and save with reduced DPI for speed
                             plt.tight_layout()
-                            plt.savefig(img_dir / filename, dpi=150, bbox_inches='tight', 
+                            plt.savefig(img_dir / filename, dpi=100, bbox_inches='tight', 
                                        facecolor='white', edgecolor='none')
 
                             print(f"Comparison plot saved to {img_dir / filename}")

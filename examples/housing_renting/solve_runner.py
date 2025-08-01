@@ -9,6 +9,19 @@ user-supplied metrics.
 The script supports both serial and parallel execution using the Message
 Passing Interface (MPI).
 
+Selective Loading and Caching
+-----------------------------
+**Reference Model Caching**: The reference model (baseline) uses a superset caching 
+strategy that always loads periods [0, 1] with all required stages. This ensures 
+all metrics share the same cached reference model, dramatically reducing memory usage.
+
+**Command Line Arguments Note**: The `--load-periods` and `--load-stages` arguments 
+are currently stored but not actively used. They were intended for selective loading 
+of primary models but are superseded by:
+- Automatic metric-based selective loading for reference models
+- Superset caching that ignores these arguments for reference models
+These arguments may be removed or reimplemented in future versions.
+
 Workflows
 ---------
 **Serial Execution (No MPI)**
@@ -698,9 +711,8 @@ def main(argv=None):
         if is_root:
             print(f"Selective loading enabled: periods={periods_to_load}, stages={stages_to_load}")
     
-    # Check if we need baseline loading for comparison metrics
-    # (comparison_metrics was already parsed from command line args above)
-    needs_baseline = any(metric in metric_fns for metric in comparison_metrics)
+    # Load or run baseline if included 
+    needs_baseline = args.include_baseline
     trace_print(f"17: Needs baseline loading: {needs_baseline}")
     
     # NOTE: this has to be consistent with whatever the metric L2 actually wants to do!
@@ -761,6 +773,16 @@ def main(argv=None):
                 rank=solver_rank
             )
             trace_print("21: Baseline solver complete")
+            
+            # Register baseline model in unified cache for reuse
+            if is_root and ref_model is not None:
+                try:
+                    from dynx.runner.model_cache import register_baseline_model
+                    # Register with periods [0, 1] since baseline loads full model
+                    register_baseline_model(BASE, ref_model, periods=[0, 1])
+                    print(f"  Registered {BASE} in unified cache for metric reuse")
+                except ImportError:
+                    trace_print("21.1: Unified model cache not available")
             
             # Restore original metrics for fast methods
             runner.metric_fns = original_metrics
@@ -940,6 +962,24 @@ def main(argv=None):
     
     # Clear the runner's metric functions which might hold closures
     runner.metric_fns = {}
+    
+    # Clear reference model cache
+    try:
+        from dynx.runner.reference_cache import clear_reference_cache
+        clear_reference_cache()
+        if is_root:
+            print("  Reference model cache cleared")
+    except ImportError:
+        pass
+    
+    # Clear unified model cache
+    try:
+        from dynx.runner.model_cache import clear_model_cache
+        clear_model_cache()
+        if is_root:
+            print("  Unified model cache cleared")
+    except ImportError:
+        pass
     
     # Final aggressive cleanup
     gc.collect()

@@ -130,12 +130,21 @@ HIGH_RES_SETTINGS_I[delta_pb]=1
 
 
 declare -A HIGH_RES_SETTINGS_J
-HIGH_RES_SETTINGS_I[periods]=5
-HIGH_RES_SETTINGS_I[vfi_ngrid]=4E6
-HIGH_RES_SETTINGS_I[hd_points]=3E5
-HIGH_RES_SETTINGS_I[grid_points]=2000
-HIGH_RES_SETTINGS_I[version_suffix]="test_0.1"
-HIGH_RES_SETTINGS_I[delta_pb]=1
+HIGH_RES_SETTINGS_J[periods]=5
+HIGH_RES_SETTINGS_J[vfi_ngrid]=4E6
+HIGH_RES_SETTINGS_J[hd_points]=3E5
+HIGH_RES_SETTINGS_J[grid_points]=2000
+HIGH_RES_SETTINGS_J[version_suffix]="test_0.1"
+HIGH_RES_SETTINGS_J[delta_pb]=1
+
+
+declare -A HIGH_RES_SETTINGS_K
+HIGH_RES_SETTINGS_K[periods]=5
+HIGH_RES_SETTINGS_K[vfi_ngrid]=5E6
+HIGH_RES_SETTINGS_K[hd_points]=3E5
+HIGH_RES_SETTINGS_K[grid_points]=2000
+HIGH_RES_SETTINGS_K[version_suffix]="test_0.1"
+HIGH_RES_SETTINGS_K[delta_pb]=1
 
 # --- Configuration Set 3: Quick Debug Run ---
 # A very small, fast run for debugging purposes.

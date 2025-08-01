@@ -5,7 +5,7 @@ from numba import cuda, njit, prange
 import math
 
 from dc_smm.models.housing_renting.horses_common import (
-    bellman_obj_gpu, piecewise_gradient,get_u_func
+    bellman_obj_gpu, piecewise_gradient, get_u_func
 )
 
 # ======================================================================
@@ -67,9 +67,111 @@ def vfi_gpu_kernel(
         policy_a[iw, h, y] = best_a
         Q_dcsn[iw, h, y] = best_Q
 
-# Note: Continuation value calculation remains on the CPU as it requires
-# a neighborhood operation (piecewise_gradient) that is not straightforward
-# to parallelize efficiently on the GPU without more complex strategies.
+# ======================================================================
+#  GPU Continuation Value and Gradient Kernels
+# ======================================================================
+
+@cuda.jit
+def calculate_gradient_gpu_kernel(
+    policy_c, w_grid, gradient_c, m_bar, eps,
+    n_W, n_H, n_Y
+):
+    """
+    GPU kernel to calculate piecewise gradients of consumption policy.
+    Each thread handles one (h, y) pair and computes gradients along w dimension.
+    """
+    h, y = cuda.grid(2)
+    
+    if h < n_H and y < n_Y:
+        # Each thread computes gradient for all wealth points
+        # This is necessary because gradient computation needs neighboring points
+        
+        # First pass: compute raw gradients
+        for iw in range(n_W):
+            left_ok = False
+            right_ok = False
+            g_raw = -1.0  # Invalid marker
+            
+            # Check left neighbor
+            if iw > 0:
+                df = policy_c[iw, h, y] - policy_c[iw-1, h, y]
+                dx = w_grid[iw] - w_grid[iw-1]
+                if dx > 0 and abs(df/dx) <= m_bar:
+                    left_ok = True
+            
+            # Check right neighbor
+            if iw < n_W - 1:
+                df = policy_c[iw+1, h, y] - policy_c[iw, h, y]
+                dx = w_grid[iw+1] - w_grid[iw]
+                if dx > 0 and abs(df/dx) <= m_bar:
+                    right_ok = True
+            
+            # Compute gradient based on available neighbors
+            if left_ok and right_ok:
+                g_raw = (policy_c[iw+1, h, y] - policy_c[iw-1, h, y]) / (w_grid[iw+1] - w_grid[iw-1])
+            elif right_ok:
+                g_raw = (policy_c[iw+1, h, y] - policy_c[iw, h, y]) / (w_grid[iw+1] - w_grid[iw])
+            elif left_ok:
+                g_raw = (policy_c[iw, h, y] - policy_c[iw-1, h, y]) / (w_grid[iw] - w_grid[iw-1])
+            
+            # Store only if positive
+            if g_raw > 0:
+                gradient_c[iw, h, y] = g_raw
+            else:
+                gradient_c[iw, h, y] = -1.0  # Mark as invalid
+        
+        # Second pass: fill invalid gradients with nearest valid neighbor
+        for iw in range(n_W):
+            if gradient_c[iw, h, y] <= 0:  # Invalid gradient
+                # Search for nearest valid gradient
+                found = False
+                for offset in range(1, n_W):
+                    # Check left
+                    if iw - offset >= 0 and gradient_c[iw - offset, h, y] > 0:
+                        gradient_c[iw, h, y] = gradient_c[iw - offset, h, y]
+                        found = True
+                        break
+                    # Check right
+                    if iw + offset < n_W and gradient_c[iw + offset, h, y] > 0:
+                        gradient_c[iw, h, y] = gradient_c[iw + offset, h, y]
+                        found = True
+                        break
+                
+                if not found:
+                    # Fallback: use eps
+                    gradient_c[iw, h, y] = eps
+
+@cuda.jit
+def calculate_continuation_values_gpu_kernel(
+    policy_c, Q_dcsn, gradient_c, H_grid, V_cntn, lambda_cntn,
+    delta, thorn, alpha, kappa, iota, compute_lambda,
+    n_W, n_H, n_Y
+):
+    """
+    GPU kernel to calculate continuation values and optionally lambda.
+    """
+    iw, ih, iy = cuda.grid(3)
+    
+    if iw < n_W and ih < n_H and iy < n_Y:
+        c_now = policy_c[iw, ih, iy]
+        H_val = H_grid[ih] * thorn
+        
+        # Compute utility using log utility function
+        if c_now <= 0:
+            util = -1e12
+        else:
+            util = alpha * math.log(c_now) + (1 - alpha) * math.log(kappa * H_val + iota)
+        
+        # Compute continuation value
+        V_cntn[iw, ih, iy] = (Q_dcsn[iw, ih, iy] - (1 - delta) * util) / delta
+        
+        # Compute lambda if requested
+        if compute_lambda:
+            uc_now = alpha / c_now  # Marginal utility for log utility
+            c_prime = gradient_c[iw, ih, iy]
+            lambda_cntn[iw, ih, iy] = (uc_now - (1 - delta) * c_prime * uc_now) / delta
+        else:
+            lambda_cntn[iw, ih, iy] = 0.0
 
 @njit(parallel=True)
 def _calculate_continuation_values_cpu(
@@ -137,7 +239,9 @@ def solve_vfi_gpu(vlu_cntn, model):
     d_lambda_cntn = cuda.device_array_like(d_policy_c)
 
     # --- 3. Configure and Launch Kernel ---
-    threads_per_block = (8, 8, 8)
+    # Optimized thread configuration for better GPU utilization
+    # Note: vfi_gpu_kernel expects (h, y, iw) order from cuda.grid(3)
+    threads_per_block = (16, 16, 4)  # 1024 threads (100% occupancy)
     blocks_per_grid_x = (n_H + threads_per_block[0] - 1) // threads_per_block[0]
     blocks_per_grid_y = (n_Y + threads_per_block[1] - 1) // threads_per_block[1]
     blocks_per_grid_z = (n_W + threads_per_block[2] - 1) // threads_per_block[2]
@@ -157,21 +261,52 @@ def solve_vfi_gpu(vlu_cntn, model):
         alpha, kappa, iota,
     )
 
-    # --- 4. Copy Results Back to CPU ---
-    # TODO: CLEANLY REMOVE lambda_cntn ETC.
-    policy_c = d_policy_c.copy_to_host()
-    #policy_a = d_policy_a.copy_to_host()
-    policy_a = np.empty_like(d_policy_c)
-    Q_dcsn = d_Q_dcsn.copy_to_host()
-
-    # --- 5. CPU-side Calculation for Continuation Values ---
-    V_cntn = np.empty_like(policy_c)
-    lambda_cntn = np.empty_like(policy_c)
+    # --- 4. GPU Continuation Values Calculation ---
+    # Get compute_lambda setting, handle both settings and settings_dict
+    if hasattr(model, 'settings_dict'):
+        compute_lambda = model.settings_dict.get("compute_lambda_gpu", False)
+    elif hasattr(model, 'settings'):
+        compute_lambda = model.settings.get("compute_lambda_gpu", False)
+    else:
+        compute_lambda = False
     
-    # Use the new, fast, JIT-compiled function
-    _calculate_continuation_values_cpu(
-        policy_c, Q_dcsn, H_grid, w_grid, V_cntn, lambda_cntn,
-        delta, m_bar, thorn, u_func_cpu
+    if compute_lambda:
+        # First compute gradients if lambda is needed
+        d_gradient_c = cuda.device_array_like(d_policy_c)
+        
+        # Configure gradient kernel (2D grid for h, y)
+        gradient_threads = (16, 16)
+        gradient_blocks_h = (n_H + gradient_threads[0] - 1) // gradient_threads[0]
+        gradient_blocks_y = (n_Y + gradient_threads[1] - 1) // gradient_threads[1]
+        gradient_blocks = (gradient_blocks_h, gradient_blocks_y)
+        
+        calculate_gradient_gpu_kernel[gradient_blocks, gradient_threads](
+            d_policy_c, d_w_grid, d_gradient_c, m_bar, 0.9,
+            n_W, n_H, n_Y
+        )
+    else:
+        d_gradient_c = cuda.device_array_like(d_policy_c)  # Dummy array
+    
+    # Calculate continuation values on GPU
+    # Use same thread configuration as main kernel for better occupancy
+    # Note: continuation kernel expects (iw, ih, iy) order
+    continuation_threads = (16, 16, 4)  # Increased from (8, 8, 8)
+    continuation_blocks_x = (n_W + continuation_threads[0] - 1) // continuation_threads[0]
+    continuation_blocks_y = (n_H + continuation_threads[1] - 1) // continuation_threads[1]
+    continuation_blocks_z = (n_Y + continuation_threads[2] - 1) // continuation_threads[2]
+    continuation_blocks = (continuation_blocks_x, continuation_blocks_y, continuation_blocks_z)
+    
+    calculate_continuation_values_gpu_kernel[continuation_blocks, continuation_threads](
+        d_policy_c, d_Q_dcsn, d_gradient_c, d_H_grid, d_V_cntn, d_lambda_cntn,
+        delta, thorn, alpha, kappa, iota, compute_lambda,
+        n_W, n_H, n_Y
     )
+    
+    # --- 5. Copy Results Back to CPU ---
+    policy_c = d_policy_c.copy_to_host()
+    policy_a = d_policy_a.copy_to_host()  # Now we actually compute this on GPU
+    Q_dcsn = d_Q_dcsn.copy_to_host()
+    V_cntn = d_V_cntn.copy_to_host()
+    lambda_cntn = d_lambda_cntn.copy_to_host()
 
     return policy_c, policy_a, Q_dcsn, V_cntn, lambda_cntn 

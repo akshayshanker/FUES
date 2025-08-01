@@ -15,7 +15,7 @@ source ../lib/job_configs.sh
 
 # --- 2. Define the Sequence of Configurations to Run ---
 CONFIG_TO_RUN=(
-    "HIGH_RES_SETTINGS_J"
+    "HIGH_RES_SETTINGS_K"
 )
 
 # --- 3. Environment Setup ---
@@ -104,6 +104,7 @@ for CONFIG_NAME in "${CONFIG_TO_RUN[@]}"; do
       --fresh-fast \
       --delta-pb "${CONFIG_REF[delta_pb]}" \
       --plots \
+      --metrics "euler_error" \
       --gpu \
       --trace \
       --low-memory \
