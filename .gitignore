@@ -10,3 +10,40 @@ venv*
 env/
 *.err
 *.log
+
+# HPC/PBS output files
+*.o[0-9]*
+*.e[0-9]*
+*.out
+
+# Backup directories
+*_backup_*
+*backup*/
+
+# Working notes and development
+notes/context/working/
+notes/archive_*/
+notes/dev/
+notes/prompts/
+notes/README_NOTES.md
+notes/REORGANIZATION_PLAN.md
+notes/todo.md
+
+# Generated results and plots
+results/plots/
+examples/*/results/
+examples/*/images/
+
+# Work-in-progress files
+*_wip.py
+*_draft.*
+*.draft
+
+# Temporary and test files
+test_*.py
+verify_*.py
+*_test.py
+
+# Documentation drafts
+docs/*.tex
+docs/*_draft.*
