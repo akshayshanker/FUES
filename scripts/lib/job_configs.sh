@@ -50,7 +50,7 @@ HIGH_RES_SETTINGS_TEST[version_suffix]="test_0.1"
 declare -A HIGH_RES_SETTINGS_A
 HIGH_RES_SETTINGS_A[periods]=5
 HIGH_RES_SETTINGS_A[vfi_ngrid]=1E4
-HIGH_RES_SETTINGS_A[hd_points]=4E4
+HIGH_RES_SETTINGS_A[hd_points]=2E4
 HIGH_RES_SETTINGS_A[grid_points]=6000
 HIGH_RES_SETTINGS_A[version_suffix]="test_0.1"
 HIGH_RES_SETTINGS_A[delta_pb]=1
@@ -106,8 +106,8 @@ HIGH_RES_SETTINGS_F[delta_pb]=1
 
 declare -A HIGH_RES_SETTINGS_G
 HIGH_RES_SETTINGS_G[periods]=5
-HIGH_RES_SETTINGS_G[vfi_ngrid]=3E6
-HIGH_RES_SETTINGS_G[hd_points]=2E5
+HIGH_RES_SETTINGS_G[vfi_ngrid]=1E6
+HIGH_RES_SETTINGS_G[hd_points]=2E4
 HIGH_RES_SETTINGS_G[grid_points]=6000
 HIGH_RES_SETTINGS_G[version_suffix]="test_0.1"
 HIGH_RES_SETTINGS_G[delta_pb]=1
