@@ -11,6 +11,12 @@ env/
 *.err
 *.log
 
+# Python package build artifacts
+*.egg-info/
+dist/
+build/
+*.egg
+
 # HPC/PBS output files
 *.o[0-9]*
 *.e[0-9]*
