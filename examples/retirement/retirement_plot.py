@@ -34,7 +34,7 @@ if PROJECT_ROOT not in sys.path:
 #cwd = os.getcwd()
 #sys.path.append('..')
 #os.chdir(cwd)
-from dc_smm.fues.fues_2dev4 import FUES as fues_alg, FUES_sep_intersect
+from dc_smm.fues.legacy.fues_current import FUES as fues_alg, FUES_sep_intersect
 from dc_smm.models.retirement.retirement import Operator_Factory, RetirementModel, euler
 
 def plot_egrids(age, e_grid, vf_work, c_worker, del_a, g_size, cp, save_path, tag = 'sigma0'):
@@ -558,7 +558,7 @@ def test_Timings(grid_sizes, delta_values,n =3):
 
                 # Test FUES
                 _, _, _, _, c_refined_FUES, _, iter_time_age = iter_bell(
-                    cp, method='FUES2DEV'
+                    cp, method='FUES'
                 )
                 time_end_FUES = np.mean(iter_time_age[0])
                 total_time_FUES = iter_time_age[1]
@@ -841,11 +841,11 @@ if __name__ == "__main__":
         )
 
     # precompile numba functions
-    _ = iter_bell(cp, method='FUES2DEV')
-    _, _, _, _, c_refined_FUES, _, time_end_FUES = iter_bell(cp, method='FUES2DEV')
+    _ = iter_bell(cp, method='FUES')
+    _, _, _, _, c_refined_FUES, _, time_end_FUES = iter_bell(cp, method='FUES')
 
-    _ = iter_bell(cp, method='FUES2DEV5')
-    _, _, _, _, c_refined_FUES5, _, time_end_FUES5 = iter_bell(cp, method='FUES2DEV5')
+    _ = iter_bell(cp, method='FUES')
+    _, _, _, _, c_refined_FUES5, _, time_end_FUES5 = iter_bell(cp, method='FUES')
 
     # precompile numba functions
     _ = iter_bell(cp, method='DCEGM')

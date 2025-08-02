@@ -107,8 +107,8 @@ def create_multi_period_model(
     #---
     #2.1 Update methods
     #---
-    if ue_method == "FUES2DEV":
-        configs["master"]["methods"] = {"upper_envelope": "FUES2DEV"}
+    if ue_method == "FUES":
+        configs["master"]["methods"] = {"upper_envelope": "FUES"}
     elif ue_method == "DCEGM":
         configs["master"]["methods"] = {"upper_envelope": "DCEGM"}
     elif ue_method == "RFC":
@@ -175,7 +175,7 @@ def main(argv=None):
     parser.add_argument("--periods", type=int, default=3, help="Number of periods to simulate")
     parser.add_argument("--plot", action="store_true", help="Generate and save plots")
     parser.add_argument("--no-solve", action="store_true", help="Skip solving (for testing loading only)")
-    parser.add_argument("--ue-method", default="FUES", choices=["FUES", "DCEGM", "RFC","CONSAV","FUES2DEV" ,"simple", "VFI", "VFI_HDGRID"], help="Upper-envelope cleaning method")
+    parser.add_argument("--ue-method", default="FUES", choices=["FUES", "DCEGM", "RFC","CONSAV","FUES" ,"simple", "VFI", "VFI_HDGRID"], help="Upper-envelope cleaning method")
     if argv is None:
         argv = sys.argv[1:]
     args = parser.parse_args(argv)
@@ -236,7 +236,7 @@ if __name__ == "__main__":
 
     # Select the methods you want to compare here.
     METHODS_TO_RUN = [
-        "FUES2DEV",
+        "FUES",
         "DCEGM",
         # "DCEGM",  # uncomment when desired
     ]

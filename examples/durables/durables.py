@@ -24,7 +24,7 @@ import os, sys
 cwd = os.getcwd()
 sys.path.append('..')
 os.chdir(cwd)
-from dc_smm.fues.fues import FUES as fues_alg, uniqueEG
+from dc_smm.fues.legacy.fues import FUES as fues_alg, uniqueEG
 from dc_smm.fues.rfc_simple import rfc
 from dc_smm.fues.dcegm import dcegm
 from dc_smm.fues.helpers.math_funcs import interp_as, rootsearch, correct_jumps1d

@@ -267,9 +267,9 @@ CFG_DIR = Path(__file__).parent / "config_HR"
 # Default baseline method - can be overridden by --baseline-method
 DEFAULT_BASE = "VFI_HDGRID_GPU"
 # All available methods
-ALL_METHODS = ["VFI_HDGRID", "VFI_HDGRID_GPU", "FUES", "FUES2DEV", "CONSAV", "DCEGM", "FUES2DEV5"]
+ALL_METHODS = ["VFI_HDGRID", "VFI_HDGRID_GPU", "FUES", "FUES", "CONSAV", "DCEGM", "FUES"]
 # Fast methods that are compared against baseline
-DEFAULT_FAST_METHODS = ["FUES2DEV", "CONSAV", "FUES", "FUES2DEV5"]
+DEFAULT_FAST_METHODS = ["FUES", "CONSAV", "FUES", "FUES"]
 # Pre-compilation parameters
 PRE_COMPILE_PARAMS = np.array(["VFI_HDGRID_GPU", 500, 500, 500], dtype=object)
 
