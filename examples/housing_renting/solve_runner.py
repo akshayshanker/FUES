@@ -267,9 +267,9 @@ CFG_DIR = Path(__file__).parent / "config_HR"
 # Default baseline method - can be overridden by --baseline-method
 DEFAULT_BASE = "VFI_HDGRID_GPU"
 # All available methods
-ALL_METHODS = ["VFI_HDGRID", "VFI_HDGRID_GPU", "FUES", "FUES", "CONSAV", "DCEGM", "FUES"]
+ALL_METHODS = ["VFI_HDGRID", "VFI_HDGRID_GPU", "FUES", "DCEGM"]
 # Fast methods that are compared against baseline
-DEFAULT_FAST_METHODS = ["FUES", "CONSAV", "FUES", "FUES"]
+DEFAULT_FAST_METHODS = ["FUES", "CONSAV"]
 # Pre-compilation parameters
 PRE_COMPILE_PARAMS = np.array(["VFI_HDGRID_GPU", 500, 500, 500], dtype=object)
 
@@ -466,7 +466,7 @@ def main(argv=None):
     p.add_argument("--baseline-method", default=None, 
                    help="Baseline method to use (default: auto-detect based on --gpu flag)")
     p.add_argument("--fast-methods", default=None,
-                   help="Comma-separated list of fast methods (default: FUES2DEV,CONSAV)")
+                   help="Comma-separated list of fast methods (default: FUES,CONSAV)")
     p.add_argument("--include-baseline", action="store_true",
                    help="Automatically include baseline method in the method list")
     p.add_argument("--trace", action="store_true",

@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.0dev9] - 2025-08-02 – GPU Underutilization Fix
+
+### Fixed
+* **GPU underutilization warning for small grids**
+  - Fixed "Grid size 1 will likely result in GPU under-utilization" warning
+  - Added adaptive thread block sizing when grid dimensions are very small
+  - Ensures minimum GPU occupancy by adjusting thread configuration dynamically
+  - Affects: horses_h.py (owner/renter choice) and horses_c_gpu.py (VFI solver)
+  - Small test grids now launch with better GPU utilization
+
+### Technical Details
+* **Adaptive kernel configuration:**
+  - Detects when total blocks would be ≤ 2 and reduces thread block size
+  - Maintains correctness while improving GPU occupancy for test configurations
+  - Example: 1×1 grid now uses 1×1 threads instead of 16×16, avoiding warnings
+
 ## [0.4.0dev8] - 2025-08-02 – GPU Kernel Fix and FUES Algorithm Reorganization
 
 ### Fixed

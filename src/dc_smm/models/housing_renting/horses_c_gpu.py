@@ -248,8 +248,17 @@ def solve_vfi_gpu(vlu_cntn, model):
     # Modified to use 2D grid to avoid CUDA limits with large grids
     # Kernel now iterates over wealth dimension internally
     threads_per_block = (16, 16)  # 256 threads per block
-    blocks_per_grid_x = (n_H + threads_per_block[0] - 1) // threads_per_block[0]
-    blocks_per_grid_y = (n_Y + threads_per_block[1] - 1) // threads_per_block[1]
+    blocks_per_grid_x = max(1, (n_H + threads_per_block[0] - 1) // threads_per_block[0])
+    blocks_per_grid_y = max(1, (n_Y + threads_per_block[1] - 1) // threads_per_block[1])
+    
+    # Ensure minimum GPU utilization
+    if blocks_per_grid_x * blocks_per_grid_y == 1:
+        # If grid is too small, use smaller thread blocks to get more blocks
+        if n_H <= 4 and n_Y <= 4:
+            threads_per_block = (min(n_H, 4), min(n_Y, 4))
+            blocks_per_grid_x = max(1, (n_H + threads_per_block[0] - 1) // threads_per_block[0])
+            blocks_per_grid_y = max(1, (n_Y + threads_per_block[1] - 1) // threads_per_block[1])
+    
     blocks_per_grid = (blocks_per_grid_x, blocks_per_grid_y)
     
     # Debug output for block configuration
@@ -298,8 +307,16 @@ def solve_vfi_gpu(vlu_cntn, model):
         
         # Configure gradient kernel (2D grid for h, y)
         gradient_threads = (16, 16)
-        gradient_blocks_h = (n_H + gradient_threads[0] - 1) // gradient_threads[0]
-        gradient_blocks_y = (n_Y + gradient_threads[1] - 1) // gradient_threads[1]
+        gradient_blocks_h = max(1, (n_H + gradient_threads[0] - 1) // gradient_threads[0])
+        gradient_blocks_y = max(1, (n_Y + gradient_threads[1] - 1) // gradient_threads[1])
+        
+        # Ensure minimum GPU utilization
+        if gradient_blocks_h * gradient_blocks_y == 1:
+            if n_H <= 4 and n_Y <= 4:
+                gradient_threads = (min(n_H, 4), min(n_Y, 4))
+                gradient_blocks_h = max(1, (n_H + gradient_threads[0] - 1) // gradient_threads[0])
+                gradient_blocks_y = max(1, (n_Y + gradient_threads[1] - 1) // gradient_threads[1])
+        
         gradient_blocks = (gradient_blocks_h, gradient_blocks_y)
         
         calculate_gradient_gpu_kernel[gradient_blocks, gradient_threads](
@@ -313,9 +330,23 @@ def solve_vfi_gpu(vlu_cntn, model):
     # Use same thread configuration as main kernel for better occupancy
     # Note: continuation kernel expects (iw, ih, iy) order
     continuation_threads = (16, 16, 4)  # Increased from (8, 8, 8)
-    continuation_blocks_x = (n_W + continuation_threads[0] - 1) // continuation_threads[0]
-    continuation_blocks_y = (n_H + continuation_threads[1] - 1) // continuation_threads[1]
-    continuation_blocks_z = (n_Y + continuation_threads[2] - 1) // continuation_threads[2]
+    continuation_blocks_x = max(1, (n_W + continuation_threads[0] - 1) // continuation_threads[0])
+    continuation_blocks_y = max(1, (n_H + continuation_threads[1] - 1) // continuation_threads[1])
+    continuation_blocks_z = max(1, (n_Y + continuation_threads[2] - 1) // continuation_threads[2])
+    
+    # Ensure minimum GPU utilization for 3D kernel
+    total_blocks = continuation_blocks_x * continuation_blocks_y * continuation_blocks_z
+    if total_blocks <= 2:
+        # Adjust thread configuration for small grids
+        continuation_threads = (
+            min(n_W, 8),
+            min(n_H, 8),
+            min(n_Y, 4)
+        )
+        continuation_blocks_x = max(1, (n_W + continuation_threads[0] - 1) // continuation_threads[0])
+        continuation_blocks_y = max(1, (n_H + continuation_threads[1] - 1) // continuation_threads[1])
+        continuation_blocks_z = max(1, (n_Y + continuation_threads[2] - 1) // continuation_threads[2])
+    
     continuation_blocks = (continuation_blocks_x, continuation_blocks_y, continuation_blocks_z)
     
     calculate_continuation_values_gpu_kernel[continuation_blocks, continuation_threads](

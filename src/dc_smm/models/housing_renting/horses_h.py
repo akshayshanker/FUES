@@ -324,7 +324,24 @@ def F_h_cntn_to_dcsn_owner(mover, use_mpi=False, comm=None):
             d_idx_out = cuda.device_array_like(best_idx_template)
             
             threads = (8, 8, 4)
-            blocks = (int(np.ceil(n_a / threads[0])), int(np.ceil(n_H / threads[1])), int(np.ceil(n_y / threads[2])))
+            blocks_x = max(1, int(np.ceil(n_a / threads[0])))
+            blocks_y = max(1, int(np.ceil(n_H / threads[1])))
+            blocks_z = max(1, int(np.ceil(n_y / threads[2])))
+            
+            # Ensure minimum GPU utilization for 3D kernel
+            total_blocks = blocks_x * blocks_y * blocks_z
+            if total_blocks <= 2:
+                # Adjust thread configuration for small grids
+                threads = (
+                    min(n_a, 4),
+                    min(n_H, 4),
+                    min(n_y, 2)
+                )
+                blocks_x = max(1, int(np.ceil(n_a / threads[0])))
+                blocks_y = max(1, int(np.ceil(n_H / threads[1])))
+                blocks_z = max(1, int(np.ceil(n_y / threads[2])))
+            
+            blocks = (blocks_x, blocks_y, blocks_z)
 
             housing_choice_solver_owner_gpu[blocks, threads](
                 d_resources, d_H_grid, d_H_nxt_grid, d_w_grid,
@@ -373,8 +390,15 @@ def F_h_cntn_to_dcsn_renter(mover, use_mpi=False, comm=None):
             d_S_pol = cuda.device_array((n_w, n_y), dtype=np.int32)
 
             threads = (16, 16)
-            blocks_x = int(np.ceil(n_w / threads[0]))
-            blocks_y = int(np.ceil(n_y / threads[1]))
+            blocks_x = max(1, int(np.ceil(n_w / threads[0])))
+            blocks_y = max(1, int(np.ceil(n_y / threads[1])))
+            # Ensure minimum GPU utilization
+            if blocks_x * blocks_y == 1:
+                # If grid is too small, use smaller thread blocks to get more blocks
+                if n_w <= 4 and n_y <= 4:
+                    threads = (min(n_w, 4), min(n_y, 4))
+                    blocks_x = max(1, int(np.ceil(n_w / threads[0])))
+                    blocks_y = max(1, int(np.ceil(n_y / threads[1])))
             blocks = (blocks_x, blocks_y)
             
             housing_choice_solver_renter_gpu[blocks, threads](
