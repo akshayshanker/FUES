@@ -22,52 +22,50 @@ def vfi_gpu_kernel(
     n_W, n_H, n_Y,                                   # Grid dimensions
 ):
     """
-    Numba CUDA kernel to solve the VFI problem for a single (h, y, w) point.
-    Modified to use 2D grid and iterate over w dimension internally.
+    Numba CUDA kernel to solve the VFI problem for a single (w, h, y) point.
+    Uses 3D grid for maximum parallelism across all dimensions.
     """
-    h, y = cuda.grid(2)
+    iw, h, y = cuda.grid(3)
 
-    if h < n_H and y < n_Y:
-        # Iterate over all wealth points for this (h,y) pair
-        for iw in range(n_W):
-            # --- 1. Setup for this specific grid point ---
-            w_val = w_grid[iw]
-            H_val = H_grid[h] * thorn
-            h_nxt_ind = h_nxt_ind_array[h]
+    if iw < n_W and h < n_H and y < n_Y:
+        # --- 1. Setup for this specific grid point ---
+        w_val = w_grid[iw]
+        H_val = H_grid[h] * thorn
+        h_nxt_ind = h_nxt_ind_array[h]
 
-            # V_slice is not created explicitly; we pass indices to bellman_obj_gpu
+        # V_slice is not created explicitly; we pass indices to bellman_obj_gpu
+        
+        a_low = a_grid[0]
+        a_high = min(w_val - 1e-12, a_grid[-1]+30) #TODO: HARDWIRE THIS
+        
+        if a_high <= a_low + 1e-14:
+            a_high = a_low
             
-            a_low = a_grid[0]
-            a_high = min(w_val - 1e-12, a_grid[-1]+30) #TODO: HARDWIRE THIS
-            
-            if a_high <= a_low + 1e-14:
-                a_high = a_low
-                
-            # --- 2. Dense Grid Search ---
-            best_Q = -1e110
-            best_a = a_low
-            step_inv = 1.0 / (n_grid - 1)
+        # --- 2. Dense Grid Search ---
+        best_Q = -1e110
+        best_a = a_low
+        step_inv = 1.0 / (n_grid - 1)
 
-            for g in range(n_grid):
-                a_try = a_low + (a_high - a_low) * g * step_inv
-                Q_try = bellman_obj_gpu(
-                    a_try, w_val, H_val, beta, delta, a_grid, V_next,
-                    h_nxt_ind, y,
-                    alpha, kappa, iota
-                )
-                if Q_try > best_Q:
-                    best_Q = Q_try
-                    best_a = a_try
+        for g in range(n_grid):
+            a_try = a_low + (a_high - a_low) * g * step_inv
+            Q_try = bellman_obj_gpu(
+                a_try, w_val, H_val, beta, delta, a_grid, V_next,
+                h_nxt_ind, y,
+                alpha, kappa, iota
+            )
+            if Q_try > best_Q:
+                best_Q = Q_try
+                best_a = a_try
+        
+        c_star = w_val - best_a
+        if math.isinf(best_Q) or c_star <= 0.0:
+            c_star = 1e-10
+            best_Q = -1e100
+            best_a = 1e-100
             
-            c_star = w_val - best_a
-            if math.isinf(best_Q) or c_star <= 0.0:
-                c_star = 1e-10
-                best_Q = -1e100
-                best_a = 1e-100
-                
-            policy_c[iw, h, y] = c_star
-            policy_a[iw, h, y] = best_a
-            Q_dcsn[iw, h, y] = best_Q
+        policy_c[iw, h, y] = c_star
+        policy_a[iw, h, y] = best_a
+        Q_dcsn[iw, h, y] = best_Q
 
 # ======================================================================
 #  GPU Continuation Value and Gradient Kernels
@@ -245,33 +243,34 @@ def solve_vfi_gpu(vlu_cntn, model):
     d_lambda_cntn = cuda.device_array_like(d_policy_c)
 
     # --- 3. Configure and Launch Kernel ---
-    # Modified to use 2D grid to avoid CUDA limits with large grids
-    # Kernel now iterates over wealth dimension internally
-    threads_per_block = (16, 16)  # 256 threads per block
-    blocks_per_grid_x = max(1, (n_H + threads_per_block[0] - 1) // threads_per_block[0])
-    blocks_per_grid_y = max(1, (n_Y + threads_per_block[1] - 1) // threads_per_block[1])
+    # Use 3D grid for maximum parallelism across all dimensions
+    # Optimize thread configuration for better GPU utilization
     
-    # Ensure minimum GPU utilization
-    if blocks_per_grid_x * blocks_per_grid_y == 1:
-        # If grid is too small, use smaller thread blocks to get more blocks
-        if n_H <= 4 and n_Y <= 4:
-            threads_per_block = (min(n_H, 4), min(n_Y, 4))
-            blocks_per_grid_x = max(1, (n_H + threads_per_block[0] - 1) // threads_per_block[0])
-            blocks_per_grid_y = max(1, (n_Y + threads_per_block[1] - 1) // threads_per_block[1])
+    # Determine optimal thread configuration based on problem size
+    if n_W * n_H * n_Y < 1000:  # Small problem
+        threads_per_block = (min(n_W, 8), min(n_H, 8), min(n_Y, 8))
+    else:  # Large problem - use optimal configuration
+        # 16*8*8 = 1024 threads (100% GPU utilization)
+        threads_per_block = (16, 8, 8)
     
-    blocks_per_grid = (blocks_per_grid_x, blocks_per_grid_y)
+    blocks_per_grid_x = max(1, (n_W + threads_per_block[0] - 1) // threads_per_block[0])
+    blocks_per_grid_y = max(1, (n_H + threads_per_block[1] - 1) // threads_per_block[1])
+    blocks_per_grid_z = max(1, (n_Y + threads_per_block[2] - 1) // threads_per_block[2])
+    
+    blocks_per_grid = (blocks_per_grid_x, blocks_per_grid_y, blocks_per_grid_z)
     
     # Debug output for block configuration
-    print(f"[GPU DEBUG] Threads per block: {threads_per_block}")
+    print(f"[GPU DEBUG] Grid dimensions: W={n_W}, H={n_H}, Y={n_Y}")
+    print(f"[GPU DEBUG] Threads per block: {threads_per_block} = {threads_per_block[0]*threads_per_block[1]*threads_per_block[2]} threads")
     print(f"[GPU DEBUG] Blocks per grid: {blocks_per_grid}")
-    print(f"[GPU DEBUG] Total blocks: {blocks_per_grid[0] * blocks_per_grid[1]:,}")
+    print(f"[GPU DEBUG] Total blocks: {blocks_per_grid[0] * blocks_per_grid[1] * blocks_per_grid[2]:,}")
     
-    # Check CUDA limits for 2D grid
+    # Check CUDA limits for 3D grid
     device = cuda.get_current_device()
-    max_grid_dim = device.MAX_GRID_DIM_X, device.MAX_GRID_DIM_Y
-    print(f"[GPU DEBUG] Max 2D grid dimensions: {max_grid_dim}")
+    max_grid_dim = device.MAX_GRID_DIM_X, device.MAX_GRID_DIM_Y, device.MAX_GRID_DIM_Z
+    print(f"[GPU DEBUG] Max 3D grid dimensions: {max_grid_dim}")
     
-    if any(blocks_per_grid[i] > max_grid_dim[i] for i in range(2)):
+    if any(blocks_per_grid[i] > max_grid_dim[i] for i in range(3)):
         print("[GPU ERROR] Block grid dimensions exceed CUDA limits!")
         for i, (actual, limit) in enumerate(zip(blocks_per_grid, max_grid_dim)):
             if actual > limit:
@@ -306,14 +305,15 @@ def solve_vfi_gpu(vlu_cntn, model):
         d_gradient_c = cuda.device_array_like(d_policy_c)
         
         # Configure gradient kernel (2D grid for h, y)
-        gradient_threads = (16, 16)
+        # Use optimal configuration: 32*32 = 1024 threads
+        gradient_threads = (32, 32)
         gradient_blocks_h = max(1, (n_H + gradient_threads[0] - 1) // gradient_threads[0])
         gradient_blocks_y = max(1, (n_Y + gradient_threads[1] - 1) // gradient_threads[1])
         
         # Ensure minimum GPU utilization
-        if gradient_blocks_h * gradient_blocks_y == 1:
-            if n_H <= 4 and n_Y <= 4:
-                gradient_threads = (min(n_H, 4), min(n_Y, 4))
+        if gradient_blocks_h * gradient_blocks_y == 1 or n_H * n_Y < 100:
+            if n_H <= 16 and n_Y <= 16:
+                gradient_threads = (min(n_H, 16), min(n_Y, 16))
                 gradient_blocks_h = max(1, (n_H + gradient_threads[0] - 1) // gradient_threads[0])
                 gradient_blocks_y = max(1, (n_Y + gradient_threads[1] - 1) // gradient_threads[1])
         
@@ -327,21 +327,21 @@ def solve_vfi_gpu(vlu_cntn, model):
         d_gradient_c = cuda.device_array_like(d_policy_c)  # Dummy array
     
     # Calculate continuation values on GPU
-    # Use same thread configuration as main kernel for better occupancy
+    # Use optimal thread configuration for maximum GPU utilization
     # Note: continuation kernel expects (iw, ih, iy) order
-    continuation_threads = (16, 16, 4)  # Increased from (8, 8, 8)
+    continuation_threads = (16, 8, 8)  # 1024 threads (100% utilization)
     continuation_blocks_x = max(1, (n_W + continuation_threads[0] - 1) // continuation_threads[0])
     continuation_blocks_y = max(1, (n_H + continuation_threads[1] - 1) // continuation_threads[1])
     continuation_blocks_z = max(1, (n_Y + continuation_threads[2] - 1) // continuation_threads[2])
     
     # Ensure minimum GPU utilization for 3D kernel
     total_blocks = continuation_blocks_x * continuation_blocks_y * continuation_blocks_z
-    if total_blocks <= 2:
+    if total_blocks <= 2 or n_W * n_H * n_Y < 1000:
         # Adjust thread configuration for small grids
         continuation_threads = (
             min(n_W, 8),
             min(n_H, 8),
-            min(n_Y, 4)
+            min(n_Y, 8)
         )
         continuation_blocks_x = max(1, (n_W + continuation_threads[0] - 1) // continuation_threads[0])
         continuation_blocks_y = max(1, (n_H + continuation_threads[1] - 1) // continuation_threads[1])
