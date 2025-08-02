@@ -38,7 +38,7 @@ class TestLocalImports(unittest.TestCase):
         self.assertTrue(callable(register))
         self.assertTrue(callable(FuesDCEGM))
         self.assertTrue(callable(FuesRFC))
-        self.assertTrue(callable(FUES_opt))
+        self.assertTrue(callable(FUES_v0dev))
         self.assertTrue(callable(upper_envelope))
 
         print("All imports in TestLocalImports successful!")
@@ -52,7 +52,7 @@ def test_imports(): # Keep this function for now if other parts of the codebase 
     assert callable(register)
     assert callable(FuesDCEGM)
     assert callable(FuesRFC)
-    assert callable(FUES_opt)
+    assert callable(FUES_v0dev)
     assert callable(upper_envelope)
     print("test_imports() successful!")
 
