@@ -19,53 +19,55 @@ def vfi_gpu_kernel(
     V_next, w_grid, a_grid, H_grid, h_nxt_ind_array,  # Input data arrays
     beta, delta, m_bar, thorn, n_grid,               # Scalar parameters
     alpha, kappa, iota,                              # Utility parameters
+    n_W, n_H, n_Y,                                   # Grid dimensions
 ):
     """
     Numba CUDA kernel to solve the VFI problem for a single (h, y, w) point.
+    Modified to use 2D grid and iterate over w dimension internally.
     """
-    h, y, iw = cuda.grid(3)
+    h, y = cuda.grid(2)
 
-    n_H, n_Y, n_W = policy_c.shape[1], policy_c.shape[2], policy_c.shape[0]
+    if h < n_H and y < n_Y:
+        # Iterate over all wealth points for this (h,y) pair
+        for iw in range(n_W):
+            # --- 1. Setup for this specific grid point ---
+            w_val = w_grid[iw]
+            H_val = H_grid[h] * thorn
+            h_nxt_ind = h_nxt_ind_array[h]
 
-    if h < n_H and y < n_Y and iw < n_W:
-        # --- 1. Setup for this specific grid point ---
-        w_val = w_grid[iw]
-        H_val = H_grid[h] * thorn
-        h_nxt_ind = h_nxt_ind_array[h]
-
-        # V_slice is not created explicitly; we pass indices to bellman_obj_gpu
-        
-        a_low = a_grid[0]
-        a_high = min(w_val - 1e-12, a_grid[-1]+30) #TODO: HARDWIRE THIS
-        
-        if a_high <= a_low + 1e-14:
-            a_high = a_low
+            # V_slice is not created explicitly; we pass indices to bellman_obj_gpu
             
-        # --- 2. Dense Grid Search ---
-        best_Q = -1e110
-        best_a = a_low
-        step_inv = 1.0 / (n_grid - 1)
-
-        for g in range(n_grid):
-            a_try = a_low + (a_high - a_low) * g * step_inv
-            Q_try = bellman_obj_gpu(
-                a_try, w_val, H_val, beta, delta, a_grid, V_next,
-                h_nxt_ind, y,
-                alpha, kappa, iota
-            )
-            if Q_try > best_Q:
-                best_Q = Q_try
-                best_a = a_try
-        
-        c_star = w_val - best_a
-        if math.isinf(best_Q) or c_star <= 0.0:
-            c_star = 1e-10
-            best_Q = -1e100
-            best_a = 1e-100
+            a_low = a_grid[0]
+            a_high = min(w_val - 1e-12, a_grid[-1]+30) #TODO: HARDWIRE THIS
             
-        policy_c[iw, h, y] = c_star
-        policy_a[iw, h, y] = best_a
-        Q_dcsn[iw, h, y] = best_Q
+            if a_high <= a_low + 1e-14:
+                a_high = a_low
+                
+            # --- 2. Dense Grid Search ---
+            best_Q = -1e110
+            best_a = a_low
+            step_inv = 1.0 / (n_grid - 1)
+
+            for g in range(n_grid):
+                a_try = a_low + (a_high - a_low) * g * step_inv
+                Q_try = bellman_obj_gpu(
+                    a_try, w_val, H_val, beta, delta, a_grid, V_next,
+                    h_nxt_ind, y,
+                    alpha, kappa, iota
+                )
+                if Q_try > best_Q:
+                    best_Q = Q_try
+                    best_a = a_try
+            
+            c_star = w_val - best_a
+            if math.isinf(best_Q) or c_star <= 0.0:
+                c_star = 1e-10
+                best_Q = -1e100
+                best_a = 1e-100
+                
+            policy_c[iw, h, y] = c_star
+            policy_a[iw, h, y] = best_a
+            Q_dcsn[iw, h, y] = best_Q
 
 # ======================================================================
 #  GPU Continuation Value and Gradient Kernels
@@ -231,6 +233,10 @@ def solve_vfi_gpu(vlu_cntn, model):
     
     n_W, n_H, n_Y = w_grid.size, H_grid.size, vlu_cntn.shape[2]
     
+    # Debug output for grid dimensions
+    print(f"[GPU DEBUG] Grid dimensions: n_W={n_W}, n_H={n_H}, n_Y={n_Y}")
+    print(f"[GPU DEBUG] Total grid points: {n_W * n_H * n_Y:,}")
+    
     # Allocate output arrays on the GPU
     d_policy_c = cuda.device_array((n_W, n_H, n_Y), dtype=np.float64)
     d_policy_a = cuda.device_array_like(d_policy_c)
@@ -239,13 +245,28 @@ def solve_vfi_gpu(vlu_cntn, model):
     d_lambda_cntn = cuda.device_array_like(d_policy_c)
 
     # --- 3. Configure and Launch Kernel ---
-    # Optimized thread configuration for better GPU utilization
-    # Note: vfi_gpu_kernel expects (h, y, iw) order from cuda.grid(3)
-    threads_per_block = (16, 16, 4)  # 1024 threads (100% occupancy)
+    # Modified to use 2D grid to avoid CUDA limits with large grids
+    # Kernel now iterates over wealth dimension internally
+    threads_per_block = (16, 16)  # 256 threads per block
     blocks_per_grid_x = (n_H + threads_per_block[0] - 1) // threads_per_block[0]
     blocks_per_grid_y = (n_Y + threads_per_block[1] - 1) // threads_per_block[1]
-    blocks_per_grid_z = (n_W + threads_per_block[2] - 1) // threads_per_block[2]
-    blocks_per_grid = (blocks_per_grid_x, blocks_per_grid_y, blocks_per_grid_z)
+    blocks_per_grid = (blocks_per_grid_x, blocks_per_grid_y)
+    
+    # Debug output for block configuration
+    print(f"[GPU DEBUG] Threads per block: {threads_per_block}")
+    print(f"[GPU DEBUG] Blocks per grid: {blocks_per_grid}")
+    print(f"[GPU DEBUG] Total blocks: {blocks_per_grid[0] * blocks_per_grid[1]:,}")
+    
+    # Check CUDA limits for 2D grid
+    device = cuda.get_current_device()
+    max_grid_dim = device.MAX_GRID_DIM_X, device.MAX_GRID_DIM_Y
+    print(f"[GPU DEBUG] Max 2D grid dimensions: {max_grid_dim}")
+    
+    if any(blocks_per_grid[i] > max_grid_dim[i] for i in range(2)):
+        print("[GPU ERROR] Block grid dimensions exceed CUDA limits!")
+        for i, (actual, limit) in enumerate(zip(blocks_per_grid, max_grid_dim)):
+            if actual > limit:
+                print(f"  Dimension {i}: {actual} > {limit}")
     expr_str = model.math["functions"]["u_func"]["expr"]
     param_vals = {
         "alpha": model.param.alpha,
@@ -259,6 +280,7 @@ def solve_vfi_gpu(vlu_cntn, model):
         d_V_next, d_w_grid, d_a_grid, d_H_grid, d_h_nxt_ind_array,
         beta, delta, m_bar, thorn, n_grid,
         alpha, kappa, iota,
+        n_W, n_H, n_Y,
     )
 
     # --- 4. GPU Continuation Values Calculation ---
