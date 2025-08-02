@@ -30,9 +30,19 @@ notes/REORGANIZATION_PLAN.md
 notes/todo.md
 
 # Generated results and plots
-results/plots/
+results/
 examples/*/results/
 examples/*/images/
+*.png
+*.jpg
+*.jpeg
+*.pdf
+*.eps
+*.svg
+
+# But allow documentation images if needed
+!docs/images/*.png
+!docs/images/*.jpg
 
 # Work-in-progress files
 *_wip.py
