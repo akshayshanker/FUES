@@ -246,12 +246,12 @@ def solve_vfi_gpu(vlu_cntn, model):
     # Use 3D grid for maximum parallelism across all dimensions
     # Optimize thread configuration for better GPU utilization
     
-    # Determine optimal thread configuration based on problem size
+    # Determine thread configuration based on problem size and GPU constraints
     if n_W * n_H * n_Y < 1000:  # Small problem
         threads_per_block = (min(n_W, 8), min(n_H, 8), min(n_Y, 8))
-    else:  # Large problem - use optimal configuration
-        # 16*8*8 = 1024 threads (100% GPU utilization)
-        threads_per_block = (16, 8, 8)
+    else:  # Large problem - balance threads vs register usage
+        # 8*8*8 = 512 threads (safer for complex VFI kernel)
+        threads_per_block = (8, 8, 8)
     
     blocks_per_grid_x = max(1, (n_W + threads_per_block[0] - 1) // threads_per_block[0])
     blocks_per_grid_y = max(1, (n_H + threads_per_block[1] - 1) // threads_per_block[1])
@@ -305,15 +305,15 @@ def solve_vfi_gpu(vlu_cntn, model):
         d_gradient_c = cuda.device_array_like(d_policy_c)
         
         # Configure gradient kernel (2D grid for h, y)
-        # Use optimal configuration: 32*32 = 1024 threads
-        gradient_threads = (32, 32)
+        # Use balanced configuration: 16*16 = 256 threads
+        gradient_threads = (16, 16)
         gradient_blocks_h = max(1, (n_H + gradient_threads[0] - 1) // gradient_threads[0])
         gradient_blocks_y = max(1, (n_Y + gradient_threads[1] - 1) // gradient_threads[1])
         
         # Ensure minimum GPU utilization
         if gradient_blocks_h * gradient_blocks_y == 1 or n_H * n_Y < 100:
-            if n_H <= 16 and n_Y <= 16:
-                gradient_threads = (min(n_H, 16), min(n_Y, 16))
+            if n_H <= 8 and n_Y <= 8:
+                gradient_threads = (min(n_H, 8), min(n_Y, 8))
                 gradient_blocks_h = max(1, (n_H + gradient_threads[0] - 1) // gradient_threads[0])
                 gradient_blocks_y = max(1, (n_Y + gradient_threads[1] - 1) // gradient_threads[1])
         
@@ -327,9 +327,9 @@ def solve_vfi_gpu(vlu_cntn, model):
         d_gradient_c = cuda.device_array_like(d_policy_c)  # Dummy array
     
     # Calculate continuation values on GPU
-    # Use optimal thread configuration for maximum GPU utilization
+    # Use balanced thread configuration to avoid resource exhaustion
     # Note: continuation kernel expects (iw, ih, iy) order
-    continuation_threads = (16, 8, 8)  # 1024 threads (100% utilization)
+    continuation_threads = (8, 8, 8)  # 512 threads (balanced)
     continuation_blocks_x = max(1, (n_W + continuation_threads[0] - 1) // continuation_threads[0])
     continuation_blocks_y = max(1, (n_H + continuation_threads[1] - 1) // continuation_threads[1])
     continuation_blocks_z = max(1, (n_Y + continuation_threads[2] - 1) // continuation_threads[2])
@@ -339,9 +339,9 @@ def solve_vfi_gpu(vlu_cntn, model):
     if total_blocks <= 2 or n_W * n_H * n_Y < 1000:
         # Adjust thread configuration for small grids
         continuation_threads = (
-            min(n_W, 8),
-            min(n_H, 8),
-            min(n_Y, 8)
+            min(n_W, 4),
+            min(n_H, 4),
+            min(n_Y, 4)
         )
         continuation_blocks_x = max(1, (n_W + continuation_threads[0] - 1) // continuation_threads[0])
         continuation_blocks_y = max(1, (n_H + continuation_threads[1] - 1) // continuation_threads[1])

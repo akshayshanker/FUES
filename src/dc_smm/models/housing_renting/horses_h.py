@@ -66,6 +66,7 @@ def F_shocks_dcsn_to_arvl(mover):
     model = mover.model
     shock_info = model.num.shocks.income_shock
     Pi = shock_info.process.transition_matrix
+    use_gpu = model.methods.get("compute") == "GPU" and GPU_AVAILABLE
     
     def operator(perch_data):
         """Transform decision data into arrival data by integrating over income shock."""
@@ -73,11 +74,57 @@ def F_shocks_dcsn_to_arvl(mover):
             vlu_dcsn = perch_data.vlu
             lambda_dcsn = perch_data.lambda_
             
-            vlu_arvl = np.einsum('ahj,ij->ahi', vlu_dcsn, Pi)
-            try:
-                lambda_arvl = np.einsum('ahj,ij->ahi', lambda_dcsn, Pi)
-            except:
-                lambda_arvl = np.empty((0,0,0))
+            if use_gpu and vlu_dcsn.size > 1000:  # Use GPU for larger problems
+                # GPU implementation
+                n_a, n_h, n_j = vlu_dcsn.shape
+                n_i = Pi.shape[0]
+                
+                # Transfer to GPU
+                d_vlu_dcsn = cuda.to_device(vlu_dcsn)
+                d_Pi = cuda.to_device(Pi)
+                d_vlu_arvl = cuda.device_array((n_a, n_h, n_i), dtype=np.float64)
+                
+                # Configure kernel - use balanced thread configuration
+                if n_a * n_h * n_i < 1000:
+                    threads = (min(n_a, 8), min(n_h, 8), min(n_i, 8))
+                else:
+                    threads = (8, 8, 8)  # 512 threads (safer)
+                
+                blocks_x = max(1, (n_a + threads[0] - 1) // threads[0])
+                blocks_y = max(1, (n_h + threads[1] - 1) // threads[1])
+                blocks_z = max(1, (n_i + threads[2] - 1) // threads[2])
+                blocks = (blocks_x, blocks_y, blocks_z)
+                
+                # Launch kernel
+                shock_integration_kernel[blocks, threads](
+                    d_vlu_dcsn, d_Pi, d_vlu_arvl, n_a, n_h, n_j, n_i
+                )
+                
+                # Get result
+                vlu_arvl = d_vlu_arvl.copy_to_host()
+                
+                # Process lambda if available
+                try:
+                    if lambda_dcsn.size > 0:
+                        d_lambda_dcsn = cuda.to_device(lambda_dcsn)
+                        d_lambda_arvl = cuda.device_array((n_a, n_h, n_i), dtype=np.float64)
+                        
+                        shock_integration_kernel[blocks, threads](
+                            d_lambda_dcsn, d_Pi, d_lambda_arvl, n_a, n_h, n_j, n_i
+                        )
+                        
+                        lambda_arvl = d_lambda_arvl.copy_to_host()
+                    else:
+                        lambda_arvl = np.empty((0,0,0))
+                except:
+                    lambda_arvl = np.empty((0,0,0))
+            else:
+                # CPU implementation (original)
+                vlu_arvl = np.einsum('ahj,ij->ahi', vlu_dcsn, Pi)
+                try:
+                    lambda_arvl = np.einsum('ahj,ij->ahi', lambda_dcsn, Pi)
+                except:
+                    lambda_arvl = np.empty((0,0,0))
             
             sol = Solution()
             sol.vlu = vlu_arvl
@@ -86,11 +133,53 @@ def F_shocks_dcsn_to_arvl(mover):
         else: # Legacy dict support
             vlu_dcsn = perch_data["vlu"]
             lambda_dcsn = perch_data["lambda_"]
-            vlu_arvl = np.einsum('ahj,ij->ahi', vlu_dcsn, Pi)
-            try:
-                lambda_arvl = np.einsum('ahj,ij->ahi', lambda_dcsn, Pi)
-            except:
-                lambda_arvl = np.empty((0,0,0))
+            
+            if use_gpu and vlu_dcsn.size > 1000:
+                # Similar GPU implementation for dict case
+                n_a, n_h, n_j = vlu_dcsn.shape
+                n_i = Pi.shape[0]
+                
+                d_vlu_dcsn = cuda.to_device(vlu_dcsn)
+                d_Pi = cuda.to_device(Pi)
+                d_vlu_arvl = cuda.device_array((n_a, n_h, n_i), dtype=np.float64)
+                
+                if n_a * n_h * n_i < 1000:
+                    threads = (min(n_a, 8), min(n_h, 8), min(n_i, 8))
+                else:
+                    threads = (8, 8, 8)  # 512 threads (safer)
+                
+                blocks_x = max(1, (n_a + threads[0] - 1) // threads[0])
+                blocks_y = max(1, (n_h + threads[1] - 1) // threads[1])
+                blocks_z = max(1, (n_i + threads[2] - 1) // threads[2])
+                blocks = (blocks_x, blocks_y, blocks_z)
+                
+                shock_integration_kernel[blocks, threads](
+                    d_vlu_dcsn, d_Pi, d_vlu_arvl, n_a, n_h, n_j, n_i
+                )
+                
+                vlu_arvl = d_vlu_arvl.copy_to_host()
+                
+                try:
+                    if lambda_dcsn.size > 0:
+                        d_lambda_dcsn = cuda.to_device(lambda_dcsn)
+                        d_lambda_arvl = cuda.device_array((n_a, n_h, n_i), dtype=np.float64)
+                        
+                        shock_integration_kernel[blocks, threads](
+                            d_lambda_dcsn, d_Pi, d_lambda_arvl, n_a, n_h, n_j, n_i
+                        )
+                        
+                        lambda_arvl = d_lambda_arvl.copy_to_host()
+                    else:
+                        lambda_arvl = np.empty((0,0,0))
+                except:
+                    lambda_arvl = np.empty((0,0,0))
+            else:
+                vlu_arvl = np.einsum('ahj,ij->ahi', vlu_dcsn, Pi)
+                try:
+                    lambda_arvl = np.einsum('ahj,ij->ahi', lambda_dcsn, Pi)
+                except:
+                    lambda_arvl = np.empty((0,0,0))
+                    
             return {"vlu": vlu_arvl, "lambda_": lambda_arvl}
     
     return operator
@@ -202,6 +291,17 @@ def housing_choice_solver_renter_cpu(w_grid, S_grid, y_grid, w_rent_grid,
 # ==============================================================================
 # --- GPU Jitted Functions ---
 # ==============================================================================
+
+@cuda.jit
+def shock_integration_kernel(vlu_dcsn, Pi, vlu_arvl, n_a, n_h, n_j, n_i):
+    """GPU kernel for shock integration: vlu_arvl[a,h,i] = sum_j vlu_dcsn[a,h,j] * Pi[i,j]"""
+    a, h, i = cuda.grid(3)
+    
+    if a < n_a and h < n_h and i < n_i:
+        sum_val = 0.0
+        for j in range(n_j):
+            sum_val += vlu_dcsn[a, h, j] * Pi[i, j]
+        vlu_arvl[a, h, i] = sum_val
 
 @cuda.jit(device=True)
 def _interp_scalar_gpu(x_grid, y_grid, x):
@@ -323,12 +423,12 @@ def F_h_cntn_to_dcsn_owner(mover, use_mpi=False, comm=None):
             best_idx_template = np.empty((n_a, n_H, n_y), dtype=np.int32)
             d_idx_out = cuda.device_array_like(best_idx_template)
             
-            # Optimize thread configuration for better GPU utilization
+            # Optimize thread configuration for GPU resource constraints
             if n_a * n_H * n_y < 1000:  # Small problem
-                threads = (min(n_a, 8), min(n_H, 8), min(n_y, 8))
-            else:  # Large problem - use optimal configuration
-                # 16*8*8 = 1024 threads (100% GPU utilization)
-                threads = (16, 8, 8)
+                threads = (min(n_a, 8), min(n_H, 8), min(n_y, 4))
+            else:  # Large problem - balance threads vs register usage
+                # 8*8*4 = 256 threads (safer for complex kernels)
+                threads = (8, 8, 4)
             
             blocks_x = max(1, int(np.ceil(n_a / threads[0])))
             blocks_y = max(1, int(np.ceil(n_H / threads[1])))
@@ -382,12 +482,12 @@ def F_h_cntn_to_dcsn_renter(mover, use_mpi=False, comm=None):
             d_lam_out = cuda.device_array((n_w, n_y), dtype=np.float64)
             d_S_pol = cuda.device_array((n_w, n_y), dtype=np.int32)
 
-            # Optimize thread configuration for better GPU utilization
+            # Optimize thread configuration for GPU resource constraints
             if n_w * n_y < 100:  # Small problem
                 threads = (min(n_w, 16), min(n_y, 16))
-            else:  # Large problem - use optimal configuration
-                # 32*32 = 1024 threads (100% GPU utilization)
-                threads = (32, 32)
+            else:  # Large problem - balance threads vs register usage
+                # 16*16 = 256 threads (safer for complex kernels)
+                threads = (16, 16)
             
             blocks_x = max(1, int(np.ceil(n_w / threads[0])))
             blocks_y = max(1, int(np.ceil(n_y / threads[1])))
