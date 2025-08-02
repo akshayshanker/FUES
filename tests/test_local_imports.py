@@ -19,11 +19,11 @@ if src_dir not in sys.path:
 from dc_smm.uenvelope import register, get_engine, available, EGM_UE
 
 # Try importing from fues
-from dc_smm.fues import FUES, FUES_opt, dcegm, rfc, interp_as, upper_envelope
+from dc_smm.fues import FUES, FUES_v0dev, dcegm, rfc, interp_as, upper_envelope
 
 # Specific sub-module imports for fues
 from dc_smm.fues.helpers import interp_as as fues_interp_as
-from dc_smm.fues.legacy.fues import FUES as FuesFUES
+from dc_smm.fues.fues_v0dev import FUES as FuesFUES
 from dc_smm.fues.dcegm import dcegm as FuesDCEGM
 from dc_smm.fues.rfc_simple import rfc as FuesRFC
 

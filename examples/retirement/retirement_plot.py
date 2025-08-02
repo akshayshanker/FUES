@@ -34,7 +34,7 @@ if PROJECT_ROOT not in sys.path:
 #cwd = os.getcwd()
 #sys.path.append('..')
 #os.chdir(cwd)
-from dc_smm.fues.legacy.fues_current import FUES as fues_alg, FUES_sep_intersect
+from dc_smm.fues.fues import FUES as fues_alg, FUES_sep_intersect
 from dc_smm.models.retirement.retirement import Operator_Factory, RetirementModel, euler
 
 def plot_egrids(age, e_grid, vf_work, c_worker, del_a, g_size, cp, save_path, tag = 'sigma0'):

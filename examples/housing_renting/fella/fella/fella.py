@@ -26,11 +26,11 @@ from itertools import groupby
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Import local modules
-import fues.ue_kernels
-from fues.fues import FUES as fues_alg, uniqueEG
-from fues.rfc_simple import rfc
-from fues.dcegm import dcegm
-from fues.helpers.math_funcs import interp_as, correct_jumps1d
+from dc_smm.fues import upper_envelope
+from dc_smm.fues.fues import FUES as fues_alg, uniqueEG
+from dc_smm.fues.rfc_simple import rfc
+from dc_smm.fues.dcegm import dcegm
+from dc_smm.fues.helpers.math_funcs import interp_as, correct_jumps1d
 
 # Commenting out missing module
 # from fues.bonnFues import fues_numba_unconstrained 
