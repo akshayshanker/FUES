@@ -1,6 +1,6 @@
-# Discrete-Continuous Structural Models
+# Discrete-Continuous Dynamic Programming
 
-Repository containing solvers and key functions to solve discrete-continuous structural models on high-performance clusters.
+Repository containing solvers and key functions to solve discrete-continuous dynamic programming (DCDP) problems on high-performance clusters.
 
 ## Core Modules
 
