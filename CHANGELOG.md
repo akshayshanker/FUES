@@ -2,6 +2,37 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.0dev10] - 2025-08-03 – GPU Performance Optimizations
+
+### Fixed
+* **CUDA_ERROR_LAUNCH_OUT_OF_RESOURCES**
+  - Reduced thread block sizes from 1024 to 256-512 threads to avoid GPU resource exhaustion
+  - VFI kernel: (8,8,8)=512, Housing Owner: (8,8,4)=256, Housing Renter: (16,16)=256
+  - All GPU kernels now launch successfully with HIGH_RES_SETTINGS
+
+### Added
+* **GPU-accelerated shock integration**
+  - New `shock_integration_kernel` replaces CPU-based np.einsum
+  - Automatic GPU dispatch when compute="GPU" and problem size > 1000
+  - Expected 5-10x speedup for shock integration operations
+
+* **Development specifications**
+  - `multi_gpu_parallel_architecture_03082025.md`: Full 4-GPU + 48-CPU architecture
+  - `vfi_hdgrid_gpu_parallel_03082025.md`: Focused VFI-only 4-GPU parallelization
+
+### Changed
+* **GPU kernel optimizations**
+  - VFI kernel restored to proper 3D parallelization (was 2D with loop)
+  - Fixed serialization bottleneck in wealth dimension
+  - All kernels now use balanced thread configurations for stability
+  - Expected 3-5x speedup from proper parallelization
+
+### Technical Details
+* **Resource management:**
+  - Complex kernels require fewer threads due to register pressure
+  - Trade-off: more kernel launches but successful execution
+  - GPU memory usage: ~400MB for test grids, scales linearly
+
 ## [0.4.0dev9] - 2025-08-02 – GPU Underutilization Fix
 
 ### Fixed

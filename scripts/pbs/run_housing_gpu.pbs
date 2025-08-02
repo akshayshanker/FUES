@@ -15,7 +15,7 @@ source ../lib/job_configs.sh
 
 # --- 2. Define the Sequence of Configurations to Run ---
 CONFIG_TO_RUN=(
-    "HIGH_RES_SETTINGS_A"
+    "HIGH_RES_SETTINGS_H"
 )
 
 # --- 3. Environment Setup ---
