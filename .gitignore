@@ -26,14 +26,8 @@ build/
 *_backup_*
 *backup*/
 
-# Working notes and development
-notes/context/working/
-notes/archive_*/
-notes/dev/
-notes/prompts/
-notes/README_NOTES.md
-notes/REORGANIZATION_PLAN.md
-notes/todo.md
+# Working notes and development - ignore entire notes folder
+notes/
 
 # Generated results and plots
 results/
