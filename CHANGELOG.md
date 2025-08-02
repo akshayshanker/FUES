@@ -2,6 +2,55 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.0dev8] - 2025-08-02 – GPU Kernel Fix and FUES Algorithm Reorganization
+
+### Fixed
+* **GPU VFI kernel launch failure**
+  - Fixed missing `@cuda.jit` decorator on `calculate_continuation_values_gpu_kernel` function
+  - Resolved `CUDA_ERROR_INVALID_VALUE` by converting 3D grid to 2D grid with internal loop
+  - Changed from `cuda.grid(3)` to `cuda.grid(2)` to avoid CUDA's Z-dimension limit (65535 blocks)
+  - Reduced thread block configuration from (16,16,4) to (16,16) for better compatibility
+  - GPU kernel now handles 4+ million grid points without exceeding CUDA limits
+
+### Changed
+* **FUES algorithm version reorganization**
+  - Renamed `fues_2dev5.py` → `fues.py` as current production version
+  - Renamed original `fues.py` → `fues_v0dev.py` (October 2024 paper version)
+  - Moved all experimental versions (fues_2dev1-8) to `src/dc_smm/fues/experimental/`
+  - Updated all method references: `FUES2DEV5` → `FUES`, `FUES2DEV*` → `FUES`
+  - Upper envelope registry updated: `@register("FUES")` for production, `@register("FUES_V0DEV")` for paper version
+
+* **Repository cleanup for public release**
+  - Enhanced .gitignore to exclude HPC output files, backup directories, working notes
+  - Added `examples/README_OUTPUTS.md` explaining output directory structure
+  - Excluded all generated images/results from version control (best practice)
+  - Python build artifacts (*.egg-info) now properly ignored
+
+### Technical Details
+* **GPU fix details:**
+  - Problem: 3D grid with dimensions (250, 250, 64) = 4M points exceeded CUDA Z limit
+  - Solution: 2D grid (n_H, n_Y) with internal loop over n_W dimension
+  - Maintains same computation pattern while respecting CUDA architecture limits
+  
+* **Files reorganized:**
+  - `src/dc_smm/fues/__init__.py` - Updated imports
+  - `src/dc_smm/uenvelope/upperenvelope.py` - Updated engine registrations
+  - 11 example/test files updated with new method references
+  - Fixed all legacy import paths (dc_smm.fues.legacy.* no longer exists)
+
+* **Repository structure:**
+  ```
+  src/dc_smm/fues/
+  ├── fues.py              # Current production (was fues_2dev5)
+  ├── fues_v0dev.py        # Original paper version
+  └── experimental/        # All experimental versions
+  ```
+
+### Performance Impact
+* GPU kernel now successfully launches for high-resolution grids
+* Expected 3-5x speedup for VFI GPU solver vs CPU
+* Eliminates memory transfer bottleneck by keeping computation on device
+
 ## [0.4.0dev7] - 2025-07-31 – Walltime Optimization and Selective Model Loading
 
 ### Added
