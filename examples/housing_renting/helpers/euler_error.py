@@ -64,14 +64,45 @@ def _calculate_euler_error_cuda_kernel(
                 c_star = inv_uc_owner_gpu(beta * R * E_lam, H_now, alpha)
                 output_logs[i_w_loop, i_h_loop, i_y_loop] = cuda.libdevice.log10(abs((c_star - c0) / c0) + 1e-16)
 
-def calculate_euler_error_gpu(model):
+def calculate_euler_error_gpu(model, sample_size=10000, debug=False):
     """
     GPU orchestrator. Extracts data, moves it to the GPU, runs the kernel, and returns the result.
+    
+    Parameters
+    ----------
+    model : Model
+        The solved model
+    sample_size : int
+        Maximum number of states to compute. If grid is larger, will sample uniformly.
+    debug : bool
+        Whether to print debug information
     """
     p0, p1 = model.get_period(0), model.get_period(1)
     ownc_now = p0.get_stage("OWNC")
     ownc, tenu, ownh, rnth, rntc = (p1.get_stage("OWNC"), p1.get_stage("TENU"), p1.get_stage("OWNH"),
                                   p1.get_stage("RNTH"), p1.get_stage("RNTC"))
+    
+    # Check problem size and decide whether to sample
+    n_w = len(ownc_now.dcsn.grid.w)
+    n_h = len(ownc_now.dcsn.grid.H_nxt)
+    n_y = len(tenu.dcsn_to_arvl.model.num.shocks.income_shock.process.values)
+    total_states = n_w * n_h * n_y
+    
+    if debug:
+        print(f"[GPU Euler] Grid size: {n_w}×{n_h}×{n_y} = {total_states:,} states")
+    
+    # Estimate memory requirements (22 arrays * 8 bytes per float64)
+    estimated_gb = total_states * 22 * 8 / 1e9
+    if estimated_gb > 10:  # More than 10GB
+        if debug:
+            print(f"[GPU Euler] Estimated GPU memory: {estimated_gb:.1f}GB - too large, falling back to CPU")
+        # Fall back to CPU implementation
+        return calculate_euler_error_cpu(model, debug=debug)
+    
+    # For moderate sizes, still use GPU but potentially sample
+    use_sampling = total_states > sample_size
+    if use_sampling and debug:
+        print(f"[GPU Euler] Sampling {sample_size:,} states from {total_states:,} total")
 
     data = {
         'z_vals': tenu.dcsn_to_arvl.model.num.shocks.income_shock.process.values, 
@@ -217,9 +248,18 @@ def _calculate_euler_error_jit(
 
     return np.array(logs)
 
-def calculate_euler_error_cpu(model, debug=True):
+def calculate_euler_error_cpu(model, debug=True, sample_size=50000):
     """
     CPU-based Euler error calculation using the original approach.
+    
+    Parameters
+    ----------
+    model : Model
+        The solved model
+    debug : bool
+        Whether to print debug information
+    sample_size : int
+        Maximum number of states to compute. If grid is larger, will sample uniformly.
     """
     from dc_smm.models.housing_renting.horses_common import build_njit_utility
     
@@ -272,13 +312,85 @@ def calculate_euler_error_cpu(model, debug=True):
     b = getattr(par, 'b', 1e-6)
     a_min_threshold = max(b, 1e-6)  # At least 1e-6 to avoid numerical issues
     
-    # Call the JIT-compiled kernel with the newly compiled functions
-    logs_array = _calculate_euler_error_jit(
-        z_vals, H_grid, w_dcsn_now, c_now, tenure_pol, H_pol, S_pol,
-        c_owner_n, c_renter_n, tenure_a_grid, owner_a_grid, renter_a_grid,
-        H_nxt_grid, S_grid, w_dcsn_o, w_dcsn_r, Pi, beta, R, Pr, tau_phi,
-        uc_owner, uc_rent, uc_inv, c_min=1e-12, a_min=a_min_threshold
-    )
+    # Check if we need to sample
+    n_w, n_h, n_y = len(w_dcsn_now), len(H_grid), len(z_vals)
+    total_states = n_w * n_h * n_y
+    
+    if total_states > sample_size:
+        if debug:
+            print(f"[CPU Euler] Sampling {sample_size:,} states from {total_states:,} total")
+        
+        # Create a sample of states
+        np.random.seed(42)  # For reproducibility
+        sample_indices = np.random.choice(total_states, size=sample_size, replace=False)
+        
+        # Convert flat indices to 3D indices
+        sampled_iw = sample_indices // (n_h * n_y)
+        sampled_ih = (sample_indices % (n_h * n_y)) // n_y
+        sampled_iy = sample_indices % n_y
+        
+        # Calculate Euler errors only for sampled states
+        logs = []
+        for idx in range(len(sampled_iw)):
+            iw = sampled_iw[idx]
+            ih = sampled_ih[idx]
+            iy = sampled_iy[idx]
+            
+            w_now = w_dcsn_now[iw]
+            H_now = H_grid[ih]
+            c0 = c_now[iw, ih, iy]
+            
+            if c0 <= 1e-12:
+                continue
+                
+            a_next = w_now - c0
+            if a_next <= 0.5 or a_next >= 30:
+                continue
+            
+            E_lam = 0.0
+            
+            # Expectation over future shocks
+            for jy, y_next in enumerate(z_vals):
+                τ_arr = interp_as(tenure_a_grid, tenure_pol[:, ih, jy], np.array([a_next]))
+                τ = int(τ_arr[0])
+                
+                if τ == 1:  # Owner
+                    h_idx_arr = interp_as(owner_a_grid, H_pol[:, ih, jy], np.array([a_next]))
+                    h_idx = int(h_idx_arr[0])
+                    H1 = H_nxt_grid[h_idx]
+                    
+                    w_dcsn_vals = (R * a_next + y_next - H1 + H_now - (tau_phi*H1 if H1 != H_now else 0.0))
+                    c1_arr = interp_as(w_dcsn_o, c_owner_n[:, h_idx, jy], np.array([w_dcsn_vals]))
+                    c1 = c1_arr[0]
+                    lam_next = uc_owner(c1, H1)
+                else:  # Renter
+                    s_idx_arr = interp_as(renter_a_grid, S_pol[:, jy], np.array([R * a_next + y_next]))
+                    s_idx = int(s_idx_arr[0])
+                    S1 = S_grid[s_idx]
+                    
+                    w_dcsn_vals = (R * a_next + y_next + H_now - Pr * S1)
+                    c1_arr = interp_as(w_dcsn_r, c_renter_n[:, s_idx, jy], np.array([w_dcsn_vals]))
+                    c1 = c1_arr[0]
+                    lam_next = uc_rent(c1, S1)
+                
+                E_lam += Pi[iy, jy] * lam_next
+            
+            # Euler equation
+            c_star = uc_inv(beta * R * E_lam, H_now)
+            logs.append(np.log10(abs((c_star - c0) / c0) + 1e-16))
+        
+        logs_array = np.array(logs)
+        
+        if debug:
+            print(f"  Computed {len(logs)} valid Euler errors from {sample_size} sampled states")
+    else:
+        # Small enough to compute all states
+        logs_array = _calculate_euler_error_jit(
+            z_vals, H_grid, w_dcsn_now, c_now, tenure_pol, H_pol, S_pol,
+            c_owner_n, c_renter_n, tenure_a_grid, owner_a_grid, renter_a_grid,
+            H_nxt_grid, S_grid, w_dcsn_o, w_dcsn_r, Pi, beta, R, Pr, tau_phi,
+            uc_owner, uc_rent, uc_inv, c_min=1e-12, a_min=a_min_threshold
+        )
 
     if debug:
         print(f"  Logs array size: {logs_array.size}")
@@ -354,7 +466,7 @@ def precompile_euler_error_cpu():
         return False
 
 
-def euler_error_metric(model, use_gpu=True, debug=True, **kwargs):
+def euler_error_metric(model, use_gpu=True, debug=True, sample_size=50000, **kwargs):
     """
     Metric wrapper. Set use_gpu=False to use the CPU version.
     
@@ -366,17 +478,20 @@ def euler_error_metric(model, use_gpu=True, debug=True, **kwargs):
         Whether to attempt GPU calculation (falls back to CPU if unavailable)
     debug : bool
         Whether to print debug information
+    sample_size : int
+        Maximum number of states to compute. If grid is larger, will sample uniformly.
     **kwargs : dict
         Additional arguments (for compatibility with CircuitRunner)
     """
+    # Check if we should use GPU based on availability and user preference
     if use_gpu and cuda.is_available():
         try:
-            return calculate_euler_error_gpu(model)
+            return calculate_euler_error_gpu(model, sample_size=sample_size, debug=debug)
         except Exception as e:
             print(f"Warning: GPU Euler error calculation failed: {e}")
             print("Falling back to CPU implementation...")
-            return calculate_euler_error_cpu(model, debug=debug)
+            return calculate_euler_error_cpu(model, debug=debug, sample_size=sample_size)
     else:
-        if use_gpu: 
+        if use_gpu and not cuda.is_available(): 
             print("Warning: GPU not available, falling back to CPU for Euler error.")
-        return calculate_euler_error_cpu(model, debug=debug)
+        return calculate_euler_error_cpu(model, debug=debug, sample_size=sample_size)

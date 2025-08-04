@@ -16,7 +16,7 @@ declare -A STD_RES_SETTINGS
 STD_RES_SETTINGS[periods]=5
 STD_RES_SETTINGS[vfi_ngrid]=1000
 STD_RES_SETTINGS[hd_points]=1000
-STD_RES_SETTINGS[grid_points]=1000
+STD_RES_SETTINGS[grid_points]=2000
 STD_RES_SETTINGS[version_suffix]="test_0.1"
 STD_RES_SETTINGS[delta_pb]=1
 

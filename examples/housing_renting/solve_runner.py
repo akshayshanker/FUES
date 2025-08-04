@@ -276,8 +276,10 @@ PRE_COMPILE_PARAMS = np.array(["VFI_HDGRID_GPU", 500, 500, 500], dtype=object)
 trace_print("0.6: Constants and globals set")
 
 egm_bounds = {
-      'value_h14': (2, 4, 2.5, 4),      # Left panel: x-axis 0-5, y-axis 0-3
-      'assets_h14': (2, 4, 0.5, 3.5), # Right panel: x-axis 0-5, y-axis auto
+      'value_h14': (30, 34, 6.4, 7.1),      # Left panel: x-axis 0-5, y-axis 0-3
+      'assets_h14': (30, 34, 24, 26), # Right panel: x-axis 0-5, y-axis auto
+      'value_h0': (31, 32.5, 6.9, 7),      # Left panel: x-axis 0-5, y-axis 0-3
+      'assets_h0': (30, 34, 24, 26), # Right panel: x-axis 0-5, y-axis auto
   }
 
 
@@ -419,12 +421,18 @@ def make_housing_solver(args, use_mpi: bool, comm):
             final_period.get_stage(tag).status_flags["is_terminal"] = True
         
         # 2. backward time iteration
+        # Free memory during solving if we're not saving the model
+        free_memory = not getattr(args, 'save_full_model', False)
+        # For Euler error, we only need periods 0 and 1
+        periods_to_keep = [0, 1] if free_memory else None
         run_time_iteration(
             mc,
             n_periods=args.periods,
             verbose=args.verbose,
             verbose_timings=args.verbose,
             recorder=recorder,
+            free_memory=free_memory,
+            periods_to_keep=periods_to_keep,
         )
         return mc
 
@@ -481,6 +489,8 @@ def main(argv=None):
                    help="Comma-separated list of period indices to load when loading existing models (e.g., '0,1' for Euler error). If not specified, loads all periods.")
     p.add_argument("--load-stages", default=None,
                    help="JSON-formatted dict of period:stages to load (e.g., '{\"0\": [\"OWNC\"], \"1\": null}' loads only OWNC in period 0, all stages in period 1)")
+    p.add_argument("--save-full-model", action="store_true",
+                   help="Keep all solution data in memory for saving. Disables memory freeing during solve. Default: False (free memory)")
     
     args = p.parse_args(argv or sys.argv[1:])
     

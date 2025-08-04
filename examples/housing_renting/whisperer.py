@@ -16,6 +16,7 @@ The model includes five stages:
 
 import numpy as np
 import time  # Add time module for timing measurements
+import gc  # For garbage collection after freeing memory
 
 # Import operator factories directly from their modules
 from dc_smm.models.housing_renting.horses_h import F_shocks_dcsn_to_arvl, F_h_cntn_to_dcsn_owner, F_h_cntn_to_dcsn_renter
@@ -359,7 +360,7 @@ def initialize_terminal_values(stage, verbose=False, use_mpi=False, comm=None):
     
 
 
-def run_time_iteration(model_circuit, n_periods=None, verbose=False,verbose_timings =False, recorder=None):
+def run_time_iteration(model_circuit, n_periods=None, verbose=False,verbose_timings =False, recorder=None, free_memory=True, periods_to_keep=None):
     """Run time iteration by solving all periods in a pre-created model circuit.
     
     This function systematically solves all five stages of the housing-rental model
@@ -379,6 +380,12 @@ def run_time_iteration(model_circuit, n_periods=None, verbose=False,verbose_timi
         Whether to print verbose output, default False
     recorder : RunRecorder, optional
         If provided, metrics will be recorded during solving
+    free_memory : bool, optional
+        Whether to free solution memory after data is passed to next stage.
+        Default True. Set to False if you need to save the full model.
+    periods_to_keep : list of int, optional
+        List of period indices to keep all data for (e.g., [0, 1] for Euler error).
+        If None, keeps data based on free_memory flag only.
         
     Returns
     -------
@@ -390,6 +397,14 @@ def run_time_iteration(model_circuit, n_periods=None, verbose=False,verbose_timi
     # Get MPI parameters from model circuit if available  
     use_mpi = getattr(model_circuit, '_use_mpi', False)
     comm = getattr(model_circuit, '_comm', None)
+    
+    # Set memory management flag on model circuit
+    model_circuit.free_after_use = free_memory
+    
+    # Default periods to keep if using free_memory
+    if free_memory and periods_to_keep is None:
+        # By default, keep periods 0 and 1 for Euler error
+        periods_to_keep = [0, 1]
     
     # Automatically calculate the number of periods if not provided
     if n_periods is None:
@@ -490,9 +505,21 @@ def run_time_iteration(model_circuit, n_periods=None, verbose=False,verbose_timi
         # -------------------------------------------------------------------------------
         # OWNC.arvl → OWNH.cntn
         ownh_stage.cntn.sol = ownc_stage.arvl.sol
+        # Free memory if not needed for saving
+        # (For periods not in keep list, we'll free everything at end of loop)
+        if getattr(model_circuit, 'free_after_use', True) and (periods_to_keep is None or period_idx in periods_to_keep):
+            ownc_stage.arvl.sol = None
+            # Keep dcsn.sol for Euler error calculation (has policy functions)
+            # Keep cntn.sol as it might be needed for next period
         
         # RNTC.arvl → RNTH.cntn
         rnth_stage.cntn.sol = rntc_stage.arvl.sol
+        # Free memory if not needed for saving
+        # (For periods not in keep list, we'll free everything at end of loop)
+        if getattr(model_circuit, 'free_after_use', True) and (periods_to_keep is None or period_idx in periods_to_keep):
+            rntc_stage.arvl.sol = None
+            # Keep dcsn.sol for Euler error calculation (has policy functions)
+            # Keep cntn.sol as it might be needed for next period
         
         # -------------------------------------------------------------------------------
         # 3. Solve housing choice stages (OWNH and RNTH)
@@ -512,9 +539,21 @@ def run_time_iteration(model_circuit, n_periods=None, verbose=False,verbose_timi
         # -------------------------------------------------------------------------------
         # OWNH.arvl → TENU.cntn_own
         tenu_stage.cntn.sol["from_owner"] = ownh_stage.arvl.sol
+        # Free memory if not needed for saving
+        # (For periods not in keep list, we'll free everything at end of loop)
+        if getattr(model_circuit, 'free_after_use', True) and (periods_to_keep is None or period_idx in periods_to_keep):
+            ownh_stage.arvl.sol = None
+            # Keep dcsn.sol for Euler error calculation (has policy functions)
+            ownh_stage.cntn.sol = None  # Already consumed
         
         # RNTH.arvl → TENU.cntn_rent
         tenu_stage.cntn.sol["from_renter"] = rnth_stage.arvl.sol
+        # Free memory if not needed for saving
+        # (For periods not in keep list, we'll free everything at end of loop)
+        if getattr(model_circuit, 'free_after_use', True) and (periods_to_keep is None or period_idx in periods_to_keep):
+            rnth_stage.arvl.sol = None
+            # Keep dcsn.sol for Euler error calculation (has policy functions)
+            rnth_stage.cntn.sol = None  # Already consumed
         
         # -------------------------------------------------------------------------------
         # 5. Solve the tenure choice stage (TENU)
@@ -536,6 +575,14 @@ def run_time_iteration(model_circuit, n_periods=None, verbose=False,verbose_timi
             # Connect inter-period: TENU.arvl → previous TENU.cntn
             prev_rentc.cntn.sol = tenu_stage.arvl.sol
             prev_ownc.cntn.sol = tenu_stage.arvl.sol
+            
+            # Free TENU memory after period connection if not needed for saving
+            if getattr(model_circuit, 'free_after_use', True):
+                # Only keep arvl.sol if it's the last solved period (period_idx == 0)
+                if period_idx > 1:  # Not the second-to-last period
+                    tenu_stage.arvl.sol = None
+                # Keep dcsn.sol for Euler error calculation (has policy functions)
+                tenu_stage.cntn.sol = None  # Already consumed
         
         # Store this period's stages in dictionary format for the return value
         stages_dict = {
@@ -547,6 +594,12 @@ def run_time_iteration(model_circuit, n_periods=None, verbose=False,verbose_timi
         }
             
         all_stages_by_period.append(stages_dict)
+        
+        # Free all memory from this period if it's not in the keep list
+        if free_memory and periods_to_keep is not None and period_idx not in periods_to_keep:
+            if verbose and (not use_mpi or comm is None or comm.rank == 0):
+                print(f"  Freeing all memory from period {period_idx} (not in keep list: {periods_to_keep})")
+            _free_period_memory(period)
         
         # Record period timing
         period_time = time.time() - period_start_time
@@ -641,3 +694,21 @@ def _sync_perch_solutions(stage, use_mpi, comm):
             perch.sol = comm.bcast(perch.sol if comm.rank == 0 else None,
                                    root=0)
     comm.Barrier()                    # keep ranks aligned
+
+
+def _free_period_memory(period):
+    """
+    Completely free all solution data from a period's stages.
+    Used for periods that are not needed for metrics.
+    """
+    for stage_name in ["TENU", "OWNH", "OWNC", "RNTH", "RNTC"]:
+        try:
+            stage = period.get_stage(stage_name)
+            # Free all perch solution data
+            for perch_name in ["arvl", "dcsn", "cntn"]:
+                perch = getattr(stage, perch_name, None)
+                if perch is not None and hasattr(perch, 'sol'):
+                    perch.sol = None
+        except:
+            pass  # Stage might not exist
+    gc.collect()

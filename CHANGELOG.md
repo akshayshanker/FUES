@@ -3,7 +3,14 @@
 All notable changes to this project will be documented in this file.
 
 ## [0.4.0dev10] - 2025-08-03 – GPU Performance Optimizations
-  - [2025-08-02 18:38 AEST] Improved CLAUDE.md documentation with better organization, version management discipline, and incorporated feedback from o3pro. 
+  - [2025-08-02 18:38 AEST] Improved CLAUDE.md documentation with better organization, version management discipline, and incorporated feedback from o3pro.
+  - [2025-08-03 17:30 AEST] Fixed GPU scaling issue by implementing memory freeing during solve to prevent 193GB+ memory accumulation
+  - [2025-08-03 18:15 AEST] Enhanced memory management to completely free periods 2+ while preserving periods 0,1 for Euler error calculation
+  - [2025-08-03 18:45 AEST] Fixed Euler error GPU bottleneck by implementing sampling-based calculation for large grids to prevent 100GB+ memory transfers
+  - [2025-08-03 15:30 AEST] Created multi-job PBS submission system for running multiple GPU configurations in parallel
+  - [2025-08-03 16:00 AEST] Added income process generation script using Fella (2014) parameters for housing model
+  - [2025-08-03 16:30 AEST] Verified memory freeing implementation is complete but jobs crashing before benefits visible
+  - [2025-08-03 19:00 AEST] Identified issue with FUES algorithm dropping points after policy function jumps - needs intersection fallback when scans fail 
 
 ### Fixed
 * **CUDA_ERROR_LAUNCH_OUT_OF_RESOURCES**
