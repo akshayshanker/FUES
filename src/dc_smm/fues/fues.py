@@ -27,10 +27,10 @@ from numba import njit
 import numpy as np
 
 # Constants for better performance
-EPS_D = 1e-20  # Epsilon for division protection
-EPS_A = 1e-20  # Epsilon for gradient calculations
-EPS_SEP = 1e-8  # Epsilon for intersection separation
-EPS_fwd_back = 8e-1
+EPS_D = 1e-200  # Epsilon for division protection
+EPS_A = 1e-200  # Epsilon for gradient calculations
+EPS_SEP = 1e-10  # Epsilon for intersection separation
+EPS_fwd_back = 0.5
 
 # ---------------------------------------------------------------------
 # Helpers that remain identical ---------------------------------------
@@ -72,7 +72,7 @@ def linear_interp(x, x1, x2, y1, y2):
 
 
 @njit(inline="always")
-def seg_intersect(ax1, ay1, ax2, ay2, bx1, by1, bx2, by2):
+def seg_intersect(ax1, ay1, ax2, ay2, bx1, by1, bx2, by2, EPS2=1):
     """Find intersection point of two line segments.
     
     Returns the intersection point as a tuple (x, y) if segments intersect within their bounds,
@@ -94,7 +94,7 @@ def seg_intersect(ax1, ay1, ax2, ay2, bx1, by1, bx2, by2):
     t = (dap_x * dp_x + dap_y * dp_y) / denom
     
     # Check if intersection point is within segment b bounds
-    if t < 0.0 or t > 1.0:
+    if t < 0.0 -EPS2 or t > 1.0 + EPS2:
         return (np.nan, np.nan)
     
     # Calculate parameter s for segment a (from a1 to a2)
@@ -106,7 +106,7 @@ def seg_intersect(ax1, ay1, ax2, ay2, bx1, by1, bx2, by2):
         s = (by1 + t * db_y - ay1) / da_y
     
     # Check if intersection point is within segment a bounds
-    if s < 0.0 or s > 1.0:
+    if s < 0.0 -EPS2 or s > 1.0 + EPS2:
         return (np.nan, np.nan)
     
     # Return the intersection point
@@ -233,14 +233,14 @@ def backward_scan_combined(
         # For Case C (check_drop=True), use original conditions
         if check_drop:
             if m_idx != -1:
-                de = max(EPS_A, e_grid[j] - e_grid[m_idx])
+                de = max(EPS_A, e_grid[i_plus_1] - e_grid[m_idx])
                 g_m_a = np.abs((a_prime[i_plus_1] - a_prime[m_idx]) / de)
                 if g_m_a < m_bar and de < EPS_fwd_back:
                     m_ind = m_idx
                     if left_turn and g_tilde_a and not last_turn_left:
                         # g_m_vf already computed with de
-                        g_m_vf = (vf[j] - vf[m_idx]) / de
-                        if g_1 > g_m_vf:
+                        g_m_vf = (vf[i_plus_1] - vf[m_idx]) / de
+                        if g_1 < g_m_vf:
                             keep_j = False
                     break
         else:
@@ -312,19 +312,27 @@ def forward_scan_case_a(e_grid, vf, a_prime, i, j, N, LB, m_bar, g_1):
     for f in range(LB):
         if i + 2 + f >= N:  # CRITICAL: Add bounds check
             break
-        de = max(EPS_D, e_grid[i + 1] - e_grid[i + 2 + f])
+        de = max(EPS_D, e_grid[j] - e_grid[i + 2 + f])
+        #sde_1 = max(EPS_D, e_grid[i + 1] - e_grid[j])
         g_f_a = np.abs((a_prime[j] - a_prime[i + 2 + f]) / de)
+        
         if g_f_a < m_bar and de < EPS_fwd_back:
             found_forward_same_branch = True
             idx_f = i + 2 + f  # Store actual grid index
             # Compute g_f_vf for this point
-            g_f_vf_at_idx = (vf[i + 1] - vf[i + 2 + f]) / de
+            de_1 = max(EPS_D, e_grid[i + 2 + f] - e_grid[j])
+            g_f_vf_at_idx = (vf[i + 2 + f] - vf[j]) / de_1
             if g_1 > g_f_vf_at_idx:
                 keep_i1 = True
             break
     
+    #if de< 0.05:
+    #    keep_i1 = True
+    
     if not found_forward_same_branch:
         keep_i1 = True
+
+    #print("keep_i1", keep_i1)
 
     return keep_i1, idx_f,found_forward_same_branch
 
@@ -612,6 +620,7 @@ def _scan(
         # - Left turn (g_1 > g_jm1): lead value point is convex
 
         # Use intersection values for k (tail) if we have added intersection in last iteration
+        use_intersection_as_k = False
         if use_intersection_as_k and include_intersections:
             k_e = intersection_e
             k_v = intersection_v
@@ -623,6 +632,7 @@ def _scan(
             k_a = a_prime[k] if k >= 0 else a_prime[0]
             k_d = del_a[k] if k >= 0 else del_a[0]
 
+        
         # Gradient from tail (k) to head (j) - slope of previous segment
         de_prev = max(EPS_D, e_grid[j] - k_e)
         inv_de_prev = 1.0 / de_prev  # Optimization: multiply is faster than divide
@@ -648,8 +658,8 @@ def _scan(
         # ============= STEP 2: Classify Current Situation =============
         # Determine if we have a right turn with jump or left turn
         right_turn_jump = (g_1 <= g_jm1) and (g_tilde_a > M_max)
-        left_turn = g_1 > g_jm1
-        right_turn_no_jump = (g_1 <= g_jm1) and (g_tilde_a <= M_max)
+        left_turn = g_1 > g_jm1 and (g_tilde_a > M_max)
+        right_turn_no_jump = (g_1 <= g_jm1) and (g_tilde_a <= M_max) or (g_tilde_a <= M_max)  
 
         # Reset intersection tracking flag at start of each iteration
         added_intersection_last_iter = False
@@ -669,11 +679,12 @@ def _scan(
         # We need forward scan to check if this jump is valid.
         if right_turn_jump:
             # Always perform forward scan for correctness
+            #print("right_turn_jump")
             keep_i1, idx_f, found_forward_same_branch = forward_scan_case_a(
                 e_grid, vf, a_prime, i, j, N, LB, m_bar, g_1
             )
             
-            if keep_i1:
+            if keep_i1 and last_turn_left==False:
                 created_intersection = False
 
                 # Case A intersection: Add intersection when jumping to new branch
@@ -794,7 +805,8 @@ def _scan(
                 # Compute intersection only if not a consecutive left turn
                 use_intersection_as_k = False
                 created_intersection = False
-                if include_intersections and not last_turn_left:
+                added_intersection_last_iter = False
+                if include_intersections:
                     # Find intersection between old branch (k, j) and new branch (m_ind, i+1)
                     intr_x, intr_y = seg_intersect(
                         e_grid[j], vf[j], e_grid[k], vf[k],  # Old branch
@@ -830,15 +842,16 @@ def _scan(
                         intersection_a = inter_a_val
                         intersection_d = inter_d_val
                         j = i + 1  # advance j
+                        k = prev_j
+                        #prev
                         created_intersection = True
 
                 # Mark this as a left turn after processing
                 last_turn_left = True
                 if created_intersection == False:
                     j = i + 1  # advance j
-                    use_intersection_as_k = False  # Reset flag
                     k = prev_j
-                    # prev_j = j
+                    prev_j = j
 
             # --- CASE C.2: Left Turn but j is Kept ---
             else:
@@ -849,6 +862,8 @@ def _scan(
                         # Remove last intersection to avoid spurious intersections
                         if include_intersections and added_intersection_last_iter and n_inter > 0:
                             n_inter = n_inter - 1
+                        
+                        j = prev_j
 
                     # Add intersection for left turn case
                 
@@ -925,7 +940,7 @@ def _scan(
                     #prev_j = j
                     j = i + 1
                     last_turn_left = True
-                    use_intersection_as_k = False  # Reset flag
+                    #use_intersection_as_k = False  # Reset flag
                 else:
                     k = j
                     prev_j = j
@@ -940,6 +955,7 @@ def _scan(
             prev_j = j
             j = i + 1
             use_intersection_as_k = False  # Reset flag only if not left turn
+            added_intersection_last_iter
             continue
 
     # Return intersection results as 2D array slice
