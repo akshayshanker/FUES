@@ -119,7 +119,7 @@ for CONFIG_NAME in "${CONFIG_TO_RUN[@]}"; do
       --HD-points "${CONFIG_REF[hd_points]}" \
       --grid-points "${CONFIG_REF[grid_points]}" \
       --baseline-method "CONSAV" \
-      --metrics "euler_error" \
+      --metrics "euler_error, plot_c_comparison" \
       --fresh-fast \
       --plots \
       --trace \

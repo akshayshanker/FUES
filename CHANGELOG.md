@@ -10,7 +10,10 @@ All notable changes to this project will be documented in this file.
   - [2025-08-03 15:30 AEST] Created multi-job PBS submission system for running multiple GPU configurations in parallel
   - [2025-08-03 16:00 AEST] Added income process generation script using Fella (2014) parameters for housing model
   - [2025-08-03 16:30 AEST] Verified memory freeing implementation is complete but jobs crashing before benefits visible
-  - [2025-08-03 19:00 AEST] Identified issue with FUES algorithm dropping points after policy function jumps - needs intersection fallback when scans fail 
+  - [2025-08-03 19:00 AEST] Identified issue with FUES algorithm dropping points after policy function jumps - needs intersection fallback when scans fail
+  - [2025-08-08 13:37 AEST] Fixed left/right branch assignment in FUES intersection calculation - new branch should be on right (higher e_grid values), old branch on left
+  - [2025-08-08 14:15 AEST] Implemented extrapolated segment intersections (extrap_segments_05_08082025_v1) - adds fallback extrapolation when forward/backward scans fail to find bracketing points, ensuring continuous piecewise-linear envelope
+  - [2025-08-08 15:34 AEST] Simplified solve_runner.py Phase 1 - extracted configuration management into ConfigurationManager class, reducing main() complexity while maintaining full PBS compatibility 
 
 ### Fixed
 * **CUDA_ERROR_LAUNCH_OUT_OF_RESOURCES**

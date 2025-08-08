@@ -50,7 +50,7 @@ HIGH_RES_SETTINGS_TEST[version_suffix]="test_0.1"
 declare -A HIGH_RES_SETTINGS_A
 HIGH_RES_SETTINGS_A[periods]=5
 HIGH_RES_SETTINGS_A[vfi_ngrid]=1E4
-HIGH_RES_SETTINGS_A[hd_points]=2E4
+HIGH_RES_SETTINGS_A[hd_points]=6000
 HIGH_RES_SETTINGS_A[grid_points]=6000
 HIGH_RES_SETTINGS_A[version_suffix]="test_0.1"
 HIGH_RES_SETTINGS_A[delta_pb]=1
