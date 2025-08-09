@@ -46,7 +46,7 @@ from dc_smm.models.housing_renting.horses_common import (
 )  # Use relative import
 from numba import njit
 from dc_smm.uenvelope.upperenvelope import EGM_UE
-from dc_smm.fues.helpers import interp_as
+from dc_smm.fues.helpers import interp_as, interp_clean
 from quantecon.optimize.scalar_maximization import brent_max
 from dynx.stagecraft.solmaker import Solution
 
@@ -541,10 +541,10 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
             lambda_refined = refined["lambda_ref"]
 
             if ue_method != "CONSAV":
-
-                Q_dcsn[:, i_h, i_y] = interp_as(
+                # Use cleaner interpolation for non-ConSav methods
+                Q_dcsn[:, i_h, i_y] = interp_clean(
                     m_refined, q_refined, w_grid, extrap=True)
-                policy[:, i_h, i_y] = interp_as(
+                policy[:, i_h, i_y] = interp_clean(
                     m_refined, c_refined, w_grid, extrap=True)
 
             else:

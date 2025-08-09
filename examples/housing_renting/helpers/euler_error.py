@@ -205,6 +205,12 @@ def _calculate_euler_error_jit(
                     continue
 
                 a_next = w_now - c0
+
+                if w_now< 0.5:
+                    continue
+                if w_now> 30:
+                    continue
+                
                 #if a_next <= 0.5:
                 #    continue
                 #if a_next >= 20:

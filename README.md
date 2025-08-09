@@ -2,6 +2,8 @@
 
 Repository containing solvers and key functions to solve discrete-continuous dynamic programming (DCDP) problems on high-performance clusters.
 
+**Work in progress and incomplete branch.**
+
 ## Core Modules
 
 - **Fast Upper-Envelope Scan (FUES)**: Original implementation of the FUES algorithm (serves as replication reference)

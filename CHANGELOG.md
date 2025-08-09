@@ -42,6 +42,23 @@ All notable changes to this project will be documented in this file.
     * Recompute intersection y-coordinate at clamped x using both line equations and average
     * Applied to all three intersection cases: Case A (right-turn jump), Case C.1 (left turn, j dropped), Case C.2 (left turn, j kept)
     * Prevents spurious off-interval intersections that corrupt envelope geometry on next iteration
+  - [2025-08-09 10:00 AEST] Implemented forced intersection points for all kept jumps - eliminates Euler equation residual gaps:
+    * Added _force_crossing_inside() function to guarantee valid intersections even for near-parallel lines
+    * Implemented adaptive separation min(EPS_SEP, 0.25*interval_length) to handle small intervals
+    * Modified all three cases (RTJ, LTJ j-dropped, LTJ j-kept) to use forced intersections
+    * Ensures piecewise-linear envelope with explicit kinks at all discrete choice switches
+  - [2025-08-09 11:00 AEST] Added comprehensive debug printing for intersection analysis:
+    * Added debug parameters to _scan and FUES functions with specific region filtering
+    * Prints intersection details including flag, point, indices, liquid savings values, and policies
+    * Default debug region set to e: [31.3, 32], v: [6.71, 6.75] for targeted analysis
+  - [2025-08-09 11:30 AEST] Replaced complex interpolation with cleaner implementation for non-ConSav methods:
+    * Added interp_clean() function with simpler, more robust extrapolation logic
+    * Modified horses_c.py to use interp_clean for Q_dcsn and policy interpolation when method != "CONSAV"
+    * Addresses suspected interpolation issues causing FUES instabilities
+  - [2025-08-09 12:00 AEST] Enhanced forward scan logic in Case A (right-turn jump):
+    * Added jump verification when g_1 > g_f_vf_at_idx condition is met
+    * Now checks if gradient from i+1 to idx_f exceeds jump threshold (m_bar)
+    * Only sets keep_i1=True when both value condition AND jump are confirmed
 
 ### Fixed
 * **CUDA_ERROR_LAUNCH_OUT_OF_RESOURCES**

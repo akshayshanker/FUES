@@ -179,6 +179,59 @@ def calculate_gradient_1d(data, x):
     gradients[0] = gradients[1]  # assuming continuous gradient at the start
     return gradients
 
+@njit(cache=True)
+def interp_clean(xp, yp, x, extrap=False):
+    """Clean interpolation function for FUES (non-ConSav case).
+    
+    Simpler and more robust than interp_as, with better handling of edge cases.
+    Uses numpy's interp for the core interpolation and simplified extrapolation.
+    
+    Parameters
+    ----------
+    xp : 1D array
+        x coordinates of data points (must be increasing)
+    yp : 1D array
+        y coordinates of data points
+    x : 1D array
+        x coordinates where we want interpolated values
+    extrap : bool
+        If True, extrapolate linearly outside bounds
+        If False, use boundary values outside bounds
+        
+    Returns
+    -------
+    evals : 1D array
+        Interpolated y values at x positions
+    """
+    n = len(xp)
+    
+    # Handle edge cases
+    if n == 0:
+        return np.zeros(len(x))
+    if n == 1:
+        return np.full(len(x), yp[0])
+    
+    # Use numpy's interp for the core interpolation
+    evals = np.interp(x, xp, yp)
+    
+    # Handle extrapolation if requested
+    if extrap:
+        # Left extrapolation
+        mask_left = x < xp[0]
+        if np.any(mask_left):
+            # Use slope from first two points
+            slope_left = (yp[1] - yp[0]) / (xp[1] - xp[0])
+            evals[mask_left] = yp[0] + slope_left * (x[mask_left] - xp[0])
+        
+        # Right extrapolation  
+        mask_right = x > xp[-1]
+        if np.any(mask_right):
+            # Use slope from last two points
+            slope_right = (yp[-1] - yp[-2]) / (xp[-1] - xp[-2])
+            evals[mask_right] = yp[-1] + slope_right * (x[mask_right] - xp[-1])
+    
+    return evals
+
 @njit
 def correct_jumps1d(data, x, gradient_jump_threshold, policy_value_funcs):
     """
