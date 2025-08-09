@@ -542,12 +542,24 @@ def plot_egm_grids(period, H_idx, y_idx, method, image_dir, bounds=None, sol_ove
     ax[0].legend(frameon=False, prop={'size': 10})
     ax[0].grid(True)
     
-    # Use MaxNLocator to set a fixed number of ticks
-    ax[0].yaxis.set_major_locator(mticker.MaxNLocator(6))
-    ax[0].xaxis.set_major_locator(mticker.MaxNLocator(6))
+    # Special tick formatting for value_h14 plot
+    if H_idx == 14:
+        # For H_idx=14, set ticks every 0.0001 on y-axis
+        if ymin is not None and ymax is not None:
+            # Create ticks every 0.0001 within the bounds
+            y_ticks = np.arange(ymin, ymax + 0.0001, 0.0001)
+            ax[0].yaxis.set_major_locator(mticker.FixedLocator(y_ticks))
+            ax[0].yaxis.set_major_formatter(mticker.FormatStrFormatter("%.4f"))
+        else:
+            # Fallback to default if bounds not specified
+            ax[0].yaxis.set_major_locator(mticker.MaxNLocator(6))
+            ax[0].yaxis.set_major_formatter(mticker.FormatStrFormatter("%.4f"))
+    else:
+        # Use MaxNLocator to set a fixed number of ticks for other plots
+        ax[0].yaxis.set_major_locator(mticker.MaxNLocator(6))
+        ax[0].yaxis.set_major_formatter(mticker.FormatStrFormatter("%.3f"))
     
-    # Set formatters after setting locators
-    ax[0].yaxis.set_major_formatter(mticker.FormatStrFormatter("%.3f"))
+    ax[0].xaxis.set_major_locator(mticker.MaxNLocator(6))
     ax[0].xaxis.set_major_formatter(mticker.FormatStrFormatter("%.0f"))
     
     # Plot housing choice
@@ -603,12 +615,24 @@ def plot_egm_grids(period, H_idx, y_idx, method, image_dir, bounds=None, sol_ove
     ax[1].spines['bottom'].set_visible(False)
     ax[1].grid(True)
     
-    # Use MaxNLocator to set a fixed number of ticks
-    ax[1].yaxis.set_major_locator(mticker.MaxNLocator(6))
-    ax[1].xaxis.set_major_locator(mticker.MaxNLocator(6))
+    # Special tick formatting for value_h14 plot
+    if H_idx == 14:
+        # For H_idx=14, set ticks every 0.1 on y-axis for assets
+        if ymin is not None and ymax is not None:
+            # Create ticks every 0.1 within the bounds
+            y_ticks = np.arange(ymin, ymax + 0.1, 0.1)
+            ax[1].yaxis.set_major_locator(mticker.FixedLocator(y_ticks))
+            ax[1].yaxis.set_major_formatter(mticker.FormatStrFormatter("%.1f"))
+        else:
+            # Fallback to default if bounds not specified
+            ax[1].yaxis.set_major_locator(mticker.MaxNLocator(6))
+            ax[1].yaxis.set_major_formatter(mticker.FormatStrFormatter("%.1f"))
+    else:
+        # Use MaxNLocator to set a fixed number of ticks for other plots
+        ax[1].yaxis.set_major_locator(mticker.MaxNLocator(6))
+        ax[1].yaxis.set_major_formatter(mticker.FormatStrFormatter("%.0f"))
     
-    # Set formatters after setting locators
-    ax[1].yaxis.set_major_formatter(mticker.FormatStrFormatter("%.0f"))
+    ax[1].xaxis.set_major_locator(mticker.MaxNLocator(6))
     ax[1].xaxis.set_major_formatter(mticker.FormatStrFormatter("%.0f"))
     
     # Add title with method, housing value, and income index

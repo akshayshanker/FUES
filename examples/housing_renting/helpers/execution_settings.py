@@ -231,12 +231,14 @@ class ExecutionSettings:
         """
         # EGM bounds for plots
         egm_bounds = {
-            'value_h14': (30, 34, 6.4, 7.1),
-            'assets_h14': (30, 34, 24, 26),
-            'value_h0': (31, 32.5, 6.9, 7),
+            'value_h14': (27, 27.5, 8.220, 8.30),
+            'assets_h14': (27, 27.5, 20, 24),
+            'value_h0': (31, 32, 7, 7.5),
             'assets_h0': (30, 34, 24, 26),
-            'value_h5': (31, 32.5, 6.9, 7),
-            'assets_h5': (30, 34, 24, 26),
+            'value_h5': (25, 30.5, 6.9, 7),
+            'assets_h5': (25, 30, 24, 26),
+            'value_h3': (25, 30.5, None, None),
+            'assets_h3': (25, 30, None, None),
         }
         
         # Dimension labels for policy arrays

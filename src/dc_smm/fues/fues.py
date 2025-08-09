@@ -27,14 +27,39 @@ from numba import njit
 import numpy as np
 
 # Constants for better performance
-EPS_D = 1e-100  # Epsilon for division protection
-EPS_A = 1e-100  # Epsilon for gradient calculations
+EPS_D = 1e-12 # Epsilon for division protection (updated for numerical stability)
+EPS_A = 1e-12  # Epsilon for gradient calculations
 EPS_SEP = 1e-05 # Epsilon for intersection separation
-EPS_fwd_back = 100
+EPS_fwd_back = 10
+PARALLEL_GUARD = 1e-12 # Guard for parallel line detection
+
+TURN_LEFT = 1; TURN_RIGHT = 0
+JUMP_YES = 1; JUMP_NO = 0
 
 # ---------------------------------------------------------------------
 # Helpers that remain identical ---------------------------------------
 # ---------------------------------------------------------------------
+
+@njit(inline="always")
+def _between_open(x, lo, hi, eps):
+    """Require x strictly inside (lo, hi) with a safety margin eps"""
+    if lo > hi:
+        lo, hi = hi, lo
+    return (x > lo + eps*100) and (x < hi - eps*100)
+
+
+@njit(inline="always")
+def _clip_open(x, lo, hi, eps):
+    """Clip x into (lo+eps, hi-eps); if interval collapsed, return nan"""
+    if lo > hi:
+        lo, hi = hi, lo
+    if (hi - lo) <= 2.0*eps:
+        return np.nan
+    if x <= lo + eps:
+        return lo + eps
+    if x >= hi - eps:
+        return hi - eps
+    return x
 
 
 @njit
@@ -191,7 +216,7 @@ def line_intersect_unbounded(ax1, ay1, ax2, ay2, bx1, by1, bx2, by2):
     da_x, da_y = ax2 - ax1, ay2 - ay1
     db_x, db_y = bx2 - bx1, by2 - by1
     denom = da_x * db_y - da_y * db_x
-    if np.abs(denom) < 1E-14:
+    if np.abs(denom) < PARALLEL_GUARD:
         return (np.nan, np.nan)
     s = ((bx1 - ax1) * db_y - (by1 - ay1) * db_x) / denom
     return (ax1 + s * da_x, ay1 + s * da_y)
@@ -325,8 +350,8 @@ def backward_scan_combined(
                     m_ind = m_idx
                     if left_turn and not last_turn_left:
                         # g_m_vf already computed with de
-                        g_m_vf = (vf[i_plus_1] - vf[m_idx]) / de
-                        if g_1 < g_m_vf:
+                        g_m_vf = np.abs((vf[i_plus_1] - vf[m_idx]) / de)
+                        if g_1 > g_m_vf:
                             keep_j = False
                     break
         else:
@@ -469,6 +494,7 @@ def FUES(
         endog_mbar,
         padding_mbar,
         include_intersections,
+        True,  # not_allow_2lefts - default to True
     )
 
     # Extract kept points using boolean mask
@@ -567,6 +593,7 @@ def FUES_sep_intersect(
         endog_mbar,
         padding_mbar,
         True,  # include_intersections
+        True,  # not_allow_2lefts - default to True
     )
 
     # Extract kept points for FUES result using boolean mask
@@ -666,7 +693,8 @@ def _scan(
 
     # 2D array to track intersection points
     # Column 0: e_grid, 1: value, 2: policy_1, 3: policy_2, 4: del_a
-    max_inter = N // 2
+    # Each crossing adds 2 rows, so allocate enough space for worst case
+    max_inter = 2 * (N - 1)
     intersections = np.full((max_inter, 5), np.nan)
     n_inter = 0
 
@@ -687,6 +715,7 @@ def _scan(
     # Index bookkeeping
     j, k = 0, -1  # j is head, k is tail i+1 is lead
     last_turn_left = False
+    last_was_jump = False  # Track consecutive jumps to prevent back-to-back jumps
     prev_j = 0  # Track previous j value if we decide k must be reset to previous iteration
 
     # ==================== MAIN SCAN LOOP ====================
@@ -695,8 +724,14 @@ def _scan(
     for i in range(N - 2):
 
         if i <= 1:  # first two points always kept
-            j, k = i, i - 1
+            if i == 0:
+                j, k = 0, -1
+                prev_j = 0
+            else:  # i == 1
+                prev_j = j  # j was set in previous iteration
+                j, k = i, i - 1
             last_turn_left = False
+            last_was_jump = False
             added_intersection_last_iter = False
             continue
 
@@ -706,12 +741,13 @@ def _scan(
         # - Left turn (g_1 > g_jm1): lead value point is convex
 
         # Use intersection values for k (tail) if we have added intersection in last iteration
+        # Consume the flag exactly once
         if use_intersection_as_k and include_intersections:
             k_e = intersection_e
             k_v = intersection_v
             k_a = intersection_a
             k_d = intersection_d
-            use_intersection_as_k = False
+            use_intersection_as_k = False  # Consume exactly once
         else:
             k_e = e_grid[k] if k >= 0 else e_grid[0]
             k_v = vf[k] if k >= 0 else vf[0]
@@ -739,38 +775,65 @@ def _scan(
         g_tilde_a = np.abs(del_pol * inv_de_lead)
 
         # Check for non-monotone policies: if savings rate is decreasing
-        del_pol_a = (e_grid[i + 1] - a_prime[i + 1]) - (e_grid[j] - a_prime[j])
+        del_pol_a = (e_grid[i + 1] - a_prime[i + 1]) - (e_grid[j] - a_prime[j])\
+        
+        del_pol_2 = policy_2[i + 1] - policy_2[j]
 
         # ============= STEP 2: Classify Current Situation =============
-        # Determine if we have a right turn with jump or left turn
-        right_turn_jump = (g_1 <= g_jm1) and (g_tilde_a > M_max)
-        left_turn = g_1 > g_jm1 and (g_tilde_a > M_max)
-        right_turn_no_jump = (g_1 <= g_jm1) and (g_tilde_a <= M_max) 
+        # Determine turn direction and jump status
+        left_turn_any = g_1 > g_jm1
+        jump_now = g_tilde_a > M_max or del_pol_2 < 0 or del_pol_a < 0
+        
+        # Demote any consecutive jump to 'no-jump' this iteration
+        #if last_was_jump and jump_now:
+        #    jump_now = False
+        
+        # Derive mutually exclusive cases
+        left_turn_jump = left_turn_any and jump_now
+        left_turn_no_jump = left_turn_any and (not jump_now)
+        right_turn_jump = (not left_turn_any) and jump_now
+        right_turn_no_jump = (not left_turn_any) and (not jump_now) 
 
         # Reset intersection tracking flag at start of each iteration
         added_intersection_last_iter = False
 
-        # ============= CASE B: Value Fall or Non-Monotone Policy =============
-        # Drop points that have declining value or violate monotonicity
-        if (vf[i + 1] - vf[j] < 0 ):
+        # ============= CASE B: Value Fall =============
+        # Drop points that have declining value
+        if (vf[i + 1] - vf[j] < 0):
             keep[i + 1] = False
             use_intersection_as_k = False  # Reset flag
-            last_turn_left = False
             m_head = circ_put(m_buf, m_head, i + 1)
+            # Update state flags
+            last_turn_left = False  # Value fall is not a geometric turn
+            last_was_jump = False  # Value fall is not a jump
             continue
 
         # ============= CASE A: Right-Turn with Jump =============
         # This indicates a jump to a different discrete choice.
         # The point might be suboptimal (jumping from a dominated branch).
         # We need forward scan to check if this jump is valid.
+        """ 
+        print = False
+        if vf[i + 1] < 8.260 and vf[i + 1]> 8.25 and policy_2[i + 1] < 22 and policy_2[i + 1] > 21:
+            print("--------------------------------")
+            print(f"vf[i+1] (value at current point): {vf[i + 1]}")
+            print(f"g_1 (leading value gradient j->i+1): {g_1}")
+            print(f"g_jm1 (previous gradient k->j): {g_jm1}")
+            print(f"left_turn_any (g_1 > g_jm1): {left_turn_any}")
+            print(f"g_tilde_a (policy gradient): {g_tilde_a}")
+            print(f"a_prime[i+1] (next period assets): {policy_2[i + 1]}")
+            print(f"right_turn_jump flag: {right_turn_jump}")
+            print("--------------------------------")
+        """
+
         if right_turn_jump:
             # Always perform forward scan for correctness
-            #print("right_turn_jump")
             keep_i1, idx_f, found_forward_same_branch = forward_scan_case_a(
                 e_grid, vf, a_prime, i, j, N, LB, m_bar, g_1
             )
+            #keep_i1 = False
             
-            if keep_i1 and last_turn_left==False:
+            if keep_i1:
                 created_intersection = False
 
                 # Find backward point on same branch from i+1
@@ -791,8 +854,9 @@ def _scan(
                     m_bar,
                     check_drop=False,
                 )
-
-                # Case A intersection: Always try to add intersection using extrapolation if needed
+        
+                # Case A intersection: Only add intersection if this is a jump iteration
+                #test_now  = False
                 if include_intersections:
                     # Build pairs, falling back as needed:
                     # Left/old branch: (j -> idx_f) or fallback (k -> j)
@@ -812,14 +876,22 @@ def _scan(
                         R[0], R[1], R[5], R[6]    # (R_x1,R_y1) -> (R_x2,R_y2)
                     )
 
-                    # Optional: mild guard to avoid absurdly far crossings
-                    if not np.isnan(intr_x):
-                        # e_min/e_max of the four endpoints, expanded a tad
-                        e_min = min(min(L[0], L[5]), min(R[0], R[5])) - 10*EPS_SEP
-                        e_max = max(max(L[0], L[5]), max(R[0], R[5])) + 10*EPS_SEP
-                        if intr_x >= e_min - 1e-8 and intr_x <= e_max + 1e-8:
+                    # Require intersection strictly between j and i+1
+                    if not np.isnan(intr_x) and _between_open(intr_x, e_grid[j], e_grid[i+1], EPS_SEP):
+                        # Clamp intr_x and recompute intr_y at the clamped x
+                        intr_x_c = _clip_open(intr_x, e_grid[j], e_grid[i+1], EPS_SEP)
+                        if not np.isnan(intr_x_c):
+                            # Recompute y at the clamped x using each line (they should match up to tiny error)
+                            denom_L = max(EPS_D, L[5] - L[0])
+                            denom_R = max(EPS_D, R[5] - R[0])
+                            tL_c = (intr_x_c - L[0]) / denom_L
+                            tR_c = (intr_x_c - R[0]) / denom_R
+                            intr_y_L = L[1] + tL_c * (L[6] - L[1])
+                            intr_y_R = R[1] + tR_c * (R[6] - R[1])
+                            intr_y_c = 0.5 * (intr_y_L + intr_y_R)
+                            
                             new_n = add_intersection_from_pairs(
-                                intersections, n_inter, intr_x, intr_y,
+                                intersections, n_inter, intr_x_c, intr_y_c,
                                 L[0], L[1], L[2], L[3], L[4], L[5], L[6], L[7], L[8], L[9],
                                 R[0], R[1], R[2], R[3], R[4], R[5], R[6], R[7], R[8], R[9]
                             )
@@ -827,37 +899,44 @@ def _scan(
                                 n_inter = new_n
                                 added_intersection_last_iter = True
                                 use_intersection_as_k = True
-                                intersection_e = intr_x
-                                intersection_v = intr_y
+                                intersection_e = intr_x_c
+                                intersection_v = intr_y_c
                                 # interpolate a_prime, del_a on the left side to seed k
                                 denom_L = max(EPS_D, L[5]-L[0])
-                                tL = (intr_x - L[0]) / denom_L
+                                tL = (intr_x_c - L[0]) / denom_L
                                 intersection_a = L[2] + tL * (L[7] - L[2])
                                 intersection_d = L[4] + tL * (L[9] - L[4])
                                 created_intersection = True
 
-                # Advance indices
+                # Advance indices uniformly
                 k = j
                 prev_j = j
                 j = i + 1
-                last_turn_left = True
+                last_turn_left = True  # Right turn but effectively a left because we kept a jump (see figure in paper )
+                #last_was_jump = True
                 if not created_intersection:
                     use_intersection_as_k = False  # Reset flag only if no intersection
-            else:
+            if not keep_i1:
                 keep[i + 1] = False
                 m_head = circ_put(m_buf, m_head, i + 1)
                 use_intersection_as_k = False  # Reset flag
-                last_turn_left = False
+                last_turn_left = False  # Right turn but effectively a left because we kept a jump (see figure in paper )
+                #j = u
+                #last_was_jump = Fa
+                # only update last was jump if right jump is kept
+            # Update state flags for Case A
+            if keep_i1:
+                last_was_jump=jump_now
+            else:
+                last_was_jump=False
             continue
 
         
 
-        # ============= CASE C: Left Turn or Right Turn without Jump =============
-        # Either:
-        # - Left turn (g_1 > g_jm1): potential crossing point, j might be suboptimal
-        # - Right turn without jump: normal concave segment continuation
+        # ============= CASE C: Left Turn (with or without Jump) =============
+        # Left turn: potential crossing point, j might be suboptimal
         # Use backward scan to find previous point m on same branch as i+1
-        if left_turn:
+        if left_turn_jump or left_turn_no_jump:
             keep_j, m_ind = backward_scan_combined(
                 m_buf,
                 m_head,
@@ -868,7 +947,7 @@ def _scan(
                 i,
                 j,
                 i + 1,
-                left_turn,
+                left_turn_any,  # Fixed: was undefined 'left_turn'
                 g_tilde_a,
                 last_turn_left,
                 g_1,
@@ -883,11 +962,11 @@ def _scan(
                 keep[j] = False
                 m_head = circ_put(m_buf, m_head, j)  # Add dropped j to circular buffer
 
-                # Compute intersection only if not a consecutive left turn
+                # Compute intersection only on jump iterations
                 use_intersection_as_k = False
                 created_intersection = False
                 added_intersection_last_iter = False
-                if include_intersections:
+                if include_intersections:  # Only add intersection on jump iterations
                     # Find forward point on same branch from j (old branch)
                     found_fwd, idx_f = find_forward_same_branch(
                         e_grid, a_prime, j, j, N, LB, m_bar
@@ -915,13 +994,22 @@ def _scan(
                         R[0], R[1], R[5], R[6]    # (R_x1,R_y1) -> (R_x2,R_y2)
                     )
 
-                    if not np.isnan(intr_x):
-                        # e_min/e_max of the four endpoints, expanded a tad
-                        e_min = min(L[0], L[5], R[0], R[5]) - 10*EPS_SEP
-                        e_max = max(L[0], L[5], R[0], R[5]) + 10*EPS_SEP
-                        if intr_x >= e_min - 1e-8 and intr_x <= e_max + 1e-8:
+                    # Require intersection strictly between j and i+1
+                    if not np.isnan(intr_x) and _between_open(intr_x, e_grid[j], e_grid[i+1], EPS_SEP):
+                        # Clamp intr_x and recompute intr_y at the clamped x
+                        intr_x_c = _clip_open(intr_x, e_grid[j], e_grid[i+1], EPS_SEP)
+                        if not np.isnan(intr_x_c):
+                            # Recompute y at the clamped x using each line (they should match up to tiny error)
+                            denom_L = max(EPS_D, L[5] - L[0])
+                            denom_R = max(EPS_D, R[5] - R[0])
+                            tL_c = (intr_x_c - L[0]) / denom_L
+                            tR_c = (intr_x_c - R[0]) / denom_R
+                            intr_y_L = L[1] + tL_c * (L[6] - L[1])
+                            intr_y_R = R[1] + tR_c * (R[6] - R[1])
+                            intr_y_c = 0.5 * (intr_y_L + intr_y_R)
+                            
                             n_new = add_intersection_from_pairs(
-                                intersections, n_inter, intr_x, intr_y,
+                                intersections, n_inter, intr_x_c, intr_y_c,
                                 L[0], L[1], L[2], L[3], L[4], L[5], L[6], L[7], L[8], L[9],
                                 R[0], R[1], R[2], R[3], R[4], R[5], R[6], R[7], R[8], R[9]
                             )
@@ -929,37 +1017,34 @@ def _scan(
                                 n_inter = n_new
                                 added_intersection_last_iter = True
                                 use_intersection_as_k = True
-                                intersection_e = intr_x
-                                intersection_v = intr_y
+                                intersection_e = intr_x_c
+                                intersection_v = intr_y_c
                                 # interpolate a_prime, del_a on the left side to seed k
                                 denom_L = max(EPS_D, L[5]-L[0])
-                                tL = (intr_x - L[0]) / denom_L
+                                tL = (intr_x_c - L[0]) / denom_L
                                 intersection_a = L[2] + tL * (L[7] - L[2])
                                 intersection_d = L[4] + tL * (L[9] - L[4])
-                                j = i + 1  # advance j
-                                k = prev_j
                                 created_intersection = True
 
-                # Mark this as a left turn after processing
-                last_turn_left = True
-                if created_intersection == False:
-                    j = i + 1  # advance j
-                    k = prev_j
-                    prev_j = j
+                # Advance indices (after dropping j)
+                # k stays unchanged (the tail remains the same)
+                prev_j = k  # Update prev_j to current tail
+                j = i + 1   # Advance j to next point
 
             # --- CASE C.2: Left Turn but j is Kept ---
             else:
-                if last_turn_left and not_allow_2lefts:
-                        keep[j] = False
-                        m_head = circ_put(m_buf, m_head, j)  # Add dropped j to circular buffer
+                # "Avoid two lefts" cleanup only for jump iterations
+                if  not_allow_2lefts and jump_now and last_turn_left:
+                    keep[j] = False
+                    #_head = circ_put(m_buf, m_head, j)  # Add dropped j to circular buffer
 
-                        # Remove last intersection to avoid spurious intersections
-                        if include_intersections and added_intersection_last_iter and n_inter > 0:
-                            n_inter = n_inter - 2
-                        
-                        j = prev_j
+                    # Remove last intersection to avoid spurious intersections (2 rows)
+                    if include_intersections and added_intersection_last_iter and n_inter > 0:
+                        n_inter = n_inter - 2
+                    
+                    j = prev_j
 
-                    # Add intersection for left turn case
+                # Add intersection for left turn case (only on jump iterations)
                 
                 use_intersection_as_k = False
                 if include_intersections and  k >= 0:
@@ -1006,13 +1091,22 @@ def _scan(
                             R[0], R[1], R[5], R[6]    # (R_x1,R_y1) -> (R_x2,R_y2)
                         )
 
-                        if not np.isnan(intr_x):
-                            # e_min/e_max of the four endpoints, expanded a tad
-                            e_min = min(L[0], L[5], R[0], R[5]) - 10*EPS_SEP
-                            e_max = max(L[0], L[5], R[0], R[5]) + 10*EPS_SEP
-                            if intr_x >= e_min - 1e-8 and intr_x <= e_max + 1e-8:
+                        # Require intersection strictly between j and i+1
+                        if not np.isnan(intr_x) and _between_open(intr_x, e_grid[j], e_grid[i+1], EPS_SEP):
+                            # Clamp intr_x and recompute intr_y at the clamped x
+                            intr_x_c = _clip_open(intr_x, e_grid[j], e_grid[i+1], EPS_SEP)
+                            if not np.isnan(intr_x_c):
+                                # Recompute y at the clamped x using each line (they should match up to tiny error)
+                                denom_L = max(EPS_D, L[5] - L[0])
+                                denom_R = max(EPS_D, R[5] - R[0])
+                                tL_c = (intr_x_c - L[0]) / denom_L
+                                tR_c = (intr_x_c - R[0]) / denom_R
+                                intr_y_L = L[1] + tL_c * (L[6] - L[1])
+                                intr_y_R = R[1] + tR_c * (R[6] - R[1])
+                                intr_y_c = 0.5 * (intr_y_L + intr_y_R)
+                                
                                 n_new = add_intersection_from_pairs(
-                                    intersections, n_inter, intr_x, intr_y,
+                                    intersections, n_inter, intr_x_c, intr_y_c,
                                     L[0], L[1], L[2], L[3], L[4], L[5], L[6], L[7], L[8], L[9],
                                     R[0], R[1], R[2], R[3], R[4], R[5], R[6], R[7], R[8], R[9]
                                 )
@@ -1020,42 +1114,43 @@ def _scan(
                                     n_inter = n_new
                                     added_intersection_last_iter = True
                                     use_intersection_as_k = True
-                                    intersection_e = intr_x
-                                    intersection_v = intr_y
+                                    intersection_e = intr_x_c
+                                    intersection_v = intr_y_c
                                     # interpolate a_prime, del_a on the left side to seed k
                                     denom_L = max(EPS_D, L[5]-L[0])
-                                    tL = (intr_x - L[0]) / denom_L
+                                    tL = (intr_x_c - L[0]) / denom_L
                                     intersection_a = L[2] + tL * (L[7] - L[2])
                                     intersection_d = L[4] + tL * (L[9] - L[4])
                 
-                last_turn_left = True
-                # Advance indices for next iteration
-
-                if last_turn_left and not_allow_2lefts:
-                    prev_j = k
-                    k = prev_j
-                    #prev_j = j
-                    j = i + 1
-                    last_turn_left = True
-                    #use_intersection_as_k = False  # Reset flag
-                else:
-                    prev_j = k
+                # Advance indices uniformly
+                if  not_allow_2lefts and jump_now and last_was_jump:
                     k = j
                     #prev_j = j
                     j = i + 1
+                else:
+                    k = j
+                    prev_j = j
+                    j = i + 1
+            
+            # Update state flags for Case C
+            last_turn_left = True
+            last_was_jump = jump_now
             continue
 
-        # --- CASE C.3: Right Turn without Jump ---
+        # ============= CASE R: Right Turn without Jump =============
+        # Concave continuation; simply advance indices
         if right_turn_no_jump:
-            last_turn_left = False
-            # For right turn without jump, advance j normally
-            prev_j = k
-            k = j  # Update k before advancing j
-            #prev_j = j
+            # Advance indices uniformly
+            k = j
+            prev_j = j
             j = i + 1
-            use_intersection_as_k = False  # Reset flag only if not left turn
-            #added_intersection_last_iter
+            use_intersection_as_k = False  # Reset flag
+            
+            # Update state flags for Case R
+            last_turn_left = False
+            last_was_jump = False
             continue
 
     # Return intersection results as 2D array slice
     return e_grid, keep, intersections[:n_inter, :]
+

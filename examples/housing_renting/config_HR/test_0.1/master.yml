@@ -28,7 +28,7 @@ parameters:
   rho: 0.58              # Elasticity of substitution between consumption and housing
   kappa: 0.77          # Housing service scaling factor
   iota: 0.01           # Housing service constant
-  phi: 0.11            # Transaction cost for housing adjustment (Fella phi)
+  phi: 0.07            # Transaction cost for housing adjustment (Fella phi)
   delta: 1            # Depreciation
   delta_pb: 1            # Laibson discounting
   b: 1e-100             # Borrowing constraint
@@ -40,10 +40,10 @@ parameters:
   # Income shock parameters - Explicit Markov process from Fella
   # Transition matrix for Markov process
   Pi:
-    - [0.9993705662187573, 0.0006294337787649558, 2.4777275770022525e-12]
-    - [7.863296831434963e-08, 0.9999998427340633, 7.863296831434963e-08]
-    - [2.4777275770022525e-12, 0.0006294337787649558, 0.9993705662187573]
-  z_vals: [0.6362752758250702, 0.9781257680336732, 1.5036416696387476]
+    - [0.9, 0.06, 0.04]
+    - [0.2, 0.7, 0.1]
+    - [0.1, 0.1, 0.9]
+  z_vals: [0.0362752758250702, 0.9781257680336732, 1.5036416696387476]
   #z_vals: [1]
   #Pi:
   #  - [1]
@@ -67,7 +67,7 @@ settings:
   max_iter: 4000        # Maximum iterations
   
   # Grid parameters - Updated from Fella
-  a_min: 1E-10          # Minimum asset value
+  a_min: 1E-5          # Minimum asset value
   a_max: 40.0           # Maximum asset value (Fella's grid_max_A)
   a_points: 4000        # Number of asset grid points (Fella's grid_size)
 
@@ -80,7 +80,7 @@ settings:
   S_max: 5.0            # Maximum housing value (Fella's grid_max_H)
   S_points: 15           # Number of housing grid points (Fella's grid_size_H)
   
-  w_min: 1E-10              # Minimum cash-on-hand
+  w_min: 1E-5              # Minimum cash-on-hand
   w_max: 40.0           # Maximum cash-on-hand (increased to accommodate shock values)
   w_points: 4000        # Number of cash-on-hand grid points
   
@@ -91,7 +91,7 @@ settings:
   # Income shock discretization - Now explicitly using Fella's values
   y_points: 3           # Number of shock grid points (length of z_vals)
   y_stop: 2 
-  m_bar: 1.000001          # Upper envelope parameter for FUES
+  m_bar: 1.0000000000000001           # Upper envelope parameter for FUES
   lb: 20                 # Look-back parameter for FUES
   rfc_radius: 0.75
   rfc_n_iter: 20

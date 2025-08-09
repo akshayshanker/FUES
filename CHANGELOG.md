@@ -14,6 +14,34 @@ All notable changes to this project will be documented in this file.
   - [2025-08-08 13:37 AEST] Fixed left/right branch assignment in FUES intersection calculation - new branch should be on right (higher e_grid values), old branch on left
   - [2025-08-08 14:15 AEST] Implemented extrapolated segment intersections (extrap_segments_05_08082025_v1) - adds fallback extrapolation when forward/backward scans fail to find bracketing points, ensuring continuous piecewise-linear envelope
   - [2025-08-08 15:34 AEST] Simplified solve_runner.py Phase 1 - extracted configuration management into ConfigurationManager class, reducing main() complexity while maintaining full PBS compatibility 
+  - [2025-08-08 15:45 AEST] Renamed ConfigurationManager to ExecutionSettings to distinguish PBS execution settings from model configuration YAML
+  - [2025-08-08 16:15 AEST] Implemented clean left/no jump logic (clean_left_no_jump_logic_05_08082025.md) - allows consecutive no-jump left turns while preventing consecutive jumps via demotion, adds jump_now condition to intersection logic, ensures uniform index bookkeeping across all cases
+  - [2025-08-08 16:25 AEST] Fixed NameError in solve_runner.py - corrected missed variable rename from cfg_container to model_config in CircuitRunner initialization
+  - [2025-08-08 16:40 AEST] Fixed critical FUES implementation errors causing all points to be dropped:
+    * Fixed undefined variable 'left_turn' -> 'left_turn_any' in backward_scan_combined call
+    * Fixed uninitialized variable 'j' in first iteration (i=0)
+    * Added missing 'not_allow_2lefts' parameter to both _scan function calls in FUES and FUES_sep_intersect wrappers
+  - [2025-08-08 16:50 AEST] Applied additional FUES fixes from 05pro_fues_dev1_fixes.md:
+    * Fixed index update logic in Case C.1 when j is dropped - prev_j now correctly points to k (current tail) instead of dropped j
+    * Fixed value-fall state flags - last_turn_left now correctly set to False (value fall is not a geometric turn)
+    * Increased intersection capacity from N//2 to 2*(N-1) to prevent silent truncation in pathological cases
+  - [2025-08-08 17:05 AEST] Implemented _scan_v2 from right_as_left_no2jumps.md - cleaner, more compact FUES implementation:
+    * Single case_id encoding (turn<<1)|jump for simpler branching logic (4 cases: RTNJ, RTJ, LTNJ, LTJ)
+    * Different consecutive jump handling: keeps second jump but drops previously jumped-to point j and undoes its intersections
+    * Uniform index updates across all cases for better maintainability
+    * Intersections only added on jump iterations with robust extrapolation fallback
+    * Updated both FUES and FUES_sep_intersect wrappers to use _scan_v2
+  - [2025-08-08 17:20 AEST] Applied no_two_jumps.md refinement - only enforce consecutive jump rule when current jump is kept:
+    * Removed early unconditional consecutive jump enforcement block
+    * RTJ case: only drops previous j when keep_i1 is True (current jump is validated and kept)
+    * LTJ case: enforces rule at start since i+1 is always kept by construction
+    * Ensures "no two jumps" rule only applies when we're actually accepting the current jump
+  - [2025-08-08 18:00 AEST] Implemented strict bracket enforcement for FUES intersections - ensures intersections always lie within (e_j, e_{i+1}):
+    * Replaced loose e_min/e_max window check with strict _between_open(intr_x, e_grid[j], e_grid[i+1], EPS_SEP) validation
+    * Added _clip_open to clamp intersection x-coordinate into valid interval with safety margin
+    * Recompute intersection y-coordinate at clamped x using both line equations and average
+    * Applied to all three intersection cases: Case A (right-turn jump), Case C.1 (left turn, j dropped), Case C.2 (left turn, j kept)
+    * Prevents spurious off-interval intersections that corrupt envelope geometry on next iteration
 
 ### Fixed
 * **CUDA_ERROR_LAUNCH_OUT_OF_RESOURCES**

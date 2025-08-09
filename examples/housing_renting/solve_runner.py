@@ -614,7 +614,7 @@ def main(argv=None):
     trace_print("12: Creating CircuitRunner")
     #  set-up main runner ------------------------------------------------------
     runner = CircuitRunner(
-        base_cfg=cfg_container,
+        base_cfg=model_config,
         param_paths=[
             "master.methods.upper_envelope",
             "master.settings.a_points",
