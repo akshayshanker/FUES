@@ -27,10 +27,10 @@ from numba import njit
 import numpy as np
 
 # Constants for better performance
-EPS_D = 1e-12 # Epsilon for division protection (updated for numerical stability)
-EPS_A = 1e-12  # Epsilon for gradient calculations
-EPS_SEP = 1e-100# Epsilon for intersection separation
-EPS_fwd_back = (40/2000)*10
+EPS_D = 1e-20# Epsilon for division protection (updated for numerical stability)
+EPS_A = 1e-20  # Epsilon for gradient calculations
+EPS_SEP = 1e-10 # Epsilon for intersection separation
+EPS_fwd_back = 10
 PARALLEL_GUARD = 1e-12 # Guard for parallel line detection
 
 TURN_LEFT = 1; TURN_RIGHT = 0
@@ -40,12 +40,6 @@ JUMP_YES = 1; JUMP_NO = 0
 # Helpers that remain identical ---------------------------------------
 # ---------------------------------------------------------------------
 
-@njit(inline="always")
-def _between_open(x, lo, hi, eps):
-    """Require x strictly inside (lo, hi) with a safety margin eps"""
-    if lo > hi:
-        lo, hi = hi, lo
-    return (x > lo + eps*100) and (x < hi - eps*100)
 
 
 @njit(inline="always")
@@ -70,59 +64,59 @@ def _force_crossing_inside(
 ):
     """
     Force a crossing point strictly inside (e_lo, e_hi).
-    
-    IMPORTANT: This function ALWAYS returns a valid intersection point.
-    If lines are parallel or intersection is outside interval, it returns
-    the midpoint of the interval.
-    
-    Parameters:
-    -----------
-    L_x1, L_y1, L_x2, L_y2: Coordinates of left line segment endpoints
-    R_x1, R_y1, R_x2, R_y2: Coordinates of right line segment endpoints
-    e_lo, e_hi: Interval bounds - must have intersection inside (e_lo, e_hi)
-    eps: Safety margin (use EPS_SEP = 1e-5)
-    
-    Returns:
-    --------
-    (x, y): Intersection point GUARANTEED inside (e_lo, e_hi)
-            Never returns (nan, nan)
+
+    - Computes infinite-line intersection robustly (vector form, not slopes).
+    - Clips x into (e_lo+eps, e_hi-eps).
+    - Evaluates both branches at that x and averages.
+    - Clips y into the band [min(yL,yR), max(yL,yR)] to avoid tiny overshoots.
+
+    Always returns a valid (x,y) inside (e_lo, e_hi).
     """
-    # Step 1: Compute slopes of both lines
-    denom_L = max(EPS_D, L_x2 - L_x1)  # EPS_D = 1e-12 from line 30
-    denom_R = max(EPS_D, R_x2 - R_x1)
-    sL = (L_y2 - L_y1) / denom_L
-    sR = (R_y2 - R_y1) / denom_R
-    
-    # Step 2: Check if lines are parallel
-    denom = sL - sR
-    
-    if np.abs(denom) < PARALLEL_GUARD:  # PARALLEL_GUARD = 1e-12 from line 34
-        # Lines are parallel - use midpoint between j and i+1
-        # This is the natural crossing point when lines have same slope
-        x = 0.5 * (e_lo + e_hi)
+
+    # 0) Order the interval defensively
+    lo = e_lo if e_lo <= e_hi else e_hi
+    hi = e_hi if e_hi >= e_lo else e_lo
+
+    # 1) Robust infinite-line intersection (parametric / cross-product form)
+    dxL = L_x2 - L_x1; dyL = L_y2 - L_y1
+    dxR = R_x2 - R_x1; dyR = R_y2 - R_y1
+    denom = dxL * dyR - dyL * dxR
+
+    if np.abs(denom) >= PARALLEL_GUARD:
+        # Solve for s in: (L_x1, L_y1) + s*(dxL,dyL) = (R_x1, R_y1) + t*(dxR,dyR)
+        s = ((R_x1 - L_x1) * dyR - (R_y1 - L_y1) * dxR) / denom
+        x_star = L_x1 + s * dxL
+        # We won't trust y_star; we'll recompute y from both branches after clipping x.
     else:
-        # Lines intersect - compute analytical intersection
-        # We solve: L_y1 + sL*(x - L_x1) = R_y1 + sR*(x - R_x1)
-        # Rearranging: x = (R_y1 - L_y1 + sL*L_x1 - sR*R_x1) / (sL - sR)
-        num = (R_y1 - L_y1) + sL * L_x1 - sR * R_x1
-        x = num / denom
-        
-        # Step 3: If intersection is outside interval, use midpoint instead of clipping
-        if x <= e_lo + eps or x >= e_hi - eps:
-            x = 0.5 * (e_lo + e_hi)
-    
-    # Step 4: Compute y at intersection point
-    # If lines actually intersect at x, yL and yR should be equal (or very close)
-    # Use average to handle numerical precision issues
+        # Near parallel → no reliable crossing; start from midpoint
+        x_star = 0.5 * (lo + hi)
+
+    # 2) Clip x strictly inside (lo, hi)
+    x = _clip_open(x_star, lo, hi, eps)
+
+    # 3) Evaluate both branches at the *clipped* x with sign-preserving slopes
+    #    (avoid abs() on dx to preserve orientation)
+    dxL_safe = dxL if np.abs(dxL) > EPS_D else (EPS_D if dxL >= 0.0 else -EPS_D)
+    dxR_safe = dxR if np.abs(dxR) > EPS_D else (EPS_D if dxR >= 0.0 else -EPS_D)
+    sL = dyL / dxL_safe
+    sR = dyR / dxR_safe
     yL = L_y1 + sL * (x - L_x1)
     yR = R_y1 + sR * (x - R_x1)
-    y = 0.5 * (yL + yR)  # Use average of both lines at intersection
-    
+
+    # 4) Average for the crossing value, then clip into the [min, max] band
+    y = 0.5 * (yL + yR)
+    y_min = yL if yL < yR else yR
+    y_max = yR if yR > yL else yL
+    if y < y_min:
+        y = y_min
+    elif y > y_max:
+        y = y_max
+
     return (x, y)
 
 
 @njit
-def uniqueEG(egrid, vf):
+def uniqueEG(egrid, vlu):
     egrid_rounded = np.round_(egrid, 10)
     unique_vals = np.unique(egrid_rounded)
     keep = np.full_like(egrid, False, dtype=np.bool_)
@@ -130,7 +124,7 @@ def uniqueEG(egrid, vf):
         if np.isnan(val):
             continue
         idx = np.where(egrid_rounded == val)[0]
-        keep[idx[np.argmax(vf[idx])]] = True
+        keep[idx[np.argmax(vlu[idx])]] = True
     return keep
 
 
@@ -200,69 +194,6 @@ def seg_intersect(ax1, ay1, ax2, ay2, bx1, by1, bx2, by2, EPS2=1):
 # ---------------- Intersection helpers -------------------
 
 
-@njit
-def add_intersection(
-    intersections,
-    n_inter,
-    intr_x,
-    intr_y,
-    e_grid,
-    a_prime,
-    policy_2,
-    del_a,
-    idx1,
-    idx2,
-    idx3,
-    idx4,
-):
-    """Add two intersection points to the 2D array - one for each policy branch.
-
-    idx1, idx2: indices for the left branch (old branch)
-    idx3, idx4: indices for the right branch (new branch)
-
-    Returns updated n_inter and the interpolated values for the intersection.
-    
-    Call Sites Summary:
-    -------------------
-    1. Case A (lines ~732-735): Right-turn jump (when i+1 is kept)
-       - Left: j to idx_f (old branch continuing)
-       - Right: idx_b to i+1 (new branch jumping in)
-    
-    2. Case C.1 (lines ~855-858): Left turn with j dropped
-       - Left: j to idx_f (old branch being dropped)
-       - Right: idx_b to i+1 (new branch taking over)
-    
-    3. Case C.2 (lines ~917-920): Left turn with j kept
-       - Left: j to idx_fwd (old branch continuing)
-       - Right: idx_back to i+1 (new branch crossing)
-    
-    The pattern is consistent: old branch on left (lower e_grid after intersection),
-    new branch on right (higher e_grid after intersection).
-    """
-    if not np.isnan(intr_x) and n_inter + 1 < intersections.shape[0]:
-        # Left branch point (slightly before intersection)
-        intersections[n_inter, 0] = intr_x - EPS_SEP  # e_grid
-        intersections[n_inter, 1] = intr_y            # value
-
-        # Interpolate policies along left branch (idx1 to idx2)
-        t_left = (intr_x - e_grid[idx1]) / max(EPS_D, e_grid[idx2] - e_grid[idx1])
-        intersections[n_inter, 2] = a_prime[idx1] + t_left * (a_prime[idx2] - a_prime[idx1])      # policy_1
-        intersections[n_inter, 3] = policy_2[idx1] + t_left * (policy_2[idx2] - policy_2[idx1])  # policy_2
-        intersections[n_inter, 4] = del_a[idx1] + t_left * (del_a[idx2] - del_a[idx1])      # del_a
-
-        # Right branch point (slightly after intersection)
-        intersections[n_inter + 1, 0] = intr_x + EPS_SEP  # e_grid
-        intersections[n_inter + 1, 1] = intr_y            # value
-
-        # Interpolate policies along right branch (idx3 to idx4)
-        t_right = (intr_x - e_grid[idx3]) / max(EPS_D, e_grid[idx4] - e_grid[idx3])
-        intersections[n_inter + 1, 2] = a_prime[idx3] + t_right * (a_prime[idx4] - a_prime[idx3])      # policy_1
-        intersections[n_inter + 1, 3] = policy_2[idx3] + t_right * (policy_2[idx4] - policy_2[idx3])  # policy_2
-        intersections[n_inter + 1, 4] = del_a[idx3] + t_right * (del_a[idx4] - del_a[idx3])      # del_a
-
-        return n_inter + 2, intr_x, intr_y, intersections[n_inter, 2], intersections[n_inter, 4]
-
-    return n_inter, 0.0, 0.0, 0.0, 0.0
 
 
 @njit(inline="always")
@@ -336,32 +267,6 @@ def make_pair_from_indices_or_fallback(e, v, a, p2, d, lo_idx, hi_idx, fb_lo, fb
     return x1, y1, a1, p21, d1, x2, y2, a2, p22, d2
 
 
-@njit
-def add_intersection_from_pairs(intersections, n_inter, intr_x, intr_y,
-                                L_x1, L_y1, L_a1, L_p21, L_d1, L_x2, L_y2, L_a2, L_p22, L_d2,
-                                R_x1, R_y1, R_a1, R_p21, R_d1, R_x2, R_y2, R_a2, R_p22, R_d2):
-    """Variant of add_intersection that accepts raw endpoints for left/right pairs."""
-    if not np.isnan(intr_x) and n_inter + 1 < intersections.shape[0]:
-        # left point (slightly before)
-        intersections[n_inter, 0] = intr_x - EPS_SEP
-        intersections[n_inter, 1] = intr_y
-        denom_L = max(EPS_D, L_x2 - L_x1)
-        tL = (intr_x - L_x1) / denom_L  # can be <0 or >1 (extrapolation)
-        intersections[n_inter, 2] = L_a1  + tL * (L_a2  - L_a1)
-        intersections[n_inter, 3] = L_p21 + tL * (L_p22 - L_p21)
-        intersections[n_inter, 4] = L_d1  + tL * (L_d2  - L_d1)
-
-        # right point (slightly after)
-        intersections[n_inter+1, 0] = intr_x + EPS_SEP
-        intersections[n_inter+1, 1] = intr_y
-        denom_R = max(EPS_D, R_x2 - R_x1)
-        tR = (intr_x - R_x1) / denom_R
-        intersections[n_inter+1, 2] = R_a1  + tR * (R_a2  - R_a1)
-        intersections[n_inter+1, 3] = R_p21 + tR * (R_p22 - R_p21)
-        intersections[n_inter+1, 4] = R_d1  + tR * (R_d2  - R_d1)
-
-        return n_inter + 2
-    return n_inter
 
 
 @njit
@@ -398,19 +303,27 @@ def add_intersection_from_pairs_with_sep(
         intersections[n_inter, 1] = intr_y         # value at intersection
         
         # Interpolate policies from LEFT branch at intersection point
-        denom_L = max(EPS_D, L_x2 - L_x1)
-        tL = (intr_x - L_x1) / denom_L  # Parameter for interpolation
+        denom_L = L_x2 - L_x1
+        if np.abs(denom_L) < EPS_D:
+            denom_L = EPS_D if denom_L >= 0.0 else -EPS_D
+        tL = (intr_x - sep - L_x1) / denom_L
         intersections[n_inter, 2] = L_a1 + tL * (L_a2 - L_a1)    # a_prime
         intersections[n_inter, 3] = L_p21 + tL * (L_p22 - L_p21) # policy_2
         intersections[n_inter, 4] = L_d1 + tL * (L_d2 - L_d1)    # del_a
+
+        #if intr_x> L_x1:
+       #     intersections[n_inter, 2] = intersections[n_inter, 2] - 1e-10
+
         
         # Add RIGHT point (slightly after intersection)
         intersections[n_inter+1, 0] = intr_x + sep  # e_grid coordinate
         intersections[n_inter+1, 1] = intr_y         # value at intersection
         
         # Interpolate policies from RIGHT branch at intersection point
-        denom_R = max(EPS_D, R_x2 - R_x1)
-        tR = (intr_x - R_x1) / denom_R  # Parameter for interpolation
+        denom_R = R_x2 - R_x1
+        if np.abs(denom_R) < EPS_D:
+            denom_R = EPS_D if denom_R >= 0.0 else -EPS_D
+        tR = (intr_x + sep - R_x1) / denom_R
         intersections[n_inter+1, 2] = R_a1 + tR * (R_a2 - R_a1)    # a_prime
         intersections[n_inter+1, 3] = R_p21 + tR * (R_p22 - R_p21) # policy_2
         intersections[n_inter+1, 4] = R_d1 + tR * (R_d2 - R_d1)    # del_a
@@ -421,101 +334,66 @@ def add_intersection_from_pairs_with_sep(
 
 @njit
 def backward_scan_combined(
-    m_buf,
-    m_head,
-    LB,
-    e_grid,
-    vf,
-    a_prime,
-    i,
-    j,
-    k,
-    i_plus_1,
-    left_turn,
-    g_tilde_a,
-    last_turn_left,
-    g_1,
+    m_buf, m_head, LB,
+    x_dcsn_hat, vlu, kappa,
+    i, j, k, i_plus_1,
+    left_turn, g_tilde_a, last_turn_left, g_1,
     m_bar,
     check_drop=True,
 ):
-    """Backward scan to find previous point on same branch and check optimality.
-
-    This function searches through recently dropped points (stored in circular buffer)
-    to find point m that is on the same branch as i+1 (i.e., policy gradient < m_bar).
-
-    In Case C with left turn, it checks if j should be dropped by comparing gradients:
-    - If gradient from m to j < gradient from j to i+1, then j is suboptimal
-
-    Parameters
-    ----------
-    m_buf : array
-        Circular buffer storing indices of recently dropped points
-    m_head : int
-        Current write position in circular buffer
-    LB : int
-        Buffer size (lookback limit)
-    e_grid, vf, a_prime : arrays
-        Grid points, values, and policies
-    i, j, i_plus_1 : int
-        Indices: i (loop counter), j (last kept), i+1 (current point)
-    left_turn : bool
-        True if g_1 > g_jm1 (convex turn)
-    g_tilde_a : float
-        Policy gradient between j and i+1
-    last_turn_left : bool
-        Whether previous iteration was also a left turn
-    g_1 : float
-        Value gradient from j to i+1
-    m_bar : float
-        Jump threshold
-    check_drop : bool
-        If True, check whether to drop j. If False, only find m.
-
-    Returns
-    -------
-    keep_j : bool
-        Whether to keep point j
-    m_ind : int
-        Index of point m on same branch as i+1 (-1 if not found)
+    """
+    Return (keep_j, b) where b is the first deleted index before i+1
+    such that:
+       gq_j_b > m_bar   (j is on a different branch from b)
+       gq_i1_b < m_bar  (i+1 is on the same branch as b)
+    and, if check_drop is True, we also test whether p_j lies strictly
+    below the chord joining p_b and p_{i+1} on the (vlu, x_dcsn_hat) plane.
     """
     keep_j = True
-    m_ind = -1
+    b = -1
 
-    # Search backwards for last same-branch point (most recent to oldest)
+    # Traverse recently dropped points, most-recent first
     for t in range(LB):
-        idx_buf = (m_head - 1 - t) % LB
-        m_idx = m_buf[idx_buf]
+        idx = (m_head - 1 - t) % LB
+        cand = m_buf[idx]
+        if cand == -1:
+            continue
 
-        # For Case C (check_drop=True), use original conditions
+        # Enforce order: b must be before the lead (and usually before the head)
+        if cand >= i_plus_1:
+            continue
+        # Optional but usually desirable:
+        # if cand > j:
+        #     continue
+
+        # --- Two-branch tests (policy-space) ---
+        # gq_i1_b  = |kappa[i+1] - kappa[b]| / |x[i+1] - x[b]|   < m_bar
+        # gq_j_b   = |kappa[j]   - kappa[b]| / |x[j]   - x[b]|   > m_bar
+        den_ib = max(EPS_D, abs(x_dcsn_hat[i_plus_1] - x_dcsn_hat[cand]))
+        den_jb = max(EPS_D, abs(x_dcsn_hat[j]        - x_dcsn_hat[cand]))
+        gq_i1_b = abs(kappa[i_plus_1] - kappa[cand]) / den_ib
+        gq_j_b  = abs(kappa[j]        - kappa[cand]) / den_jb
+
+        if not (gq_i1_b < m_bar and gq_j_b > m_bar):
+            continue
+
+        # First candidate that passes the two tests is our b
+        b = cand
+
         if check_drop:
-            if m_idx != -1:
-                de = max(EPS_A, e_grid[i_plus_1] - e_grid[m_idx])
-                g_m_a = np.abs((a_prime[i_plus_1] - a_prime[m_idx]) / de)
+            # --- Geometric drop test for j in value space ---
+            # Is p_j below the chord from p_b to p_{i+1}?
+            # v_on_bi1(x_j) = vlu[b] + (x_j - x_b)/(x_{i+1} - x_b) * (vlu[i+1] - vlu[b])
+            w = (x_dcsn_hat[j] - x_dcsn_hat[b]) / den_ib
+            v_on_bi1_at_j = vlu[b] + w * (vlu[i_plus_1] - vlu[b])
 
-                d_idx_b_k =  e_grid[k] - e_grid[m_idx]
-                g_k_idx_b = np.abs((vf[k] - vf[m_idx]) / d_idx_b_k)
-                if g_m_a < m_bar and de < EPS_fwd_back and g_k_idx_b > m_bar:
-                    m_ind = m_idx
+            # tiny slack to avoid flapping due to roundoff
+            if vlu[j] < v_on_bi1_at_j - 1e-14:
+                keep_j = False
+        break
 
-                    # g_m_vf already computed with de
-                    g_m_vf = np.abs((vf[i_plus_1] - vf[m_idx]) / de)
-                    if g_1 > g_m_vf:
-                        keep_j = False
-                    break
-        else:
-            # For intersection finding (check_drop=False), use original find_backward_same_branch logic
-            if m_idx != -1 and m_idx < i_plus_1:
-                de = max(EPS_D, e_grid[i_plus_1] - e_grid[m_idx])
-                grad_a = np.abs((a_prime[i_plus_1] - a_prime[m_idx]) / de)
+    return keep_j, b
 
-                d_idx_b_k =  e_grid[k] - e_grid[m_idx]
-                g_k_idx_b = np.abs((vf[k] - vf[m_idx]) / d_idx_b_k)
-                if grad_a < m_bar and de < EPS_fwd_back and g_k_idx_b > m_bar:
-                    m_ind = m_idx
-                    #if left_turn  
-                    break
-
-    return keep_j, m_ind
 
 
 @njit
@@ -535,7 +413,7 @@ def find_forward_same_branch(e_grid, a_prime, start_idx, j_idx, N, LB, m_bar):
 
 
 @njit
-def forward_scan_case_a(e_grid, vf, a_prime, i, j, N, LB, m_bar, g_1):
+def forward_scan_case_a(e_grid, vlu, a_prime, i, j, N, LB, m_bar, g_1):
     """Forward scan validation for Case A (right-turn jump).
 
     When we detect a right-turn jump, point i+1 might be jumping from a dominated
@@ -548,7 +426,7 @@ def forward_scan_case_a(e_grid, vf, a_prime, i, j, N, LB, m_bar, g_1):
 
     Parameters
     ----------
-    e_grid, vf, a_prime : arrays
+    e_grid, vlu, a_prime : arrays
         Grid points, values, and policies
     i, j : int
         Indices: i (loop counter), j (last kept point)
@@ -569,6 +447,7 @@ def forward_scan_case_a(e_grid, vf, a_prime, i, j, N, LB, m_bar, g_1):
         Index of forward point on same branch as j (-1 if not found)
     """
     idx_f = -1
+    idx_f_return = -1
     keep_i1 = False
     found_forward_same_branch = False
 
@@ -585,11 +464,11 @@ def forward_scan_case_a(e_grid, vf, a_prime, i, j, N, LB, m_bar, g_1):
         if g_f_a < m_bar and de < EPS_fwd_back and g_jump >= m_bar:
             
             found_forward_same_branch = True
-            
-            # Compute g_f_vf for this point
+            idx_f_return = idx_f
+            # Compute g_f_vlu for this point
             de_1 = max(EPS_D, e_grid[i + 2 + f] - e_grid[j])
-            g_f_vf_at_idx = (vf[i + 2 + f] - vf[j]) / de_1
-            if g_1 > g_f_vf_at_idx:
+            g_f_vlu_at_idx = (vlu[i + 2 + f] - vlu[j]) / de_1
+            if g_1 > g_f_vlu_at_idx:
                 # Only keep i+1 if there's also a jump from i+1 to idx_f
                 # Check if gradient from i+1 to idx_f exceeds jump threshold
                 #
@@ -606,7 +485,7 @@ def forward_scan_case_a(e_grid, vf, a_prime, i, j, N, LB, m_bar, g_1):
 
     #print("keep_i1", keep_i1)
 
-    return keep_i1, idx_f,found_forward_same_branch
+    return keep_i1, idx_f_return,found_forward_same_branch
 
 
 # ---------------------------------------------------------------------
@@ -614,102 +493,137 @@ def forward_scan_case_a(e_grid, vf, a_prime, i, j, N, LB, m_bar, g_1):
 # ---------------------------------------------------------------------
 
 
+
 #@njit
-def FUES(
-    e_grid,
-    vf,
-    policy_1,
-    policy_2,
-    del_a,
-    b=1e-10,
-    m_bar=2.0,
-    LB=4,
-    endog_mbar=False,
-    padding_mbar=0.0,
-    include_intersections=True,
-):
-    """Sort input, call scanner, drop NaNs, return cleaned arrays.
-
-    Parameters:
-    -----------
-    include_intersections : bool, default True
-        If True, intersection points where discrete choices switch are included in output.
-        If False, returns only the original upper envelope points.
-    debug_intersections : bool, default False
-        If True, print debug information for each intersection added.
-    debug_e_min, debug_e_max : float, default -inf, +inf
-        Only print debug info for intersections with e-coordinate in this range.
-    debug_v_min, debug_v_max : float, default -inf, +inf
-        Only print debug info for intersections with v-coordinate in this range.
+def _postclean_double_jump_mask(e_grid, a_prime, m_bar, skip_mask):
     """
+    Keep[i] == False  iff BOTH neighbors of i are policy jumps > m_bar.
+    First and last points are always kept. Points with skip_mask[i]==True
+    (e.g., intersection rows) are always kept.
 
-    idx = np.argsort(e_grid)
-    e_grid = e_grid[idx]
-    vf = vf[idx]
-    policy_1 = policy_1[idx]
-    policy_2 = policy_2[idx]
-    del_a = del_a[idx]
+    Parameters
+    ----------
+    e_grid : 1d array (sorted)
+    a_prime: 1d array (policy_1 in your outer API)
+    m_bar  : float
+    skip_mask : 1d bool array with same length as e_grid
+                True -> never drop (e.g., intersection rows)
 
-    e_grid_out, keep, intersections = _scan(
-        e_grid,
-        vf,
-        policy_1,
-        policy_2,
-        del_a,
-        m_bar,
-        LB,
-        endog_mbar,
-        padding_mbar,
-        include_intersections,
-        True,  # not_allow_2lefts - default to True
-    )
+    Returns
+    -------
+    keep : 1d bool array
+    """
+    N = e_grid.size
+    keep = np.ones(N, dtype=np.bool_)
+    if N <= 2:
+        return keep
 
-    # Extract kept points using boolean mask
-    env_idx = np.flatnonzero(keep)
-    e_kept = e_grid_out[env_idx]
-    v_kept = vf[env_idx]
-    p1_kept = policy_1[env_idx]
-    p2_kept = policy_2[env_idx]
-    d_kept = del_a[env_idx]
+    # Endpoints: always keep
+    keep[0] = True
+    keep[N-1] = True
 
-    if include_intersections:
-        # If we have intersections, merge them with kept points
-        if intersections.shape[0] > 0:
-            n_kept = len(e_kept)
-            n_inter = intersections.shape[0]
-            n_total = n_kept + n_inter
+    for i in range(1, N-1):
+        #if skip_mask[i]:
+        #    continue
 
-            # Pre-allocate output arrays (faster than concatenate)
-            all_e = np.empty(n_total, dtype=e_kept.dtype)
-            all_v = np.empty(n_total, dtype=v_kept.dtype)
-            all_p1 = np.empty(n_total, dtype=p1_kept.dtype)
-            all_p2 = np.empty(n_total, dtype=p2_kept.dtype)
-            all_d = np.empty(n_total, dtype=d_kept.dtype)
+        deL = e_grid[i]   - e_grid[i-1]
+        deR = e_grid[i+1] - e_grid[i]
+        # protect divisions but keep sign (not needed for abs, but consistent)
+        if np.abs(deL) < EPS_D:
+            deL = EPS_D if deL >= 0.0 else -EPS_D
+        if np.abs(deR) < EPS_D:
+            deR = EPS_D if deR >= 0.0 else -EPS_D
 
-            # Fill arrays (memory-efficient copy)
-            all_e[:n_kept] = e_kept
-            all_e[n_kept:] = intersections[:, 0]  # e_grid
-            all_v[:n_kept] = v_kept
-            all_v[n_kept:] = intersections[:, 1]  # value
-            all_p1[:n_kept] = p1_kept
-            all_p1[n_kept:] = intersections[:, 2]  # policy_1
-            all_p2[:n_kept] = p2_kept
-            all_p2[n_kept:] = intersections[:, 3]  # policy_2
-            all_d[:n_kept] = d_kept
-            all_d[n_kept:] = intersections[:, 4]  # del_a
+        gL = np.abs( (a_prime[i]   - a_prime[i-1]) / deL )
+        gR = np.abs( (a_prime[i+1] - a_prime[i])   / deR )
 
-            # Sort by e_grid to maintain order
-            sort_idx = np.argsort(all_e)
-            return (
-                all_e[sort_idx],
-                all_v[sort_idx],
-                all_p1[sort_idx],
-                all_p2[sort_idx],
-                all_d[sort_idx],
+        # Drop i only if both sides are true jumps
+        if (gL > m_bar) and (gR > m_bar):
+            keep[i] = False
+            #print(e_grid[i])
+            #print(a_prime[i])
+
+        if e_grid[i] > 5.309 and e_grid[i] < 5.315:
+            print(
+                f"DEBUG POSTCLEAN (e_grid={e_grid[i]:.4f}): "
+                f"gL={gL:.4f}, gR={gR:.4f}, a_prime={a_prime[i]:.4f}, kept={keep[i]}"
             )
 
-    # Return only kept points (original behavior)
-    return (e_kept, v_kept, p1_kept, p2_kept, d_kept)
+    return keep
+
+
+#@njit
+def FUES(
+    e_grid, vlu, policy_1, policy_2, del_a,
+    b=1e-10, m_bar=1.0, LB=4, endog_mbar=False, padding_mbar=0.0,
+    include_intersections=True,
+):
+    idx = np.argsort(e_grid)
+    e_grid = e_grid[idx]; vlu = vlu[idx]
+    policy_1 = policy_1[idx]; policy_2 = policy_2[idx]; del_a = del_a[idx]
+
+    e_out, keep_scan, intersections = _scan(
+        e_grid, vlu, policy_1, policy_2, del_a,
+        m_bar, LB, endog_mbar, padding_mbar,
+        include_intersections, True
+    )
+
+    env_idx = np.flatnonzero(keep_scan)
+    e_kept  = e_out[env_idx]
+    v_kept  = vlu[env_idx]
+    p1_kept = policy_1[env_idx]
+    p2_kept = policy_2[env_idx]
+    d_kept  = del_a[env_idx]
+
+    # --- Merge intersections (if any) and sort ---
+    if include_intersections and intersections.shape[0] > 0:
+        n_kept  = e_kept.size
+        n_inter = intersections.shape[0]
+        n_total = n_kept + n_inter
+
+        all_e  = np.empty(n_total, dtype=e_kept.dtype)
+        all_v  = np.empty(n_total, dtype=v_kept.dtype)
+        all_p1 = np.empty(n_total, dtype=p1_kept.dtype)
+        all_p2 = np.empty(n_total, dtype=p2_kept.dtype)
+        all_d  = np.empty(n_total, dtype=d_kept.dtype)
+        is_inter = np.zeros(n_total, dtype=np.bool_)  # track intersection rows
+
+        all_e[:n_kept] = e_kept;       all_e[n_kept:] = intersections[:,0]
+        all_v[:n_kept] = v_kept;       all_v[n_kept:] = intersections[:,1]
+        all_p1[:n_kept]= p1_kept;      all_p1[n_kept:]= intersections[:,2]
+        all_p2[:n_kept]= p2_kept;      all_p2[n_kept:]= intersections[:,3]
+        all_d[:n_kept] = d_kept;       all_d[n_kept:] = intersections[:,4]
+        is_inter[n_kept:] = True
+
+        sort_idx = np.argsort(all_e)
+        all_e  = all_e[sort_idx]
+        all_v  = all_v[sort_idx]
+        all_p1 = all_p1[sort_idx]
+        all_p2 = all_p2[sort_idx]
+        all_d  = all_d[sort_idx]
+        is_inter = is_inter[sort_idx]
+
+        print(f"FUES: Post-cleaning with m_bar = {m_bar}")
+        # --- POST-CLEAN: drop i if both neighbors are jumps (> m_bar) ---
+        post_mask = _postclean_double_jump_mask(all_e, all_p2, m_bar, is_inter)
+
+        final_mask = post_mask  # or just post_mask if you want only post-clean
+
+        return (all_e[final_mask], all_v[final_mask],
+                all_p1[final_mask], all_p2[final_mask], all_d[final_mask])
+
+    # No intersections to merge → still apply the POST-CLEAN on the kept scan
+    # Build a skip_mask of all False (no intersections to protect)
+    is_inter = np.zeros(e_kept.size, dtype=np.bool_)
+    post_mask = _postclean_double_jump_mask(e_kept, p2_kept, m_bar, is_inter)
+
+    # (optional) pre-clean as well:
+    # pre_mask = _preclean_same_branch_mask(e_kept, p1_kept, m_bar)
+    # post_mask = pre_mask & post_mask
+
+    return (e_kept[post_mask], v_kept[post_mask],
+            p1_kept[post_mask], p2_kept[post_mask], d_kept[post_mask])
+
 
 
 # ---------------------------------------------------------------------
@@ -719,7 +633,7 @@ def FUES(
 
 def FUES_sep_intersect(
     e_grid,
-    vf,
+    vlu,
     policy_1,
     policy_2,
     del_a,
@@ -736,14 +650,14 @@ def FUES_sep_intersect(
     Returns
     -------
     fues_result : tuple
-        Standard FUES output (e_grid, vf, policy_1, policy_2, del_a)
+        Standard FUES output (e_grid, vlu, policy_1, policy_2, del_a)
     intersections : tuple
         Intersection points (inter_e, inter_v, inter_p1, inter_p2, inter_d)
     """
     # Sort inputs
     idx = np.argsort(e_grid)
     e_grid_sorted = e_grid[idx]
-    vf_sorted = vf[idx]
+    vlu_sorted = vlu[idx]
     policy_1_sorted = policy_1[idx]
     policy_2_sorted = policy_2[idx]
     del_a_sorted = del_a[idx]
@@ -751,7 +665,7 @@ def FUES_sep_intersect(
     # Call scan WITH intersection tracking to get both FUES result and intersections
     e_grid_out, keep, intersections = _scan(
         e_grid_sorted,
-        vf_sorted,
+        vlu_sorted,
         policy_1_sorted,
         policy_2_sorted,
         del_a_sorted,
@@ -767,7 +681,7 @@ def FUES_sep_intersect(
     env_idx = np.flatnonzero(keep)
     fues_result = (
         e_grid_sorted[env_idx],
-        vf_sorted[env_idx],
+        vlu_sorted[env_idx],
         policy_1_sorted[env_idx],
         policy_2_sorted[env_idx],
         del_a_sorted[env_idx],
@@ -797,7 +711,7 @@ def FUES_sep_intersect(
 @njit
 def _scan(
     e_grid,
-    vf,
+    vlu,
     a_prime,
     policy_2,
     del_a,
@@ -824,7 +738,7 @@ def _scan(
     ----------
     e_grid : array
         Sorted endogenous grid points
-    vf : array
+    vlu : array
         Value function at each grid point (read-only, no longer modified)
     a_prime : array
         Next-period assets (policy function)
@@ -855,7 +769,7 @@ def _scan(
     """
 
     N = e_grid.size
-    # Boolean mask to track kept points (instead of vf.copy())
+    # Boolean mask to track kept points (instead of vlu.copy())
     keep = np.ones(N, dtype=np.bool_)
 
     # 2D array to track intersection points
@@ -911,6 +825,7 @@ def _scan(
         # Use intersection values for k (tail) if we have added intersection in last iteration
         # Consume the flag exactly once
         # BUG FIX: Removed premature reset of flag
+        #use_intersection_as_k = False  # Consume exactly once
         if use_intersection_as_k and include_intersections:
             k_e = intersection_e
             k_v = intersection_v
@@ -919,7 +834,7 @@ def _scan(
             use_intersection_as_k = False  # Consume exactly once
         else:
             k_e = e_grid[k] if k >= 0 else e_grid[0]
-            k_v = vf[k] if k >= 0 else vf[0]
+            k_v = vlu[k] if k >= 0 else vlu[0]
             k_a = a_prime[k] if k >= 0 else a_prime[0]
             k_d = del_a[k] if k >= 0 else del_a[0]
 
@@ -927,12 +842,12 @@ def _scan(
         # Gradient from tail (k) to head (j) - slope of previous segment
         de_prev = max(EPS_D, e_grid[j] - k_e)
         inv_de_prev = 1.0 / de_prev  # Optimization: multiply is faster than divide
-        g_jm1 = (vf[j] - k_v) * inv_de_prev
+        g_jm1 = (vlu[j] - k_v) * inv_de_prev
 
         # Gradient from head (j) to current point (i+1) - slope of current segment
         de_lead = max(EPS_D, e_grid[i + 1] - e_grid[j])
         inv_de_lead = 1.0 / de_lead
-        g_1 = (vf[i + 1] - vf[j]) * inv_de_lead
+        g_1 = (vlu[i + 1] - vlu[j]) * inv_de_lead
 
         # Jump threshold: either fixed (m_bar) or endogenous based on policy gradients
         M_max = max(np.abs(del_a[j]), np.abs(del_a[i + 1])) + padding_mbar
@@ -947,10 +862,12 @@ def _scan(
 
         # Policy gradient for jump detection
         del_pol = a_prime[i + 1] - a_prime[j]
+        del_pol_2 = policy_2[i + 1] - policy_2[j]
         g_tilde_a = np.abs(del_pol * inv_de_lead)
+        g_tilde_a_2 = np.abs(del_pol_2 * inv_de_lead)
 
         # Check for non-monotone policies: if savings rate is decreasing
-        del_pol_a = (e_grid[i + 1] - a_prime[i + 1]) - (e_grid[j] - a_prime[j])\
+        del_pol_a = (e_grid[i + 1] - a_prime[i + 1]) - (e_grid[j] - a_prime[j])
         
         del_pol_2 = policy_2[i + 1] - policy_2[j]
 
@@ -958,6 +875,10 @@ def _scan(
         # Determine turn direction and jump status
         left_turn_any = g_1 > g_jm1
         jump_now = g_tilde_a > M_max or del_pol_2 < 0 or del_pol_a < 0
+
+        if del_pol_2> EPS_D:
+            if g_tilde_a_2 > M_max:
+                jump_now = True
 
         
         
@@ -979,7 +900,7 @@ def _scan(
 
         # ============= CASE B: Value Fall =============
         # Drop points that have declining value
-        if (vf[i + 1] - vf[j] < 0):
+        if (vlu[i + 1] - vlu[j] < 0):
             keep[i + 1] = False
             use_intersection_as_k = False  # Reset flag
             m_head = circ_put(m_buf, m_head, i + 1)
@@ -994,9 +915,9 @@ def _scan(
         # We need forward scan to check if this jump is valid.
         """ 
         print = False
-        if vf[i + 1] < 8.260 and vf[i + 1]> 8.25 and policy_2[i + 1] < 22 and policy_2[i + 1] > 21:
+        if vlu[i + 1] < 8.260 and vlu[i + 1]> 8.25 and policy_2[i + 1] < 22 and policy_2[i + 1] > 21:
             print("--------------------------------")
-            print(f"vf[i+1] (value at current point): {vf[i + 1]}")
+            print(f"vlu[i+1] (value at current point): {vlu[i + 1]}")
             print(f"g_1 (leading value gradient j->i+1): {g_1}")
             print(f"g_jm1 (previous gradient k->j): {g_jm1}")
             print(f"left_turn_any (g_1 > g_jm1): {left_turn_any}")
@@ -1009,11 +930,12 @@ def _scan(
         if right_turn_jump:
             # Always perform forward scan for correctness
             keep_i1, idx_f, found_forward_same_branch = forward_scan_case_a(
-                e_grid, vf, a_prime, i, j, N, LB, M_max, g_1
+                e_grid, vlu, a_prime, i, j, N, LB, M_max, g_1
             )
+            
             #keep_i1 = False
             
-            if keep_i1:
+            if keep_i1 and not last_was_jump:
                 created_intersection = False
 
                 # Find backward point on same branch from i+1
@@ -1022,7 +944,7 @@ def _scan(
                     m_head,
                     LB,
                     e_grid,
-                    vf,
+                    vlu,
                     a_prime,
                     i,
                     j,
@@ -1042,14 +964,14 @@ def _scan(
                     # Build L (old branch) and R (new branch) with robust fallbacks
                     # L: j → idx_f (forward point on same branch as j), fallback k → j
                     L = make_pair_from_indices_or_fallback(
-                        e_grid, vf, a_prime, policy_2, del_a,
+                        e_grid, vlu, a_prime, policy_2, del_a,
                         j, idx_f if idx_f != -1 else -1, k, j, N
                     )
                     # R: idx_b → i+1 (new branch), fallback i+1 → forward point on same branch
                     # If we can't find a backward point, look forward and extrapolate back
                     safe_extrap = find_safe_extrapolation_point(e_grid, a_prime, i+1, N, M_max, forward=True)
                     R = make_pair_from_indices_or_fallback(
-                        e_grid, vf, a_prime, policy_2, del_a,
+                        e_grid, vlu, a_prime, policy_2, del_a,
                         idx_b if idx_b != -1 else -1, i+1, i+1, safe_extrap, N
                     )
                     
@@ -1062,6 +984,7 @@ def _scan(
                     
                     # Fallback: if somehow still nan (shouldn't happen), use midpoint
                     if np.isnan(intr_x):
+                        print(f"SCAN DEBUG: intr_x is NaN at i={i}, j={j}. Falling back to midpoint.")
                         mid = 0.5 * (e_grid[j] + e_grid[i+1])
                         denom_L = max(EPS_D, L[5] - L[0])
                         denom_R = max(EPS_D, R[5] - R[0])
@@ -1083,6 +1006,7 @@ def _scan(
                         R[0], R[1], R[2], R[3], R[4], R[5], R[6], R[7], R[8], R[9]
                     )
                     
+                    #add_int = False
                     if n_new > n_inter:
                         n_inter = n_new
                         added_intersection_last_iter = True
@@ -1133,7 +1057,7 @@ def _scan(
                 m_head,
                 LB,
                 e_grid,
-                vf,
+                vlu,
                 a_prime,
                 i,
                 j,
@@ -1164,8 +1088,8 @@ def _scan(
                     
                     # L (old branch after j dropped): k → j
                     L = make_pair_from_indices_or_fallback(
-                        e_grid, vf, a_prime, policy_2, del_a,
-                        k, j, k, j, N  # Use same indices for primary and fallback
+                        e_grid, vlu, a_prime, policy_2, del_a,
+                        -1, -1, k, j, N  # Use same indices for primary and fallback
                     )
                     
                     # R (new branch): m_ind → i+1, fallback i+1 → forward point on same branch
@@ -1173,7 +1097,7 @@ def _scan(
                     # Note: Intersection is still forced to be in (j, i+1) by _force_crossing_inside
                     safe_extrap = find_safe_extrapolation_point(e_grid, a_prime, i+1, N, M_max, forward=True)
                     R = make_pair_from_indices_or_fallback(
-                        e_grid, vf, a_prime, policy_2, del_a,
+                        e_grid, vlu, a_prime, policy_2, del_a,
                         m_ind if m_ind != -1 else -1, i+1, i+1, safe_extrap, N
                     )
                     
@@ -1186,6 +1110,7 @@ def _scan(
                     
                     # Fallback: if somehow still nan, use midpoint
                     if np.isnan(intr_x):
+                        print(f"SCAN DEBUG: intr_x is NaN at i={i}, j={j}. Falling back to midpoint.")
                         mid = 0.5 * (e_grid[j] + e_grid[i+1])
                         denom_L = max(EPS_D, L[5] - L[0])
                         denom_R = max(EPS_D, R[5] - R[0])
@@ -1251,14 +1176,14 @@ def _scan(
                     
                     # Find backward point on same branch from i+1
                     _, idx_back = backward_scan_combined(
-                        m_buf, m_head, LB, e_grid, vf, a_prime,
+                        m_buf, m_head, LB, e_grid, vlu, a_prime,
                         i, j, k, i+1, False, False, False, 0.0, M_max,
                         check_drop=False
                     )
                     
                     # L (old branch): j → idx_fwd
                     L = make_pair_from_indices_or_fallback(
-                        e_grid, vf, a_prime, policy_2, del_a,
+                        e_grid, vlu, a_prime, policy_2, del_a,
                         j, idx_fwd if found_fwd else -1, k, j, N
                     )
                     
@@ -1266,7 +1191,7 @@ def _scan(
                     # Note: Intersection is forced to be in (j, i+1) by _force_crossing_inside
                     safe_extrap = find_safe_extrapolation_point(e_grid, a_prime, i+1, N, M_max, forward=True)
                     R = make_pair_from_indices_or_fallback(
-                        e_grid, vf, a_prime, policy_2, del_a,
+                        e_grid, vlu, a_prime, policy_2, del_a,
                         idx_back if idx_back != -1 else -1, i+1, i+1, safe_extrap, N
                     )
                     
@@ -1279,6 +1204,7 @@ def _scan(
                     
                     # Fallback to midpoint if needed
                     if np.isnan(intr_x):
+                        print(f"SCAN DEBUG: intr_x is NaN at i={i}, j={j}. Falling back to midpoint.")
                         mid = 0.5 * (e_grid[j] + e_grid[i+1])
                         denom_L = max(EPS_D, L[5] - L[0])
                         denom_R = max(EPS_D, R[5] - R[0])
