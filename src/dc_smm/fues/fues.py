@@ -494,7 +494,7 @@ def forward_scan_case_a(e_grid, vlu, a_prime, i, j, N, LB, m_bar, g_1):
 
 
 
-#@njit
+@njit
 def _postclean_double_jump_mask(e_grid, a_prime, m_bar, skip_mask):
     """
     Keep[i] == False  iff BOTH neighbors of i are policy jumps > m_bar.
@@ -543,11 +543,6 @@ def _postclean_double_jump_mask(e_grid, a_prime, m_bar, skip_mask):
             #print(e_grid[i])
             #print(a_prime[i])
 
-        if e_grid[i] > 5.309 and e_grid[i] < 5.315:
-            print(
-                f"DEBUG POSTCLEAN (e_grid={e_grid[i]:.4f}): "
-                f"gL={gL:.4f}, gR={gR:.4f}, a_prime={a_prime[i]:.4f}, kept={keep[i]}"
-            )
 
     return keep
 
@@ -603,7 +598,7 @@ def FUES(
         all_d  = all_d[sort_idx]
         is_inter = is_inter[sort_idx]
 
-        print(f"FUES: Post-cleaning with m_bar = {m_bar}")
+        #print(f"FUES: Post-cleaning with m_bar = {m_bar}")
         # --- POST-CLEAN: drop i if both neighbors are jumps (> m_bar) ---
         post_mask = _postclean_double_jump_mask(all_e, all_p2, m_bar, is_inter)
 

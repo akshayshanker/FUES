@@ -252,6 +252,7 @@ try:
     from helpers.plots import generate_plots
     from helpers.tables import print_summary, generate_latex_table
     from helpers.metrics import dev_c_L2, dev_v_L2, plot_comparison_factory
+    from helpers.plot_csv_export import csv_plot_comparison_factory, csv_generate_plots
     from helpers.memory_utils import MemoryMonitor, log_memory_usage, cleanup_if_needed, get_memory_config, get_memory_usage, get_available_memory
     from helpers.execution_settings import ExecutionSettings
 except ImportError:
@@ -260,6 +261,7 @@ except ImportError:
     from .helpers.plots import generate_plots
     from .helpers.tables import print_summary, generate_latex_table
     from .helpers.metrics import dev_c_L2, dev_v_L2, plot_comparison_factory
+    from .helpers.plot_csv_export import csv_plot_comparison_factory, csv_generate_plots
     from .helpers.memory_utils import MemoryMonitor, log_memory_usage, cleanup_if_needed, get_memory_config, get_memory_usage, get_available_memory
     from .helpers.execution_settings import ExecutionSettings
 
@@ -476,6 +478,8 @@ def main(argv=None):
                    help="Comma-separated list of period indices to load when loading existing models (e.g., '0,1' for Euler error). If not specified, loads all periods.")
     p.add_argument("--load-stages", default=None,
                    help="JSON-formatted dict of period:stages to load (e.g., '{\"0\": [\"OWNC\"], \"1\": null}' loads only OWNC in period 0, all stages in period 1)")
+    p.add_argument("--csv-export", action="store_true",
+                   help="Export plot data to CSV files instead of generating matplotlib plots (for cluster use)")
     p.add_argument("--save-full-model", action="store_true",
                    help="Keep all solution data in memory for saving. Disables memory freeing during solve. Default: False (free memory)")
     
@@ -569,17 +573,27 @@ def main(argv=None):
     #  set-up plotting configuration -----------------------------------------------
     plot_config = settings.get_plot_config()
     
+    # Choose between CSV export or matplotlib plotting based on flag
+    if args.csv_export:
+        plot_factory = csv_plot_comparison_factory
+        egm_plot_func = csv_generate_plots
+        if is_root:
+            print("\n*** CSV EXPORT MODE: Plot data will be saved as CSV files ***\n")
+    else:
+        plot_factory = plot_comparison_factory
+        egm_plot_func = generate_plots
+    
     # Available metrics mapping
     AVAILABLE_METRICS = {
         "euler_error": euler_error_metric,
         "dev_c_L2": dev_c_L2,
-        "plot_c_comparison": plot_comparison_factory(
+        "plot_c_comparison": plot_factory(
             decision_variable='c',
             dim_labels=plot_config['asset_dims'],
             plot_axis_label='w_idx',
             slice_config=plot_config['plots_of_interest']
         ),
-        "plot_v_comparison": plot_comparison_factory(
+        "plot_v_comparison": plot_factory(
             decision_variable='vlu',
             dim_labels=plot_config['asset_dims'],
             plot_axis_label='w_idx',
@@ -723,7 +737,7 @@ def main(argv=None):
                 
                 try:
                     print(f"  Generating plots for {settings.baseline_method}...")
-                    generate_plots(ref_model, settings.baseline_method, settings.img_dir, egm_bounds=plot_config['egm_bounds'])
+                    egm_plot_func(ref_model, settings.baseline_method, settings.img_dir, egm_bounds=plot_config['egm_bounds'])
                 except Exception as err:
                     print(f"[warn] plot-gen for {settings.baseline_method} failed: {err}")
                 finally:
@@ -825,7 +839,7 @@ def main(argv=None):
                             print(f"[DEBUG] Model passed to plotting for {method}: NO EGM grids!")
                             print(f"[DEBUG] Model object id: {id(model)}, ownc_stage.dcsn.sol id: {id(ownc_stage.dcsn.sol)}")
                         
-                        generate_plots(model, method, settings.img_dir, egm_bounds=plot_config['egm_bounds'], y_idx_list=plot_config['y_idx_list'])
+                        egm_plot_func(model, method, settings.img_dir, egm_bounds=plot_config['egm_bounds'], y_idx_list=plot_config['y_idx_list'])
                     except Exception as err:
                         print(f"[warn] plot-gen for {method} failed: {err}")
                     finally:

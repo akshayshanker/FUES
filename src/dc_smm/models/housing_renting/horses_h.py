@@ -250,7 +250,7 @@ def housing_choice_solver_owner_cpu(resources_liquid_3d, H_grid, H_nxt_grid,
 
     return best_Q, best_v, best_lambda, best_idx
 
-@njit(cache=True, fastmath=True, parallel=True)
+@njit(cache=True)
 def housing_choice_solver_renter_cpu(w_grid, S_grid, y_grid, w_rent_grid, 
                                      q_cntn, vlu_cntn, lambda_cntn, Pr, shock_grid):
     """Jitted function to solve the renter housing choice problem on the CPU."""

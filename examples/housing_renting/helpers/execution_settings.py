@@ -233,8 +233,8 @@ class ExecutionSettings:
         egm_bounds = {
             'value_h14': (27, 27.5, 8.220, 8.30),
             'assets_h14': (27, 27.5, 20, 24),
-            'value_h0': (31, 32, 6.64, 6.8),
-            'assets_h0': (31, 32, 24, 32),
+            'value_h0': (2, 4, -2, None),
+            'assets_h0': (2,4, 0, 4),
             'value_h5': (25, 30.5, 6.9, 7),
             'assets_h5': (25, 30, 24, 26),
             'value_h3': (25, 30.5, None, None),

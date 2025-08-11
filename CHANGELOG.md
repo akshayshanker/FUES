@@ -2,6 +2,40 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.0dev11] - 2025-08-11 – FUES Algorithm Stability Improvements
+
+### Enhanced
+* **FUES intersection calculations**
+  - Rewrote intersection logic to handle near-parallel segments robustly
+  - Added forced intersection points that guarantee envelope continuity  
+  - Intersection coordinates now strictly bounded within valid intervals
+  - Averaging technique reduces numerical drift at segment boundaries
+
+* **Branch detection and continuity**
+  - New branch detection checks both gradient thresholds and point proximity
+  - Safe extrapolation finds suitable points when direct neighbors unavailable
+  - Circular buffer for backward scanning improves memory efficiency
+  - Forward scan validates jumps using combined value and gradient criteria
+
+* **Consecutive jump handling**
+  - Prevents numerical instabilities from multiple policy jumps in sequence
+  - Drops previous jump point when consecutive jump detected
+  - Maintains index consistency by removing associated intersections
+  - Rule only enforced when current jump passes validation
+
+### Fixed
+* **Numerical stability issues**
+  - Adjusted epsilon constants for better numerical behavior (EPS_D from 1e-200 to 1e-20)
+  - Added parallel line guard (1e-12) for degenerate geometry detection
+  - Intersection capacity increased to 2*(N-1) preventing silent truncation
+  - Eliminated spurious Euler residuals at policy kinks
+
+### Performance
+* **Memory optimizations**
+  - Pre-allocated arrays reduce allocation overhead in hot loops
+  - Circular buffer implementation minimizes memory churn
+  - Uniform index bookkeeping simplifies maintenance and debugging
+
 ## [0.4.0dev10] - 2025-08-03 – GPU Performance Optimizations
   - [2025-08-02 18:38 AEST] Improved CLAUDE.md documentation with better organization, version management discipline, and incorporated feedback from o3pro.
   - [2025-08-03 17:30 AEST] Fixed GPU scaling issue by implementing memory freeing during solve to prevent 193GB+ memory accumulation
@@ -59,6 +93,7 @@ All notable changes to this project will be documented in this file.
     * Added jump verification when g_1 > g_f_vf_at_idx condition is met
     * Now checks if gradient from i+1 to idx_f exceeds jump threshold (m_bar)
     * Only sets keep_i1=True when both value condition AND jump are confirmed
+  - [2025-08-10 10:15 AEST] Refactored `e_grid` to `x_dcsn_hat` in `fues.py` for improved clarity and consistency with paper notation.
 
 ### Fixed
 * **CUDA_ERROR_LAUNCH_OUT_OF_RESOURCES**

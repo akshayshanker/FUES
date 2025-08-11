@@ -62,7 +62,7 @@ def _calculate_euler_error_cuda_kernel(
                     E_lam += Pi[i_y_loop, jy] * lam_next
                 
                 c_star = inv_uc_owner_gpu(beta * R * E_lam, H_now, alpha)
-                output_logs[i_w_loop, i_h_loop, i_y_loop] = cuda.libdevice.log10(abs((c_star - c0) / c0) + 1e-16)
+                output_logs[i_w_loop, i_h_loop, i_y_loop] = cuda.libdevice.log10(abs((c_star - c0)**2 / c0) + 1e-16)
 
 def calculate_euler_error_gpu(model, sample_size=10000, debug=False):
     """
@@ -206,7 +206,7 @@ def _calculate_euler_error_jit(
 
                 a_next = w_now - c0
 
-                if w_now< 0.5:
+                if w_now< 0.1:
                     continue
                 if w_now> 30:
                     continue
@@ -254,7 +254,7 @@ def _calculate_euler_error_jit(
 
     return np.array(logs)
 
-def calculate_euler_error_cpu(model, debug=True, sample_size=50000):
+def calculate_euler_error_cpu(model, debug=True, sample_size=50000, random_sample=False):
     """
     CPU-based Euler error calculation using the original approach.
     
@@ -322,7 +322,7 @@ def calculate_euler_error_cpu(model, debug=True, sample_size=50000):
     n_w, n_h, n_y = len(w_dcsn_now), len(H_grid), len(z_vals)
     total_states = n_w * n_h * n_y
     
-    if total_states > sample_size:
+    if total_states > sample_size and random_sample:
         if debug:
             print(f"[CPU Euler] Sampling {sample_size:,} states from {total_states:,} total")
         

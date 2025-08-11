@@ -262,6 +262,8 @@ ARGS=(
     --trace
     --precompile 
     --verbose
+    --csv-export
+    --plots
 )
 
 if [[ "$ENABLE_PLOTS" == true ]]; then
