@@ -47,7 +47,8 @@ All notable changes to this project will be documented in this file.
   - [2025-08-03 19:00 AEST] Identified issue with FUES algorithm dropping points after policy function jumps - needs intersection fallback when scans fail
   - [2025-08-08 13:37 AEST] Fixed left/right branch assignment in FUES intersection calculation - new branch should be on right (higher e_grid values), old branch on left
   - [2025-08-08 14:15 AEST] Implemented extrapolated segment intersections (extrap_segments_05_08082025_v1) - adds fallback extrapolation when forward/backward scans fail to find bracketing points, ensuring continuous piecewise-linear envelope
-  - [2025-08-08 15:34 AEST] Simplified solve_runner.py Phase 1 - extracted configuration management into ConfigurationManager class, reducing main() complexity while maintaining full PBS compatibility 
+  - [2025-08-08 15:34 AEST] Simplified solve_runner.py Phase 1 - extracted configuration management into ConfigurationManager class, reducing main() complexity while maintaining full PBS compatibility
+  - [2025-08-12 17:15 AEST] Cleaned up fues.py - removed 4 unused functions (uniqueEG, linear_interp, seg_intersect, line_intersect_unbounded) and made epsilon parameters (eps_d, eps_sep, eps_fwd_back, parallel_guard) configurable as optional function arguments while maintaining backward compatibility 
   - [2025-08-08 15:45 AEST] Renamed ConfigurationManager to ExecutionSettings to distinguish PBS execution settings from model configuration YAML
   - [2025-08-08 16:15 AEST] Implemented clean left/no jump logic (clean_left_no_jump_logic_05_08082025.md) - allows consecutive no-jump left turns while preventing consecutive jumps via demotion, adds jump_now condition to intersection logic, ensures uniform index bookkeeping across all cases
   - [2025-08-08 16:25 AEST] Fixed NameError in solve_runner.py - corrected missed variable rename from cfg_container to model_config in CircuitRunner initialization
