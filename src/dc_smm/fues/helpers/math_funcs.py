@@ -302,3 +302,241 @@ def mask_jumps(data, threshold=0.9):
     # Mask out the points after large jumps
     masked_data[1:][diffs > threshold] = np.nan
     return masked_data
+
+
+# ============== FUES Intersection Helpers ==============
+
+# Constants
+EPS_D = 1e-50
+EPS_SEP = 1e-10
+PARALLEL_GUARD = 1e-12
+
+@njit(inline="always")
+def _clip_open(x, lo, hi, eps):
+    """Clip x into (lo+eps, hi-eps); if interval collapsed, return nan"""
+    if lo > hi:
+        lo, hi = hi, lo
+    if (hi - lo) <= 2.0*eps:
+        return np.nan
+    if x <= lo + eps:
+        return lo + eps
+    if x >= hi - eps:
+        return hi - eps
+    return x
+
+@njit(inline="always")
+def _force_crossing_inside(
+    L_x1, L_y1, L_x2, L_y2,
+    R_x1, R_y1, R_x2, R_y2,
+    e_lo, e_hi, eps, eps_d=EPS_D, parallel_guard=PARALLEL_GUARD
+):
+    """
+    Force a crossing point strictly inside (e_lo, e_hi).
+    """
+    lo = e_lo if e_lo <= e_hi else e_hi
+    hi = e_hi if e_hi >= e_lo else e_lo
+
+    dxL = L_x2 - L_x1; dyL = L_y2 - L_y1
+    dxR = R_x2 - R_x1; dyR = R_y2 - R_y1
+    denom = dxL * dyR - dyL * dxR
+
+    if np.abs(denom) >= parallel_guard:
+        s = ((R_x1 - L_x1) * dyR - (R_y1 - L_y1) * dxR) / denom
+        x_star = L_x1 + s * dxL
+    else:
+        x_star = 0.5 * (lo + hi)
+
+    x = _clip_open(x_star, lo, hi, eps)
+    dxL_safe = dxL if np.abs(dxL) > eps_d else (eps_d if dxL >= 0.0 else -eps_d)
+    dxR_safe = dxR if np.abs(dxR) > eps_d else (eps_d if dxR >= 0.0 else -eps_d)
+    sL = dyL / dxL_safe
+    sR = dyR / dxR_safe
+    yL = L_y1 + sL * (x - L_x1)
+    yR = R_y1 + sR * (x - R_x1)
+
+    y = 0.5 * (yL + yR)
+    y_min = yL if yL < yR else yR
+    y_max = yR if yR > yL else yL
+    if y < y_min:
+        y = y_min
+    elif y > y_max:
+        y = y_max
+
+    return (x, y)
+
+@njit
+def add_intersection_from_pairs_with_sep(
+    intersections, n_inter, intr_x, intr_y, sep,
+    L, R, eps_d=EPS_D
+):
+    """
+    Add two intersection points with ADAPTIVE separation.
+    L and R format: (x1, y1, a1, p21, d1, x2, y2, a2, p22, d2)
+    """
+    L_x1, L_y1, L_a1, L_p21, L_d1, L_x2, L_y2, L_a2, L_p22, L_d2 = L
+    R_x1, R_y1, R_a1, R_p21, R_d1, R_x2, R_y2, R_a2, R_p22, R_d2 = R
+    
+    if not np.isnan(intr_x) and n_inter + 1 < intersections.shape[0]:
+        intersections[n_inter, 0] = intr_x - sep
+        intersections[n_inter, 1] = intr_y
+        
+        denom_L = L_x2 - L_x1
+        if np.abs(denom_L) < eps_d:
+            denom_L = eps_d if denom_L >= 0.0 else -eps_d
+        tL = (intr_x - sep - L_x1) / denom_L
+        intersections[n_inter, 2] = L_a1 + tL * (L_a2 - L_a1)
+        intersections[n_inter, 3] = L_p21 + tL * (L_p22 - L_p21)
+        intersections[n_inter, 4] = L_d1 + tL * (L_d2 - L_d1)
+
+        intersections[n_inter+1, 0] = intr_x + sep
+        intersections[n_inter+1, 1] = intr_y
+        
+        denom_R = R_x2 - R_x1
+        if np.abs(denom_R) < eps_d:
+            denom_R = eps_d if denom_R >= 0.0 else -eps_d
+        tR = (intr_x + sep - R_x1) / denom_R
+        intersections[n_inter+1, 2] = R_a1 + tR * (R_a2 - R_a1)
+        intersections[n_inter+1, 3] = R_p21 + tR * (R_p22 - R_p21)
+        intersections[n_inter+1, 4] = R_d1 + tR * (R_d2 - R_d1)
+        
+        return n_inter + 2
+    return n_inter
+
+@njit(inline="always")
+def _forced_intersection_twopoint(
+    intersections, n_inter,
+    e_lo, e_hi, sep_cap,
+    L, R,
+    eps_d, eps_sep, parallel_guard,
+    dbg_i, dbg_j
+):
+    """
+    Forced crossing of two line segments with adaptive separation (FUES/DC‑EGM helper).
+
+    Purpose
+    -------
+    Compute a numerically robust crossing between two segments, force the x‑coordinate
+    strictly inside (e_lo, e_hi), and write **two** intersection rows slightly to the
+    left and right of the crossing. This is used when constructing the upper envelope
+    of choice‑specific value functions: the small left/right separation avoids kinks and
+    “flapping” when branches are nearly parallel.
+
+    Interface (drop‑in)
+    -------------------
+    This function preserves the original signature and return values so it can replace
+    existing inlined geometry blocks without changing call sites.
+
+    Parameters
+    ----------
+    intersections : 2d float array, shape (M, 5)
+        Preallocated buffer for intersection rows:
+        [e, value, policy_1 (a'), policy_2, del_a].
+    n_inter : int
+        Current count of filled rows in `intersections`.
+    e_lo, e_hi : float
+        Open interval endpoints for the x‑coordinate of the crossing. Order is not
+        assumed elsewhere, but here we **use them as provided** (callers should pass
+        j < i+1 in EGM loops so e_hi > e_lo).
+    sep_cap : float
+        Optional upper bound on the left/right separation. If <= 0, cap is disabled.
+    L, R : tuple[10 floats] or 1d float arrays (length 10)
+        Segment endpoints and interpolands:
+        (x1, y1, a1, p21, d1,   x2, y2, a2, p22, d2)
+        for the LEFT (L) and RIGHT (R) branches.
+        * Seeding is always done from the LEFT branch (EGM convention).
+    eps_d : float
+        Division guard (denominator floor) that **preserves sign** of dx.
+    eps_sep : float
+        Base epsilon for intersection separation and open‑interval padding when
+        computing the forced crossing.
+    parallel_guard : float
+        Threshold for treating the two infinite lines as “near parallel” in the
+        cross‑product denominator. Midpoint fallback is used if |den| < parallel_guard.
+    dbg_i, dbg_j : int
+        Loop indices used only in the rare fallback debug print.
+
+    Returns
+    -------
+    n_inter_new : int
+        Updated number of filled rows in `intersections` (n_inter or n_inter+2).
+    intr_x, intr_y : float
+        Crossing coordinates (after forcing inside (e_lo, e_hi)).
+    seed_a_left, seed_d_left : float
+        Policy seeds interpolated from the **LEFT** segment at intr_x (for
+        downstream use as next‑iteration tail).
+    added : bool
+        True if two rows were successfully written to `intersections`, else False.
+
+    Numerical method (summary)
+    --------------------------
+    1) Intersect the infinite lines (LEFT and RIGHT) using the cross‑product form.
+       If nearly parallel, use the midpoint of (e_lo, e_hi) for x.
+    2) Force x strictly inside (e_lo + eps_sep, e_hi − eps_sep).
+    3) Evaluate y from both segments at that x using sign‑preserving slopes,
+       take the average, and clip into [min(yL, yR), max(yL, yR)].
+    4) Set separation sep = min(eps_sep, 0.25*(e_hi − e_lo)); if sep_cap>0, sep=min(sep, sep_cap).
+    5) Emit **two** rows: (intr_x − sep, LEFT policies) and (intr_x + sep, RIGHT policies).
+       Interpolate policies along the respective segments.
+    """
+ 
+    L_x1, L_y1, L_a1, L_p21, L_d1, L_x2, L_y2, L_a2, L_p22, L_d2 = L
+    R_x1, R_y1, R_a1, R_p21, R_d1, R_x2, R_y2, R_a2, R_p22, R_d2 = R
+    
+    intr_x, intr_y = _force_crossing_inside(
+        L_x1, L_y1, L_x2, L_y2,
+        R_x1, R_y1, R_x2, R_y2,
+        e_lo, e_hi, eps_sep, eps_d, parallel_guard
+    )
+
+    if np.isnan(intr_x):
+        mid = 0.5 * (e_lo + e_hi)
+
+        denom_L = L_x2 - L_x1
+        if np.abs(denom_L) < eps_d:
+            denom_L = eps_d if denom_L >= 0.0 else -eps_d
+        sL = (L_y2 - L_y1) / denom_L
+        yL = L_y1 + sL * (mid - L_x1)
+
+        denom_R = R_x2 - R_x1
+        if np.abs(denom_R) < eps_d:
+            denom_R = eps_d if denom_R >= 0.0 else -eps_d
+        sR = (R_y2 - R_y1) / denom_R
+        yR = R_y1 + sR * (mid - R_x1)
+
+        intr_x = mid
+        intr_y = 0.5 * (yL + yR)
+
+        print(f"SCAN DEBUG: intr_x is NaN at i={dbg_i}, j={dbg_j}. Falling back to midpoint.")
+
+    interval_length = e_hi - e_lo
+    if np.abs(interval_length) < eps_d:
+        interval_length = eps_d if interval_length >= 0.0 else -eps_d
+
+    sep = 0.25 * interval_length
+    if sep > eps_sep:
+        sep = eps_sep
+    if sep_cap > 0.0 and sep > sep_cap:
+        sep = sep_cap
+
+    n_new = add_intersection_from_pairs_with_sep(
+        intersections, n_inter, intr_x, intr_y, sep,
+        L, R, eps_d
+    )
+
+    if n_new > n_inter:
+        denom_L = L_x2 - L_x1
+        if np.abs(denom_L) < eps_d:
+            denom_L = eps_d if denom_L >= 0.0 else -eps_d
+        tL = (intr_x - L_x1) / denom_L
+        seed_a = L_a1 + tL * (L_a2 - L_a1)
+        seed_d = L_d1 + tL * (L_d2 - L_d1)
+        return n_new, intr_x, intr_y, seed_a, seed_d, True
+    return n_inter, 0.0, 0.0, 0.0, 0.0, False
+
+# ============== Circular Buffer Utilities ==============
+
+@njit
+def circ_put(buf, head, value):
+    """Write *value* at *head* position, return new head index."""
+    buf[head] = value
+    return (head + 1) % buf.size
