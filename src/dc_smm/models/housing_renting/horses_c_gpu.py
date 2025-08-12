@@ -67,6 +67,75 @@ def vfi_gpu_kernel(
         policy_a[iw, h, y] = best_a
         Q_dcsn[iw, h, y] = best_Q
 
+@cuda.jit
+def vfi_gpu_kernel_slice(
+    V_prev,                       # Input: full V from previous iteration (device)
+    a_grid, H_grid, w_grid_slice, # Grid arrays (all on device)
+    h_nxt_ind_array,
+    V_out_slice, P_out_slice, Q_out_slice,  # Outputs (slice only, device)
+    beta, delta, m_bar, thorn, n_grid,     # Scalar parameters
+    alpha, kappa, iota,                     # Utility parameters
+    w_offset,                               # Offset for global indexing
+    n_W_slice, n_H, n_Y                    # Slice dimensions
+):
+    """
+    Modified kernel that processes a wealth slice while reading from full V_prev.
+    
+    Key difference from original:
+    - Reads from full V_prev using global index (iw_global) 
+    - Writes to slice arrays using local index (iw_local)
+    - w_grid_slice is pre-sliced device array
+    """
+    iw_local, h, y = cuda.grid(3)
+    
+    if iw_local < n_W_slice and h < n_H and y < n_Y:
+        iw_global = iw_local + w_offset
+        
+        w_val = w_grid_slice[iw_local]
+        H_val = H_grid[h] * thorn
+        h_nxt_ind = h_nxt_ind_array[h]
+        
+        a_low = a_grid[0]
+        a_high = min(w_val - 1e-12, a_grid[-1] + 30)
+        
+        if a_high <= a_low + 1e-14:
+            a_high = a_low
+        
+        best_Q = -1e110
+        best_a = a_low
+        step_inv = 1.0 / (n_grid - 1)
+        
+        for g in range(n_grid):
+            a_try = a_low + (a_high - a_low) * g * step_inv
+            
+            Q_try = bellman_obj_gpu(
+                a_try, w_val, H_val, beta, delta, a_grid, 
+                V_prev,
+                h_nxt_ind, y,
+                alpha, kappa, iota
+            )
+            
+            if Q_try > best_Q:
+                best_Q = Q_try
+                best_a = a_try
+        
+        c_star = w_val - best_a
+        if math.isinf(best_Q) or c_star <= 0.0:
+            c_star = 1e-10
+            best_Q = -1e100
+            best_a = 1e-100
+        
+        # Compute V from Q: V = (Q - (1-delta)*u(c,h)) / delta
+        # where u(c,h) = alpha*log(c) + (1-alpha)*log(kappa*H + iota)
+        if c_star > 0 and kappa * H_val + iota > 0:
+            u_current = alpha * math.log(c_star) + (1 - alpha) * math.log(kappa * H_val + iota)
+            V_out_slice[iw_local, h, y] = (best_Q - (1 - delta) * u_current) / delta
+        else:
+            V_out_slice[iw_local, h, y] = -1e100
+        
+        P_out_slice[iw_local, h, y] = best_a
+        Q_out_slice[iw_local, h, y] = best_Q
+
 # ======================================================================
 #  GPU Continuation Value and Gradient Kernels
 # ======================================================================
@@ -362,4 +431,255 @@ def solve_vfi_gpu(vlu_cntn, model):
     V_cntn = d_V_cntn.copy_to_host()
     lambda_cntn = d_lambda_cntn.copy_to_host()
 
-    return policy_c, policy_a, Q_dcsn, V_cntn, lambda_cntn 
+    return policy_c, policy_a, Q_dcsn, V_cntn, lambda_cntn
+def detect_num_gpus():
+    """Detect number of available GPUs."""
+    try:
+        return cuda.gpus.count()
+    except:
+        return 0
+
+def _split_0axis(N: int, world: int, rank: int):
+    """Compute balanced slice for rank along axis 0."""
+    q, r = divmod(N, world)
+    a = rank * q + min(rank, r)
+    b = a + q + (1 if rank < r else 0)
+    return slice(a, b)
+
+def _counts_displs(shape, world: int):
+    """Compute counts and displacements for Allgatherv."""
+    N = shape[0]
+    rest = int(np.prod(shape[1:])) if len(shape) > 1 else 1
+    lens = [N // world + (1 if r < (N % world) else 0) for r in range(world)]
+    counts = [l * rest for l in lens]
+    displs = [0]
+    for i in range(1, world):
+        displs.append(displs[i-1] + counts[i-1])
+    return lens, counts, displs, rest
+
+def vfh_hd_grid_compute_slice(cfg, V_prev_h, P_prev_h, meta, sl, device_id):
+    """
+    Compute V_new[sl], P_new[sl] on assigned GPU.
+    
+    Parameters
+    ----------
+    V_prev_h : array
+        Full V from previous iteration (host memory)
+    P_prev_h : array or None
+        Full policy from previous iteration (host memory)
+    sl : slice
+        Wealth dimension slice this rank computes
+    device_id : int
+        GPU device ID for this rank
+    
+    Returns
+    -------
+    V_new_slice, P_new_slice : arrays
+        Computed slice of new value function and policy
+    """
+    cuda.select_device(device_id)
+    
+    d_V_prev = cuda.to_device(V_prev_h)
+    
+    n_W_slice = sl.stop - sl.start
+    n_H = meta['n_H']
+    n_Y = meta['n_Y']
+    
+    w_grid_slice = meta['w_grid'][sl]
+    d_w_grid_slice = cuda.to_device(w_grid_slice)
+    d_a_grid = cuda.to_device(meta['a_grid'])
+    d_H_grid = cuda.to_device(meta['H_grid'])
+    d_h_nxt_ind = cuda.to_device(meta['h_nxt_ind_array'])
+    
+    d_V_slice = cuda.device_array((n_W_slice, n_H, n_Y), dtype=np.float64)
+    d_P_slice = cuda.device_array((n_W_slice, n_H, n_Y), dtype=np.float64)
+    d_Q_slice = cuda.device_array((n_W_slice, n_H, n_Y), dtype=np.float64)
+    
+    threads = (8, 8, 8)
+    blocks_x = (n_W_slice + threads[0] - 1) // threads[0]
+    blocks_y = (n_H + threads[1] - 1) // threads[1]
+    blocks_z = (n_Y + threads[2] - 1) // threads[2]
+    blocks = (blocks_x, blocks_y, blocks_z)
+    
+    vfi_gpu_kernel_slice[blocks, threads](
+        d_V_prev,
+        d_a_grid, d_H_grid,
+        d_w_grid_slice,
+        d_h_nxt_ind,
+        d_V_slice, d_P_slice, d_Q_slice,
+        meta['beta'], meta['delta'], meta['m_bar'],
+        meta['thorn'], meta['n_grid'],
+        meta['alpha'], meta['kappa'], meta['iota'],
+        sl.start,
+        n_W_slice, n_H, n_Y
+    )
+    
+    V_out = d_V_slice.copy_to_host()
+    P_out = d_P_slice.copy_to_host()
+    
+    return V_out, P_out
+
+def allgatherv_like(comm, part, full, counts, displs):
+    """Safe Allgatherv with C-contiguous arrays."""
+    part_c = np.ascontiguousarray(part)
+    full_c = np.ascontiguousarray(full) 
+    comm.Allgatherv(
+        part_c.ravel(), 
+        [full_c.ravel(), (counts, displs)]
+    )
+    return full_c
+
+def initialize_vfh_from_config(cfg):
+    """
+    Initialize value function, policy, and metadata from config.
+    
+    Parameters
+    ----------
+    cfg : Config object
+        Configuration with model parameters and grids
+    
+    Returns
+    -------
+    V_initial : ndarray
+        Initial value function (n_W, n_H, n_Y)
+    P_initial : ndarray or None
+        Initial policy function (n_W, n_H, n_Y) if needed
+    meta : dict
+        Metadata including grids and parameters
+    """
+    # Extract grid dimensions from config
+    n_W = getattr(cfg, 'n_W', 100)  # Wealth grid points
+    n_H = getattr(cfg, 'n_H', 20)   # Housing grid points  
+    n_Y = getattr(cfg, 'n_Y', 5)    # Income shock points
+    
+    # Initialize value function (start with zeros or simple heuristic)
+    V_initial = np.zeros((n_W, n_H, n_Y), dtype=np.float64)
+    
+    # Optionally initialize with a simple heuristic (log utility of wealth)
+    w_min = getattr(cfg, 'w_min', 0.1)
+    w_max = getattr(cfg, 'w_max', 100.0)
+    w_grid = np.linspace(w_min, w_max, n_W)
+    
+    h_min = getattr(cfg, 'h_min', 0.1)
+    h_max = getattr(cfg, 'h_max', 10.0)
+    H_grid = np.linspace(h_min, h_max, n_H)
+    
+    # Simple initialization: V = log(w) for each state
+    for i_w in range(n_W):
+        for i_h in range(n_H):
+            for i_y in range(n_Y):
+                V_initial[i_w, i_h, i_y] = np.log(max(w_grid[i_w], 0.01))
+    
+    # Initialize policy (optional, can be None)
+    P_initial = None
+    if getattr(cfg, 'compute_policy', True):
+        P_initial = np.zeros((n_W, n_H, n_Y), dtype=np.float64)
+        # Simple initial policy: save fraction of wealth
+        for i_w in range(n_W):
+            P_initial[i_w, :, :] = 0.3 * w_grid[i_w]
+    
+    # Create metadata dictionary
+    meta = {
+        'n_W': n_W,
+        'n_H': n_H,
+        'n_Y': n_Y,
+        'w_grid': w_grid,
+        'H_grid': H_grid,
+        'a_grid': np.linspace(0, w_max * 0.9, n_W),  # Assets grid
+        'h_nxt_ind_array': np.arange(n_H, dtype=np.int32),  # Housing transition indices
+        'beta': getattr(cfg, 'beta', 0.96),
+        'delta': getattr(cfg, 'delta', 0.9),
+        'm_bar': getattr(cfg, 'm_bar', 1.0),
+        'thorn': getattr(cfg, 'thorn', 1.0),
+        'n_grid': getattr(cfg, 'n_grid', 50),  # Search grid points
+        'alpha': getattr(cfg, 'alpha', 0.7),
+        'kappa': getattr(cfg, 'kappa', 0.5),
+        'iota': getattr(cfg, 'iota', 0.1),
+    }
+    
+    return V_initial, P_initial, meta
+
+def vfh_mpi_driver(cfg, comm, device_id):
+    """MPI driver - all collectives live here."""
+    from mpi4py import MPI
+    rank, world = comm.Get_rank(), comm.Get_size()
+    
+    if rank == 0:
+        V_prev, P_prev, meta = initialize_vfh_from_config(cfg)
+        shapeV, dtypeV = V_prev.shape, V_prev.dtype
+        shapeP = P_prev.shape if P_prev is not None else None
+        dtypeP = P_prev.dtype if P_prev is not None else None
+    else:
+        V_prev = P_prev = meta = None
+        shapeV = dtypeV = shapeP = dtypeP = None
+    
+    shapeV = comm.bcast(shapeV, root=0)
+    dtypeV = comm.bcast(dtypeV, root=0)
+    shapeP = comm.bcast(shapeP, root=0)
+    dtypeP = comm.bcast(dtypeP, root=0) if shapeP else None
+    meta = comm.bcast(meta, root=0)
+    
+    if rank != 0:
+        V_prev = np.empty(shapeV, dtype=dtypeV, order='C')
+        P_prev = np.empty(shapeP, dtype=dtypeP, order='C') if shapeP else None
+    
+    V_prev = np.ascontiguousarray(V_prev)
+    comm.Bcast(V_prev, root=0)
+    if P_prev is not None:
+        P_prev = np.ascontiguousarray(P_prev)
+        comm.Bcast(P_prev, root=0)
+    
+    lensV, countsV, displsV, restV = _counts_displs(shapeV, world)
+    if P_prev is not None:
+        lensP, countsP, displsP, restP = _counts_displs(shapeP, world)
+    
+    N = shapeV[0]
+    sl = _split_0axis(N, world, rank)
+    
+    compute_policy_every = getattr(cfg, 'policy_every', 1)
+    compute_policy_final = True
+    
+    for it in range(cfg.vfi_iters):
+        is_last = (it == cfg.vfi_iters - 1)
+        compute_policy_now = is_last or (it % compute_policy_every == 0)
+        
+        V_part, P_part = vfh_hd_grid_compute_slice(
+            cfg, V_prev, P_prev, meta, sl, device_id
+        )
+        
+        V_part = np.ascontiguousarray(V_part)
+        
+        V_new = np.empty_like(V_prev, order='C')
+        comm.Allgatherv(
+            V_part.ravel(),
+            [V_new.ravel(), (countsV, displsV)]
+        )
+        
+        if P_prev is not None and compute_policy_now:
+            P_part = np.ascontiguousarray(P_part)
+            P_new = np.empty_like(P_prev, order='C')
+            comm.Allgatherv(
+                P_part.ravel(),
+                [P_new.ravel(), (countsP, displsP)]
+            )
+        else:
+            P_new = P_prev
+        
+        if getattr(cfg, 'check_convergence', False):
+            local_resid = np.max(np.abs(V_new - V_prev))
+            global_resid = comm.allreduce(local_resid, op=MPI.MAX)
+            converged = (global_resid < cfg.tol)
+        else:
+            converged = False
+        
+        V_prev, P_prev = V_new, P_new
+        
+        if converged:
+            if rank == 0:
+                print(f"Converged at iteration {it+1}, residual: {global_resid:.2e}")
+            break
+    
+    if rank == 0:
+        return (V_prev, P_prev, meta)
+    else:
+        return None 

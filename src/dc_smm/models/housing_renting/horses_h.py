@@ -40,12 +40,55 @@ import numpy as np
 from numba import njit, prange, cuda
 from dc_smm.models.housing_renting.horses_common import interp_as
 from dynx.stagecraft.solmaker import Solution
+import os
 
 # --- GPU Availability Check ---
 try:
     GPU_AVAILABLE = cuda.is_available()
 except Exception:
     GPU_AVAILABLE = False
+
+
+def _detect_ncpus():
+    """Detect number of CPUs available."""
+    try:
+        import psutil
+        return psutil.cpu_count(logical=True)
+    except Exception:
+        return int(os.environ.get("PBS_NCPUS", os.cpu_count() or 4))
+
+def run_vfh_hd_grid(cfg):
+    """Main entry point with MPI dispatch."""
+    use_mpi = getattr(cfg, "dist", None) == "mpi" or os.environ.get("DIST") == "mpi"
+    if not use_mpi:
+        from dc_smm.models.housing_renting.horses_c import VFI_homog_shocks as run_vfh_hd_grid_single
+        return run_vfh_hd_grid_single(cfg)
+    
+    from mpi4py import MPI
+    from .horses_c_gpu import detect_num_gpus
+    comm = MPI.COMM_WORLD
+    rank = comm.Get_rank()
+    
+    node_comm = comm.Split_type(MPI.COMM_TYPE_SHARED, 0, key=rank)
+    local_rank = node_comm.Get_rank()
+    
+    n_local_gpus = detect_num_gpus()
+    if local_rank >= n_local_gpus:
+        raise RuntimeError(f"Local rank {local_rank} but only {n_local_gpus} GPUs visible.")
+    
+    device_id = local_rank
+    
+    n_cpus = _detect_ncpus()
+    world = comm.Get_size()
+    cpus_per_rank = max(1, n_cpus // world)
+    os.environ["OMP_NUM_THREADS"] = str(cpus_per_rank)
+    os.environ["MKL_NUM_THREADS"] = str(cpus_per_rank)
+    os.environ["OMP_PROC_BIND"] = "close"
+    os.environ["OMP_PLACES"] = "cores"
+    os.environ["CUDA_VISIBLE_DEVICES"] = str(device_id)
+    
+    from .horses_c_gpu import vfh_mpi_driver
+    return vfh_mpi_driver(cfg, comm, device_id)
 
 
 def F_shocks_dcsn_to_arvl(mover):
