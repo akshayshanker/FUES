@@ -55,6 +55,8 @@ All notable changes to this project will be documented in this file.
   - [2025-08-12 19:30 AEST] Simplified function signatures in fues.py - refactored _forced_intersection_twopoint and add_intersection_from_pairs_with_sep to accept L and R as tuples instead of 20 individual parameters, improving code clarity
   - [2025-08-12 19:45 AEST] Fixed Numba compilation issue - removed @njit decorator from FUES wrapper function as it's unnecessary (only _scan needs JIT compilation) and was causing return type inconsistency errors
   - [2025-08-12 20:00 AEST] Refactored FUES helpers - moved intersection and circular buffer utilities from fues.py to helpers/math_funcs.py for better code organization and reusability.
+  - [2025-08-12 20:15 AEST] Applied PEP8 formatting to fues.py - cleaned up whitespace, fixed spacing around operators, improved line breaks for better readability
+  - [2025-08-12 20:30 AEST] Fixed constants handling - moved EPS_D, EPS_SEP, and PARALLEL_GUARD constants from math_funcs.py back to fues.py where they belong, removed default parameter values that used these constants
   - [2025-08-08 15:45 AEST] Renamed ConfigurationManager to ExecutionSettings to distinguish PBS execution settings from model configuration YAML
   - [2025-08-08 16:15 AEST] Implemented clean left/no jump logic (clean_left_no_jump_logic_05_08082025.md) - allows consecutive no-jump left turns while preventing consecutive jumps via demotion, adds jump_now condition to intersection logic, ensures uniform index bookkeeping across all cases
   - [2025-08-08 16:25 AEST] Fixed NameError in solve_runner.py - corrected missed variable rename from cfg_container to model_config in CircuitRunner initialization

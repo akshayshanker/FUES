@@ -14,17 +14,17 @@ from .helpers.math_funcs import (
     _force_crossing_inside,
     _forced_intersection_twopoint,
     add_intersection_from_pairs_with_sep,
-    EPS_D,
-    EPS_SEP,
-    PARALLEL_GUARD,
 )
 
 # Constants
+EPS_D = 1e-50
+EPS_SEP = 1e-10
 EPS_fwd_back = 0.5
-
-TURN_LEFT = 1; TURN_RIGHT = 0
-JUMP_YES = 1; JUMP_NO = 0
-
+PARALLEL_GUARD = 1e-12
+TURN_LEFT = 1
+TURN_RIGHT = 0
+JUMP_YES = 1
+JUMP_NO = 0
 
 
 @njit(inline="always")
@@ -35,6 +35,7 @@ def check_same_branch(e_grid, a_prime, idx1, idx2, m_bar, eps_d=EPS_D, eps_fwd_b
     de = max(eps_d, e_grid[idx2] - e_grid[idx1])
     g_a = np.abs((a_prime[idx2] - a_prime[idx1]) / de)
     return g_a < m_bar and de < eps_fwd_back
+
 
 @njit(inline="always")
 def find_safe_extrapolation_point(e_grid, a_prime, base_idx, N, m_bar, forward=True, eps_d=EPS_D, eps_fwd_back=EPS_fwd_back):
@@ -57,6 +58,7 @@ def find_safe_extrapolation_point(e_grid, a_prime, base_idx, N, m_bar, forward=T
     # If no valid point found, return base_idx (will result in flat extrapolation)
     return base_idx
 
+
 @njit(inline="always")
 def make_pair_from_indices_or_fallback(e, v, a, p2, d, lo_idx, hi_idx, fb_lo, fb_hi, N):
     """
@@ -64,8 +66,8 @@ def make_pair_from_indices_or_fallback(e, v, a, p2, d, lo_idx, hi_idx, fb_lo, fb
     If lo_idx or hi_idx is -1, uses the fallback pair (fb_lo, fb_hi).
     """
     # Bounds checking for fallback indices
-    fb_lo = max(0, min(fb_lo, N-1))
-    fb_hi = max(0, min(fb_hi, N-1))
+    fb_lo = max(0, min(fb_lo, N - 1))
+    fb_hi = max(0, min(fb_hi, N - 1))
     
     if lo_idx != -1 and hi_idx != -1:
         return (e[lo_idx], v[lo_idx], a[lo_idx], p2[lo_idx], d[lo_idx],
@@ -105,9 +107,9 @@ def backward_scan_combined(
         if cand >= i_plus_1:
             continue
         den_ib = max(eps_d, abs(x_dcsn_hat[i_plus_1] - x_dcsn_hat[cand]))
-        den_jb = max(eps_d, abs(x_dcsn_hat[j]        - x_dcsn_hat[cand]))
+        den_jb = max(eps_d, abs(x_dcsn_hat[j] - x_dcsn_hat[cand]))
         gq_i1_b = abs(kappa[i_plus_1] - kappa[cand]) / den_ib
-        gq_j_b  = abs(kappa[j]        - kappa[cand]) / den_jb
+        gq_j_b = abs(kappa[j] - kappa[cand]) / den_jb
 
         if not (gq_i1_b < m_bar and gq_j_b > m_bar):
             continue
@@ -199,20 +201,13 @@ def forward_scan_case_a(e_grid, vlu, a_prime, i, j, N, LB, m_bar, g_1, eps_d=EPS
             de_1 = max(eps_d, e_grid[i + 2 + f] - e_grid[j])
             g_f_vlu_at_idx = (vlu[i + 2 + f] - vlu[j]) / de_1
             if g_1 > g_f_vlu_at_idx:
-                # Only keep i+1 if there's also a jump from i+1 to idx_f
-                # Check if gradient from i+1 to idx_f exceeds jump threshold
-                #
-                #if   # There IS a jump from i+1 to idx_f
                 keep_i1 = True
-                
                 break
-    
     
     if not found_forward_same_branch:
         keep_i1 = True
 
-    return keep_i1, idx_f_return,found_forward_same_branch
-
+    return keep_i1, idx_f_return, found_forward_same_branch
 
 
 @njit
@@ -241,21 +236,19 @@ def _postclean_double_jump_mask(e_grid, a_prime, m_bar, skip_mask, eps_d=EPS_D):
 
     # Endpoints: always keep
     keep[0] = True
-    keep[N-1] = True
+    keep[N - 1] = True
 
-    for i in range(1, N-1):
-
-
-        deL = e_grid[i]   - e_grid[i-1]
-        deR = e_grid[i+1] - e_grid[i]
+    for i in range(1, N - 1):
+        deL = e_grid[i] - e_grid[i - 1]
+        deR = e_grid[i + 1] - e_grid[i]
         # protect divisions but keep sign (not needed for abs, but consistent)
         if np.abs(deL) < eps_d:
             deL = eps_d if deL >= 0.0 else -eps_d
         if np.abs(deR) < eps_d:
             deR = eps_d if deR >= 0.0 else -eps_d
 
-        gL = np.abs( (a_prime[i]   - a_prime[i-1]) / deL )
-        gR = np.abs( (a_prime[i+1] - a_prime[i])   / deR )
+        gL = np.abs((a_prime[i] - a_prime[i - 1]) / deL)
+        gR = np.abs((a_prime[i + 1] - a_prime[i]) / deR)
 
         # Drop i only if both sides are true jumps
         if (gL > m_bar) and (gR > m_bar):
@@ -294,8 +287,11 @@ def FUES(
     eps_fwd_back = eps_fwd_back if eps_fwd_back is not None else EPS_fwd_back
     parallel_guard = parallel_guard if parallel_guard is not None else PARALLEL_GUARD
     idx = np.argsort(e_grid)
-    e_grid = e_grid[idx]; vlu = vlu[idx]
-    policy_1 = policy_1[idx]; policy_2 = policy_2[idx]; del_a = del_a[idx]
+    e_grid = e_grid[idx]
+    vlu = vlu[idx]
+    policy_1 = policy_1[idx]
+    policy_2 = policy_2[idx]
+    del_a = del_a[idx]
 
     e_out, keep_scan, intersections = _scan(
         e_grid, vlu, policy_1, policy_2, del_a,
@@ -305,11 +301,11 @@ def FUES(
     )
 
     env_idx = np.flatnonzero(keep_scan)
-    e_kept  = e_out[env_idx]
-    v_kept  = vlu[env_idx]
+    e_kept = e_out[env_idx]
+    v_kept = vlu[env_idx]
     p1_kept = policy_1[env_idx]
     p2_kept = policy_2[env_idx]
-    d_kept  = del_a[env_idx]
+    d_kept = del_a[env_idx]
 
     if include_intersections and intersections.shape[0] > 0:
         if return_intersections_separately:
@@ -323,35 +319,35 @@ def FUES(
             fues_result = (e_kept, v_kept, p1_kept, p2_kept, d_kept)
             return fues_result, inter_tuple
         
-        n_kept  = e_kept.size
+        n_kept = e_kept.size
         n_inter = intersections.shape[0]
         n_total = n_kept + n_inter
 
-        all_e  = np.empty(n_total, dtype=e_kept.dtype)
-        all_v  = np.empty(n_total, dtype=v_kept.dtype)
+        all_e = np.empty(n_total, dtype=e_kept.dtype)
+        all_v = np.empty(n_total, dtype=v_kept.dtype)
         all_p1 = np.empty(n_total, dtype=p1_kept.dtype)
         all_p2 = np.empty(n_total, dtype=p2_kept.dtype)
-        all_d  = np.empty(n_total, dtype=d_kept.dtype)
+        all_d = np.empty(n_total, dtype=d_kept.dtype)
         is_inter = np.zeros(n_total, dtype=np.bool_)
 
         all_e[:n_kept] = e_kept
-        all_e[n_kept:] = intersections[:,0]
+        all_e[n_kept:] = intersections[:, 0]
         all_v[:n_kept] = v_kept
-        all_v[n_kept:] = intersections[:,1]
-        all_p1[:n_kept]= p1_kept
-        all_p1[n_kept:]= intersections[:,2]
-        all_p2[:n_kept]= p2_kept
-        all_p2[n_kept:]= intersections[:,3]
+        all_v[n_kept:] = intersections[:, 1]
+        all_p1[:n_kept] = p1_kept
+        all_p1[n_kept:] = intersections[:, 2]
+        all_p2[:n_kept] = p2_kept
+        all_p2[n_kept:] = intersections[:, 3]
         all_d[:n_kept] = d_kept
-        all_d[n_kept:] = intersections[:,4]
+        all_d[n_kept:] = intersections[:, 4]
         is_inter[n_kept:] = True
 
         sort_idx = np.argsort(all_e)
-        all_e  = all_e[sort_idx]
-        all_v  = all_v[sort_idx]
+        all_e = all_e[sort_idx]
+        all_v = all_v[sort_idx]
         all_p1 = all_p1[sort_idx]
         all_p2 = all_p2[sort_idx]
-        all_d  = all_d[sort_idx]
+        all_d = all_d[sort_idx]
         is_inter = is_inter[sort_idx]
 
         post_mask = _postclean_double_jump_mask(all_e, all_p2, m_bar, is_inter, eps_d)

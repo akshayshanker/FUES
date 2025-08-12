@@ -306,11 +306,6 @@ def mask_jumps(data, threshold=0.9):
 
 # ============== FUES Intersection Helpers ==============
 
-# Constants
-EPS_D = 1e-50
-EPS_SEP = 1e-10
-PARALLEL_GUARD = 1e-12
-
 @njit(inline="always")
 def _clip_open(x, lo, hi, eps):
     """Clip x into (lo+eps, hi-eps); if interval collapsed, return nan"""
@@ -328,7 +323,7 @@ def _clip_open(x, lo, hi, eps):
 def _force_crossing_inside(
     L_x1, L_y1, L_x2, L_y2,
     R_x1, R_y1, R_x2, R_y2,
-    e_lo, e_hi, eps, eps_d=EPS_D, parallel_guard=PARALLEL_GUARD
+    e_lo, e_hi, eps, eps_d, parallel_guard
 ):
     """
     Force a crossing point strictly inside (e_lo, e_hi).
@@ -367,7 +362,7 @@ def _force_crossing_inside(
 @njit
 def add_intersection_from_pairs_with_sep(
     intersections, n_inter, intr_x, intr_y, sep,
-    L, R, eps_d=EPS_D
+    L, R, eps_d
 ):
     """
     Add two intersection points with ADAPTIVE separation.
