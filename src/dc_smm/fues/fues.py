@@ -114,6 +114,90 @@ def _force_crossing_inside(
     return (x, y)
 
 
+@njit(inline="always")
+def _forced_intersection_twopoint(
+    intersections, n_inter,
+    e_lo, e_hi, sep_cap,
+    # LEFT segment: x1,y1,a1,p21,d1, x2,y2,a2,p22,d2
+    L_x1, L_y1, L_a1, L_p21, L_d1, L_x2, L_y2, L_a2, L_p22, L_d2,
+    # RIGHT segment: x1,y1,a1,p21,d1, x2,y2,a2,p22,d2
+    R_x1, R_y1, R_a1, R_p21, R_d1, R_x2, R_y2, R_a2, R_p22, R_d2,
+    eps_d, eps_sep, parallel_guard,
+    dbg_i, dbg_j
+):
+    """
+    Compute an intersection between LEFT and RIGHT segments, force it into (e_lo, e_hi),
+    add TWO intersection rows with adaptive separation (left/right of the crossing),
+    and return:
+        (n_inter_new, intr_x, intr_y, seed_a_left, seed_d_left, added_flag)
+
+    - Separation: sep = min(EPS_SEP, 0.25*(e_hi - e_lo)); if sep_cap>0, sep=min(sep, sep_cap)
+    - Seeding: seed values are interpolated from the LEFT segment at intr_x.
+    - Fallback: if intr_x is NaN (should be rare), use midpoint and average y.
+    """
+    # 1) robust forced crossing strictly inside (e_lo, e_hi)
+    intr_x, intr_y = _force_crossing_inside(
+        L_x1, L_y1, L_x2, L_y2,
+        R_x1, R_y1, R_x2, R_y2,
+        e_lo, e_hi, eps_sep, eps_d, parallel_guard
+    )
+
+    # 2) rare fallback: safeguard if nan slips through
+    if np.isnan(intr_x):
+        # match existing fallback behavior: use midpoint and average branch values
+        mid = 0.5 * (e_lo + e_hi)
+
+        denom_L = L_x2 - L_x1
+        if np.abs(denom_L) < eps_d:
+            denom_L = eps_d if denom_L >= 0.0 else -eps_d
+        sL = (L_y2 - L_y1) / denom_L
+        yL = L_y1 + sL * (mid - L_x1)
+
+        denom_R = R_x2 - R_x1
+        if np.abs(denom_R) < eps_d:
+            denom_R = eps_d if denom_R >= 0.0 else -eps_d
+        sR = (R_y2 - R_y1) / denom_R
+        yR = R_y1 + sR * (mid - R_x1)
+
+        intr_x = mid
+        intr_y = 0.5 * (yL + yR)
+
+        # keep debug print semantics (Numba allows print)
+        print(f"SCAN DEBUG: intr_x is NaN at i={dbg_i}, j={dbg_j}. Falling back to midpoint.")
+
+    # 3) adaptive separation
+    interval_length = e_hi - e_lo
+    # (do not allow negative or zero)
+    if np.abs(interval_length) < eps_d:
+        interval_length = eps_d if interval_length >= 0.0 else -eps_d
+
+    sep = 0.25 * interval_length
+    if sep > eps_sep:
+        sep = eps_sep
+    if sep_cap > 0.0 and sep > sep_cap:
+        sep = sep_cap
+
+    # 4) emit TWO rows using the existing writer
+    n_new = add_intersection_from_pairs_with_sep(
+        intersections, n_inter, intr_x, intr_y, sep,
+        L_x1, L_y1, L_a1, L_p21, L_d1, L_x2, L_y2, L_a2, L_p22, L_d2,
+        R_x1, R_y1, R_a1, R_p21, R_d1, R_x2, R_y2, R_a2, R_p22, R_d2,
+        eps_d
+    )
+
+    if n_new > n_inter:
+        # seed from LEFT branch
+        denom_L = L_x2 - L_x1
+        if np.abs(denom_L) < eps_d:
+            denom_L = eps_d if denom_L >= 0.0 else -eps_d
+        tL = (intr_x - L_x1) / denom_L
+        seed_a = L_a1 + tL * (L_a2 - L_a1)
+        seed_d = L_d1 + tL * (L_d2 - L_d1)
+        return n_new, intr_x, intr_y, seed_a, seed_d, True
+
+    # nothing added
+    return n_inter, 0.0, 0.0, 0.0, 0.0, False
+
 # ---------------- Circular buffer utilities --------------------------
 
 
@@ -837,19 +921,7 @@ def _scan(
         # This indicates a jump to a different discrete choice.
         # The point might be suboptimal (jumping from a dominated branch).
         # We need forward scan to check if this jump is valid.
-        """ 
-        print = False
-        if vlu[i + 1] < 8.260 and vlu[i + 1]> 8.25 and policy_2[i + 1] < 22 and policy_2[i + 1] > 21:
-            print("--------------------------------")
-            print(f"vlu[i+1] (value at current point): {vlu[i + 1]}")
-            print(f"g_1 (leading value gradient j->i+1): {g_1}")
-            print(f"g_jm1 (previous gradient k->j): {g_jm1}")
-            print(f"left_turn_any (g_1 > g_jm1): {left_turn_any}")
-            print(f"g_tilde_a (policy gradient): {g_tilde_a}")
-            print(f"a_prime[i+1] (next period assets): {policy_2[i + 1]}")
-            print(f"right_turn_jump flag: {right_turn_jump}")
-            print("--------------------------------")
-        """
+
 
         if right_turn_jump:
             # Always perform forward scan for correctness
@@ -880,71 +952,34 @@ def _scan(
                     0.0,
                     M_max,
                     check_drop=False,
+                    eps_d=eps_d,
                 )
         
                 # Case A intersection: Only add intersection if this is a jump iteration
-                #test_now  = False
                 if include_intersections and not last_was_jump:
-                    # Build L (old branch) and R (new branch) with robust fallbacks
-                    # L: j → idx_f (forward point on same branch as j), fallback k → j
+                    # L and R as before
                     L = make_pair_from_indices_or_fallback(
                         e_grid, vlu, a_prime, policy_2, del_a,
                         j, idx_f if idx_f != -1 else -1, k, j, N
                     )
-                    # R: idx_b → i+1 (new branch), fallback i+1 → forward point on same branch
-                    # If we can't find a backward point, look forward and extrapolate back
-                    safe_extrap = find_safe_extrapolation_point(e_grid, a_prime, i+1, N, M_max, forward=True)
+                    safe_extrap = find_safe_extrapolation_point(e_grid, a_prime, i+1, N, M_max, forward=True, eps_d=eps_d, eps_fwd_back=eps_fwd_back)
                     R = make_pair_from_indices_or_fallback(
                         e_grid, vlu, a_prime, policy_2, del_a,
                         idx_b if idx_b != -1 else -1, i+1, i+1, safe_extrap, N
                     )
-                    
-                    # FORCE a crossing strictly inside (e_j, e_{i+1})
-                    intr_x, intr_y = _force_crossing_inside(
-                        L[0], L[1], L[5], L[6],  # L_x1, L_y1, L_x2, L_y2
-                        R[0], R[1], R[5], R[6],  # R_x1, R_y1, R_x2, R_y2
-                        e_grid[j], e_grid[i+1], eps_sep, eps_d, parallel_guard
-                    )
-                    
-                    # Fallback: if somehow still nan (shouldn't happen), use midpoint
-                    if np.isnan(intr_x):
-                        print(f"SCAN DEBUG: intr_x is NaN at i={i}, j={j}. Falling back to midpoint.")
-                        mid = 0.5 * (e_grid[j] + e_grid[i+1])
-                        denom_L = max(eps_d, L[5] - L[0])
-                        denom_R = max(eps_d, R[5] - R[0])
-                        sL = (L[6] - L[1]) / denom_L
-                        sR = (R[6] - R[1]) / denom_R
-                        yL = L[1] + sL * (mid - L[0])
-                        yR = R[1] + sR * (mid - R[0])
-                        intr_x = mid
-                        intr_y = 0.5 * (yL + yR)  # Use average at intersection
-                    
-                    # ADAPTIVE separation based on interval length
-                    interval_length = e_grid[i+1] - e_grid[j]
-                    sep = min(eps_sep, 0.25 * interval_length)
-                    
-                    # Write TWO points with adaptive separation
-                    n_new = add_intersection_from_pairs_with_sep(
-                        intersections, n_inter, intr_x, intr_y, sep,
+
+                    n_inter, intersection_e, intersection_v, intersection_a, intersection_d, added = _forced_intersection_twopoint(
+                        intersections, n_inter,
+                        e_grid[j], e_grid[i+1], -1.0,   # sep_cap disabled
                         L[0], L[1], L[2], L[3], L[4], L[5], L[6], L[7], L[8], L[9],
-                        R[0], R[1], R[2], R[3], R[4], R[5], R[6], R[7], R[8], R[9], eps_d
+                        R[0], R[1], R[2], R[3], R[4], R[5], R[6], R[7], R[8], R[9],
+                        eps_d, eps_sep, parallel_guard,
+                        i, j
                     )
-                    
-                    #add_int = False
-                    if n_new > n_inter:
-                        n_inter = n_new
+
+                    if added:
                         added_intersection_last_iter = True
                         use_intersection_as_k = True
-                        
-                        # Seed k values from LEFT branch for next iteration
-                        denom_L = max(eps_d, L[5] - L[0])
-                        tL = (intr_x - L[0]) / denom_L
-                        intersection_e = intr_x
-                        intersection_v = intr_y
-                        intersection_a = L[2] + tL * (L[7] - L[2])
-                        intersection_d = L[4] + tL * (L[9] - L[4])
-                        
-                        
                         created_intersection = True
 
                 # Advance indices uniformly
@@ -993,6 +1028,7 @@ def _scan(
                 g_1,
                 M_max,
                 check_drop=True,
+                eps_d=eps_d,
             )
 
             # --- CASE C.1: Left Turn with j Dropped ---
@@ -1007,68 +1043,27 @@ def _scan(
                 created_intersection = False
                 added_intersection_last_iter = False
                 if include_intersections and not last_was_jump:
-                    # IMPORTANT: j is being dropped, so old branch is k → j
-                    # No need for forward search since j itself is the endpoint
-                    
-                    # L (old branch after j dropped): k → j
                     L = make_pair_from_indices_or_fallback(
                         e_grid, vlu, a_prime, policy_2, del_a,
-                        -1, -1, k, j, N  # Use same indices for primary and fallback
+                        -1, -1, k, j, N  # unchanged: fallback uses (k, j)
                     )
-                    
-                    # R (new branch): m_ind → i+1, fallback i+1 → forward point on same branch
-                    # m_ind comes from backward_scan_combined
-                    # Note: Intersection is still forced to be in (j, i+1) by _force_crossing_inside
-                    safe_extrap = find_safe_extrapolation_point(e_grid, a_prime, i+1, N, M_max, forward=True)
+                    safe_extrap = find_safe_extrapolation_point(e_grid, a_prime, i+1, N, M_max, forward=True, eps_d=eps_d, eps_fwd_back=eps_fwd_back)
                     R = make_pair_from_indices_or_fallback(
                         e_grid, vlu, a_prime, policy_2, del_a,
                         m_ind if m_ind != -1 else -1, i+1, i+1, safe_extrap, N
                     )
-                    
-                    # FORCE a crossing strictly inside (e_j, e_{i+1})
-                    intr_x, intr_y = _force_crossing_inside(
-                        L[0], L[1], L[5], L[6],  # L_x1, L_y1, L_x2, L_y2
-                        R[0], R[1], R[5], R[6],  # R_x1, R_y1, R_x2, R_y2
-                        e_grid[j], e_grid[i+1], eps_sep, eps_d, parallel_guard
-                    )
-                    
-                    # Fallback: if somehow still nan, use midpoint
-                    if np.isnan(intr_x):
-                        print(f"SCAN DEBUG: intr_x is NaN at i={i}, j={j}. Falling back to midpoint.")
-                        mid = 0.5 * (e_grid[j] + e_grid[i+1])
-                        denom_L = max(eps_d, L[5] - L[0])
-                        denom_R = max(eps_d, R[5] - R[0])
-                        sL = (L[6] - L[1]) / denom_L
-                        sR = (R[6] - R[1]) / denom_R
-                        yL = L[1] + sL * (mid - L[0])
-                        yR = R[1] + sR * (mid - R[0])
-                        intr_x = mid
-                        intr_y = 0.5 * (yL + yR)  # Use average at intersection
-                    
-                    # ADAPTIVE separation
-                    interval_length = e_grid[i+1] - e_grid[j]
-                    sep = min(eps_sep, 0.25 * interval_length)
-                    
-                    # Write TWO points
-                    n_new = add_intersection_from_pairs_with_sep(
-                        intersections, n_inter, intr_x, intr_y, sep,
-                        L[0], L[1], L[2], L[3], L[4], L[5], L[6], L[7], L[8], L[9],
-                        R[0], R[1], R[2], R[3], R[4], R[5], R[6], R[7], R[8], R[9], eps_d
-                    )
-                    
-                    if n_new > n_inter:
-                        n_inter = n_new
-                        use_intersection_as_k = True
-                        
-                        # Seed k from LEFT branch
-                        denom_L = max(eps_d, L[5] - L[0])
-                        tL = (intr_x - L[0]) / denom_L
-                        intersection_e = intr_x
-                        intersection_v = intr_y
-                        intersection_a = L[2] + tL * (L[7] - L[2])
-                        intersection_d = L[4] + tL * (L[9] - L[4])
-                        
 
+                    n_inter, intersection_e, intersection_v, intersection_a, intersection_d, added = _forced_intersection_twopoint(
+                        intersections, n_inter,
+                        e_grid[j], e_grid[i+1], -1.0,
+                        L[0], L[1], L[2], L[3], L[4], L[5], L[6], L[7], L[8], L[9],
+                        R[0], R[1], R[2], R[3], R[4], R[5], R[6], R[7], R[8], R[9],
+                        eps_d, eps_sep, parallel_guard,
+                        i, j
+                    )
+
+                    if added:
+                        use_intersection_as_k = True
                         created_intersection = True
 
                 # Advance indices (after dropping j)
@@ -1090,79 +1085,40 @@ def _scan(
                     j = prev_j
 
                 # Add intersection for left turn case (only on jump iterations)
-                
                 use_intersection_as_k = False
                 if include_intersections and not last_was_jump:
-                    # Find forward point on same branch from j
                     found_fwd, idx_fwd = find_forward_same_branch(
                         e_grid, a_prime, j, j, N, LB, m_bar, eps_d, eps_fwd_back
                     )
                     
-                    # Find backward point on same branch from i+1
                     _, idx_back = backward_scan_combined(
                         m_buf, m_head, LB, e_grid, vlu, a_prime,
                         i, j, k, i+1, False, False, False, 0.0, M_max,
                         check_drop=False, eps_d=eps_d
                     )
                     
-                    # L (old branch): j → idx_fwd
                     L = make_pair_from_indices_or_fallback(
                         e_grid, vlu, a_prime, policy_2, del_a,
                         j, idx_fwd if found_fwd else -1, k, j, N
                     )
                     
-                    # R (new branch): idx_back → i+1, fallback i+1 → forward point on same branch
-                    # Note: Intersection is forced to be in (j, i+1) by _force_crossing_inside
                     safe_extrap = find_safe_extrapolation_point(e_grid, a_prime, i+1, N, M_max, forward=True, eps_d=eps_d, eps_fwd_back=eps_fwd_back)
                     R = make_pair_from_indices_or_fallback(
                         e_grid, vlu, a_prime, policy_2, del_a,
                         idx_back if idx_back != -1 else -1, i+1, i+1, safe_extrap, N
                     )
                     
-                    # FORCE a crossing strictly inside (e_j, e_{i+1})
-                    intr_x, intr_y = _force_crossing_inside(
-                        L[0], L[1], L[5], L[6],
-                        R[0], R[1], R[5], R[6],
-                        e_grid[j], e_grid[i+1], eps_sep, eps_d, parallel_guard
-                    )
-                    
-                    # Fallback to midpoint if needed
-                    if np.isnan(intr_x):
-                        print(f"SCAN DEBUG: intr_x is NaN at i={i}, j={j}. Falling back to midpoint.")
-                        mid = 0.5 * (e_grid[j] + e_grid[i+1])
-                        denom_L = max(eps_d, L[5] - L[0])
-                        denom_R = max(eps_d, R[5] - R[0])
-                        sL = (L[6] - L[1]) / denom_L
-                        sR = (R[6] - R[1]) / denom_R
-                        yL = L[1] + sL * (mid - L[0])
-                        yR = R[1] + sR * (mid - R[0])
-                        intr_x = mid
-                        intr_y = 0.5 * (yL + yR)  # Use average at intersection
-                    
-                    # ADAPTIVE separation
-                    interval_length = e_grid[i+1] - e_grid[j]
-                    sep = min(eps_sep, 0.25 * interval_length)
-                    
-                    # Write TWO points
-                    n_new = add_intersection_from_pairs_with_sep(
-                        intersections, n_inter, intr_x, intr_y, sep,
+                    n_inter, intersection_e, intersection_v, intersection_a, intersection_d, added = _forced_intersection_twopoint(
+                        intersections, n_inter,
+                        e_grid[j], e_grid[i+1], -1.0,
                         L[0], L[1], L[2], L[3], L[4], L[5], L[6], L[7], L[8], L[9],
-                        R[0], R[1], R[2], R[3], R[4], R[5], R[6], R[7], R[8], R[9], eps_d
+                        R[0], R[1], R[2], R[3], R[4], R[5], R[6], R[7], R[8], R[9],
+                        eps_d, eps_sep, parallel_guard,
+                        i, j
                     )
                     
-                    if n_new > n_inter:
-                        n_inter = n_new
+                    if added:
                         use_intersection_as_k = True
-                        
-                        # Seed k from LEFT branch
-                        denom_L = max(eps_d, L[5] - L[0])
-                        tL = (intr_x - L[0]) / denom_L
-                        intersection_e = intr_x
-                        intersection_v = intr_y
-                        intersection_a = L[2] + tL * (L[7] - L[2])
-                        intersection_d = L[4] + tL * (L[9] - L[4])
-                        
-                        
                         created_intersection = True
                 
                 # Advance indices uniformly
