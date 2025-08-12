@@ -82,7 +82,7 @@ def plot_egrids(age, e_grid, vf_work, c_worker, del_a, g_size, cp, save_path, ta
 
     # 2. Generate refined grid, value function and policy using FUES
     # For plotting, also get intersection points separately
-    fues_result, intersections = FUES_sep_intersect(x, vf, c, a_prime, del_a, m_bar=1.2)
+    fues_result, intersections = FUES_sep_intersect(x, vf, c, a_prime, del_a, m_bar=1.0001)
     #print(intersections)
     x_clean, vf_clean, c_clean, a_prime_clean, del_a_clean = fues_result
     inter_e, inter_v, inter_p1, inter_p2, inter_d = intersections
@@ -130,8 +130,8 @@ def plot_egrids(age, e_grid, vf_work, c_worker, del_a, g_size, cp, save_path, ta
 
     # formatting     
     ax[0].set_ylabel('Value', fontsize=11)
-    ax[0].set_ylim(30.5, 30.8)
-    ax[0].set_xlim(55,58.01)
+    #ax[0].set_ylim(30.5, 30.8)
+    ax[0].set_xlim(1,58.01)
     ax[0].spines['right'].set_visible(False)
     ax[0].spines['top'].set_visible(False)
     ax[0].legend(frameon=False, prop={'size': 10})
@@ -181,8 +181,8 @@ def plot_egrids(age, e_grid, vf_work, c_worker, del_a, g_size, cp, save_path, ta
             zorder=5)
     
     # fromatting 
-    ax[1].set_ylim(20, 40)
-    ax[1].set_xlim(44, 55.01)
+    #ax[1].set_ylim(20, 40)
+    ax[0].set_xlim(1,58.01)
     ax[1].set_ylabel('Financial assets at time t+1', fontsize=11)
     ax[1].spines['right'].set_visible(False)
     ax[1].spines['top'].set_visible(False)
@@ -804,7 +804,7 @@ if __name__ == "__main__":
     
     grid_sizes = [500, 1000, 2000, 3000,10000]  # Test different grid sizes
     delta_values = [0.25, 0.5, 1, 2]  # Test different delta values
-    egrid_plot_age = 3
+    egrid_plot_age = 5
     run_performance_tests = False
 
     # Define save path for plots and create directory if it doesn't exist
@@ -820,12 +820,12 @@ if __name__ == "__main__":
 
     cp = RetirementModel(
         r=0.02, beta=0.98, delta=1, y=20, b=1E-10, grid_max_A=500,
-        grid_size=3000, T=50, smooth_sigma=0
+        grid_size=3000, T=20, smooth_sigma=0
     )
 
     cp2 = RetirementModel(
         r=0.02, beta=0.98, delta=1, y=20, b=1E-10, grid_max_A=500,
-        grid_size=3000, T=50, smooth_sigma=0
+        grid_size=3000, T=20, smooth_sigma=0
     )
 
     # Unpack solver operators

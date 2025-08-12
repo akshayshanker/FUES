@@ -62,7 +62,7 @@ def _calculate_euler_error_cuda_kernel(
                     E_lam += Pi[i_y_loop, jy] * lam_next
                 
                 c_star = inv_uc_owner_gpu(beta * R * E_lam, H_now, alpha)
-                output_logs[i_w_loop, i_h_loop, i_y_loop] = cuda.libdevice.log10(abs((c_star - c0)**2 / c0) + 1e-16)
+                output_logs[i_w_loop, i_h_loop, i_y_loop] = cuda.libdevice.log10(abs((c_star - c0)/ c0) + 1e-16)
 
 def calculate_euler_error_gpu(model, sample_size=10000, debug=False):
     """

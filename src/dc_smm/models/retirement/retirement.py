@@ -212,7 +212,7 @@ def Operator_Factory(cp):
             {"func": u, "args": {}}, # u_func placeholder
             ue_method=method.upper(),
             m_bar=m_bar,
-            lb=4,
+            lb=20,
             rfc_radius=0.75,
             rfc_n_iter=40,
         )
@@ -363,7 +363,7 @@ def Operator_Factory(cp):
         time_start_fues = time.time()
         egrid1, vf_clean, sigma_clean, a_prime_clean, dela_clean = EGM_UE(
             endog_grid, vf_work_t_inv, beta * VF_prime_work - delta, sigma_work_t_inv, 
-            asset_grid_A, del_a_unrefined, m_bar=1, method=method, padding_mbar=padding_mbar)
+            asset_grid_A, del_a_unrefined, m_bar=1.00001, method=method, padding_mbar=padding_mbar)
         time_end_fues = time.time()
         
         # Step 3: JIT-compiled final interpolation and discrete choice

@@ -33,39 +33,18 @@ parameters:
   delta_pb: 1            # Laibson discounting
   b: 1e-100             # Borrowing constraint
   Pr: 0.05              # Rental price
-  thorn: 0.9            # Fella's thorn parameter
+  thorn: 0.9            # Markdown on renter's housing utility from renting 
   
 
-  
   # Income shock parameters - Explicit Markov process from Fella
   # Transition matrix for Markov process
-  #Pi:
-  #  - [0.9993705662187573, 0.0006294337787649558, 2.4777275770022525e-12]
-  #  - [7.863296831434963e-08, 0.9999998427340633, 7.863296831434963e-08]
-  #  - [2.4777275770022525e-12, 0.0006294337787649558, 0.9993705662187573]
-  #z_vals: [0.6362752758250702, 0.9781257680336732, 1.5036416696387476]
-  #z_vals: [1]
-  #Pi:
-  #  - [1]
-  #$z_vals: [0.25, 0.45, 0.70, 1.0, 1.40, 2.0, 3.0]
-  # Create a transition matrix with high persistence
-  # Diagonal elements have highest probability
   Pi:
     - [0.8, 0.1, 0.1]
     - [0.05, 0.9, 0.05]
     - [0.1, 0.1, 0.8]
   z_vals: [0.1, 1.1526, 4.167]  # Shock values
-  #Pi:
-  #Pi:
-  #  - [0.80, 0.18, 0.02, 0.00, 0.00, 0.00, 0.00]  # Lowest income
-  #  - [0.10, 0.70, 0.15, 0.05, 0.00, 0.00, 0.00]
-  #  - [0.02, 0.15, 0.65, 0.15, 0.03, 0.00, 0.00]
-  #  - [0.00, 0.05, 0.15, 0.60, 0.15, 0.05, 0.00]  # Middle income
-  #  - [0.00, 0.00, 0.03, 0.15, 0.65, 0.15, 0.02]
-  #  - [0.00, 0.00, 0.00, 0.05, 0.15, 0.70, 0.10]
-  #  - [0.00, 0.00, 0.00, 0.00, 0.02, 0.18, 0.80]
-    
-  
+
+
 # Global settings shared across all stages
 settings:
   tol: 1.0e-6           # Convergence tolerance
