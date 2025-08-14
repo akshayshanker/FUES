@@ -2,6 +2,44 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.0dev0] - 2025-08-12 – Multi-GPU Support and FUES Algorithm Cleanup
+
+### Added
+* **Multi-GPU MPI parallelization for housing model**
+  - Single-node support for up to 4 GPUs with MPI
+  - Multi-node support for scaling across Gadi nodes (8+ GPUs)
+  - NUMA-aware CPU binding with 12 cores per MPI rank
+  - MPI dispatcher in horses_h.py with GPU detection and fallback
+  - MPI driver in horses_c_gpu.py with Allgatherv collectives
+
+* **PBS scripts for GPU scaling**
+  - `run_housing_gpu_mpi.pbs`: Single-node 4 GPU execution
+  - `run_housing_gpu_multi_node.pbs`: Multi-node 8 GPU execution  
+  - `benchmark_gpu_scaling.pbs`: Automated 1, 2, 4 GPU performance comparison
+  - Scripts use same options as single-GPU version for consistency
+
+### Changed
+* **FUES algorithm cleanup and configurability**
+  - Removed 4 unused functions (uniqueEG, linear_interp, seg_intersect, line_intersect_unbounded)
+  - Made epsilon parameters configurable (eps_d, eps_sep, eps_fwd_back, parallel_guard)
+  - Consolidated duplicated intersection logic into _forced_intersection_twopoint() helper
+  - Moved helper functions to src/dc_smm/fues/helpers/math_funcs.py
+  - Merged FUES_sep_intersect into main FUES function with return_intersections_separately flag
+
+* **GPU implementation modifications**
+  - Added initialize_vfh_from_config() function for MPI initialization
+  - Modified V_out calculation in kernel to use formula: V = (Q - (1-delta)*u(c,h)) / delta
+  - Implemented C-contiguous array handling for MPI operations
+  - Convergence check performed before array swap using allreduce(MAX)
+  - Policy gathering made conditional via policy_every parameter
+
+### Architecture
+* **MPI implementation structure**
+  - MPI logic isolated in solver layer (horses_h.py, horses_c_gpu.py)
+  - Whisperer module unchanged - no modifications required
+  - 1 MPI rank mapped to 1 GPU
+  - Precomputed Allgatherv counts and displacements
+
 ## [0.4.0dev11] - 2025-08-11 – FUES Algorithm Stability Improvements
 
 ### Enhanced

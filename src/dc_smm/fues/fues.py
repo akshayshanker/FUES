@@ -10,10 +10,7 @@ from numba import njit
 import numpy as np
 from .helpers.math_funcs import (
     circ_put,
-    _clip_open,
-    _force_crossing_inside,
     _forced_intersection_twopoint,
-    add_intersection_from_pairs_with_sep,
 )
 
 # Constants
@@ -28,32 +25,37 @@ JUMP_NO = 0
 
 
 @njit(inline="always")
-def check_same_branch(e_grid, a_prime, idx1, idx2, m_bar, eps_d=EPS_D, eps_fwd_back=EPS_fwd_back):
-    """Check if two points are on the same branch (no jump between them)."""
+def check_same_seg(e_grid, kappa_hat, idx1, idx2, m_bar, eps_d=EPS_D, eps_fwd_back=EPS_fwd_back):
+    """Check if two points are on the same segment (no jump in policy between them)."""
     if idx1 < 0 or idx2 < 0 or idx1 >= len(e_grid) or idx2 >= len(e_grid):
         return False
-    de = max(eps_d, e_grid[idx2] - e_grid[idx1])
-    g_a = np.abs((a_prime[idx2] - a_prime[idx1]) / de)
+    de = max(eps_d, e_grid[idx2] - e_grid[idx1]) # should give use positive value since e-grid sorted to be increasing 
+    g_a = np.abs((kappa_hat[idx2] - kappa_hat[idx1]) / de)
     return g_a < m_bar and de < eps_fwd_back
 
 
 @njit(inline="always")
 def find_safe_extrapolation_point(e_grid, a_prime, base_idx, N, m_bar, forward=True, eps_d=EPS_D, eps_fwd_back=EPS_fwd_back):
     """
-    Find a safe point for extrapolation that's on the same branch as base_idx.
+    Find a safe point for extrapolation that's on the same segment as base_idx.
     Returns the index of a point that doesn't jump from base_idx, or base_idx if none found.
+
+    Todo
+    ----
+    - Also include a condition that point jumps from "other" segment that is jumped from or to?
+    - Should we remove the min 4 condition?
     """
     if forward:
         # Search forward for a point on same branch
         for offset in range(1, min(4, N - base_idx)):
             test_idx = base_idx + offset
-            if test_idx < N and check_same_branch(e_grid, a_prime, base_idx, test_idx, m_bar, eps_d, eps_fwd_back):
+            if test_idx < N and check_same_seg(e_grid, a_prime, base_idx, test_idx, m_bar, eps_d, eps_fwd_back):
                 return test_idx
     else:
         # Search backward for a point on same branch
         for offset in range(1, min(4, base_idx + 1)):
             test_idx = base_idx - offset
-            if test_idx >= 0 and check_same_branch(e_grid, a_prime, test_idx, base_idx, m_bar, eps_d, eps_fwd_back):
+            if test_idx >= 0 and check_same_seg(e_grid, a_prime, test_idx, base_idx, m_bar, eps_d, eps_fwd_back):
                 return test_idx
     # If no valid point found, return base_idx (will result in flat extrapolation)
     return base_idx
@@ -62,7 +64,10 @@ def find_safe_extrapolation_point(e_grid, a_prime, base_idx, N, m_bar, forward=T
 @njit(inline="always")
 def make_pair_from_indices_or_fallback(e, v, a, p2, d, lo_idx, hi_idx, fb_lo, fb_hi, N):
     """
-    Returns endpoints (x1,y1,a1,p21,d1) and (x2,y2,a2,p22,d2).
+    If forward and backward scans both return points, then returns endpoints (x1,y1,a1,p21,d1) and (x2,y2,a2,p22,d2).
+
+    Otherwise, returns the fallback pair (fb_lo, fb_hi).
+    
     If lo_idx or hi_idx is -1, uses the fallback pair (fb_lo, fb_hi).
     """
     # Bounds checking for fallback indices
@@ -81,8 +86,7 @@ def make_pair_from_indices_or_fallback(e, v, a, p2, d, lo_idx, hi_idx, fb_lo, fb
 def backward_scan_combined(
     m_buf, m_head, LB,
     x_dcsn_hat, vlu, kappa,
-    i, j, k, i_plus_1,
-    left_turn, g_tilde_a, last_turn_left, g_1,
+    j, i_plus_1,
     m_bar,
     check_drop=True,
     eps_d=EPS_D,
@@ -265,21 +269,84 @@ def FUES(
     eps_d=None, eps_sep=None, eps_fwd_back=None, parallel_guard=None,
 ):
     """
-    Sort input, call scanner, drop NaNs, and return cleaned arrays.
+    Fast Upper-Envelope Scan (FUES) wrapper.
 
-    This function serves as the main entry point for the FUES algorithm. 
-    It can return the upper envelope with intersections merged or separately,
-    controlled by the `return_intersections_separately` flag.
+    Computes the upper envelope of future segment choices over an endogenous grid in a
+    single pass and returns the retained points. Optionally, it also creates
+    explicit intersection points at discrete-choice switches and can return
+    those intersections separately for downstream processing.
 
-    Parameters:
-    -----------
+    The Numba-compiled scanner (`_scan`) provides O(N) time behavior with a
+    small, fixed look-back/forward window. This wrapper prepares inputs,
+    invokes the scanner, and post-processes the results (merging or returning
+    intersections separately, plus a final post-clean step to avoid spurious
+   consecutive jumps).
+
+    Parameters
+    ----------
+    e_grid : ndarray, shape (N,)
+        Endogenous decision grid. The inputs are internally sorted by `e_grid`.
+    vlu : ndarray, shape (N,)
+        Choice-specific value at each grid point (read-only in the scan).
+    policy_1 : ndarray, shape (N,)
+        Primary policy aligned with `e_grid` (e.g., consumption).
+    policy_2 : ndarray, shape (N,)
+        Secondary policy aligned with `e_grid` (e.g., asset policy a'). Used
+        in jump classification and as payload in intersections.
+    del_a : ndarray, shape (N,)
+        Policy-gradient-like series used for endogenous jump thresholds.
+
+    b : float, default 1e-10
+        Legacy argument retained for signature stability. Not used.
+    m_bar : float, default 1.0
+        Jump threshold for same-branch tests. If `endog_mbar=True`, the
+        threshold adapts using `del_a` with `padding_mbar`.
+    LB : int, default 4
+        Look-back/forward buffer length used by backward/forward scans.
+    endog_mbar : bool, default False
+        If True, uses endogenous jump threshold based on `del_a`.
+    padding_mbar : float, default 0.0
+        Extra padding added to the endogenous threshold.
     include_intersections : bool, default True
-        If True, intersection points where discrete choices switch are included in output.
-        If False, returns only the original upper envelope points.
+        If True, create forced intersections at kept jumps.
     return_intersections_separately : bool, default False
-        If True, returns a tuple (fues_results, inter_tuple), where fues_results
-        contains the upper envelope and inter_tuple contains the intersection points.
-        If False, returns a single tuple with intersections merged into the results.
+        If True, return a pair `(fues_result, inter_tuple)` instead of a
+        single merged result. See Returns.
+    eps_d : float, optional
+        Minimum separation between grid points. Defaults to `EPS_D`.
+    eps_sep : float, optional
+        Minimum separation used when creating intersections. Defaults to
+        `EPS_SEP`.
+    eps_fwd_back : float, optional
+        Proximity threshold for forward/backward scans. Defaults to
+        `EPS_fwd_back`.
+    parallel_guard : float, optional
+        Tolerance to guard against near-parallel segment geometry when forming
+        intersections. Defaults to `PARALLEL_GUARD`.
+
+    Returns
+    -------
+    tuple
+        If `return_intersections_separately` is False:
+            (e_kept, v_kept, p1_kept, p2_kept, d_kept)
+
+        If `return_intersections_separately` is True:
+            (fues_result, inter_tuple)
+
+            where
+              - fues_result = (e_kept, v_kept, p1_kept, p2_kept, d_kept)
+              - inter_tuple = (e_inter, v_inter, p1_inter, p2_inter, d_inter)
+
+            Each array in `inter_tuple` contains only intersection rows.
+
+    Notes
+    -----
+    - Inputs are sorted by `e_grid` prior to scanning. Outputs inherit this
+      order; merged outputs are resorted after adding intersections.
+    - Intersections are forced to lie strictly within open intervals, using
+      `eps_sep` and `parallel_guard` to avoid degenerate intersections.
+    - Both policies are used to detect jumps. Policy 1 used in forward and backward scans.
+
     """
     # Use provided epsilons or fall back to module defaults
     eps_d = eps_d if eps_d is not None else EPS_D
@@ -376,8 +443,6 @@ def FUES(
             p1_kept[post_mask], p2_kept[post_mask], d_kept[post_mask])
 
 
-
-
 @njit
 def _scan(
     e_grid,
@@ -452,8 +517,6 @@ def _scan(
     use_intersection_as_k = False
     intersection_e = 0.0
     intersection_v = 0.0
-    intersection_a = 0.0
-    intersection_d = 0.0
 
     added_intersection_last_iter = False
 
@@ -461,12 +524,10 @@ def _scan(
     m_head = 0
 
     j, k = 0, -1
-    last_turn_left = False
     last_was_jump = False
     prev_j = 0
 
-    # Main scan loop
-    prev_g_tilde_a = m_bar
+
     for i in range(N - 2):
 
         if i <= 1:
@@ -485,14 +546,12 @@ def _scan(
         if use_intersection_as_k and include_intersections:
             k_e = intersection_e
             k_v = intersection_v
-            k_a = intersection_a
-            k_d = intersection_d
+
             use_intersection_as_k = False
         else:
             k_e = e_grid[k] if k >= 0 else e_grid[0]
             k_v = vlu[k] if k >= 0 else vlu[0]
-            k_a = a_prime[k] if k >= 0 else a_prime[0]
-            k_d = del_a[k] if k >= 0 else del_a[0]
+
 
         
         de_prev = max(eps_d, e_grid[j] - k_e)
@@ -534,8 +593,7 @@ def _scan(
         right_turn_jump = (not left_turn_any) and jump_now
         right_turn_no_jump = (not left_turn_any) and (not jump_now)
 
-        if right_turn_no_jump:
-            prev_g_tilde_a = g_tilde_a
+
 
         added_intersection_last_iter = False
 
@@ -564,14 +622,8 @@ def _scan(
                     e_grid,
                     vlu,
                     a_prime,
-                    i,
                     j,
-                    k,
                     i + 1,
-                    False,
-                    False,
-                    False,
-                    0.0,
                     M_max,
                     check_drop=False,
                     eps_d=eps_d,
@@ -588,7 +640,7 @@ def _scan(
                         idx_b if idx_b != -1 else -1, i+1, i+1, safe_extrap, N
                     )
 
-                    n_inter, intersection_e, intersection_v, intersection_a, intersection_d, added = _forced_intersection_twopoint(
+                    n_inter, intersection_e, intersection_v, _, _, added = _forced_intersection_twopoint(
                         intersections, n_inter,
                         e_grid[j], e_grid[i+1], -1.0,   # sep_cap disabled
                         L, R,
@@ -629,14 +681,8 @@ def _scan(
                 e_grid,
                 vlu,
                 a_prime,
-                i,
                 j,
-                k,
                 i + 1,
-                left_turn_any,
-                g_tilde_a,
-                last_turn_left,
-                g_1,
                 M_max,
                 check_drop=True,
                 eps_d=eps_d,
@@ -660,7 +706,7 @@ def _scan(
                         m_ind if m_ind != -1 else -1, i+1, i+1, safe_extrap, N
                     )
 
-                    n_inter, intersection_e, intersection_v, intersection_a, intersection_d, added = _forced_intersection_twopoint(
+                    n_inter, intersection_e, intersection_v, _, _, added = _forced_intersection_twopoint(
                         intersections, n_inter,
                         e_grid[j], e_grid[i+1], -1.0,
                         L, R,
@@ -692,7 +738,7 @@ def _scan(
                     
                     _, idx_back = backward_scan_combined(
                         m_buf, m_head, LB, e_grid, vlu, a_prime,
-                        i, j, k, i+1, False, False, False, 0.0, M_max,
+                        j, i+1, M_max,
                         check_drop=False, eps_d=eps_d
                     )
                     
@@ -707,7 +753,7 @@ def _scan(
                         idx_back if idx_back != -1 else -1, i+1, i+1, safe_extrap, N
                     )
                     
-                    n_inter, intersection_e, intersection_v, intersection_a, intersection_d, added = _forced_intersection_twopoint(
+                    n_inter, intersection_e, intersection_v, _, _, added = _forced_intersection_twopoint(
                         intersections, n_inter,
                         e_grid[j], e_grid[i+1], -1.0,
                         L, R,
