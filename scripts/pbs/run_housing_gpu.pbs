@@ -2,7 +2,7 @@
 #PBS -N fues-gpu-profile
 #PBS -P tp66
 #PBS -q gpuvolta
-#PBS -l ncpus=12,mem=382GB,walltime=2:00:00
+#PBS -l ncpus=12,mem=382GB,walltime=10:00:00
 #PBS -l ngpus=1
 #PBS -l storage=gdata/tp66+scratch/tp66
 #PBS -l wd
@@ -15,7 +15,7 @@ source ../lib/job_configs.sh
 
 # --- 2. Define the Sequence of Configurations to Run ---
 CONFIG_TO_RUN=(
-    "HIGH_RES_SETTINGS_A"
+    "HIGH_RES_SETTINGS_J"
 )
 
 # --- 3. Environment Setup ---

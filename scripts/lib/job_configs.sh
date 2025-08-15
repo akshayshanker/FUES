@@ -141,7 +141,7 @@ HIGH_RES_SETTINGS_J[delta_pb]=1
 declare -A HIGH_RES_SETTINGS_K
 HIGH_RES_SETTINGS_K[periods]=5
 HIGH_RES_SETTINGS_K[vfi_ngrid]=5E6
-HIGH_RES_SETTINGS_K[hd_points]=6E6
+HIGH_RES_SETTINGS_K[hd_points]=1E6
 HIGH_RES_SETTINGS_K[grid_points]=2000
 HIGH_RES_SETTINGS_K[version_suffix]="test_0.1"
 HIGH_RES_SETTINGS_K[delta_pb]=1
