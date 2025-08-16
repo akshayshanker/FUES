@@ -49,14 +49,64 @@ except Exception:
     GPU_AVAILABLE = False
 
 
+# ==============================================================================
+# --- Helper Functions ---
+# TODO: Move these to a shared utility module.
+# ==============================================================================
+
+
 def _detect_ncpus():
     """Detect number of CPUs available."""
     try:
         import psutil
+
         return psutil.cpu_count(logical=True)
     except Exception:
         return int(os.environ.get("PBS_NCPUS", os.cpu_count() or 4))
 
+
+@njit(inline="always")
+def _interp_scalar_cpu(x_grid, y_grid, x):
+    """C-style linear interpolation of one point for the CPU."""
+    if x <= x_grid[0]:
+        return y_grid[0]
+    if x >= x_grid[-1]:
+        return y_grid[-1]
+
+    lo, hi = 0, len(x_grid) - 1
+    while hi - lo > 1:
+        mid = (lo + hi) // 2
+        if x_grid[mid] <= x:
+            lo = mid
+        else:
+            hi = mid
+
+    x_lo = x_grid[lo]
+    inv_dx = 1.0 / (x_grid[hi] - x_lo)
+    w_hi = (x - x_lo) * inv_dx
+    return (1.0 - w_hi) * y_grid[lo] + w_hi * y_grid[hi]
+
+
+@cuda.jit(device=True)
+def _interp_scalar_gpu(x_grid, y_grid, x):
+    """C-style linear interpolation of one point for the GPU."""
+    if x <= x_grid[0]:
+        return y_grid[0]
+    if x >= x_grid[-1]:
+        return y_grid[-1]
+
+    lo, hi = 0, len(x_grid) - 1
+    while hi - lo > 1:
+        mid = (lo + hi) // 2
+        if x_grid[mid] <= x:
+            lo = mid
+        else:
+            hi = mid
+
+    x_lo = x_grid[lo]
+    inv_dx = 1.0 / (x_grid[hi] - x_lo)
+    w_hi = (x - x_lo) * inv_dx
+    return (1.0 - w_hi) * y_grid[lo] + w_hi * y_grid[hi]
 
 
 def F_shocks_dcsn_to_arvl(mover):
@@ -199,26 +249,6 @@ def F_shocks_dcsn_to_arvl(mover):
 # --- CPU Jitted Functions ---
 # ==============================================================================
 
-@njit(inline='always')
-def _interp_scalar_cpu(x_grid, y_grid, x):
-    """C-style linear interpolation of one point for the CPU."""
-    if x <= x_grid[0]:
-        return y_grid[0]
-    if x >= x_grid[-1]:
-        return y_grid[-1]
-
-    lo, hi = 0, len(x_grid) - 1
-    while hi - lo > 1:
-        mid = (lo + hi) // 2
-        if x_grid[mid] <= x:
-            lo = mid
-        else:
-            hi = mid
-
-    x_lo  = x_grid[lo]
-    inv_dx = 1.0 / (x_grid[hi] - x_lo)
-    w_hi  = (x - x_lo) * inv_dx
-    return (1.0 - w_hi) * y_grid[lo] + w_hi * y_grid[hi]
 
 @njit(cache=True)
 def housing_choice_solver_owner_cpu(resources_liquid_3d, H_grid, H_nxt_grid,
@@ -313,27 +343,6 @@ def shock_integration_kernel(vlu_dcsn, Pi, vlu_arvl, n_a, n_h, n_j, n_i):
         for j in range(n_j):
             sum_val += vlu_dcsn[a, h, j] * Pi[i, j]
         vlu_arvl[a, h, i] = sum_val
-
-@cuda.jit(device=True)
-def _interp_scalar_gpu(x_grid, y_grid, x):
-    """C-style linear interpolation of one point for the GPU."""
-    if x <= x_grid[0]:
-        return y_grid[0]
-    if x >= x_grid[-1]:
-        return y_grid[-1]
-
-    lo, hi = 0, len(x_grid) - 1
-    while hi - lo > 1:
-        mid = (lo + hi) // 2
-        if x_grid[mid] <= x:
-            lo = mid
-        else:
-            hi = mid
-
-    x_lo  = x_grid[lo]
-    inv_dx = 1.0 / (x_grid[hi] - x_lo)
-    w_hi = (x - x_lo) * inv_dx
-    return (1.0 - w_hi) * y_grid[lo] + w_hi * y_grid[hi]
 
 @cuda.jit
 def housing_choice_solver_owner_gpu(
