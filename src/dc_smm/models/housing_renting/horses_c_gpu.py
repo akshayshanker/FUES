@@ -15,8 +15,8 @@ from dc_smm.models.housing_renting.horses_common import (
 
 @cuda.jit
 def vfi_gpu_kernel(
-    policy_c, policy_a, Q_dcsn, V_cntn, lambda_cntn,  # Output arrays
-    V_next, w_grid, a_grid, H_grid, h_nxt_ind_array,  # Input data arrays
+    policy_c, policy_a, Q_dcsn, vlu_dcsn, lambda_dcsn,  # Output arrays
+    vlu_cntn, w_grid, a_grid, H_grid, h_nxt_ind_array,  # Input data arrays
     beta, delta, m_bar, thorn, n_grid,               # Scalar parameters
     alpha, kappa, iota,                              # Utility parameters
     n_W, n_H, n_Y,                                   # Grid dimensions
@@ -49,7 +49,7 @@ def vfi_gpu_kernel(
         for g in range(n_grid):
             a_try = a_low + (a_high - a_low) * g * step_inv
             Q_try = bellman_obj_gpu(
-                a_try, w_val, H_val, beta, delta, a_grid, V_next,
+                a_try, w_val, H_val, beta, delta, a_grid, vlu_cntn,
                 h_nxt_ind, y,
                 alpha, kappa, iota
             )
@@ -145,7 +145,7 @@ def calculate_gradient_gpu_kernel(
 
 @cuda.jit
 def calculate_continuation_values_gpu_kernel(
-    policy_c, Q_dcsn, gradient_c, H_grid, V_cntn, lambda_cntn,
+    policy_c, Q_dcsn, gradient_c, H_grid, vlu_dcsn, lambda_dcsn,
     delta, thorn, alpha, kappa, iota, compute_lambda,
     n_W, n_H, n_Y
 ):
@@ -165,35 +165,15 @@ def calculate_continuation_values_gpu_kernel(
             util = alpha * math.log(c_now) + (1 - alpha) * math.log(kappa * H_val + iota)
         
         # Compute continuation value
-        V_cntn[iw, ih, iy] = (Q_dcsn[iw, ih, iy] - (1 - delta) * util) / delta
+        vlu_dcsn[iw, ih, iy] = (Q_dcsn[iw, ih, iy] - (1 - delta) * util) / delta
         
         # Compute lambda if requested
         if compute_lambda:
             uc_now = alpha / c_now  # Marginal utility for log utility
             c_prime = gradient_c[iw, ih, iy]
-            lambda_cntn[iw, ih, iy] = (uc_now - (1 - delta) * c_prime * uc_now) / delta
+            lambda_dcsn[iw, ih, iy] = (uc_now - (1 - delta) * c_prime * uc_now) / delta
         else:
-            lambda_cntn[iw, ih, iy] = 0.0
-
-@njit(parallel=True)
-def _calculate_continuation_values_cpu(
-    policy_c, Q_dcsn, H_grid, w_grid, V_cntn, lambda_cntn,
-    delta, m_bar, thorn, u_func_cpu
-):
-    """
-    JIT-compiled function to calculate continuation values on the CPU
-    in parallel.
-    """
-    n_W, n_H, n_Y = policy_c.shape
-    for h in prange(n_H):
-        for y in range(n_Y):
-            H_val = H_grid[h] * thorn
-            #c_prime = piecewise_gradient(policy_c[:, h, y], w_grid, m_bar)
-            for iw in range(n_W):
-                c_now = policy_c[iw, h, y]
-                uc_now = 1.0 / c_now
-                V_cntn[iw, h, y] = (Q_dcsn[iw, h, y] - (1 - delta) * u_func_cpu(c_now, H_val)) / delta
-                #lambda_cntn[iw, h, y] = (uc_now - (1 - delta) * c_prime[iw] * uc_now) / delta
+            lambda_dcsn[iw, ih, iy] = 0.0
 
 # ======================================================================
 #  Host-Side GPU Launcher
@@ -225,7 +205,7 @@ def solve_vfi_gpu(vlu_cntn, model):
     h_nxt_ind_array = model.num.functions.g_ve_h_ind(H_ind=np.arange(H_grid.size))
 
     # --- 2. Allocate and Transfer Data to GPU ---
-    d_V_next = cuda.to_device(vlu_cntn)
+    d_vlu_cntn = cuda.to_device(vlu_cntn)
     d_w_grid = cuda.to_device(w_grid)
     d_a_grid = cuda.to_device(a_grid)
     d_H_grid = cuda.to_device(H_grid)
@@ -241,8 +221,8 @@ def solve_vfi_gpu(vlu_cntn, model):
     d_policy_c = cuda.device_array((n_W, n_H, n_Y), dtype=np.float64)
     d_policy_a = cuda.device_array_like(d_policy_c)
     d_Q_dcsn = cuda.device_array_like(d_policy_c)
-    d_V_cntn = cuda.device_array_like(d_policy_c)
-    d_lambda_cntn = cuda.device_array_like(d_policy_c)
+    d_vlu_dcsn = cuda.device_array_like(d_policy_c)
+    d_lambda_dcsn = cuda.device_array_like(d_policy_c)
 
     # --- 3. Configure and Launch Kernel ---
     # Use 3D grid for maximum parallelism across all dimensions
@@ -286,8 +266,8 @@ def solve_vfi_gpu(vlu_cntn, model):
     u_func_cpu = get_u_func(expr_str, param_vals)
 
     vfi_gpu_kernel[blocks_per_grid, threads_per_block](
-        d_policy_c, d_policy_a, d_Q_dcsn, d_V_cntn, d_lambda_cntn,
-        d_V_next, d_w_grid, d_a_grid, d_H_grid, d_h_nxt_ind_array,
+        d_policy_c, d_policy_a, d_Q_dcsn, d_vlu_dcsn, d_lambda_dcsn,
+        d_vlu_cntn, d_w_grid, d_a_grid, d_H_grid, d_h_nxt_ind_array,
         beta, delta, m_bar, thorn, n_grid,
         alpha, kappa, iota,
         n_W, n_H, n_Y,
@@ -352,7 +332,7 @@ def solve_vfi_gpu(vlu_cntn, model):
     continuation_blocks = (continuation_blocks_x, continuation_blocks_y, continuation_blocks_z)
     
     calculate_continuation_values_gpu_kernel[continuation_blocks, continuation_threads](
-        d_policy_c, d_Q_dcsn, d_gradient_c, d_H_grid, d_V_cntn, d_lambda_cntn,
+        d_policy_c, d_Q_dcsn, d_gradient_c, d_H_grid, d_vlu_dcsn, d_lambda_dcsn,
         delta, thorn, alpha, kappa, iota, compute_lambda,
         n_W, n_H, n_Y
     )
@@ -361,8 +341,8 @@ def solve_vfi_gpu(vlu_cntn, model):
     policy_c = d_policy_c.copy_to_host()
     policy_a = d_policy_a.copy_to_host()  # Now we actually compute this on GPU
     Q_dcsn = d_Q_dcsn.copy_to_host()
-    V_cntn = d_V_cntn.copy_to_host()
-    lambda_cntn = d_lambda_cntn.copy_to_host()
+    vlu_dcsn = d_vlu_dcsn.copy_to_host()
+    lambda_dcsn = d_lambda_dcsn.copy_to_host()
 
-    return policy_c, policy_a, Q_dcsn, V_cntn, lambda_cntn
+    return policy_c, policy_a, Q_dcsn, vlu_dcsn, lambda_dcsn
 
