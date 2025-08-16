@@ -239,15 +239,15 @@ def F_ownc_cntn_to_dcsn_gpu(mover, use_mpi=False, comm=None):
         vlu_cntn = perch_data.vlu
         
         # This call offloads the heavy computation to the GPU
-        policy, policy_a, Q_dcsn, V_cntn, lambda_cntn = solve_vfi_gpu(
+        policy_c, policy_a, Q_dcsn, vlu_dcsn, lambda_dcsn = solve_vfi_gpu(
             vlu_cntn, model
         )
 
         sol = Solution()
-        sol.policy["c"] = policy
+        sol.policy["c"] = policy_c
         sol.policy["a"] = policy_a
-        sol.vlu = V_cntn # Note: We use V_cntn from the GPU run
-        sol.lambda_ = lambda_cntn
+        sol.vlu = vlu_dcsn # Note: We use vlu_dcsn from the GPU run
+        sol.lambda_ = lambda_dcsn
         sol.Q = Q_dcsn
         return sol
 
