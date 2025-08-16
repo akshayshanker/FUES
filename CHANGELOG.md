@@ -3,6 +3,7 @@
 All notable changes to this project will be documented in this file.
 
 ## [0.5.0dev0] - 2025-08-12 – Multi-GPU Support and FUES Algorithm Cleanup
+- [2025-08-16 10:00 AEST] Major refactoring: Removed MPI support from horses_c.py, removed unused F_ownc_cntn_to_dcsn factory, standardized terminology
 
 ### Added
 * **Multi-GPU MPI parallelization for housing model**
