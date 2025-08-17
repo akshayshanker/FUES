@@ -5,13 +5,33 @@ from numba import cuda, njit, prange
 import math
 
 from dc_smm.models.housing_renting.horses_common import (
-    bellman_obj_gpu, piecewise_gradient, get_u_func
+    bellman_obj_gpu, piecewise_gradient, get_u_func, interp_gpu
 )
 
 # ======================================================================
 #  GPU VFI Kernel
 # ======================================================================
 
+
+@cuda.jit(device=True)
+def bellman_obj_gpu_fast(a_prime, w, log_H_term, beta, delta, a_grid, V_next,
+                         h_nxt_ind, y_ind, alpha):
+    """
+    Optimized GPU device version of the Bellman objective function.
+    Uses pre-computed log_H_term to avoid redundant calculations.
+    """
+    c = w - a_prime
+    if c <= 0:
+        return -1e110
+    
+    # Use pre-computed log_H_term
+    util = alpha * math.log(c) + (1 - alpha) * log_H_term
+    
+    # Interpolate next period value
+    v_next_slice = V_next[:, h_nxt_ind, y_ind]
+    v_interp = interp_gpu(a_prime, a_grid, v_next_slice)
+    
+    return util + beta * delta * v_interp
 
 @cuda.jit
 def vfi_gpu_kernel(
@@ -32,6 +52,10 @@ def vfi_gpu_kernel(
         w_val = w_grid[iw]
         H_val = H_grid[h] * thorn
         h_nxt_ind = h_nxt_ind_array[h]
+        
+        # Pre-compute log term for housing utility (constant within this thread)
+        # This avoids recomputing it in every bellman_obj_gpu call
+        log_H_term = math.log(kappa * H_val + iota)
 
         # V_slice is not created explicitly; we pass indices to bellman_obj_gpu
         
@@ -51,10 +75,9 @@ def vfi_gpu_kernel(
         
         for g in range(coarse_grid):
             a_try = a_low + (a_high - a_low) * g * coarse_step_inv
-            Q_try = bellman_obj_gpu(
-                a_try, w_val, H_val, beta, delta, a_grid, vlu_cntn,
-                h_nxt_ind, y,
-                alpha, kappa, iota
+            Q_try = bellman_obj_gpu_fast(
+                a_try, w_val, log_H_term, beta, delta, a_grid, vlu_cntn,
+                h_nxt_ind, y, alpha
             )
             if Q_try > best_coarse_Q:
                 best_coarse_Q = Q_try
@@ -77,18 +100,19 @@ def vfi_gpu_kernel(
         
         for g in range(fine_grid):
             a_try = fine_a_low + (fine_a_high - fine_a_low) * g * fine_step_inv
-            Q_try = bellman_obj_gpu(
-                a_try, w_val, H_val, beta, delta, a_grid, vlu_cntn,
-                h_nxt_ind, y,
-                alpha, kappa, iota
+            Q_try = bellman_obj_gpu_fast(
+                a_try, w_val, log_H_term, beta, delta, a_grid, vlu_cntn,
+                h_nxt_ind, y, alpha
             )
             if Q_try > best_Q:
                 best_Q = Q_try
                 best_a = a_try
         
-        c_star = w_val - best_a
-        if math.isinf(best_Q) or c_star <= 0.0:
-            c_star = 1e-10
+        # Use max to avoid branching for c_star
+        c_star = max(w_val - best_a, 1e-10)
+        
+        # Handle invalid Q values
+        if math.isinf(best_Q):
             best_Q = -1e100
             best_a = 1e-100
             
