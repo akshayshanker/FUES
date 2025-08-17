@@ -439,7 +439,7 @@ def dev_c_log10_mean(
                 model,
                 stage="OWNC", 
                 sol_attr="policy", 
-                policy_attr="c",
+                key="c",
                 perch_grid_key="dcsn",
                 cont_grid_key="w",
             )
@@ -447,7 +447,7 @@ def dev_c_log10_mean(
                 ref_model,
                 stage="OWNC", 
                 sol_attr="policy", 
-                policy_attr="c",
+                key="c",
                 perch_grid_key="dcsn",
                 cont_grid_key="w",
             )
@@ -490,8 +490,14 @@ def dev_c_log10_mean(
             diff_safe = diff + epsilon
             
             # Compute mean of log10 absolute errors
+            # Use nanmean to handle any potential NaN values robustly
             log_errors = np.log10(diff_safe)
-            result = float(np.mean(log_errors))
+            
+            # Check if we have valid values
+            if np.all(np.isnan(log_errors)):
+                result = np.nan
+            else:
+                result = float(np.nanmean(log_errors))
             
             # Clean up
             del diff, pol, refp, g_mod, g_ref, diff_safe, log_errors

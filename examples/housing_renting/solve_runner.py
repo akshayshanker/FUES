@@ -739,7 +739,16 @@ def main(argv=None):
             # Generate plots immediately and delete model
             if is_root and args.plots and ref_model is not None:
                 trace_print("19: Generating baseline plots")
-                settings.img_dir.mkdir(exist_ok=True)
+                
+                # Use bundle-specific directory for plots
+                if baseline_bundle_path:
+                    from pathlib import Path
+                    baseline_plot_dir = Path(baseline_bundle_path) / "plots"
+                    baseline_plot_dir.mkdir(parents=True, exist_ok=True)
+                else:
+                    # Fallback to original location if no bundle path
+                    baseline_plot_dir = settings.img_dir
+                    baseline_plot_dir.mkdir(exist_ok=True)
                 
                 # Clean up non-essential data before plotting if in low-memory mode
                 if args.low_memory:
@@ -748,7 +757,9 @@ def main(argv=None):
                 
                 try:
                     print(f"  Generating plots for {settings.baseline_method}...")
-                    egm_plot_func(ref_model, settings.baseline_method, settings.img_dir, egm_bounds=plot_config['egm_bounds'])
+                    if baseline_bundle_path:
+                        print(f"  Plots will be saved to: {baseline_plot_dir}")
+                    egm_plot_func(ref_model, settings.baseline_method, baseline_plot_dir, egm_bounds=plot_config['egm_bounds'])
                 except Exception as err:
                     print(f"[warn] plot-gen for {settings.baseline_method} failed: {err}")
                 finally:
@@ -827,7 +838,16 @@ def main(argv=None):
                 # Generate plots immediately and delete model
                 if is_root and args.plots and model is not None:
                     trace_print(f"27.{i+1}: Generating {method} plots")
-                    settings.img_dir.mkdir(exist_ok=True)
+                    
+                    # Use bundle-specific directory for plots
+                    if method_bundle_path:
+                        from pathlib import Path
+                        bundle_plot_dir = Path(method_bundle_path) / "plots"
+                        bundle_plot_dir.mkdir(parents=True, exist_ok=True)
+                    else:
+                        # Fallback to original location if no bundle path
+                        bundle_plot_dir = settings.img_dir
+                        bundle_plot_dir.mkdir(exist_ok=True)
                     
                     # Clean up non-essential data before plotting if in low-memory mode
                     if args.low_memory:
@@ -836,6 +856,8 @@ def main(argv=None):
                     
                     try:
                         print(f"  Generating plots for {method}...")
+                        if method_bundle_path:
+                            print(f"  Plots will be saved to: {bundle_plot_dir}")
                         
                         # Debug: Check if this model has EGM grids
                         first_period = model.get_period(0)
@@ -850,7 +872,7 @@ def main(argv=None):
                             print(f"[DEBUG] Model passed to plotting for {method}: NO EGM grids!")
                             print(f"[DEBUG] Model object id: {id(model)}, ownc_stage.dcsn.sol id: {id(ownc_stage.dcsn.sol)}")
                         
-                        egm_plot_func(model, method, settings.img_dir, egm_bounds=plot_config['egm_bounds'], y_idx_list=plot_config['y_idx_list'])
+                        egm_plot_func(model, method, bundle_plot_dir, egm_bounds=plot_config['egm_bounds'], y_idx_list=plot_config['y_idx_list'])
                     except Exception as err:
                         print(f"[warn] plot-gen for {method} failed: {err}")
                     finally:
