@@ -2,6 +2,55 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.0dev0] - 2025-08-12 – Multi-GPU Support and FUES Algorithm Cleanup
+- [2025-08-16 10:00 AEST] Major refactoring: Removed MPI support from horses_c.py, removed unused F_ownc_cntn_to_dcsn factory, standardized terminology
+- [2025-08-17 17:00 AEST] Added DGX A100 support with specialized PBS scripts, GPU kernel optimizations, and log management utilities
+
+### Added
+* **Multi-GPU MPI parallelization for housing model**
+  - Single-node support for up to 4 GPUs with MPI
+  - Multi-node support for scaling across Gadi nodes (8+ GPUs)
+  - NUMA-aware CPU binding with 12 cores per MPI rank
+  - MPI dispatcher in horses_h.py with GPU detection and fallback
+  - MPI driver in horses_c_gpu.py with Allgatherv collectives
+  - Shared cache for grid. 
+
+* **PBS scripts for GPU scaling**
+  - `run_housing_gpu_mpi.pbs`: Single-node 4 GPU execution
+  - `run_housing_gpu_multi_node.pbs`: Multi-node 8 GPU execution  
+  - `benchmark_gpu_scaling.pbs`: Automated 1, 2, 4 GPU performance comparison
+  - Scripts use same options as single-GPU version for consistency
+  - `run_housing_dgxa100_single.pbs`: DGX A100 single GPU job (512GB RAM, 80GB GPU)
+  - `run_housing_dgxa100_parallel.pbs`: DGX A100 4-GPU parallel execution
+  - `submit_dgxa100_config.sh`: Submit helper accepting multiple configurations
+  - `move_logs_to_scratch.sh`: Utility to move all logs to scratch storage
+
+### Changed
+* **FUES algorithm cleanup and configurability**
+  - Removed 4 unused functions (uniqueEG, linear_interp, seg_intersect, line_intersect_unbounded)
+  - Made epsilon parameters configurable (eps_d, eps_sep, eps_fwd_back, parallel_guard)
+  - Consolidated duplicated intersection logic into _forced_intersection_twopoint() helper
+  - Moved helper functions to src/dc_smm/fues/helpers/math_funcs.py
+  - Merged FUES_sep_intersect into main FUES function with return_intersections_separately flag
+
+* **GPU implementation modifications**
+  - Added initialize_vfh_from_config() function for MPI initialization
+  - Modified V_out calculation in kernel to use formula: V = (Q - (1-delta)*u(c,h)) / delta
+  - Implemented C-contiguous array handling for MPI operations
+  - Convergence check performed before array swap using allreduce(MAX)
+  - Policy gathering made conditional via policy_every parameter
+  - Two-pass grid search in vfi_gpu_kernel: coarse then fine search (~25% fewer evaluations)
+  - Pre-computed log_H_term for housing utility (avoids redundant calculations)
+  - Branchless operations using max() instead of if-statements
+  - Immediate memory cleanup after GPU transfers for large arrays
+
+### Architecture
+* **MPI implementation structure**
+  - MPI logic isolated in solver layer (horses_h.py, horses_c_gpu.py)
+  - Whisperer module unchanged - no modifications required
+  - 1 MPI rank mapped to 1 GPU
+  - Precomputed Allgatherv counts and displacements
+
 ## [0.4.0dev11] - 2025-08-11 – FUES Algorithm Stability Improvements
 
 ### Enhanced
@@ -49,6 +98,14 @@ All notable changes to this project will be documented in this file.
   - [2025-08-08 14:15 AEST] Implemented extrapolated segment intersections (extrap_segments_05_08082025_v1) - adds fallback extrapolation when forward/backward scans fail to find bracketing points, ensuring continuous piecewise-linear envelope
   - [2025-08-08 15:34 AEST] Simplified solve_runner.py Phase 1 - extracted configuration management into ConfigurationManager class, reducing main() complexity while maintaining full PBS compatibility
   - [2025-08-12 17:15 AEST] Cleaned up fues.py - removed 4 unused functions (uniqueEG, linear_interp, seg_intersect, line_intersect_unbounded) and made epsilon parameters (eps_d, eps_sep, eps_fwd_back, parallel_guard) configurable as optional function arguments while maintaining backward compatibility 
+  - [2025-08-12 18:30 AEST] Consolidated duplicated intersection geometry logic in fues.py - created _forced_intersection_twopoint helper function to eliminate ~150 lines of duplicate code across Cases A, C.1, and C.2, while ensuring all epsilon parameters are properly passed through the function hierarchy
+  - [2025-08-12 19:00 AEST] Merged `FUES` and `FUES_sep_intersect` functions in fues.py - consolidated into a single `FUES` function with a `return_intersections_separately` flag for simplified API and improved maintainability.
+  - [2025-08-12 19:15 AEST] Cleaned up fues.py formatting - removed redundant comments, excessive blank lines, and obvious inline comments to improve code readability while maintaining functionality
+  - [2025-08-12 19:30 AEST] Simplified function signatures in fues.py - refactored _forced_intersection_twopoint and add_intersection_from_pairs_with_sep to accept L and R as tuples instead of 20 individual parameters, improving code clarity
+  - [2025-08-12 19:45 AEST] Fixed Numba compilation issue - removed @njit decorator from FUES wrapper function as it's unnecessary (only _scan needs JIT compilation) and was causing return type inconsistency errors
+  - [2025-08-12 20:00 AEST] Refactored FUES helpers - moved intersection and circular buffer utilities from fues.py to helpers/math_funcs.py for better code organization and reusability.
+  - [2025-08-12 20:15 AEST] Applied PEP8 formatting to fues.py - cleaned up whitespace, fixed spacing around operators, improved line breaks for better readability
+  - [2025-08-12 20:30 AEST] Fixed constants handling - moved EPS_D, EPS_SEP, and PARALLEL_GUARD constants from math_funcs.py back to fues.py where they belong, removed default parameter values that used these constants
   - [2025-08-08 15:45 AEST] Renamed ConfigurationManager to ExecutionSettings to distinguish PBS execution settings from model configuration YAML
   - [2025-08-08 16:15 AEST] Implemented clean left/no jump logic (clean_left_no_jump_logic_05_08082025.md) - allows consecutive no-jump left turns while preventing consecutive jumps via demotion, adds jump_now condition to intersection logic, ensures uniform index bookkeeping across all cases
   - [2025-08-08 16:25 AEST] Fixed NameError in solve_runner.py - corrected missed variable rename from cfg_container to model_config in CircuitRunner initialization

@@ -5,11 +5,14 @@ consumption and savings decisions of both owners and renters. It implements
 several solution methods, including:
 - Endogenous Grid Method (EGM) with an upper envelope step.
 - Value Function Iteration (VFI) for standard resolution grids.
-- MPI-parallelized VFI for high-density grids (`VFI_HDGRID`).
+- High-density grid VFI (`VFI_HDGRID`) running serially.
 
 The solvers are designed to be integrated into a larger model circuit via
 StageCraft operator factories. The module also includes GPU-specific operator
 factories that delegate the computation to the corresponding GPU kernels.
+
+Note: MPI support has been removed. All CPU-based VFI solvers run serially.
+GPU solvers are implemented in horses_c_gpu.py.
 
 Module Contents
 ---------------
@@ -19,24 +22,18 @@ F_rntc_cntn_to_dcsn(mover, use_mpi, comm)
     Wrapper factory for the renter's consumption solver (CPU).
 F_rntc_cntn_to_dcsn_gpu(mover, use_mpi, comm)
     Wrapper factory for the renter's consumption solver (GPU).
-F_ownc_dcsn_to_cntn(mover)
-    Forward-step operator mapping decision state to next-period assets.
 F_ownc_cntn_to_dcsn_gpu(mover, use_mpi, comm)
     Factory for the owner's VFI consumption solver (GPU).
 _solve_egm_loop(vlu_cntn, lambda_cntn, model)
     Private helper to solve the consumption problem using the EGM algorithm.
 _solve_vfi_loop(vlu_cntn, model, use_mpi, comm)
-    Private helper to solve the consumption problem using VFI (serial or MPI).
-_solve_vfi_numerical(V_next, w_grid, a_grid, H_grid, beta, delta, m_bar, u_func, h_nxt_ind_array, thorn)
+    Private helper to solve the consumption problem using VFI (serial only).
+_solve_vfi_numerical(vlu_cntn, w_grid, a_grid, H_grid, beta, delta, m_bar, u_func, h_nxt_ind_array, thorn)
     Numba-jitted kernel for VFI using Brent's method optimization.
-solve_vfi_grid_serial(V_next, w_grid, a_grid, H_grid, beta, delta, m_bar, u_func, h_nxt_ind_array, thorn, n_grid)
+solve_vfi_grid_serial(vlu_cntn, w_grid, a_grid, H_grid, beta, delta, m_bar, u_func, h_nxt_ind_array, thorn, n_grid)
     Serial VFI solver that uses a block kernel for a dense grid search.
-solve_vfi_grid_mpi(vlu_cntn, model, comm, use_mpi)
-    Memory-slim MPI-parallel VFI solver that scatters continuation values to workers.
-_solve_vfi_block(h_idx, y_idx, V_next, w_grid, a_grid, H_grid, beta, delta, m_bar, u_func, h_nxt_ind_array, thorn, n_grid)
+_solve_vfi_block(h_idx, y_idx, vlu_cntn, w_grid, a_grid, H_grid, beta, delta, m_bar, u_func, h_nxt_ind_array, thorn, n_grid)
     Numba-jitted kernel to solve VFI for a block of (h,y) pairs.
-_solve_vfi_block_local(h_idx, y_idx, V_slices, w_grid, a_grid, H_grid, beta, delta, m_bar, u_func, h_nxt_ind_array, thorn, n_grid, policy_c, policy_a, Q_dcsn, V_cntn, lambda_cntn)
-    Memory-slim, Numba-jitted VFI kernel for pre-scattered data chunks in MPI.
 """
 import os, time, numba, numpy as np
 import logging
@@ -49,10 +46,6 @@ from dc_smm.uenvelope.upperenvelope import EGM_UE
 from dc_smm.fues.helpers import interp_as, interp_clean
 from quantecon.optimize.scalar_maximization import brent_max
 from dynx.stagecraft.solmaker import Solution
-
-from dc_smm.helpers.mpi_utils import (
-    get_comm, scatter_dict_list, gather_nested, broadcast_arrays, chunk_indices
-)
 from dc_smm.models.housing_renting.horses_c_gpu import solve_vfi_gpu
 
 logger = logging.getLogger(__name__)
@@ -232,6 +225,34 @@ def F_ownc_cntn_to_dcsn(mover, use_mpi=False, comm=None):
     return operator
 
 
+def F_ownc_cntn_to_dcsn_gpu(mover, use_mpi=False, comm=None):
+    """
+    Operator factory for the GPU-based VFI solver.
+    """
+    model = mover.model
+    model.stage_name = mover.stage_name
+
+    def operator(perch_data):
+        """
+        Launches the GPU VFI solver.
+        """
+        vlu_cntn = perch_data.vlu
+        
+        # This call offloads the heavy computation to the GPU
+        policy_c, policy_a, Q_dcsn, vlu_dcsn, lambda_dcsn = solve_vfi_gpu(
+            vlu_cntn, model
+        )
+
+        sol = Solution()
+        sol.policy["c"] = policy_c
+        sol.policy["a"] = policy_a
+        sol.vlu = vlu_dcsn # Note: We use vlu_dcsn from the GPU run
+        sol.lambda_ = lambda_dcsn
+        sol.Q = Q_dcsn
+        return sol
+
+    return operator
+
 def F_rntc_cntn_to_dcsn(mover, use_mpi=False, comm=None):
     """
     Operator factory for the renter's consumption choice (CPU).
@@ -248,88 +269,6 @@ def F_rntc_cntn_to_dcsn_gpu(mover, use_mpi=False, comm=None):
     """
     return F_ownc_cntn_to_dcsn_gpu(mover, use_mpi=use_mpi, comm=comm)
 
-
-def F_ownc_dcsn_to_cntn(mover):
-    """Create operator for ownc_dcsn_to_cntn mover (Forward step).
-
-    Calculates end-of-period assets based on decision-period state and policy.
-    Maps (w, H_nxt, y) -> a_nxt.
-    The value/lambda mapping is usually handled by backward steps or identity.
-    This primarily calculates the implied asset state.
-    NOTE: This simple version doesn't map values/lambda, assumes handled elsewhere.
-    """
-    # Extract model and stage
-    model = mover.model
-
-    # In StageCraft, Movers have source_name and target_name, not perch objects
-    # We need to access the stage to get the perches
-    source_name = mover.source_name  # Should be 'dcsn'
-    target_name = mover.target_name  # Should be 'cntn'
-
-    # Get the stage to access perches
-
-    def operator(perch_data):
-        """Transforms decision state & policy to continuation state (assets).
-
-        This operator calculates the end-of-period assets based on the
-        decision-period state and the consumption policy. The primary purpose
-        is to map the decision state (w, H_nxt, y) and policy C(w, H_nxt, y)
-        to the next-period asset state a_nxt.
-
-        In this simplified version, it's assumed that the value and marginal
-        utility (lambda) propagation is handled by other parts of the model
-        framework, particularly the backward solution steps. Therefore, this
-        operator focuses solely on the state transformation for assets.
-
-        Args:
-            perch_data: A dictionary or Solution object containing data from
-                        the source 'dcsn' perch. Expected to hold the
-                        consumption 'policy' and relevant state grids if needed
-                        (though currently commented out as it returns an empty dict).
-
-        Returns:
-            dict: An empty dictionary. This operator, in its current form,
-                  does not populate any fields in the target 'cntn' perch
-                  as it assumes value/lambda mapping is done elsewhere.
-                  A more complete implementation might return {'a_nxt': a_nxt_array}.
-        """
-        # policy = perch_data["policy"] # Consumption policy C(w, H_nxt, y)
-        # w_grid = stage.dcsn.grid.w
-
-        # Minimal implementation: returns empty dict assuming value/lambda
-        # mapping is not done by this specific forward operator.
-        # The framework connects states, value calculation happens in backward steps.
-        return {}
-
-    return operator
-
-def F_ownc_cntn_to_dcsn_gpu(mover, use_mpi=False, comm=None):
-    """
-    Operator factory for the GPU-based VFI solver.
-    """
-    model = mover.model
-    model.stage_name = mover.stage_name
-
-    def operator(perch_data):
-        """
-        Launches the GPU VFI solver.
-        """
-        vlu_cntn = perch_data.vlu
-        
-        # This call offloads the heavy computation to the GPU
-        policy, policy_a, Q_dcsn, V_cntn, lambda_cntn = solve_vfi_gpu(
-            vlu_cntn, model
-        )
-
-        sol = Solution()
-        sol.policy["c"] = policy
-        sol.policy["a"] = policy_a
-        sol.vlu = V_cntn # Note: We use V_cntn from the GPU run
-        sol.lambda_ = lambda_cntn
-        sol.Q = Q_dcsn
-        return sol
-
-    return operator
 
 
 # --- Private Solver Loop Helpers ---
@@ -623,83 +562,57 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
 def _solve_vfi_loop(vlu_cntn, model, use_mpi=False, comm=None):
     """
     Drop-in replacement that matches the EGM solver's 7-value return.
+    Note: MPI support has been removed - all VFI solvers now run serially.
     """
-    # For VFI_HDGRID with MPI, use the optimized memory-slim version
-    if model.methods["solution"] == "VFI_HDGRID" and use_mpi and comm and comm.size > 1:
-        print("Solving VFI_HDGRID with MPI")
-        policy_c, policy_a, Q_dcsn, V_cntn, lambda_cntn = solve_vfi_grid_mpi(
-            vlu_cntn, model, comm, use_mpi
-        )
-        # Handle None results from worker ranks
-        if policy_c is None:        # worker rank
-            dummy = np.empty((0, 0, 0))
-            policy_c = policy_a = Q_dcsn = V_cntn = lambda_cntn = dummy
+    # Standard path for serial runs
+    # --- grids ---------------------------------------------------
+    w_grid = model.num.state_space.dcsn.grids.w.astype(np.float64)
+    a_grid = model.num.state_space.cntn.grids.a_nxt.astype(np.float64)
+    H_grid = model.num.state_space.cntn.grids.H_nxt.astype(np.float64)
+    if "RNT" in model.stage_name:
+        thorn = model.param.thorn
     else:
-        # Standard path for serial runs or VFI method
-        # --- grids ---------------------------------------------------
-        w_grid = model.num.state_space.dcsn.grids.w.astype(np.float64)
-        a_grid = model.num.state_space.cntn.grids.a_nxt.astype(np.float64)
-        H_grid = model.num.state_space.cntn.grids.H_nxt.astype(np.float64)
-        if "RNT" in model.stage_name:
-            thorn = model.param.thorn
-        else:
-            thorn = 1
+        thorn = 1
 
-        # --- parameters ---------------------------------------------
-        beta = float(model.param.beta)
-        delta = float(model.param.delta_pb)
-        m_bar = float(model.settings_dict["m_bar"])
-        N_arg_grid_vfi = model.settings_dict["N_arg_grid_vfi"]
+    # --- parameters ---------------------------------------------
+    beta = float(model.param.beta)
+    delta = float(model.param.delta_pb)
+    m_bar = float(model.settings_dict["m_bar"])
+    N_arg_grid_vfi = model.settings_dict["N_arg_grid_vfi"]
 
-        # --- contiguous 3-D continuation value array ----------------
-        V_next = np.ascontiguousarray(vlu_cntn, dtype=np.float64)
+    # --- contiguous 3-D continuation value array ----------------
+    vlu_cntn = np.ascontiguousarray(vlu_cntn, dtype=np.float64)
 
-        expr_str = model.math["functions"]["u_func"]["expr"]
-        param_vals = {
-            "alpha": model.param.alpha,
-            "kappa": model.param.kappa,
-            "iota": model.param.iota,
-            # add any extra constants referenced in expr_str
-        }
-        utility_func = build_njit_utility(expr_str, param_vals)
-        g_ve_h_ind = model.num.functions.g_ve_h_ind
-        h_nxt_ind_array = g_ve_h_ind(H_ind=np.arange(H_grid.size))
+    expr_str = model.math["functions"]["u_func"]["expr"]
+    param_vals = {
+        "alpha": model.param.alpha,
+        "kappa": model.param.kappa,
+        "iota": model.param.iota,
+        # add any extra constants referenced in expr_str
+    }
+    utility_func = build_njit_utility(expr_str, param_vals)
+    g_ve_h_ind = model.num.functions.g_ve_h_ind
+    h_nxt_ind_array = g_ve_h_ind(H_ind=np.arange(H_grid.size))
 
-        # --- run kernel ---------------------------------------------
-        if model.methods["solution"] == "VFI":
-            # Handle MPI for serial VFI - solve on root only
-            if use_mpi and comm and comm.size > 1:
-                if comm.rank == 0:
-                    policy_c, policy_a, Q_dcsn, V_cntn, lambda_cntn = _solve_vfi_numerical(
-                        V_next, w_grid, a_grid, H_grid,
-                        beta, delta, m_bar,
-                        utility_func, h_nxt_ind_array, thorn
-                    )
-                else:
-                    policy_c = policy_a = Q_dcsn = V_cntn = lambda_cntn = None
-                
-                # Handle None results from worker ranks
-                if policy_c is None:        # worker rank
-                    dummy = np.empty((0, 0, 0))
-                    policy_c = policy_a = Q_dcsn = V_cntn = lambda_cntn = dummy
-            else:
-                # Serial execution
-                policy_c, policy_a, Q_dcsn, V_cntn, lambda_cntn = _solve_vfi_numerical(
-                    V_next, w_grid, a_grid, H_grid,
-                    beta, delta, m_bar,
-                    utility_func, h_nxt_ind_array, thorn
-                )
-        elif model.methods["solution"] == "VFI_HDGRID":
-            # Serial VFI_HDGRID
-            policy_c, policy_a, Q_dcsn, V_cntn, lambda_cntn = solve_vfi_grid_serial(
-                V_next, w_grid, a_grid, H_grid,
-                beta, delta, m_bar,
-                utility_func, h_nxt_ind_array, thorn, n_grid=N_arg_grid_vfi
-            )
+    # --- run kernel ---------------------------------------------
+    if model.methods["solution"] == "VFI":
+        # Serial execution only
+        policy_c, policy_a, Q_dcsn, vlu_dcsn, lambda_dcsn = _solve_vfi_numerical(
+            vlu_cntn, w_grid, a_grid, H_grid,
+            beta, delta, m_bar,
+            utility_func, h_nxt_ind_array, thorn
+        )
+    elif model.methods["solution"] == "VFI_HDGRID":
+        # Serial VFI_HDGRID
+        policy_c, policy_a, Q_dcsn, vlu_dcsn, lambda_dcsn = solve_vfi_grid_serial(
+            vlu_cntn, w_grid, a_grid, H_grid,
+            beta, delta, m_bar,
+            utility_func, h_nxt_ind_array, thorn, n_grid=N_arg_grid_vfi
+        )
 
-        # Memory cleanup
-        del V_next
-        gc.collect()
+    # Memory cleanup
+    del vlu_cntn
+    gc.collect()
 
     # The EGM solver returns an average UE time and grid dicts.
     # For VFI these have no meaning, so we stub them out.
@@ -711,8 +624,8 @@ def _solve_vfi_loop(vlu_cntn, model, use_mpi=False, comm=None):
     egm_grids = {"unrefined": unrefined_grids, "refined": refined_grids}
 
     return (policy_c,             # same as `policy`
-            V_cntn,               # vlu_dcsn
-            lambda_cntn,          # lambda_dcsn
+            vlu_dcsn,               # vlu_dcsn
+            lambda_dcsn,          # lambda_dcsn
             avg_ue_time,
             egm_grids,
             policy_a,             # asset policy, matches EGM output
@@ -720,7 +633,7 @@ def _solve_vfi_loop(vlu_cntn, model, use_mpi=False, comm=None):
 
 
 @njit
-def _solve_vfi_numerical(V_next, w_grid, a_grid, H_grid,
+def _solve_vfi_numerical(vlu_cntn, w_grid, a_grid, H_grid,
                      beta, delta, m_bar,
                      u_func, h_nxt_ind_array, thorn):
     """
@@ -733,19 +646,19 @@ def _solve_vfi_numerical(V_next, w_grid, a_grid, H_grid,
         lambda_cntn: continuation marginal value
     """
     n_W = w_grid.size
-    n_A, n_H, n_Y = V_next.shape
+    n_A, n_H, n_Y = vlu_cntn.shape
 
     policy_c = np.empty((n_W, n_H, n_Y))
     policy_a = np.empty_like(policy_c)
     Q_dcsn = np.empty_like(policy_c)
-    V_cntn = np.empty_like(policy_c)
-    lambda_cntn = np.empty_like(policy_c)
+    vlu_dcsn = np.empty_like(policy_c)
+    lambda_dcsn = np.empty_like(policy_c)
 
     for h in range(n_H):
         H_val = H_grid[h]*thorn
         for y in range(n_Y):
             h_nxt_ind = h_nxt_ind_array[h]
-            V_slice = V_next[:, h_nxt_ind, y]                # contiguous 1-D
+            V_slice = vlu_cntn[:, h_nxt_ind, y]                # contiguous 1-D
 
             for iw in range(n_W):
                 w_val = w_grid[iw]
@@ -776,23 +689,23 @@ def _solve_vfi_numerical(V_next, w_grid, a_grid, H_grid,
             for iw in range(n_W):
                 c_now = policy_c[iw, h, y]
                 uc_now = 1/c_now
-                V_cntn[iw, h, y] = (Q_dcsn[iw, h, y]
+                vlu_dcsn[iw, h, y] = (Q_dcsn[iw, h, y]
                                     - (1.0 - delta)*u_func(c_now, H_val)) / delta
-                lambda_cntn[iw, h, y] = (uc_now -
+                lambda_dcsn[iw, h, y] = (uc_now -
                                          (1.0 - delta)*c_prime[iw]*uc_now) / delta
 
                 # print(V_cntn[iw, h, y][np.isinf(V_cntn[iw, h, y])])
 
-    return policy_c, policy_a, Q_dcsn, V_cntn, lambda_cntn
+    return policy_c, policy_a, Q_dcsn, vlu_dcsn, lambda_dcsn
 
 
-def solve_vfi_grid_serial(V_next, w_grid, a_grid, H_grid,
+def solve_vfi_grid_serial(vlu_cntn, w_grid, a_grid, H_grid,
                           beta, delta, m_bar, u_func, h_nxt_ind_array, 
                           thorn, n_grid=2000):
     """
     Serial VFI using block kernel.
     """
-    n_A, n_H, n_Y = V_next.shape
+    n_A, n_H, n_Y = vlu_cntn.shape
     n_W = w_grid.size
     
     # Create index arrays for all (h,y) pairs
@@ -801,7 +714,7 @@ def solve_vfi_grid_serial(V_next, w_grid, a_grid, H_grid,
     
     # Call block kernel
     policy_c_block, policy_a_block, Q_block, V_block, lambda_block = _solve_vfi_block(
-        h_idx, y_idx, V_next, w_grid, a_grid, H_grid,
+        h_idx, y_idx, vlu_cntn, w_grid, a_grid, H_grid,
         beta, delta, m_bar, u_func, h_nxt_ind_array, thorn, n_grid
     )
     
@@ -809,8 +722,8 @@ def solve_vfi_grid_serial(V_next, w_grid, a_grid, H_grid,
     policy_c = np.empty((n_W, n_H, n_Y))
     policy_a = np.empty((n_W, n_H, n_Y))
     Q_dcsn = np.empty((n_W, n_H, n_Y))
-    V_cntn = np.empty((n_W, n_H, n_Y))
-    lambda_cntn = np.empty((n_W, n_H, n_Y))
+    vlu_dcsn = np.empty((n_W, n_H, n_Y))
+    lambda_dcsn = np.empty((n_W, n_H, n_Y))
     
     for b in range(len(h_idx)):
         h = h_idx[b]
@@ -818,221 +731,14 @@ def solve_vfi_grid_serial(V_next, w_grid, a_grid, H_grid,
         policy_c[:, h, y] = policy_c_block[b, :]
         policy_a[:, h, y] = policy_a_block[b, :]
         Q_dcsn[:, h, y] = Q_block[b, :]
-        V_cntn[:, h, y] = V_block[b, :]
-        lambda_cntn[:, h, y] = lambda_block[b, :]
+        vlu_dcsn[:, h, y] = V_block[b, :]
+        lambda_dcsn[:, h, y] = lambda_block[b, :]
     
-    return policy_c, policy_a, Q_dcsn, V_cntn, lambda_cntn
+    return policy_c, policy_a, Q_dcsn, vlu_dcsn, lambda_dcsn
 
-
-def solve_vfi_grid_mpi(vlu_cntn, model, comm, use_mpi=True):
-    """
-    Memory-slim MPI-parallel VFI solver that scatters V_next slices to workers.
-    Workers never hold the full continuation tensor during solves.
-    """
-    # Extract parameters - all ranks need access to basic model info
-    if comm is None or comm.rank == 0:
-        w_grid = model.num.state_space.dcsn.grids.w.astype(np.float64)
-        a_grid = model.num.state_space.cntn.grids.a_nxt.astype(np.float64)
-        H_grid = model.num.state_space.cntn.grids.H_nxt.astype(np.float64)
-        
-        if "RNT" in model.stage_name:
-            thorn = model.param.thorn
-        else:
-            thorn = 1
-            
-        beta = float(model.param.beta)
-        delta = float(model.param.delta_pb)
-        m_bar = float(model.settings_dict["m_bar"])
-        N_arg_grid_vfi = model.settings_dict["N_arg_grid_vfi"]
-        
-        # Build utility function parameters
-        expr_str = model.math["functions"]["u_func"]["expr"]
-        param_vals = {
-            "alpha": model.param.alpha,
-            "kappa": model.param.kappa,
-            "iota": model.param.iota,
-        }
-        
-        g_ve_h_ind = model.num.functions.g_ve_h_ind
-        h_nxt_ind_array = g_ve_h_ind(H_ind=np.arange(H_grid.size))
-        
-        V_next = np.ascontiguousarray(vlu_cntn, dtype=np.float64)
-        n_A, n_H, n_Y = V_next.shape
-        n_W = w_grid.size
-    else:
-        # Workers get None for heavy objects, but need basic info
-        w_grid = a_grid = H_grid = h_nxt_ind_array = V_next = None
-        beta = delta = m_bar = thorn = None
-        N_arg_grid_vfi = None
-        expr_str = None
-        param_vals = None
-        n_A = n_H = n_Y = n_W = None
-
-    # Broadcast read-only data to all ranks
-    broadcast_data = {
-        'w_grid': w_grid,
-        'a_grid': a_grid,
-        'H_grid': H_grid,
-        'h_nxt_ind_array': h_nxt_ind_array,
-        'beta': beta,
-        'delta': delta,
-        'm_bar': m_bar,
-        'thorn': thorn,
-        'n_grid': N_arg_grid_vfi,
-        'expr_str': expr_str,
-        'param_vals': param_vals,
-    }
-    
-    # Broadcast to all ranks
-    broadcast_data = broadcast_arrays(comm, broadcast_data, root=0)
-    
-    # Build utility function on all ranks after broadcast
-    utility_func = build_njit_utility(
-        broadcast_data['expr_str'], 
-        broadcast_data['param_vals']
-    )
-    
-    # Create chunks and associated V_slices on root
-    if comm.rank == 0:
-        # Create all (h,y) pairs
-        h_all = np.repeat(np.arange(n_H), n_Y).astype(np.int32)
-        y_all = np.tile(np.arange(n_Y), n_H).astype(np.int32)
-        
-        # Build chunks with contiguous V_slices
-        chunks = []
-        for rank in range(comm.size):
-            rank_indices = chunk_indices(len(h_all), comm.size, rank)
-            h_chunk = h_all[rank_indices]
-            y_chunk = y_all[rank_indices]
-            
-            # Create contiguous V_slices for this chunk
-            if h_chunk.size > 0:
-                V_slices = np.empty((h_chunk.size, n_A), dtype=np.float64)
-                for i, (h, y) in enumerate(zip(h_chunk, y_chunk)):
-                    h_nxt_ind = h_nxt_ind_array[h]
-                    V_slices[i, :] = V_next[:, h_nxt_ind, y]
-                V_slices = np.ascontiguousarray(V_slices)
-            else:
-                V_slices = np.empty((0, n_A), dtype=np.float64)
-            
-            chunks.append({
-                'h_idx': h_chunk,
-                'y_idx': y_chunk, 
-                'V_slices': V_slices
-            })
-    else:
-        chunks = None
-    
-    # Scatter chunks (including V_slices)
-    local_chunk = scatter_dict_list(comm, chunks)
-    
-    # Memory cleanup on root: release large objects after scattering
-    if comm.rank == 0:
-        del V_next
-        del chunks
-        gc.collect()
-    
-    if local_chunk and local_chunk['h_idx'].size > 0:
-        h_local = local_chunk['h_idx']
-        y_local = local_chunk['y_idx']
-        V_local = local_chunk['V_slices']
-        
-        B_local = h_local.size
-        n_W = broadcast_data['w_grid'].size
-        
-        # --- Pre-allocate work arrays ONCE here ---
-        policy_c_local = np.empty((B_local, n_W))
-        policy_a_local = np.empty((B_local, n_W))
-        Q_local = np.empty((B_local, n_W))
-        V_cntn_local = np.empty((B_local, n_W))
-        lambda_local = np.empty((B_local, n_W))
-        
-        # --- Pass pre-allocated arrays to the kernel ---
-        _solve_vfi_block_local(
-            h_local, y_local, V_local,
-            broadcast_data['w_grid'], broadcast_data['a_grid'],
-            broadcast_data['H_grid'], broadcast_data['beta'],
-            broadcast_data['delta'], broadcast_data['m_bar'],
-            utility_func, broadcast_data['h_nxt_ind_array'],
-            broadcast_data['thorn'], broadcast_data['n_grid'],
-            # The five pre-allocated arrays:
-            policy_c_local, policy_a_local, Q_local, V_cntn_local, lambda_local
-        )
-        
-        # Memory cleanup: immediately release V_local
-        del V_local
-        gc.collect()
-        
-        # Package results from the now-filled arrays
-        local_results = {
-            'h_idx': h_local,
-            'y_idx': y_local,
-            'policy_c': policy_c_local,
-            'policy_a': policy_a_local,
-            'Q_dcsn': Q_local,
-            'V_cntn': V_cntn_local,
-            'lambda_cntn': lambda_local
-        }
-    else:
-        # Empty chunk - need n_W from broadcast data
-        n_W = broadcast_data['w_grid'].size if broadcast_data['w_grid'] is not None else 0
-        local_results = {
-            'h_idx': np.empty(0, dtype=np.int32),
-            'y_idx': np.empty(0, dtype=np.int32),
-            'policy_c': np.empty((0, n_W)),
-            'policy_a': np.empty((0, n_W)),
-            'Q_dcsn': np.empty((0, n_W)),
-            'V_cntn': np.empty((0, n_W)),
-            'lambda_cntn': np.empty((0, n_W))
-        }
-    
-    # Gather results to root
-    if comm.rank == 0:
-        all_results = gather_nested(comm, [local_results], root=0)
-        
-        # Reconstruct full arrays with explicit memory management
-        policy_c = np.empty((n_W, n_H, n_Y))
-        policy_a = np.empty((n_W, n_H, n_Y))
-        Q_dcsn = np.empty((n_W, n_H, n_Y))
-        V_cntn = np.empty((n_W, n_H, n_Y))
-        lambda_cntn = np.empty((n_W, n_H, n_Y))
-        
-        for result in all_results:
-            h_idx = result['h_idx']
-            y_idx = result['y_idx']
-            for k in range(h_idx.size):
-                h = h_idx[k]
-                y = y_idx[k]
-                policy_c[:, h, y]   = result['policy_c'][k]
-                policy_a[:, h, y]   = result['policy_a'][k]
-                Q_dcsn[:, h, y]     = result['Q_dcsn'][k]
-                V_cntn[:, h, y]     = result['V_cntn'][k]
-                lambda_cntn[:, h, y]= result['lambda_cntn'][k]
-        
-        # Clear temporary buffers
-        all_results.clear()
-        gc.collect()
-    else:
-        # Workers participate in gather but don't store results
-        gather_nested(comm, [local_results], root=0)
-        
-        # Free memory on worker ranks after data is sent
-        del local_results
-        gc.collect()
-    
-    # Root returns full results, workers return None
-    # TODO: MAKE NOTE RETURNING COMPLETE ARRAYS AN OPTION!  
-    if comm.rank == 0:
-        return policy_c, np.empty((1,1,1)), Q_dcsn, V_cntn, np.zeros(np.shape(V_cntn))
-    else:
-        return (None,)*5          # workers keep virtually zero data
-
-
-# Note: _get_solver function removed as it's no longer used
-# VFI solver selection is now handled directly in _solve_vfi_loop
 
 @njit
-def _solve_vfi_block(h_idx, y_idx, V_next, w_grid, a_grid, H_grid,
+def _solve_vfi_block(h_idx, y_idx, vlu_cntn, w_grid, a_grid, H_grid,
                      beta, delta, m_bar, u_func, h_nxt_ind_array,
                      thorn, n_grid):
     """
@@ -1044,7 +750,7 @@ def _solve_vfi_block(h_idx, y_idx, V_next, w_grid, a_grid, H_grid,
         Housing indices, shape (B,)
     y_idx : np.ndarray(int32) 
         Income indices, shape (B,)
-    V_next : np.ndarray
+    vlu_cntn : np.ndarray
         Value function continuation
     w_grid : np.ndarray
         Wealth grid
@@ -1066,7 +772,7 @@ def _solve_vfi_block(h_idx, y_idx, V_next, w_grid, a_grid, H_grid,
     Returns
     -------
     tuple
-        (policy_c, policy_a, Q_dcsn, V_cntn, lambda_cntn) each shape (B, n_W)
+        (policy_c, policy_a, Q_dcsn, vlu_dcsn, lambda_dcsn) each shape (B, n_W)
     """
     B = h_idx.size
     n_W = w_grid.size
@@ -1075,8 +781,8 @@ def _solve_vfi_block(h_idx, y_idx, V_next, w_grid, a_grid, H_grid,
     policy_c = np.empty((B, n_W))
     policy_a = np.empty((B, n_W))
     Q_dcsn = np.empty((B, n_W))
-    V_cntn = np.empty((B, n_W))
-    lambda_cntn = np.empty((B, n_W))
+    vlu_dcsn = np.empty((B, n_W))
+    lambda_dcsn = np.empty((B, n_W))
     
     step_inv = 1.0 / (n_grid - 1)
     
@@ -1087,7 +793,7 @@ def _solve_vfi_block(h_idx, y_idx, V_next, w_grid, a_grid, H_grid,
         
         H_val = H_grid[h] * thorn
         h_nxt_ind = h_nxt_ind_array[h]
-        V_slice = V_next[:, h_nxt_ind, y]
+        V_slice = vlu_cntn[:, h_nxt_ind, y]
         
         # Solve for all wealth points for this (h,y)
         for iw in range(n_W):
@@ -1126,117 +832,7 @@ def _solve_vfi_block(h_idx, y_idx, V_next, w_grid, a_grid, H_grid,
         for iw in range(n_W):
             c_now = policy_c[b, iw]
             uc_now = 1.0 / c_now
-            V_cntn[b, iw] = (Q_dcsn[b, iw] - (1 - delta) * u_func(c_now, H_val)) / delta
-            lambda_cntn[b, iw] = (uc_now - (1 - delta) * c_prime[iw] * uc_now) / delta
+            vlu_dcsn[b, iw] = (Q_dcsn[b, iw] - (1 - delta) * u_func(c_now, H_val)) / delta
+            lambda_dcsn[b, iw] = (uc_now - (1 - delta) * c_prime[iw] * uc_now) / delta
     
-    return policy_c, policy_a, Q_dcsn, V_cntn, lambda_cntn
-
-@njit
-def _solve_vfi_block_local(h_idx, y_idx, V_slices, w_grid, a_grid, H_grid,
-                           beta, delta, m_bar, u_func, h_nxt_ind_array,
-                           thorn, n_grid,
-                           policy_c, policy_a, Q_dcsn, V_cntn, lambda_cntn):
-    """
-    Memory-slim VFI kernel that works with pre-scattered V_slices and
-    pre-allocated output arrays.
-    
-    Parameters
-    ----------
-    h_idx : np.ndarray(int32)
-        Housing indices, shape (B,)
-    y_idx : np.ndarray(int32) 
-        Income indices, shape (B,)
-    V_slices : np.ndarray
-        Pre-scattered continuation value slices, shape (B, n_A)
-    w_grid : np.ndarray
-        Wealth grid
-    a_grid : np.ndarray  
-        Asset grid
-    H_grid : np.ndarray
-        Housing grid
-    beta, delta, m_bar : float
-        Parameters
-    u_func : callable
-        Utility function
-    h_nxt_ind_array : np.ndarray
-        Housing index mapping
-    thorn : float
-        Rental efficiency
-    n_grid : int
-        Grid density
-    policy_c, policy_a, Q_dcsn, V_cntn, lambda_cntn : np.ndarray
-        Pre-allocated output arrays
-        
-    Returns
-    -------
-    None
-    """
-    B = h_idx.size
-    n_W = w_grid.size
-    
-    # This function now expects pre-allocated arrays and fills them in-place.
-    # No new allocations happen here.
-    
-    step_inv = 1.0 / (n_grid - 1)
-    
-    # Process each (h,y) pair in the block
-    for b in range(B):
-        h = h_idx[b]
-        y = y_idx[b]
-        
-        H_val = H_grid[h] * thorn
-        V_slice = V_slices[b]  # Use pre-scattered slice instead of V_next[:, h_nxt_ind, y]
-        
-        # Solve for all wealth points for this (h,y)
-        for iw in range(n_W):
-            w_val = w_grid[iw]
-            a_low = a_grid[0]
-            a_high = min(w_val - 1e-12, a_grid[-1]+30) #TODO: HARDWIRE THIS
-            
-            if a_high <= a_low + 1e-14:
-                a_high = a_low
-                
-            best_Q = -1e110
-            best_a = a_low
-            
-            # Dense grid search
-            for g in range(n_grid):
-                a_try = a_low + (a_high - a_low) * g * step_inv
-                Q_try = bellman_obj(a_try, w_val, H_val, beta, delta, a_grid, V_slice, u_func)
-                if Q_try > best_Q:
-                    best_Q = Q_try
-                    best_a = a_try
-                    
-            c_star = w_val - best_a
-            
-            if np.isinf(best_Q) or c_star <= 0.0:
-                c_star = 1e-10
-                best_Q = -1e100
-                best_a = 1e-100
-            
-            policy_c[b, iw] = c_star
-            policy_a[b, iw] = best_a
-            Q_dcsn[b, iw] = best_Q
-        
-        # Calculate continuation value and lambda for this (h,y)
-        #c_prime = piecewise_gradient(policy_c[b, :], w_grid, m_bar)
-        
-        # IMPORTANT 
-        # TODO: MAKE THIS HARDWIRED NOT TO COMPUTE LAMBDA IN HD GRID!
-        # IMPORTANT 
-        for iw in range(n_W):
-            c_now = policy_c[b, iw]
-            #uc_now = 1.0 / c_now
-            V_cntn[b, iw] = (Q_dcsn[b, iw] - (1 - delta) * u_func(c_now, H_val)) / delta
-            #lambda_cntn[b, iw] = (uc_now - (1 - delta) * c_prime[iw] * uc_now) / delta
-            lambda_cntn[b, iw] = 0.0
-    
-    # No return value needed as arrays are modified in-place
-    return
-
-# --- End Private Solver Loop Helpers ---
-
-# Need F_ownc_dcsn_to_cntn - If it exists, move it here.
-# Otherwise, it needs to be defined. Let's assume it needs definition:
-
-
+    return policy_c, policy_a, Q_dcsn, vlu_dcsn, lambda_dcsn

@@ -19,7 +19,7 @@ set -euo pipefail
 source ../lib/job_configs.sh
 
 # --- Define the Sequence of Configurations to Run ---
-CONFIG_TO_RUN=("HIGH_RES_SETTINGS_A")
+CONFIG_TO_RUN=("HIGH_RES_SETTINGS_D")
 
 
 # --- Environment Setup ---
@@ -111,15 +111,16 @@ for CONFIG_NAME in "${CONFIG_TO_RUN[@]}"; do
     # This reduces loading from 75 to 18 pickle files (76% reduction)
     python3 -m examples.housing_renting.solve_runner \
       --periods "${CONFIG_REF[periods]}" \
-      --ue-method "FUES, CONSAV, VFI_HDGRID" \
+      --ue-method "FUES, CONSAV,VFI_HDGRID_GPU" \
       --output-root "$OUTPUT_DIR" \
       --bundle-prefix "${VERSION_TAG}" \
       --RUN-ID "${VERSION_TAG}_${TIMESTAMP}" \
       --vfi-ngrid "${CONFIG_REF[vfi_ngrid]}" \
       --HD-points "${CONFIG_REF[hd_points]}" \
       --grid-points "${CONFIG_REF[grid_points]}" \
-      --baseline-method "CONSAV" \
-      --metrics "euler_error, plot_c_comparison" \
+      --delta-pb "${CONFIG_REF[delta_pb]}" \
+      --baseline-method "VFI_HDGRID_GPU" \
+      --metrics "euler_error, plot_c_comparison,dev_c_L2, dev_c_log10_mean" \
       --fresh-fast \
       --plots \
       --trace \

@@ -225,6 +225,13 @@ def solve_stage(stage, max_iter=None, tol=None, verbose=False, use_mpi=False, co
     dcsn_data = operators["cntn_to_dcsn"](cntn_data)
     cntn_to_dcsn_time = time.time() - cntn_to_dcsn_start
     
+    # Clear cntn_data if it's no longer needed (especially for GPU stages)
+    if "OWNC" in stage.name or "RNTC" in stage.name:
+        # For consumption stages, cntn_data can be large (value functions)
+        # We don't need it after the operator has consumed it
+        del cntn_data
+        gc.collect()
+    
     # Extract UE time if available in the result (from EGM computation)
     ue_time = 0
     if isinstance(dcsn_data, Solution):
@@ -601,6 +608,19 @@ def run_time_iteration(model_circuit, n_periods=None, verbose=False,verbose_timi
                 print(f"  Freeing all memory from period {period_idx} (not in keep list: {periods_to_keep})")
             _free_period_memory(period)
         
+        # Even for periods we keep, clear Q and lambda arrays which are rarely needed
+        elif free_memory and period_idx in periods_to_keep:
+            for stage_name in ["OWNC", "RNTC"]:
+                try:
+                    stage = period.get_stage(stage_name)
+                    if stage.dcsn.sol and hasattr(stage.dcsn.sol, 'Q'):
+                        stage.dcsn.sol.Q = None
+                    if stage.dcsn.sol and hasattr(stage.dcsn.sol, 'lambda_'):
+                        stage.dcsn.sol.lambda_ = None
+                except:
+                    pass
+            gc.collect()
+        
         # Record period timing
         period_time = time.time() - period_start_time
         period_data = {
@@ -708,7 +728,22 @@ def _free_period_memory(period):
             for perch_name in ["arvl", "dcsn", "cntn"]:
                 perch = getattr(stage, perch_name, None)
                 if perch is not None and hasattr(perch, 'sol'):
+                    # If it's a Solution object, clear its internal arrays too
+                    if hasattr(perch.sol, 'vlu'):
+                        perch.sol.vlu = None
+                    if hasattr(perch.sol, 'lambda_'):
+                        perch.sol.lambda_ = None
+                    if hasattr(perch.sol, 'Q'):
+                        perch.sol.Q = None
+                    if hasattr(perch.sol, 'policy'):
+                        perch.sol.policy = {}
                     perch.sol = None
+            
+            # Also clear any cached operators
+            if hasattr(stage, '_ops'):
+                stage._ops = None
         except:
             pass  # Stage might not exist
+    
+    # Force garbage collection
     gc.collect()

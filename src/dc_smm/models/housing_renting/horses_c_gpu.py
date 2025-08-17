@@ -2,10 +2,11 @@ import os
 import gc
 import numpy as np
 from numba import cuda, njit, prange
+import numba as nb
 import math
 
 from dc_smm.models.housing_renting.horses_common import (
-    bellman_obj_gpu, piecewise_gradient, get_u_func
+    bellman_obj_gpu, piecewise_gradient, get_u_func, interp_gpu
 )
 
 # ======================================================================
@@ -13,13 +14,33 @@ from dc_smm.models.housing_renting.horses_common import (
 # ======================================================================
 
 
+@cuda.jit(device=True)
+def bellman_obj_gpu_fast(a_prime, w, log_H_term, beta, delta, a_grid, V_next,
+                         h_nxt_ind, y_ind, alpha):
+    """
+    Optimized GPU device version of the Bellman objective function.
+    Uses pre-computed log_H_term to avoid redundant calculations.
+    """
+    c = w - a_prime
+    if c <= 0:
+        return -1e110
+    
+    # Use pre-computed log_H_term
+    util = alpha * math.log(c) + (1 - alpha) * log_H_term
+    
+    # Interpolate next period value
+    v_next_slice = V_next[:, h_nxt_ind, y_ind]
+    v_interp = interp_gpu(a_prime, a_grid, v_next_slice)
+    
+    return util + beta * delta * v_interp
+
 @cuda.jit
 def vfi_gpu_kernel(
-    policy_c, policy_a, Q_dcsn, V_cntn, lambda_cntn,  # Output arrays
-    V_next, w_grid, a_grid, H_grid, h_nxt_ind_array,  # Input data arrays
+    policy_c, policy_a, Q_dcsn, vlu_dcsn, lambda_dcsn,  # Output arrays
+    vlu_cntn, w_grid, a_grid, H_grid, h_nxt_ind_array,  # Input data arrays
     beta, delta, m_bar, thorn, n_grid,               # Scalar parameters
     alpha, kappa, iota,                              # Utility parameters
-    n_W, n_H, n_Y,                                   # Grid dimensions
+    n_W, n_H, n_Y, n_A,                              # Grid dimensions
 ):
     """
     Numba CUDA kernel to solve the VFI problem for a single (w, h, y) point.
@@ -32,40 +53,75 @@ def vfi_gpu_kernel(
         w_val = w_grid[iw]
         H_val = H_grid[h] * thorn
         h_nxt_ind = h_nxt_ind_array[h]
+        
+        # Pre-compute log term for housing utility (constant within this thread)
+        # This avoids recomputing it in every bellman_obj_gpu call
+        log_H_term = math.log(kappa * H_val + iota)
 
         # V_slice is not created explicitly; we pass indices to bellman_obj_gpu
         
         a_low = a_grid[0]
-        a_high = min(w_val - 1e-12, a_grid[-1]+30) #TODO: HARDWIRE THIS
+        a_high = min(w_val - 1e-12, a_grid[n_A - 1] + 30) #TODO: HARDWIRE THIS
         
         if a_high <= a_low + 1e-14:
             a_high = a_low
             
-        # --- 2. Dense Grid Search ---
-        best_Q = -1e110
-        best_a = a_low
-        step_inv = 1.0 / (n_grid - 1)
-
-        for g in range(n_grid):
-            a_try = a_low + (a_high - a_low) * g * step_inv
-            Q_try = bellman_obj_gpu(
-                a_try, w_val, H_val, beta, delta, a_grid, V_next,
-                h_nxt_ind, y,
-                alpha, kappa, iota
+        # --- 2. Two-Pass Grid Search ---
+        # First Pass: Coarse search to identify promising region
+        coarse_grid = max(4, n_grid // 4)  # Use 1/4 of points for coarse search
+        coarse_step_inv = 1.0 / (coarse_grid - 1) if coarse_grid > 1 else 1.0
+        
+        best_coarse_Q = -1e110
+        best_coarse_idx = 0
+        
+        for g in range(coarse_grid):
+            a_try = a_low + (a_high - a_low) * g * coarse_step_inv
+            Q_try = bellman_obj_gpu_fast(
+                a_try, w_val, log_H_term, beta, delta, a_grid, vlu_cntn,
+                h_nxt_ind, y, alpha
+            )
+            if Q_try > best_coarse_Q:
+                best_coarse_Q = Q_try
+                best_coarse_idx = g
+        
+        # Second Pass: Fine search around best coarse point
+        # Define refined search bounds (search ±1 coarse steps around best)
+        fine_low_idx = max(0, best_coarse_idx - 1)
+        fine_high_idx = min(coarse_grid - 1, best_coarse_idx + 1)
+        
+        fine_a_low = a_low + (a_high - a_low) * fine_low_idx * coarse_step_inv
+        fine_a_high = a_low + (a_high - a_low) * fine_high_idx * coarse_step_inv
+        
+        # Fine grid search with more points in narrowed range
+        fine_grid = max(n_grid // 2, 10)  # Use half the points for fine search
+        fine_step_inv = 1.0 / (fine_grid - 1) if fine_grid > 1 else 1.0
+        
+        best_Q = best_coarse_Q
+        best_a = a_low + (a_high - a_low) * best_coarse_idx * coarse_step_inv
+        
+        for g in range(fine_grid):
+            a_try = fine_a_low + (fine_a_high - fine_a_low) * g * fine_step_inv
+            Q_try = bellman_obj_gpu_fast(
+                a_try, w_val, log_H_term, beta, delta, a_grid, vlu_cntn,
+                h_nxt_ind, y, alpha
             )
             if Q_try > best_Q:
                 best_Q = Q_try
                 best_a = a_try
         
-        c_star = w_val - best_a
-        if math.isinf(best_Q) or c_star <= 0.0:
-            c_star = 1e-10
+        # Use max to avoid branching for c_star
+        c_star = max(w_val - best_a, 1e-10)
+        
+        # Handle invalid Q values
+        if math.isinf(best_Q):
             best_Q = -1e100
             best_a = 1e-100
             
         policy_c[iw, h, y] = c_star
         policy_a[iw, h, y] = best_a
         Q_dcsn[iw, h, y] = best_Q
+
+
 
 # ======================================================================
 #  GPU Continuation Value and Gradient Kernels
@@ -81,31 +137,31 @@ def calculate_gradient_gpu_kernel(
     Each thread handles one (h, y) pair and computes gradients along w dimension.
     """
     h, y = cuda.grid(2)
-    
+
     if h < n_H and y < n_Y:
         # Each thread computes gradient for all wealth points
         # This is necessary because gradient computation needs neighboring points
-        
+
         # First pass: compute raw gradients
         for iw in range(n_W):
             left_ok = False
             right_ok = False
             g_raw = -1.0  # Invalid marker
-            
+
             # Check left neighbor
             if iw > 0:
                 df = policy_c[iw, h, y] - policy_c[iw-1, h, y]
                 dx = w_grid[iw] - w_grid[iw-1]
                 if dx > 0 and abs(df/dx) <= m_bar:
                     left_ok = True
-            
+
             # Check right neighbor
             if iw < n_W - 1:
                 df = policy_c[iw+1, h, y] - policy_c[iw, h, y]
                 dx = w_grid[iw+1] - w_grid[iw]
                 if dx > 0 and abs(df/dx) <= m_bar:
                     right_ok = True
-            
+
             # Compute gradient based on available neighbors
             if left_ok and right_ok:
                 g_raw = (policy_c[iw+1, h, y] - policy_c[iw-1, h, y]) / (w_grid[iw+1] - w_grid[iw-1])
@@ -143,7 +199,7 @@ def calculate_gradient_gpu_kernel(
 
 @cuda.jit
 def calculate_continuation_values_gpu_kernel(
-    policy_c, Q_dcsn, gradient_c, H_grid, V_cntn, lambda_cntn,
+    policy_c, Q_dcsn, gradient_c, H_grid, vlu_dcsn, lambda_dcsn,
     delta, thorn, alpha, kappa, iota, compute_lambda,
     n_W, n_H, n_Y
 ):
@@ -151,7 +207,7 @@ def calculate_continuation_values_gpu_kernel(
     GPU kernel to calculate continuation values and optionally lambda.
     """
     iw, ih, iy = cuda.grid(3)
-    
+
     if iw < n_W and ih < n_H and iy < n_Y:
         c_now = policy_c[iw, ih, iy]
         H_val = H_grid[ih] * thorn
@@ -163,35 +219,15 @@ def calculate_continuation_values_gpu_kernel(
             util = alpha * math.log(c_now) + (1 - alpha) * math.log(kappa * H_val + iota)
         
         # Compute continuation value
-        V_cntn[iw, ih, iy] = (Q_dcsn[iw, ih, iy] - (1 - delta) * util) / delta
+        vlu_dcsn[iw, ih, iy] = (Q_dcsn[iw, ih, iy] - (1 - delta) * util) / delta
         
         # Compute lambda if requested
         if compute_lambda:
             uc_now = alpha / c_now  # Marginal utility for log utility
             c_prime = gradient_c[iw, ih, iy]
-            lambda_cntn[iw, ih, iy] = (uc_now - (1 - delta) * c_prime * uc_now) / delta
+            lambda_dcsn[iw, ih, iy] = (uc_now - (1 - delta) * c_prime * uc_now) / delta
         else:
-            lambda_cntn[iw, ih, iy] = 0.0
-
-@njit(parallel=True)
-def _calculate_continuation_values_cpu(
-    policy_c, Q_dcsn, H_grid, w_grid, V_cntn, lambda_cntn,
-    delta, m_bar, thorn, u_func_cpu
-):
-    """
-    JIT-compiled function to calculate continuation values on the CPU
-    in parallel.
-    """
-    n_W, n_H, n_Y = policy_c.shape
-    for h in prange(n_H):
-        for y in range(n_Y):
-            H_val = H_grid[h] * thorn
-            #c_prime = piecewise_gradient(policy_c[:, h, y], w_grid, m_bar)
-            for iw in range(n_W):
-                c_now = policy_c[iw, h, y]
-                uc_now = 1.0 / c_now
-                V_cntn[iw, h, y] = (Q_dcsn[iw, h, y] - (1 - delta) * u_func_cpu(c_now, H_val)) / delta
-                #lambda_cntn[iw, h, y] = (uc_now - (1 - delta) * c_prime[iw] * uc_now) / delta
+            lambda_dcsn[iw, ih, iy] = 0.0
 
 # ======================================================================
 #  Host-Side GPU Launcher
@@ -216,6 +252,8 @@ def solve_vfi_gpu(vlu_cntn, model):
     m_bar = float(model.settings_dict["m_bar"])
     n_grid = int(model.settings_dict["N_arg_grid_vfi"])
 
+
+
     alpha = float(model.param.alpha)
     kappa = float(model.param.kappa)
     iota = float(model.param.iota)
@@ -223,35 +261,63 @@ def solve_vfi_gpu(vlu_cntn, model):
     h_nxt_ind_array = model.num.functions.g_ve_h_ind(H_ind=np.arange(H_grid.size))
 
     # --- 2. Allocate and Transfer Data to GPU ---
-    d_V_next = cuda.to_device(vlu_cntn)
+    n_W, n_H, n_Y = w_grid.size, H_grid.size, vlu_cntn.shape[2]
+    n_A = a_grid.size
+    
+    # Transfer arrays to GPU and immediately free host memory for large arrays
+    d_vlu_cntn = cuda.to_device(vlu_cntn)
+    del vlu_cntn  # Free host memory immediately (this is the largest array)
+    gc.collect()
+    
     d_w_grid = cuda.to_device(w_grid)
     d_a_grid = cuda.to_device(a_grid)
     d_H_grid = cuda.to_device(H_grid)
     d_h_nxt_ind_array = cuda.to_device(h_nxt_ind_array)
     
-    n_W, n_H, n_Y = w_grid.size, H_grid.size, vlu_cntn.shape[2]
-    
-    # Debug output for grid dimensions
-    print(f"[GPU DEBUG] Grid dimensions: n_W={n_W}, n_H={n_H}, n_Y={n_Y}")
-    print(f"[GPU DEBUG] Total grid points: {n_W * n_H * n_Y:,}")
+    # Debug output for grid dimensions (only if verbose)
+    #verbose = model.settings_dict.get("gpu_verbose", False)
+    verbose = True
+    if verbose:
+        print(f"[GPU DEBUG] Grid dimensions: n_W={n_W}, n_H={n_H}, n_Y={n_Y}")
+        print(f"[GPU DEBUG] Total grid points: {n_W * n_H * n_Y:,}")
+        print(f"[GPU DEBUG] n_grid search size: {n_grid}")
+        # Show memory usage
+        context = cuda.current_context()
+        free_mem, total_mem = context.get_memory_info()
+        used_mem = total_mem - free_mem
+        print(f"[GPU DEBUG] GPU Memory: {used_mem/1e9:.2f} GB used, {free_mem/1e9:.2f} GB free (of {total_mem/1e9:.2f} GB total)")
     
     # Allocate output arrays on the GPU
     d_policy_c = cuda.device_array((n_W, n_H, n_Y), dtype=np.float64)
     d_policy_a = cuda.device_array_like(d_policy_c)
     d_Q_dcsn = cuda.device_array_like(d_policy_c)
-    d_V_cntn = cuda.device_array_like(d_policy_c)
-    d_lambda_cntn = cuda.device_array_like(d_policy_c)
+    d_vlu_dcsn = cuda.device_array_like(d_policy_c)
+    d_lambda_dcsn = cuda.device_array_like(d_policy_c)
 
     # --- 3. Configure and Launch Kernel ---
     # Use 3D grid for maximum parallelism across all dimensions
     # Optimize thread configuration for better GPU utilization
     
     # Determine thread configuration based on problem size and GPU constraints
+    # Key optimizations:
+    # 1. Keep total threads per block at 256 or 512 for better occupancy
+    # 2. Make X dimension (wealth) larger for coalesced memory access
+    # 3. Ensure dimensions are powers of 2 when possible
+    
     if n_W * n_H * n_Y < 1000:  # Small problem
         threads_per_block = (min(n_W, 8), min(n_H, 8), min(n_Y, 8))
-    else:  # Large problem - balance threads vs register usage
-        # 8*8*8 = 512 threads (safer for complex VFI kernel)
-        threads_per_block = (8, 8, 8)
+    else:  # Large problem - optimize for memory coalescing and occupancy
+        # Prefer 256 threads for better occupancy with complex kernels
+        # Prioritize X dimension (wealth) for coalesced access
+        if n_W >= 32:
+            # 32*4*2 = 256 threads, optimized for wealth dimension
+            threads_per_block = (32, 4, 2)
+        elif n_W >= 16:
+            # 16*8*2 = 256 threads
+            threads_per_block = (16, 8, 2)
+        else:
+            # 8*8*4 = 256 threads (fallback for small wealth grids)
+            threads_per_block = (8, 8, 4)
     
     blocks_per_grid_x = max(1, (n_W + threads_per_block[0] - 1) // threads_per_block[0])
     blocks_per_grid_y = max(1, (n_H + threads_per_block[1] - 1) // threads_per_block[1])
@@ -259,22 +325,23 @@ def solve_vfi_gpu(vlu_cntn, model):
     
     blocks_per_grid = (blocks_per_grid_x, blocks_per_grid_y, blocks_per_grid_z)
     
-    # Debug output for block configuration
-    print(f"[GPU DEBUG] Grid dimensions: W={n_W}, H={n_H}, Y={n_Y}")
-    print(f"[GPU DEBUG] Threads per block: {threads_per_block} = {threads_per_block[0]*threads_per_block[1]*threads_per_block[2]} threads")
-    print(f"[GPU DEBUG] Blocks per grid: {blocks_per_grid}")
-    print(f"[GPU DEBUG] Total blocks: {blocks_per_grid[0] * blocks_per_grid[1] * blocks_per_grid[2]:,}")
-    
-    # Check CUDA limits for 3D grid
-    device = cuda.get_current_device()
-    max_grid_dim = device.MAX_GRID_DIM_X, device.MAX_GRID_DIM_Y, device.MAX_GRID_DIM_Z
-    print(f"[GPU DEBUG] Max 3D grid dimensions: {max_grid_dim}")
-    
-    if any(blocks_per_grid[i] > max_grid_dim[i] for i in range(3)):
-        print("[GPU ERROR] Block grid dimensions exceed CUDA limits!")
-        for i, (actual, limit) in enumerate(zip(blocks_per_grid, max_grid_dim)):
-            if actual > limit:
-                print(f"  Dimension {i}: {actual} > {limit}")
+    # Debug output for block configuration (only if verbose)
+    if verbose:
+        print(f"[GPU DEBUG] Grid dimensions: W={n_W}, H={n_H}, Y={n_Y}")
+        print(f"[GPU DEBUG] Threads per block: {threads_per_block} = {threads_per_block[0]*threads_per_block[1]*threads_per_block[2]} threads")
+        print(f"[GPU DEBUG] Blocks per grid: {blocks_per_grid}")
+        print(f"[GPU DEBUG] Total blocks: {blocks_per_grid[0] * blocks_per_grid[1] * blocks_per_grid[2]:,}")
+        
+        # Check CUDA limits for 3D grid
+        device = cuda.get_current_device()
+        max_grid_dim = device.MAX_GRID_DIM_X, device.MAX_GRID_DIM_Y, device.MAX_GRID_DIM_Z
+        print(f"[GPU DEBUG] Max 3D grid dimensions: {max_grid_dim}")
+        
+        if any(blocks_per_grid[i] > max_grid_dim[i] for i in range(3)):
+            print("[GPU ERROR] Block grid dimensions exceed CUDA limits!")
+            for i, (actual, limit) in enumerate(zip(blocks_per_grid, max_grid_dim)):
+                if actual > limit:
+                    print(f"  Dimension {i}: {actual} > {limit}")
     expr_str = model.math["functions"]["u_func"]["expr"]
     param_vals = {
         "alpha": model.param.alpha,
@@ -284,11 +351,11 @@ def solve_vfi_gpu(vlu_cntn, model):
     u_func_cpu = get_u_func(expr_str, param_vals)
 
     vfi_gpu_kernel[blocks_per_grid, threads_per_block](
-        d_policy_c, d_policy_a, d_Q_dcsn, d_V_cntn, d_lambda_cntn,
-        d_V_next, d_w_grid, d_a_grid, d_H_grid, d_h_nxt_ind_array,
+        d_policy_c, d_policy_a, d_Q_dcsn, d_vlu_dcsn, d_lambda_dcsn,
+        d_vlu_cntn, d_w_grid, d_a_grid, d_H_grid, d_h_nxt_ind_array,
         beta, delta, m_bar, thorn, n_grid,
         alpha, kappa, iota,
-        n_W, n_H, n_Y,
+        n_W, n_H, n_Y, n_A,
     )
 
     # --- 4. GPU Continuation Values Calculation ---
@@ -305,8 +372,13 @@ def solve_vfi_gpu(vlu_cntn, model):
         d_gradient_c = cuda.device_array_like(d_policy_c)
         
         # Configure gradient kernel (2D grid for h, y)
-        # Use balanced configuration: 16*16 = 256 threads
-        gradient_threads = (16, 16)
+        # Optimize for small H dimension (typically 7-8)
+        if n_H <= 8:
+            # 8*32 = 256 threads, optimized for small H
+            gradient_threads = (min(n_H, 8), min(n_Y, 32))
+        else:
+            # 16*16 = 256 threads for larger grids
+            gradient_threads = (16, 16)
         gradient_blocks_h = max(1, (n_H + gradient_threads[0] - 1) // gradient_threads[0])
         gradient_blocks_y = max(1, (n_Y + gradient_threads[1] - 1) // gradient_threads[1])
         
@@ -327,9 +399,15 @@ def solve_vfi_gpu(vlu_cntn, model):
         d_gradient_c = cuda.device_array_like(d_policy_c)  # Dummy array
     
     # Calculate continuation values on GPU
-    # Use balanced thread configuration to avoid resource exhaustion
+    # Use optimized thread configuration for memory coalescing
     # Note: continuation kernel expects (iw, ih, iy) order
-    continuation_threads = (8, 8, 8)  # 512 threads (balanced)
+    # Prioritize X dimension (wealth) for coalesced memory access
+    if n_W >= 32:
+        continuation_threads = (32, 4, 2)  # 256 threads, wealth-optimized
+    elif n_W >= 16:
+        continuation_threads = (16, 8, 2)  # 256 threads
+    else:
+        continuation_threads = (8, 8, 4)  # 256 threads (fallback)
     continuation_blocks_x = max(1, (n_W + continuation_threads[0] - 1) // continuation_threads[0])
     continuation_blocks_y = max(1, (n_H + continuation_threads[1] - 1) // continuation_threads[1])
     continuation_blocks_z = max(1, (n_Y + continuation_threads[2] - 1) // continuation_threads[2])
@@ -350,7 +428,7 @@ def solve_vfi_gpu(vlu_cntn, model):
     continuation_blocks = (continuation_blocks_x, continuation_blocks_y, continuation_blocks_z)
     
     calculate_continuation_values_gpu_kernel[continuation_blocks, continuation_threads](
-        d_policy_c, d_Q_dcsn, d_gradient_c, d_H_grid, d_V_cntn, d_lambda_cntn,
+        d_policy_c, d_Q_dcsn, d_gradient_c, d_H_grid, d_vlu_dcsn, d_lambda_dcsn,
         delta, thorn, alpha, kappa, iota, compute_lambda,
         n_W, n_H, n_Y
     )
@@ -359,7 +437,84 @@ def solve_vfi_gpu(vlu_cntn, model):
     policy_c = d_policy_c.copy_to_host()
     policy_a = d_policy_a.copy_to_host()  # Now we actually compute this on GPU
     Q_dcsn = d_Q_dcsn.copy_to_host()
-    V_cntn = d_V_cntn.copy_to_host()
-    lambda_cntn = d_lambda_cntn.copy_to_host()
+    vlu_dcsn = d_vlu_dcsn.copy_to_host()
+    lambda_dcsn = d_lambda_dcsn.copy_to_host()
+    
+    # --- 6. Clean up GPU memory ---
+    # Delete all GPU arrays to free memory immediately
+    del d_policy_c, d_policy_a, d_Q_dcsn, d_vlu_dcsn, d_lambda_dcsn
+    del d_vlu_cntn, d_w_grid, d_a_grid, d_H_grid, d_h_nxt_ind_array
+    if compute_lambda:
+        del d_gradient_c
+    
+    # Synchronize and collect garbage
+    cuda.synchronize()
+    gc.collect()
+    
+    if verbose:
+        # Show final memory usage after cleanup
+        context = cuda.current_context()
+        free_mem, total_mem = context.get_memory_info()
+        used_mem = total_mem - free_mem
+        print(f"[GPU DEBUG] After cleanup - GPU Memory: {used_mem/1e9:.2f} GB used, {free_mem/1e9:.2f} GB free")
 
-    return policy_c, policy_a, Q_dcsn, V_cntn, lambda_cntn 
+    return policy_c, policy_a, Q_dcsn, vlu_dcsn, lambda_dcsn
+
+
+def warmup_gpu_kernels():
+    """
+    Warm up GPU kernels by running them on tiny grids.
+    This forces CUDA JIT compilation before actual runs.
+    """
+    print("[GPU] Warming up kernels...")
+    
+    # Create tiny test arrays
+    n_W, n_H, n_Y = 4, 2, 2
+    n_A = n_W
+    
+    # Allocate tiny arrays on GPU
+    d_policy_c = cuda.device_array((n_W, n_H, n_Y), dtype=np.float64)
+    d_policy_a = cuda.device_array_like(d_policy_c)
+    d_Q_dcsn = cuda.device_array_like(d_policy_c)
+    d_vlu_dcsn = cuda.device_array_like(d_policy_c)
+    d_lambda_dcsn = cuda.device_array_like(d_policy_c)
+    d_vlu_cntn = cuda.device_array_like(d_policy_c)
+    d_gradient_c = cuda.device_array_like(d_policy_c)
+    
+    d_w_grid = cuda.to_device(np.linspace(0.1, 1.0, n_W))
+    d_a_grid = cuda.to_device(np.linspace(0.0, 0.8, n_W))
+    d_H_grid = cuda.to_device(np.linspace(0.5, 1.0, n_H))
+    d_h_nxt_ind = cuda.to_device(np.arange(n_H))
+    
+    # Warmup VFI kernel
+    threads = (2, 2, 2)
+    blocks = (2, 1, 1)
+    vfi_gpu_kernel[blocks, threads](
+        d_policy_c, d_policy_a, d_Q_dcsn, d_vlu_dcsn, d_lambda_dcsn,
+        d_vlu_cntn, d_w_grid, d_a_grid, d_H_grid, d_h_nxt_ind,
+        0.95, 0.96, 1.0, 1.0, 10,
+        0.7, 0.2, 0.1,
+        n_W, n_H, n_Y, n_A
+    )
+    
+    # Warmup gradient kernel
+    gradient_threads = (2, 2)
+    gradient_blocks = (1, 1)
+    calculate_gradient_gpu_kernel[gradient_blocks, gradient_threads](
+        d_policy_c, d_w_grid, d_gradient_c, 1.0, 0.9,
+        n_W, n_H, n_Y
+    )
+    
+    # Warmup continuation kernel
+    continuation_threads = (2, 2, 2)
+    continuation_blocks = (2, 1, 1)
+    calculate_continuation_values_gpu_kernel[continuation_blocks, continuation_threads](
+        d_policy_c, d_Q_dcsn, d_gradient_c, d_H_grid, d_vlu_dcsn, d_lambda_dcsn,
+        0.96, 1.0, 0.7, 0.2, 0.1, False,
+        n_W, n_H, n_Y
+    )
+    
+    # Force synchronization to ensure compilation is complete
+    cuda.synchronize()
+    print("[GPU] Kernel warmup complete")
+

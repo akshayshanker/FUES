@@ -251,7 +251,7 @@ try:
     from helpers.euler_error import euler_error_metric
     from helpers.plots import generate_plots
     from helpers.tables import print_summary, generate_latex_table
-    from helpers.metrics import dev_c_L2, dev_v_L2, plot_comparison_factory
+    from helpers.metrics import dev_c_L2, dev_v_L2, dev_c_log10_mean, plot_comparison_factory
     from helpers.plot_csv_export import csv_plot_comparison_factory, csv_generate_plots
     from helpers.memory_utils import MemoryMonitor, log_memory_usage, cleanup_if_needed, get_memory_config, get_memory_usage, get_available_memory
     from helpers.execution_settings import ExecutionSettings
@@ -260,7 +260,7 @@ except ImportError:
     from .helpers.euler_error import euler_error_metric
     from .helpers.plots import generate_plots
     from .helpers.tables import print_summary, generate_latex_table
-    from .helpers.metrics import dev_c_L2, dev_v_L2, plot_comparison_factory
+    from .helpers.metrics import dev_c_L2, dev_v_L2, dev_c_log10_mean, plot_comparison_factory
     from .helpers.plot_csv_export import csv_plot_comparison_factory, csv_generate_plots
     from .helpers.memory_utils import MemoryMonitor, log_memory_usage, cleanup_if_needed, get_memory_config, get_memory_usage, get_available_memory
     from .helpers.execution_settings import ExecutionSettings
@@ -393,7 +393,7 @@ def make_housing_model(args, cfg_container: dict, periods: int, vf_ngrid: int, c
 # ---------------------------------------------------------------------
 #  Solver-factory helper
 # ---------------------------------------------------------------------
-def make_housing_solver(args, use_mpi: bool, comm):
+def make_housing_solver(args, use_mpi: bool, comm, baseline_method=None):
     """
     Returns an _solve(model, recorder) closure that the CircuitRunner calls.
     """
@@ -408,6 +408,16 @@ def make_housing_solver(args, use_mpi: bool, comm):
         final_period = mc.get_period(len(mc.periods_list) - 1)
         for tag in ("OWNC", "RNTC"):
             final_period.get_stage(tag).status_flags["is_terminal"] = True
+        
+        # 1b. Warm up GPU kernels if using GPU solver (happens once before solving)
+        # Use baseline_method passed from outer scope
+        solver_method = baseline_method or ""
+        if solver_method.endswith("_GPU") and (comm is None or comm.rank == 0):
+            try:
+                from src.dc_smm.models.housing_renting.horses_c_gpu import warmup_gpu_kernels
+                warmup_gpu_kernels()
+            except ImportError:
+                pass  # GPU module not available
         
         # 2. backward time iteration
         # Free memory during solving if we're not saving the model
@@ -551,7 +561,7 @@ def main(argv=None):
                 "master.parameters.delta_pb",
             ],
             model_factory=lambda cfg: make_housing_model(args,cfg, 2, 100, comm),
-            solver=make_housing_solver(argparse.Namespace(verbose=False, periods=2), use_mpi=args.mpi, comm=comm),
+            solver=make_housing_solver(argparse.Namespace(verbose=False, periods=2), use_mpi=args.mpi, comm=comm, baseline_method=settings.baseline_method),
             metric_fns={},
             save_by_default=False,
             load_if_exists=False,
@@ -587,6 +597,7 @@ def main(argv=None):
     AVAILABLE_METRICS = {
         "euler_error": euler_error_metric,
         "dev_c_L2": dev_c_L2,
+        "dev_c_log10_mean": dev_c_log10_mean,
         "plot_c_comparison": plot_factory(
             decision_variable='c',
             dim_labels=plot_config['asset_dims'],
@@ -637,7 +648,7 @@ def main(argv=None):
             "master.parameters.delta_pb",
         ],
         model_factory=lambda cfg: make_housing_model(args,cfg, args.periods, vf_ngrid, comm),
-        solver=make_housing_solver(args, args.mpi, comm),
+        solver=make_housing_solver(args, args.mpi, comm, baseline_method=settings.baseline_method),
         metric_fns=metric_fns,
         output_root=output_root,
         bundle_prefix=args.bundle_prefix,
@@ -728,7 +739,16 @@ def main(argv=None):
             # Generate plots immediately and delete model
             if is_root and args.plots and ref_model is not None:
                 trace_print("19: Generating baseline plots")
-                settings.img_dir.mkdir(exist_ok=True)
+                
+                # Use bundle-specific directory for plots
+                if baseline_bundle_path:
+                    from pathlib import Path
+                    baseline_plot_dir = Path(baseline_bundle_path) / "plots"
+                    baseline_plot_dir.mkdir(parents=True, exist_ok=True)
+                else:
+                    # Fallback to original location if no bundle path
+                    baseline_plot_dir = settings.img_dir
+                    baseline_plot_dir.mkdir(exist_ok=True)
                 
                 # Clean up non-essential data before plotting if in low-memory mode
                 if args.low_memory:
@@ -737,7 +757,9 @@ def main(argv=None):
                 
                 try:
                     print(f"  Generating plots for {settings.baseline_method}...")
-                    egm_plot_func(ref_model, settings.baseline_method, settings.img_dir, egm_bounds=plot_config['egm_bounds'])
+                    if baseline_bundle_path:
+                        print(f"  Plots will be saved to: {baseline_plot_dir}")
+                    egm_plot_func(ref_model, settings.baseline_method, baseline_plot_dir, egm_bounds=plot_config['egm_bounds'])
                 except Exception as err:
                     print(f"[warn] plot-gen for {settings.baseline_method} failed: {err}")
                 finally:
@@ -816,7 +838,16 @@ def main(argv=None):
                 # Generate plots immediately and delete model
                 if is_root and args.plots and model is not None:
                     trace_print(f"27.{i+1}: Generating {method} plots")
-                    settings.img_dir.mkdir(exist_ok=True)
+                    
+                    # Use bundle-specific directory for plots
+                    if method_bundle_path:
+                        from pathlib import Path
+                        bundle_plot_dir = Path(method_bundle_path) / "plots"
+                        bundle_plot_dir.mkdir(parents=True, exist_ok=True)
+                    else:
+                        # Fallback to original location if no bundle path
+                        bundle_plot_dir = settings.img_dir
+                        bundle_plot_dir.mkdir(exist_ok=True)
                     
                     # Clean up non-essential data before plotting if in low-memory mode
                     if args.low_memory:
@@ -825,6 +856,8 @@ def main(argv=None):
                     
                     try:
                         print(f"  Generating plots for {method}...")
+                        if method_bundle_path:
+                            print(f"  Plots will be saved to: {bundle_plot_dir}")
                         
                         # Debug: Check if this model has EGM grids
                         first_period = model.get_period(0)
@@ -839,7 +872,7 @@ def main(argv=None):
                             print(f"[DEBUG] Model passed to plotting for {method}: NO EGM grids!")
                             print(f"[DEBUG] Model object id: {id(model)}, ownc_stage.dcsn.sol id: {id(ownc_stage.dcsn.sol)}")
                         
-                        egm_plot_func(model, method, settings.img_dir, egm_bounds=plot_config['egm_bounds'], y_idx_list=plot_config['y_idx_list'])
+                        egm_plot_func(model, method, bundle_plot_dir, egm_bounds=plot_config['egm_bounds'], y_idx_list=plot_config['y_idx_list'])
                     except Exception as err:
                         print(f"[warn] plot-gen for {method} failed: {err}")
                     finally:

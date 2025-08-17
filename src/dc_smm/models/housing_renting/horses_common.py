@@ -642,7 +642,8 @@ def searchsorted_gpu(a, v):
     lower_bound = 0
     upper_bound = len(a)
     while lower_bound < upper_bound:
-        i = lower_bound + (upper_bound - lower_bound) // 2
+        # Use bit shift for faster division by 2
+        i = lower_bound + ((upper_bound - lower_bound) >> 1)
         if a[i] < v:
             lower_bound = i + 1
         else:

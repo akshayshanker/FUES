@@ -350,7 +350,7 @@ def calculate_euler_error_cpu(model, debug=True, sample_size=50000, random_sampl
                 continue
                 
             a_next = w_now - c0
-            if a_next <= 0.5 or a_next >= 30:
+            if w_now <= 0.01 or w_now >= 30:
                 continue
             
             E_lam = 0.0

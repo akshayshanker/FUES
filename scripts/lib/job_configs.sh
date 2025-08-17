@@ -20,13 +20,6 @@ STD_RES_SETTINGS[grid_points]=2000
 STD_RES_SETTINGS[version_suffix]="test_0.1"
 STD_RES_SETTINGS[delta_pb]=1
 
-declare -A STD_RES_SETTINGS_2
-STD_RES_SETTINGS_2[periods]=5
-STD_RES_SETTINGS_2[vfi_ngrid]=1000
-STD_RES_SETTINGS_2[hd_points]=2000
-STD_RES_SETTINGS_2[grid_points]=2000
-STD_RES_SETTINGS_2[version_suffix]="test_0.1"
-STD_RES_SETTINGS_2[delta_pb]=1
 
 declare -A STD_RES_SETTINGS_PB
 STD_RES_SETTINGS_PB[periods]=5
@@ -36,130 +29,69 @@ STD_RES_SETTINGS_PB[grid_points]=6000
 STD_RES_SETTINGS_PB[version_suffix]="test_0.1"
 STD_RES_SETTINGS_PB[delta_pb]=0.6
 
-# --- Configuration Set 1.1 (LOW POINTS FOR TESTING: High Resolution Benchmark ---
-# A high-resolution run for producing final, accurate results.
-declare -A HIGH_RES_SETTINGS_TEST
-HIGH_RES_SETTINGS_TEST[periods]=5
-HIGH_RES_SETTINGS_TEST[vfi_ngrid]=10000
-HIGH_RES_SETTINGS_TEST[hd_points]=5000
-HIGH_RES_SETTINGS_TEST[grid_points]=3000
-HIGH_RES_SETTINGS_TEST[version_suffix]="test_0.1"
-
 # --- Configuration Set 2: High Resolution Benchmark ---
 # A high-resolution run for producing final, accurate results.
 declare -A HIGH_RES_SETTINGS_A
 HIGH_RES_SETTINGS_A[periods]=5
 HIGH_RES_SETTINGS_A[vfi_ngrid]=1E4
 HIGH_RES_SETTINGS_A[hd_points]=6000
-HIGH_RES_SETTINGS_A[grid_points]=6000
+HIGH_RES_SETTINGS_A[grid_points]=2000
 HIGH_RES_SETTINGS_A[version_suffix]="test_0.1"
 HIGH_RES_SETTINGS_A[delta_pb]=1
 
 declare -A HIGH_RES_SETTINGS_A_PB
 HIGH_RES_SETTINGS_A_PB[periods]=5
-HIGH_RES_SETTINGS_A_PB[vfi_ngrid]=1000
-HIGH_RES_SETTINGS_A_PB[hd_points]=1000
-HIGH_RES_SETTINGS_A_PB[grid_points]=6000
+HIGH_RES_SETTINGS_A_PB[vfi_ngrid]=1E4
+HIGH_RES_SETTINGS_A_PB[hd_points]=6000
+HIGH_RES_SETTINGS_A_PB[grid_points]=2000
 HIGH_RES_SETTINGS_A_PB[version_suffix]="test_0.1"
 HIGH_RES_SETTINGS_A_PB[delta_pb]=0.95
 
 declare -A HIGH_RES_SETTINGS_B
 HIGH_RES_SETTINGS_B[periods]=5
-HIGH_RES_SETTINGS_B[vfi_ngrid]=2E4
-HIGH_RES_SETTINGS_B[hd_points]=6E4
-HIGH_RES_SETTINGS_B[grid_points]=6000
+HIGH_RES_SETTINGS_B[vfi_ngrid]=2E6
+HIGH_RES_SETTINGS_B[hd_points]=2E4
+HIGH_RES_SETTINGS_B[grid_points]=2000
 HIGH_RES_SETTINGS_B[version_suffix]="test_0.1"
 HIGH_RES_SETTINGS_B[delta_pb]=1
 
+declare -A HIGH_RES_SETTINGS_B1
+HIGH_RES_SETTINGS_B1[periods]=5
+HIGH_RES_SETTINGS_B1[vfi_ngrid]=1E6
+HIGH_RES_SETTINGS_B1[hd_points]=2E4
+HIGH_RES_SETTINGS_B1[grid_points]=2000
+HIGH_RES_SETTINGS_B1[version_suffix]="test_0.1"
+HIGH_RES_SETTINGS_B1[delta_pb]=1
+
 declare -A HIGH_RES_SETTINGS_C
 HIGH_RES_SETTINGS_C[periods]=5
-HIGH_RES_SETTINGS_C[vfi_ngrid]=3E4
-HIGH_RES_SETTINGS_C[hd_points]=8E4
-HIGH_RES_SETTINGS_C[grid_points]=6000
+HIGH_RES_SETTINGS_C[vfi_ngrid]=1E6
+HIGH_RES_SETTINGS_C[hd_points]=3E5
+HIGH_RES_SETTINGS_C[grid_points]=2000
 HIGH_RES_SETTINGS_C[version_suffix]="test_0.1"
 HIGH_RES_SETTINGS_C[delta_pb]=1
 
 declare -A HIGH_RES_SETTINGS_D
 HIGH_RES_SETTINGS_D[periods]=5
-HIGH_RES_SETTINGS_D[vfi_ngrid]=1E5
-HIGH_RES_SETTINGS_D[hd_points]=1E5
-HIGH_RES_SETTINGS_D[grid_points]=6000
+HIGH_RES_SETTINGS_D[vfi_ngrid]=1E6
+HIGH_RES_SETTINGS_D[hd_points]=6E5
+HIGH_RES_SETTINGS_D[grid_points]=2000
 HIGH_RES_SETTINGS_D[version_suffix]="test_0.1"
 HIGH_RES_SETTINGS_D[delta_pb]=1
-
 
 declare -A HIGH_RES_SETTINGS_E
 HIGH_RES_SETTINGS_E[periods]=5
 HIGH_RES_SETTINGS_E[vfi_ngrid]=1E6
-HIGH_RES_SETTINGS_E[hd_points]=1E5
-HIGH_RES_SETTINGS_E[grid_points]=6000
+HIGH_RES_SETTINGS_E[hd_points]=9E5
+HIGH_RES_SETTINGS_E[grid_points]=2000
 HIGH_RES_SETTINGS_E[version_suffix]="test_0.1"
 HIGH_RES_SETTINGS_E[delta_pb]=1
 
-declare -A HIGH_RES_SETTINGS_F
-HIGH_RES_SETTINGS_F[periods]=5
-HIGH_RES_SETTINGS_F[vfi_ngrid]=2E6
-HIGH_RES_SETTINGS_F[hd_points]=2E5
-HIGH_RES_SETTINGS_F[grid_points]=6000
-HIGH_RES_SETTINGS_F[version_suffix]="test_0.1"
-HIGH_RES_SETTINGS_F[delta_pb]=1
-
-declare -A HIGH_RES_SETTINGS_G
-HIGH_RES_SETTINGS_G[periods]=5
-HIGH_RES_SETTINGS_G[vfi_ngrid]=1E6
-HIGH_RES_SETTINGS_G[hd_points]=2E4
-HIGH_RES_SETTINGS_G[grid_points]=6000
-HIGH_RES_SETTINGS_G[version_suffix]="test_0.1"
-HIGH_RES_SETTINGS_G[delta_pb]=1
-
-declare -A HIGH_RES_SETTINGS_H
-HIGH_RES_SETTINGS_H[periods]=5
-HIGH_RES_SETTINGS_H[vfi_ngrid]=3E6
-HIGH_RES_SETTINGS_H[hd_points]=5E4
-HIGH_RES_SETTINGS_H[grid_points]=2000
-HIGH_RES_SETTINGS_H[version_suffix]="test_0.1"
-HIGH_RES_SETTINGS_H[delta_pb]=1
-
-declare -A HIGH_RES_SETTINGS_I
-HIGH_RES_SETTINGS_I[periods]=5
-HIGH_RES_SETTINGS_I[vfi_ngrid]=3E6
-HIGH_RES_SETTINGS_I[hd_points]=2E5
-HIGH_RES_SETTINGS_I[grid_points]=2000
-HIGH_RES_SETTINGS_I[version_suffix]="test_0.1"
-HIGH_RES_SETTINGS_I[delta_pb]=1
-
-
-declare -A HIGH_RES_SETTINGS_J
-HIGH_RES_SETTINGS_J[periods]=5
-HIGH_RES_SETTINGS_J[vfi_ngrid]=4E6
-HIGH_RES_SETTINGS_J[hd_points]=3E5
-HIGH_RES_SETTINGS_J[grid_points]=2000
-HIGH_RES_SETTINGS_J[version_suffix]="test_0.1"
-HIGH_RES_SETTINGS_J[delta_pb]=1
-
-
+# Aliases for commonly used configurations
 declare -A HIGH_RES_SETTINGS_K
 HIGH_RES_SETTINGS_K[periods]=5
-HIGH_RES_SETTINGS_K[vfi_ngrid]=5E6
-HIGH_RES_SETTINGS_K[hd_points]=6E6
+HIGH_RES_SETTINGS_K[vfi_ngrid]=1E6
+HIGH_RES_SETTINGS_K[hd_points]=6E5
 HIGH_RES_SETTINGS_K[grid_points]=2000
 HIGH_RES_SETTINGS_K[version_suffix]="test_0.1"
 HIGH_RES_SETTINGS_K[delta_pb]=1
-
-
-
-# --- Configuration Set 3: Quick Debug Run ---
-# A very small, fast run for debugging purposes.
-declare -A DEBUG_SETTINGS
-DEBUG_SETTINGS[periods]=2
-DEBUG_SETTINGS[vfi_ngrid]=50
-DEBUG_SETTINGS[hd_points]=100
-DEBUG_SETTINGS[grid_points]=100
-DEBUG_SETTINGS[version_suffix]="test_0.1"
-DEBUG_SETTINGS[delta_pb]=1
-
-# --- Add more configurations as needed ---
-# Example:
-# declare -A SENSITIVITY_ANALYSIS_1
-# SENSITIVITY_ANALYSIS_1[periods]=3
-# ... 

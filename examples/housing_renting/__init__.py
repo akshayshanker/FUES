@@ -11,10 +11,7 @@ from dc_smm.models.housing_renting.horses_h import (
     F_h_cntn_to_dcsn_owner,
     F_h_cntn_to_dcsn_renter
 )
-from dc_smm.models.housing_renting.horses_c import (
-    F_ownc_cntn_to_dcsn,
-    F_ownc_dcsn_to_cntn
-)
+
 from dc_smm.models.housing_renting.horses_common import F_id
 
 from dc_smm.models.housing_renting.horses_t import (
@@ -33,7 +30,6 @@ __all__ = [
     'F_shocks_dcsn_to_arvl',
     'F_h_cntn_to_dcsn',
     'F_ownc_cntn_to_dcsn',
-    'F_ownc_dcsn_to_cntn',
     'F_id',
     'F_t_cntn_to_dcsn',
     
