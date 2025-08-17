@@ -251,6 +251,8 @@ def solve_vfi_gpu(vlu_cntn, model):
     m_bar = float(model.settings_dict["m_bar"])
     n_grid = int(model.settings_dict["N_arg_grid_vfi"])
 
+
+
     alpha = float(model.param.alpha)
     kappa = float(model.param.kappa)
     iota = float(model.param.iota)
@@ -271,10 +273,12 @@ def solve_vfi_gpu(vlu_cntn, model):
     d_h_nxt_ind_array = cuda.to_device(h_nxt_ind_array)
     
     # Debug output for grid dimensions (only if verbose)
-    verbose = model.settings_dict.get("gpu_verbose", False)
+    #verbose = model.settings_dict.get("gpu_verbose", False)
+    verbose = True
     if verbose:
         print(f"[GPU DEBUG] Grid dimensions: n_W={n_W}, n_H={n_H}, n_Y={n_Y}")
         print(f"[GPU DEBUG] Total grid points: {n_W * n_H * n_Y:,}")
+        print(f"[GPU DEBUG] n_grid search size: {n_grid}")
         # Show memory usage
         context = cuda.current_context()
         free_mem, total_mem = context.get_memory_info()
