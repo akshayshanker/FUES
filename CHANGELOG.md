@@ -13,6 +13,7 @@ All notable changes to this project will be documented in this file.
   - NUMA-aware CPU binding with 12 cores per MPI rank
   - MPI dispatcher in horses_h.py with GPU detection and fallback
   - MPI driver in horses_c_gpu.py with Allgatherv collectives
+  - Shared cache for grid. 
 
 * **PBS scripts for GPU scaling**
   - `run_housing_gpu_mpi.pbs`: Single-node 4 GPU execution
