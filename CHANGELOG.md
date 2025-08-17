@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## [0.5.0dev0] - 2025-08-12 – Multi-GPU Support and FUES Algorithm Cleanup
 - [2025-08-16 10:00 AEST] Major refactoring: Removed MPI support from horses_c.py, removed unused F_ownc_cntn_to_dcsn factory, standardized terminology
+- [2025-08-17 17:00 AEST] Added DGX A100 support with specialized PBS scripts, GPU kernel optimizations, and log management utilities
 
 ### Added
 * **Multi-GPU MPI parallelization for housing model**
@@ -18,6 +19,10 @@ All notable changes to this project will be documented in this file.
   - `run_housing_gpu_multi_node.pbs`: Multi-node 8 GPU execution  
   - `benchmark_gpu_scaling.pbs`: Automated 1, 2, 4 GPU performance comparison
   - Scripts use same options as single-GPU version for consistency
+  - `run_housing_dgxa100_single.pbs`: DGX A100 single GPU job (512GB RAM, 80GB GPU)
+  - `run_housing_dgxa100_parallel.pbs`: DGX A100 4-GPU parallel execution
+  - `submit_dgxa100_config.sh`: Submit helper accepting multiple configurations
+  - `move_logs_to_scratch.sh`: Utility to move all logs to scratch storage
 
 ### Changed
 * **FUES algorithm cleanup and configurability**
@@ -33,6 +38,10 @@ All notable changes to this project will be documented in this file.
   - Implemented C-contiguous array handling for MPI operations
   - Convergence check performed before array swap using allreduce(MAX)
   - Policy gathering made conditional via policy_every parameter
+  - Two-pass grid search in vfi_gpu_kernel: coarse then fine search (~25% fewer evaluations)
+  - Pre-computed log_H_term for housing utility (avoids redundant calculations)
+  - Branchless operations using max() instead of if-statements
+  - Immediate memory cleanup after GPU transfers for large arrays
 
 ### Architecture
 * **MPI implementation structure**
