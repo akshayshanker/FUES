@@ -19,7 +19,7 @@ set -euo pipefail
 source ../lib/job_configs.sh
 
 # --- Define the Sequence of Configurations to Run ---
-CONFIG_TO_RUN=("HIGH_RES_SETTINGS_C")
+CONFIG_TO_RUN=("HIGH_RES_SETTINGS_D")
 
 
 # --- Environment Setup ---
@@ -118,6 +118,7 @@ for CONFIG_NAME in "${CONFIG_TO_RUN[@]}"; do
       --vfi-ngrid "${CONFIG_REF[vfi_ngrid]}" \
       --HD-points "${CONFIG_REF[hd_points]}" \
       --grid-points "${CONFIG_REF[grid_points]}" \
+      --delta-pb "${CONFIG_REF[delta_pb]}" \
       --baseline-method "VFI_HDGRID_GPU" \
       --metrics "euler_error, plot_c_comparison,dev_c_L2, dev_c_log10_mean" \
       --fresh-fast \
