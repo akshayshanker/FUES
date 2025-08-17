@@ -49,7 +49,7 @@ HIGH_RES_SETTINGS_A_PB[delta_pb]=0.95
 
 declare -A HIGH_RES_SETTINGS_B
 HIGH_RES_SETTINGS_B[periods]=5
-HIGH_RES_SETTINGS_B[vfi_ngrid]=1E6
+HIGH_RES_SETTINGS_B[vfi_ngrid]=2E6
 HIGH_RES_SETTINGS_B[hd_points]=2E4
 HIGH_RES_SETTINGS_B[grid_points]=2000
 HIGH_RES_SETTINGS_B[version_suffix]="test_0.1"
@@ -57,20 +57,27 @@ HIGH_RES_SETTINGS_B[delta_pb]=1
 
 declare -A HIGH_RES_SETTINGS_C
 HIGH_RES_SETTINGS_C[periods]=5
-HIGH_RES_SETTINGS_C[vfi_ngrid]=1E6
+HIGH_RES_SETTINGS_C[vfi_ngrid]=2E6
 HIGH_RES_SETTINGS_C[hd_points]=3E5
 HIGH_RES_SETTINGS_C[grid_points]=2000
 HIGH_RES_SETTINGS_C[version_suffix]="test_0.1"
 HIGH_RES_SETTINGS_C[delta_pb]=1
 
-
 declare -A HIGH_RES_SETTINGS_D
 HIGH_RES_SETTINGS_D[periods]=5
-HIGH_RES_SETTINGS_D[vfi_ngrid]=1E6
+HIGH_RES_SETTINGS_D[vfi_ngrid]=2E6
 HIGH_RES_SETTINGS_D[hd_points]=6E5
 HIGH_RES_SETTINGS_D[grid_points]=2000
 HIGH_RES_SETTINGS_D[version_suffix]="test_0.1"
 HIGH_RES_SETTINGS_D[delta_pb]=1
+
+declare -A HIGH_RES_SETTINGS_E
+HIGH_RES_SETTINGS_E[periods]=5
+HIGH_RES_SETTINGS_E[vfi_ngrid]=2E6
+HIGH_RES_SETTINGS_E[hd_points]=9E5
+HIGH_RES_SETTINGS_E[grid_points]=2000
+HIGH_RES_SETTINGS_E[version_suffix]="test_0.1"
+HIGH_RES_SETTINGS_E[delta_pb]=1
 
 # Aliases for commonly used configurations
 declare -A HIGH_RES_SETTINGS_K

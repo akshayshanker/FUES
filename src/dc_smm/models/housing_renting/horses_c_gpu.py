@@ -258,19 +258,28 @@ def solve_vfi_gpu(vlu_cntn, model):
     h_nxt_ind_array = model.num.functions.g_ve_h_ind(H_ind=np.arange(H_grid.size))
 
     # --- 2. Allocate and Transfer Data to GPU ---
+    n_W, n_H, n_Y = w_grid.size, H_grid.size, vlu_cntn.shape[2]
+    
+    # Transfer arrays to GPU and immediately free host memory for large arrays
     d_vlu_cntn = cuda.to_device(vlu_cntn)
+    del vlu_cntn  # Free host memory immediately (this is the largest array)
+    gc.collect()
+    
     d_w_grid = cuda.to_device(w_grid)
     d_a_grid = cuda.to_device(a_grid)
     d_H_grid = cuda.to_device(H_grid)
     d_h_nxt_ind_array = cuda.to_device(h_nxt_ind_array)
-    
-    n_W, n_H, n_Y = w_grid.size, H_grid.size, vlu_cntn.shape[2]
     
     # Debug output for grid dimensions (only if verbose)
     verbose = model.settings_dict.get("gpu_verbose", False)
     if verbose:
         print(f"[GPU DEBUG] Grid dimensions: n_W={n_W}, n_H={n_H}, n_Y={n_Y}")
         print(f"[GPU DEBUG] Total grid points: {n_W * n_H * n_Y:,}")
+        # Show memory usage
+        context = cuda.current_context()
+        free_mem, total_mem = context.get_memory_info()
+        used_mem = total_mem - free_mem
+        print(f"[GPU DEBUG] GPU Memory: {used_mem/1e9:.2f} GB used, {free_mem/1e9:.2f} GB free (of {total_mem/1e9:.2f} GB total)")
     
     # Allocate output arrays on the GPU
     d_policy_c = cuda.device_array((n_W, n_H, n_Y), dtype=np.float64)
@@ -424,6 +433,24 @@ def solve_vfi_gpu(vlu_cntn, model):
     Q_dcsn = d_Q_dcsn.copy_to_host()
     vlu_dcsn = d_vlu_dcsn.copy_to_host()
     lambda_dcsn = d_lambda_dcsn.copy_to_host()
+    
+    # --- 6. Clean up GPU memory ---
+    # Delete all GPU arrays to free memory immediately
+    del d_policy_c, d_policy_a, d_Q_dcsn, d_vlu_dcsn, d_lambda_dcsn
+    del d_vlu_cntn, d_w_grid, d_a_grid, d_H_grid, d_h_nxt_ind_array
+    if compute_lambda:
+        del d_gradient_c
+    
+    # Synchronize and collect garbage
+    cuda.synchronize()
+    gc.collect()
+    
+    if verbose:
+        # Show final memory usage after cleanup
+        context = cuda.current_context()
+        free_mem, total_mem = context.get_memory_info()
+        used_mem = total_mem - free_mem
+        print(f"[GPU DEBUG] After cleanup - GPU Memory: {used_mem/1e9:.2f} GB used, {free_mem/1e9:.2f} GB free")
 
     return policy_c, policy_a, Q_dcsn, vlu_dcsn, lambda_dcsn
 
