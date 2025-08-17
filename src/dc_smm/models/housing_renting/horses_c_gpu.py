@@ -41,13 +41,42 @@ def vfi_gpu_kernel(
         if a_high <= a_low + 1e-14:
             a_high = a_low
             
-        # --- 2. Dense Grid Search ---
-        best_Q = -1e110
-        best_a = a_low
-        step_inv = 1.0 / (n_grid - 1)
-
-        for g in range(n_grid):
-            a_try = a_low + (a_high - a_low) * g * step_inv
+        # --- 2. Two-Pass Grid Search ---
+        # First Pass: Coarse search to identify promising region
+        coarse_grid = max(4, n_grid // 4)  # Use 1/4 of points for coarse search
+        coarse_step_inv = 1.0 / (coarse_grid - 1) if coarse_grid > 1 else 1.0
+        
+        best_coarse_Q = -1e110
+        best_coarse_idx = 0
+        
+        for g in range(coarse_grid):
+            a_try = a_low + (a_high - a_low) * g * coarse_step_inv
+            Q_try = bellman_obj_gpu(
+                a_try, w_val, H_val, beta, delta, a_grid, vlu_cntn,
+                h_nxt_ind, y,
+                alpha, kappa, iota
+            )
+            if Q_try > best_coarse_Q:
+                best_coarse_Q = Q_try
+                best_coarse_idx = g
+        
+        # Second Pass: Fine search around best coarse point
+        # Define refined search bounds (search ±1 coarse steps around best)
+        fine_low_idx = max(0, best_coarse_idx - 1)
+        fine_high_idx = min(coarse_grid - 1, best_coarse_idx + 1)
+        
+        fine_a_low = a_low + (a_high - a_low) * fine_low_idx * coarse_step_inv
+        fine_a_high = a_low + (a_high - a_low) * fine_high_idx * coarse_step_inv
+        
+        # Fine grid search with more points in narrowed range
+        fine_grid = max(n_grid // 2, 10)  # Use half the points for fine search
+        fine_step_inv = 1.0 / (fine_grid - 1) if fine_grid > 1 else 1.0
+        
+        best_Q = best_coarse_Q
+        best_a = a_low + (a_high - a_low) * best_coarse_idx * coarse_step_inv
+        
+        for g in range(fine_grid):
+            a_try = fine_a_low + (fine_a_high - fine_a_low) * g * fine_step_inv
             Q_try = bellman_obj_gpu(
                 a_try, w_val, H_val, beta, delta, a_grid, vlu_cntn,
                 h_nxt_ind, y,
