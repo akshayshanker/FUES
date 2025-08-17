@@ -251,7 +251,7 @@ try:
     from helpers.euler_error import euler_error_metric
     from helpers.plots import generate_plots
     from helpers.tables import print_summary, generate_latex_table
-    from helpers.metrics import dev_c_L2, dev_v_L2, plot_comparison_factory
+    from helpers.metrics import dev_c_L2, dev_v_L2, dev_c_log10_mean, plot_comparison_factory
     from helpers.plot_csv_export import csv_plot_comparison_factory, csv_generate_plots
     from helpers.memory_utils import MemoryMonitor, log_memory_usage, cleanup_if_needed, get_memory_config, get_memory_usage, get_available_memory
     from helpers.execution_settings import ExecutionSettings
@@ -260,7 +260,7 @@ except ImportError:
     from .helpers.euler_error import euler_error_metric
     from .helpers.plots import generate_plots
     from .helpers.tables import print_summary, generate_latex_table
-    from .helpers.metrics import dev_c_L2, dev_v_L2, plot_comparison_factory
+    from .helpers.metrics import dev_c_L2, dev_v_L2, dev_c_log10_mean, plot_comparison_factory
     from .helpers.plot_csv_export import csv_plot_comparison_factory, csv_generate_plots
     from .helpers.memory_utils import MemoryMonitor, log_memory_usage, cleanup_if_needed, get_memory_config, get_memory_usage, get_available_memory
     from .helpers.execution_settings import ExecutionSettings
@@ -597,6 +597,7 @@ def main(argv=None):
     AVAILABLE_METRICS = {
         "euler_error": euler_error_metric,
         "dev_c_L2": dev_c_L2,
+        "dev_c_log10_mean": dev_c_log10_mean,
         "plot_c_comparison": plot_factory(
             decision_variable='c',
             dim_labels=plot_config['asset_dims'],

@@ -408,6 +408,103 @@ dev_pol_L2   = make_policy_dev_metric("pol", "L2")
 dev_pol_Linf = make_policy_dev_metric("pol", "Linf")
 
 
+# ─────────────────────────── mean log10 error metric ───────────────────────────
+def dev_c_log10_mean(
+    model: Any, *, _runner: Optional[CircuitRunner] = None, _x: Optional[np.ndarray] = None
+) -> float:
+    """
+    Compute mean log10 absolute error between fast method and baseline consumption policies.
+    
+    This metric computes mean(log10(|c_baseline - c_fast|)) to provide an error measure
+    similar in spirit to Euler error (which also uses log10 scale).
+    
+    Returns:
+        float: Mean log10 absolute error. Returns np.nan if extraction or comparison fails.
+    """
+    if _runner is None or _x is None:
+        return np.nan
+    
+    # Initialize variables for cleanup
+    ref_swapped = None
+    lead = None
+    out = None
+    
+    try:
+        with managed_model_load(_runner, _x, metric_name="dev_c_log10_mean") as ref_model:
+            if ref_model is None:
+                return np.nan
+            
+            # Extract consumption policies
+            pol, g_mod = _extract_policy(
+                model,
+                stage="OWNC", 
+                sol_attr="policy", 
+                policy_attr="c",
+                perch_grid_key="dcsn",
+                cont_grid_key="w",
+            )
+            refp, g_ref = _extract_policy(
+                ref_model,
+                stage="OWNC", 
+                sol_attr="policy", 
+                policy_attr="c",
+                perch_grid_key="dcsn",
+                cont_grid_key="w",
+            )
+            
+            if pol is None or refp is None or g_mod is None or g_ref is None:
+                print("Policy not extracted from model or baseline for log10 metric")
+                return np.nan
+            
+            # Handle interpolation if shapes don't match
+            if pol.shape != refp.shape:
+                if len(pol.shape) != len(refp.shape):
+                    return np.nan
+                
+                # Determine interpolation axis
+                diff_axes = [i for i, (a, b) in enumerate(zip(pol.shape, refp.shape)) if a != b]
+                if len(diff_axes) != 1:
+                    return np.nan
+                ax = diff_axes[0]
+                
+                if g_mod.size != pol.shape[ax] or g_ref.size != refp.shape[ax]:
+                    return np.nan
+                
+                # Interpolate baseline to fast method's grid
+                ref_swapped = np.moveaxis(refp, ax, -1)
+                ref_swapped = _optimize_array_layout(ref_swapped)
+                lead = ref_swapped.reshape(-1, g_ref.size, order='C')
+                out = fast_interp_1d_vectorized(g_mod, g_ref, lead)
+                refp = np.moveaxis(out.reshape(*ref_swapped.shape[:-1], g_mod.size), -1, ax)
+                
+                if pol.shape != refp.shape:
+                    return np.nan
+            
+            # Compute log10 absolute error
+            diff = np.abs(refp - pol)
+            
+            # Add small epsilon to avoid log10(0) issues
+            # This ensures the metric rewards good methods (small differences)
+            # rather than penalizing them by filtering out small values
+            epsilon = 1e-16
+            diff_safe = diff + epsilon
+            
+            # Compute mean of log10 absolute errors
+            log_errors = np.log10(diff_safe)
+            result = float(np.mean(log_errors))
+            
+            # Clean up
+            del diff, pol, refp, g_mod, g_ref, diff_safe, log_errors
+            gc.collect()
+            
+            return result
+            
+    except Exception as e:
+        print(f"Error in log10 mean metric computation: {e}")
+        gc.collect()
+        return np.nan
+
+
 # ─────────────────────────── plotting comparison factory ──────────────────────
 def plot_comparison_factory(
     decision_variable: str, 

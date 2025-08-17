@@ -42,6 +42,7 @@ def format_metrics_table(results_df):
         ue_percent = row.get("ue_time_percent", 0.0)
         euler_error = row.get("euler_error", 0.0)
         VFI_L2_error = row.get("dev_c_L2",0.0)
+        log10_mean_error = row.get("dev_c_log10_mean", 0.0)
         param_hash = row.get("param_hash", "Unknown")
         reference_bundle_hash = row.get("reference_bundle_hash", "Unknown")
         latest_time_id = row.get("latest_time_id", "Unknown")
@@ -55,6 +56,7 @@ def format_metrics_table(results_df):
             f"{ue_percent:.2f}%",
             f"{euler_error:.6f}",
             f"{VFI_L2_error:.6f}",
+            f"{log10_mean_error:.6f}",
             param_hash,
             reference_bundle_hash,
             latest_time_id
@@ -69,6 +71,7 @@ def format_metrics_table(results_df):
         "UE/Non-Terminal",
         "Euler Error",
         "VFI L2 Error",
+        "Log10 Mean Error",
         "Param Hash",
         "Reference Bundle Hash",
         "Latest Time ID"
@@ -284,6 +287,7 @@ def generate_latex_table(res_df: pd.DataFrame, output_root: Path):
         "solve_time": "Solve Time (s)",
         "euler_error": "Euler Error",
         "dev_c_L2": r"$\|c - c_{base}\|_{L_2}$",
+        "dev_c_log10_mean": r"$\overline{\log_{10}|c - c_{base}|}$",
         "VFI_L2_error": r"$\|V - V_{base}\|_{L_2}$"
     }
     
