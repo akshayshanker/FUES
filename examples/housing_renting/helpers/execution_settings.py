@@ -20,7 +20,7 @@ class ExecutionSettings:
     # Class constants - moved from solve_runner.py
     DEFAULT_BASE = "VFI_HDGRID_GPU"
     ALL_METHODS = ["VFI_HDGRID", "VFI_HDGRID_GPU", "FUES", "DCEGM", "CONSAV", "FUES2DEV"]
-    DEFAULT_FAST_METHODS = ["FUES", "CONSAV"]
+    DEFAULT_FAST_METHODS = ["FUES", "CONSAV", "DCEGM"]
     DEFAULT_COMPARISON_METRICS = "dev_c_L2,plot_c_comparison,plot_v_comparison"
     
     def __init__(self, args, cfg_dir_base):

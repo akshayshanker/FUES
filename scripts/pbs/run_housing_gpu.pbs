@@ -2,7 +2,7 @@
 #PBS -N fues-gpu-profile
 #PBS -P tp66
 #PBS -q gpuvolta
-#PBS -l ncpus=12,mem=382GB,walltime=10:00:00
+#PBS -l ncpus=12,mem=382GB,walltime=20:00:00
 #PBS -l ngpus=1
 #PBS -l storage=gdata/tp66+scratch/tp66
 #PBS -l wd
@@ -14,9 +14,16 @@ set -euo pipefail
 source ../lib/job_configs.sh
 
 # --- 2. Define the Sequence of Configurations to Run ---
-CONFIG_TO_RUN=(
-    "HIGH_RES_SETTINGS_J"
-)
+# Check if FUES_CONFIGS environment variable is set, otherwise use default
+if [[ -n "${FUES_CONFIGS:-}" ]]; then
+    IFS=' ' read -ra CONFIG_TO_RUN <<< "$FUES_CONFIGS"
+    echo "Using configurations from FUES_CONFIGS: ${CONFIG_TO_RUN[@]}"
+else
+    CONFIG_TO_RUN=(
+        "HIGH_RES_SETTINGS_K"
+    )
+    echo "Using default configurations: ${CONFIG_TO_RUN[@]}"
+fi
 
 # --- 3. Environment Setup ---
 module purge
@@ -56,6 +63,14 @@ export OMPI_MCA_coll_hcoll_enable=0
 
 # --- 5. Main Execution Loop ---
 for CONFIG_NAME in "${CONFIG_TO_RUN[@]}"; do
+    
+    # Check if configuration exists
+    if ! declare -p "$CONFIG_NAME" &>/dev/null; then
+        echo "Error: Configuration '$CONFIG_NAME' not found in job_configs.sh"
+        echo "Available configurations:"
+        compgen -v | grep -E '^(STD_RES|HIGH_RES)_SETTINGS' | sort -u
+        exit 1
+    fi
 
     declare -n CONFIG_REF=$CONFIG_NAME
 

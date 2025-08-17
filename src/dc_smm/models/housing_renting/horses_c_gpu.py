@@ -213,9 +213,11 @@ def solve_vfi_gpu(vlu_cntn, model):
     
     n_W, n_H, n_Y = w_grid.size, H_grid.size, vlu_cntn.shape[2]
     
-    # Debug output for grid dimensions
-    print(f"[GPU DEBUG] Grid dimensions: n_W={n_W}, n_H={n_H}, n_Y={n_Y}")
-    print(f"[GPU DEBUG] Total grid points: {n_W * n_H * n_Y:,}")
+    # Debug output for grid dimensions (only if verbose)
+    verbose = model.settings_dict.get("gpu_verbose", False)
+    if verbose:
+        print(f"[GPU DEBUG] Grid dimensions: n_W={n_W}, n_H={n_H}, n_Y={n_Y}")
+        print(f"[GPU DEBUG] Total grid points: {n_W * n_H * n_Y:,}")
     
     # Allocate output arrays on the GPU
     d_policy_c = cuda.device_array((n_W, n_H, n_Y), dtype=np.float64)
@@ -229,11 +231,25 @@ def solve_vfi_gpu(vlu_cntn, model):
     # Optimize thread configuration for better GPU utilization
     
     # Determine thread configuration based on problem size and GPU constraints
+    # Key optimizations:
+    # 1. Keep total threads per block at 256 or 512 for better occupancy
+    # 2. Make X dimension (wealth) larger for coalesced memory access
+    # 3. Ensure dimensions are powers of 2 when possible
+    
     if n_W * n_H * n_Y < 1000:  # Small problem
         threads_per_block = (min(n_W, 8), min(n_H, 8), min(n_Y, 8))
-    else:  # Large problem - balance threads vs register usage
-        # 8*8*8 = 512 threads (safer for complex VFI kernel)
-        threads_per_block = (8, 8, 8)
+    else:  # Large problem - optimize for memory coalescing and occupancy
+        # Prefer 256 threads for better occupancy with complex kernels
+        # Prioritize X dimension (wealth) for coalesced access
+        if n_W >= 32:
+            # 32*4*2 = 256 threads, optimized for wealth dimension
+            threads_per_block = (32, 4, 2)
+        elif n_W >= 16:
+            # 16*8*2 = 256 threads
+            threads_per_block = (16, 8, 2)
+        else:
+            # 8*8*4 = 256 threads (fallback for small wealth grids)
+            threads_per_block = (8, 8, 4)
     
     blocks_per_grid_x = max(1, (n_W + threads_per_block[0] - 1) // threads_per_block[0])
     blocks_per_grid_y = max(1, (n_H + threads_per_block[1] - 1) // threads_per_block[1])
@@ -241,22 +257,23 @@ def solve_vfi_gpu(vlu_cntn, model):
     
     blocks_per_grid = (blocks_per_grid_x, blocks_per_grid_y, blocks_per_grid_z)
     
-    # Debug output for block configuration
-    print(f"[GPU DEBUG] Grid dimensions: W={n_W}, H={n_H}, Y={n_Y}")
-    print(f"[GPU DEBUG] Threads per block: {threads_per_block} = {threads_per_block[0]*threads_per_block[1]*threads_per_block[2]} threads")
-    print(f"[GPU DEBUG] Blocks per grid: {blocks_per_grid}")
-    print(f"[GPU DEBUG] Total blocks: {blocks_per_grid[0] * blocks_per_grid[1] * blocks_per_grid[2]:,}")
-    
-    # Check CUDA limits for 3D grid
-    device = cuda.get_current_device()
-    max_grid_dim = device.MAX_GRID_DIM_X, device.MAX_GRID_DIM_Y, device.MAX_GRID_DIM_Z
-    print(f"[GPU DEBUG] Max 3D grid dimensions: {max_grid_dim}")
-    
-    if any(blocks_per_grid[i] > max_grid_dim[i] for i in range(3)):
-        print("[GPU ERROR] Block grid dimensions exceed CUDA limits!")
-        for i, (actual, limit) in enumerate(zip(blocks_per_grid, max_grid_dim)):
-            if actual > limit:
-                print(f"  Dimension {i}: {actual} > {limit}")
+    # Debug output for block configuration (only if verbose)
+    if verbose:
+        print(f"[GPU DEBUG] Grid dimensions: W={n_W}, H={n_H}, Y={n_Y}")
+        print(f"[GPU DEBUG] Threads per block: {threads_per_block} = {threads_per_block[0]*threads_per_block[1]*threads_per_block[2]} threads")
+        print(f"[GPU DEBUG] Blocks per grid: {blocks_per_grid}")
+        print(f"[GPU DEBUG] Total blocks: {blocks_per_grid[0] * blocks_per_grid[1] * blocks_per_grid[2]:,}")
+        
+        # Check CUDA limits for 3D grid
+        device = cuda.get_current_device()
+        max_grid_dim = device.MAX_GRID_DIM_X, device.MAX_GRID_DIM_Y, device.MAX_GRID_DIM_Z
+        print(f"[GPU DEBUG] Max 3D grid dimensions: {max_grid_dim}")
+        
+        if any(blocks_per_grid[i] > max_grid_dim[i] for i in range(3)):
+            print("[GPU ERROR] Block grid dimensions exceed CUDA limits!")
+            for i, (actual, limit) in enumerate(zip(blocks_per_grid, max_grid_dim)):
+                if actual > limit:
+                    print(f"  Dimension {i}: {actual} > {limit}")
     expr_str = model.math["functions"]["u_func"]["expr"]
     param_vals = {
         "alpha": model.param.alpha,
@@ -287,8 +304,13 @@ def solve_vfi_gpu(vlu_cntn, model):
         d_gradient_c = cuda.device_array_like(d_policy_c)
         
         # Configure gradient kernel (2D grid for h, y)
-        # Use balanced configuration: 16*16 = 256 threads
-        gradient_threads = (16, 16)
+        # Optimize for small H dimension (typically 7-8)
+        if n_H <= 8:
+            # 8*32 = 256 threads, optimized for small H
+            gradient_threads = (min(n_H, 8), min(n_Y, 32))
+        else:
+            # 16*16 = 256 threads for larger grids
+            gradient_threads = (16, 16)
         gradient_blocks_h = max(1, (n_H + gradient_threads[0] - 1) // gradient_threads[0])
         gradient_blocks_y = max(1, (n_Y + gradient_threads[1] - 1) // gradient_threads[1])
         
@@ -309,9 +331,15 @@ def solve_vfi_gpu(vlu_cntn, model):
         d_gradient_c = cuda.device_array_like(d_policy_c)  # Dummy array
     
     # Calculate continuation values on GPU
-    # Use balanced thread configuration to avoid resource exhaustion
+    # Use optimized thread configuration for memory coalescing
     # Note: continuation kernel expects (iw, ih, iy) order
-    continuation_threads = (8, 8, 8)  # 512 threads (balanced)
+    # Prioritize X dimension (wealth) for coalesced memory access
+    if n_W >= 32:
+        continuation_threads = (32, 4, 2)  # 256 threads, wealth-optimized
+    elif n_W >= 16:
+        continuation_threads = (16, 8, 2)  # 256 threads
+    else:
+        continuation_threads = (8, 8, 4)  # 256 threads (fallback)
     continuation_blocks_x = max(1, (n_W + continuation_threads[0] - 1) // continuation_threads[0])
     continuation_blocks_y = max(1, (n_H + continuation_threads[1] - 1) // continuation_threads[1])
     continuation_blocks_z = max(1, (n_Y + continuation_threads[2] - 1) // continuation_threads[2])
@@ -345,4 +373,61 @@ def solve_vfi_gpu(vlu_cntn, model):
     lambda_dcsn = d_lambda_dcsn.copy_to_host()
 
     return policy_c, policy_a, Q_dcsn, vlu_dcsn, lambda_dcsn
+
+
+def warmup_gpu_kernels():
+    """
+    Warm up GPU kernels by running them on tiny grids.
+    This forces CUDA JIT compilation before actual runs.
+    """
+    print("[GPU] Warming up kernels...")
+    
+    # Create tiny test arrays
+    n_W, n_H, n_Y = 4, 2, 2
+    
+    # Allocate tiny arrays on GPU
+    d_policy_c = cuda.device_array((n_W, n_H, n_Y), dtype=np.float64)
+    d_policy_a = cuda.device_array_like(d_policy_c)
+    d_Q_dcsn = cuda.device_array_like(d_policy_c)
+    d_vlu_dcsn = cuda.device_array_like(d_policy_c)
+    d_lambda_dcsn = cuda.device_array_like(d_policy_c)
+    d_vlu_cntn = cuda.device_array_like(d_policy_c)
+    d_gradient_c = cuda.device_array_like(d_policy_c)
+    
+    d_w_grid = cuda.to_device(np.linspace(0.1, 1.0, n_W))
+    d_a_grid = cuda.to_device(np.linspace(0.0, 0.8, n_W))
+    d_H_grid = cuda.to_device(np.linspace(0.5, 1.0, n_H))
+    d_h_nxt_ind = cuda.to_device(np.arange(n_H))
+    
+    # Warmup VFI kernel
+    threads = (2, 2, 2)
+    blocks = (2, 1, 1)
+    vfi_gpu_kernel[blocks, threads](
+        d_policy_c, d_policy_a, d_Q_dcsn, d_vlu_dcsn, d_lambda_dcsn,
+        d_vlu_cntn, d_w_grid, d_a_grid, d_H_grid, d_h_nxt_ind,
+        0.95, 0.96, 1.0, 1.0, 10,
+        0.7, 0.2, 0.1,
+        n_W, n_H, n_Y
+    )
+    
+    # Warmup gradient kernel
+    gradient_threads = (2, 2)
+    gradient_blocks = (1, 1)
+    calculate_gradient_gpu_kernel[gradient_blocks, gradient_threads](
+        d_policy_c, d_w_grid, d_gradient_c, 1.0, 0.9,
+        n_W, n_H, n_Y
+    )
+    
+    # Warmup continuation kernel
+    continuation_threads = (2, 2, 2)
+    continuation_blocks = (2, 1, 1)
+    calculate_continuation_values_gpu_kernel[continuation_blocks, continuation_threads](
+        d_policy_c, d_Q_dcsn, d_gradient_c, d_H_grid, d_vlu_dcsn, d_lambda_dcsn,
+        0.96, 1.0, 0.7, 0.2, 0.1, False,
+        n_W, n_H, n_Y
+    )
+    
+    # Force synchronization to ensure compilation is complete
+    cuda.synchronize()
+    print("[GPU] Kernel warmup complete")
 

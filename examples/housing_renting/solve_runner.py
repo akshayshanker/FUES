@@ -393,7 +393,7 @@ def make_housing_model(args, cfg_container: dict, periods: int, vf_ngrid: int, c
 # ---------------------------------------------------------------------
 #  Solver-factory helper
 # ---------------------------------------------------------------------
-def make_housing_solver(args, use_mpi: bool, comm):
+def make_housing_solver(args, use_mpi: bool, comm, baseline_method=None):
     """
     Returns an _solve(model, recorder) closure that the CircuitRunner calls.
     """
@@ -408,6 +408,16 @@ def make_housing_solver(args, use_mpi: bool, comm):
         final_period = mc.get_period(len(mc.periods_list) - 1)
         for tag in ("OWNC", "RNTC"):
             final_period.get_stage(tag).status_flags["is_terminal"] = True
+        
+        # 1b. Warm up GPU kernels if using GPU solver (happens once before solving)
+        # Use baseline_method passed from outer scope
+        solver_method = baseline_method or ""
+        if solver_method.endswith("_GPU") and (comm is None or comm.rank == 0):
+            try:
+                from src.dc_smm.models.housing_renting.horses_c_gpu import warmup_gpu_kernels
+                warmup_gpu_kernels()
+            except ImportError:
+                pass  # GPU module not available
         
         # 2. backward time iteration
         # Free memory during solving if we're not saving the model
@@ -551,7 +561,7 @@ def main(argv=None):
                 "master.parameters.delta_pb",
             ],
             model_factory=lambda cfg: make_housing_model(args,cfg, 2, 100, comm),
-            solver=make_housing_solver(argparse.Namespace(verbose=False, periods=2), use_mpi=args.mpi, comm=comm),
+            solver=make_housing_solver(argparse.Namespace(verbose=False, periods=2), use_mpi=args.mpi, comm=comm, baseline_method=settings.baseline_method),
             metric_fns={},
             save_by_default=False,
             load_if_exists=False,
@@ -637,7 +647,7 @@ def main(argv=None):
             "master.parameters.delta_pb",
         ],
         model_factory=lambda cfg: make_housing_model(args,cfg, args.periods, vf_ngrid, comm),
-        solver=make_housing_solver(args, args.mpi, comm),
+        solver=make_housing_solver(args, args.mpi, comm, baseline_method=settings.baseline_method),
         metric_fns=metric_fns,
         output_root=output_root,
         bundle_prefix=args.bundle_prefix,

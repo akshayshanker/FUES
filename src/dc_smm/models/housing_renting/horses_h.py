@@ -250,7 +250,7 @@ def F_shocks_dcsn_to_arvl(mover):
 # ==============================================================================
 
 
-@njit(cache=True)
+@njit(cache=True, parallel=True)
 def housing_choice_solver_owner_cpu(resources_liquid_3d, H_grid, H_nxt_grid,
                                     w_grid, Q_cntn, v_cntn, lambda_cntn,
                                     tau, min_wealth):
@@ -291,7 +291,7 @@ def housing_choice_solver_owner_cpu(resources_liquid_3d, H_grid, H_nxt_grid,
 
     return best_Q, best_v, best_lambda, best_idx
 
-@njit(cache=True)
+@njit(cache=True, parallel=True)
 def housing_choice_solver_renter_cpu(w_grid, S_grid, y_grid, w_rent_grid, 
                                      q_cntn, vlu_cntn, lambda_cntn, Pr, shock_grid):
     """Jitted function to solve the renter housing choice problem on the CPU."""
@@ -305,7 +305,7 @@ def housing_choice_solver_renter_cpu(w_grid, S_grid, y_grid, w_rent_grid,
     
     for i_y in prange(n_y):
         y_val = shock_grid[i_y]
-        for i_w in range(n_w):
+        for i_w in prange(n_w):
             w_dcsn_val = w_grid[i_w]
             
             best_q, best_lambda, best_S_idx, best_v = -np.inf, 0.0, 0, -np.inf
