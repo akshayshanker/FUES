@@ -11,6 +11,7 @@ import numpy as np
 from .helpers.math_funcs import (
     circ_put,
     _forced_intersection_twopoint,
+    _force_crossing_inside,
 )
 
 # Constants
@@ -147,6 +148,71 @@ def find_forward_same_branch(e_grid, a_prime, start_idx, j_idx, N, LB, m_bar, ep
             return True, start_idx + 1 + f
     return False, -1
 
+
+@njit
+def check_intersection_within_bounds(e_grid, vlu, j, idx_f, i_plus_1, idx_b, eps_d=EPS_D, parallel_guard=PARALLEL_GUARD):
+    """
+    Check if the natural intersection of segment [j, idx_f] with segment [i+1, idx_b] 
+    lies within the segment boundaries [j, i+1].
+    
+    Computes the raw intersection without forcing it inside bounds, then checks
+    if it naturally falls within the interval.
+    
+    Parameters
+    ----------
+    e_grid, vlu : arrays
+        Grid points and values
+    j, idx_f : int
+        Indices for the first segment (j to forward point)
+    i_plus_1, idx_b : int  
+        Indices for the second segment (i+1 to backward point)
+    eps_d : float
+        Small epsilon for division protection
+        
+    Returns
+    -------
+    bool
+        True if intersection is within [e_grid[j], e_grid[i_plus_1]]
+    """
+    # Check if we have valid indices
+    if idx_f == -1 or idx_b == -1:
+        return False
+    
+    # Compute the raw intersection using the same logic as _force_crossing_inside
+    # but without the clipping step
+    L_x1, L_y1 = e_grid[j], vlu[j]
+    L_x2, L_y2 = e_grid[idx_f], vlu[idx_f]
+    R_x1, R_y1 = e_grid[i_plus_1], vlu[i_plus_1]
+    R_x2, R_y2 = e_grid[idx_b], vlu[idx_b]
+    
+    dxL = L_x2 - L_x1
+    dyL = L_y2 - L_y1
+    dxR = R_x2 - R_x1
+    dyR = R_y2 - R_y1
+    
+    # Check for parallel lines
+    denom = dxL * dyR - dyL * dxR
+    if np.abs(denom) < parallel_guard:
+        return False  # Lines are parallel or nearly parallel
+    
+    # Compute intersection point using parametric form
+    # Intersection occurs at parameter s on the left line
+    s = ((R_x1 - L_x1) * dyR - (R_y1 - L_y1) * dxR) / denom
+    
+    # Compute the x-coordinate of the intersection
+    x_intersect = L_x1 + s * dxL
+    
+    # Check if intersection is within the segment boundary [j, i+1]
+    # Use a small tolerance for numerical precision
+    tol = eps_d
+    e_lo = e_grid[j] - tol
+    e_hi = e_grid[i_plus_1] + tol
+    
+    # Return true if intersection is within bounds
+    if x_intersect >= e_lo and x_intersect <= e_hi:
+        return True
+    else:
+        return False
 
 @njit
 def forward_scan_case_a(e_grid, vlu, a_prime, i, j, N, LB, m_bar, g_1, eps_d=EPS_D, eps_fwd_back=EPS_fwd_back):
@@ -417,7 +483,7 @@ def FUES(
         all_d = all_d[sort_idx]
         is_inter = is_inter[sort_idx]
 
-        post_mask = _postclean_double_jump_mask(all_e, all_p2, m_bar, is_inter, eps_d)
+        post_mask = _postclean_double_jump_mask(all_e, all_p1, m_bar, is_inter, eps_d)
 
         final_mask = post_mask
 
@@ -628,8 +694,26 @@ def _scan(
                     check_drop=False,
                     eps_d=eps_d,
                 )
+                
+                # Check if we should create an intersection
+                create_intersection = include_intersections and not last_was_jump
+                
+                # Augmented keep_i1 condition:
+                # If found_forward_same_branch is true and both idx_f and idx_b are valid,
+                # check if intersection of [j, idx_f] with [i+1, idx_b] is within segment boundary
+                if found_forward_same_branch and idx_f != -1 and idx_b != -1:
+                    intersection_within = check_intersection_within_bounds(
+                        e_grid, vlu, j, idx_f, i + 1, idx_b, eps_d
+                    )
+                    if not intersection_within:  
+                        # If intersection is OUTSIDE bounds:
+                        # - Don't keep i+1
+                        # - Don't create intersection
+                        keep_i1 = False
+                        create_intersection = False
         
-                if include_intersections and not last_was_jump:
+                # Only create intersection if it's within bounds
+                if create_intersection and keep_i1:
                     L = make_pair_from_indices_or_fallback(
                         e_grid, vlu, a_prime, policy_2, del_a,
                         j, idx_f if idx_f != -1 else -1, k, j, N
@@ -653,12 +737,14 @@ def _scan(
                         use_intersection_as_k = True
                         created_intersection = True
 
-                k = j
-                prev_j = j
-                j = i + 1
-                last_turn_left = True
-                if not created_intersection:
-                    use_intersection_as_k = False
+                # Only update k, j, etc. if keep_i1 is still true after augmented check
+                if keep_i1:
+                    k = j
+                    prev_j = j
+                    j = i + 1
+                    last_turn_left = True
+                    if not created_intersection:
+                        use_intersection_as_k = False
             if not keep_i1:
                 keep[i + 1] = False
                 m_head = circ_put(m_buf, m_head, i + 1)

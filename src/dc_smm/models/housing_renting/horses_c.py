@@ -417,11 +417,15 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
             # Add nxt period binding solutions (if time inconsistency)
             # Only applies to DCEGM, FUES, RFC.
             if ue_method != "CONSAV":
+                # Only add jump constraints when delta_pb != 1 (time inconsistent)
+                add_jump_constraints = (delta != 1.0)
+                
                 m_egm_unique, vlu_q_egm_unique, c_egm_unique, a_nxt_grid_unique = (
                     egm_preprocess(
                         m_egm, q_egm, c_egm, a_nxt_grid, delta*beta,
                         utility_func, vlu_e, m_bar=m_bar, n_con=n_con,
-                        n_con_nxt=n_con_nxt, c_max=c_max, h_nxt=H_val
+                        n_con_nxt=n_con_nxt, c_max=c_max, h_nxt=H_val,
+                        add_jump_constraints=add_jump_constraints
                     )
                 )
 
@@ -512,6 +516,7 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
             # this matches eq in Harris and Laibson (2001)
             #lambda_dcsn[:, i_h, i_y] = (c_prime*beta*delta + (1-c_prime)*beta)*uc_today/beta*delta
             #lambda_dcsn[:,i_h,i_y] = 
+            c_prime[c_prime>1] = 1
             lambda_dcsn[:, i_h, i_y] = (
                 uc_today - (1-delta)*c_prime*uc_today) / delta
             
