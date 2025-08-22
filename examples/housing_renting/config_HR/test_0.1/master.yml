@@ -75,12 +75,12 @@ settings:
   # Income shock discretization - Now explicitly using Fella's values
   y_points: 3           # Number of shock grid points (length of z_vals)
   y_stop: 2 
-  m_bar: 1.00001           # Upper envelope parameter for FUES
+  m_bar: 1.000001           # Upper envelope parameter for FUES
   lb: 10                 # Look-back parameter for FUES
   rfc_radius: 0.75
   rfc_n_iter: 20
   n_constraint_points: 2000
-  n_constraint_points_nxt: 0
+  n_constraint_points_nxt: 100
   N_arg_grid_vfi: 500   # Number of grid points for VFI_GRID
 
 ###################

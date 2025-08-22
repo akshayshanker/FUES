@@ -40,15 +40,19 @@ def csv_generate_plots(model, method, image_dir, plot_period=0, bounds=None,
     
     Parameters match generate_plots exactly for seamless replacement.
     """
-    # Convert image_dir to csv_dir
+    # Convert image_dir to appropriate csv directories
     image_dir = Path(image_dir)
-    # Check if we're in a bundle-specific directory (plots subdirectory)
-    if image_dir.name == "plots" and "bundles" in str(image_dir):
-        # We're in a bundle directory, put CSV data alongside plots
-        csv_dir = ensure_dir(image_dir.parent / "csv_egm_data")
+    
+    # Check if we're in the new organized structure (images directory)
+    if image_dir.name == "images" and "bundles" in str(image_dir):
+        # Create separate directories for different CSV types
+        egm_csv_dir = ensure_dir(image_dir / "egm_csv")
+        policy_csv_dir = ensure_dir(image_dir / "policy_csv")
+        # Use egm_csv_dir as the main csv_dir for EGM data
+        csv_dir = egm_csv_dir
     else:
-        # Original behavior for backward compatibility
-        csv_dir = ensure_dir(image_dir.parent / "csv_egm_data" / method)
+        # Fallback for backward compatibility
+        csv_dir = ensure_dir(image_dir / "csv_egm_data")
     
     # Get the solution
     first_period = model.get_period(plot_period)
@@ -74,12 +78,27 @@ def csv_generate_plots(model, method, image_dir, plot_period=0, bounds=None,
         y_idx_list = [0]
     
     # Extract EGM data if available
+    print(f"[DEBUG CSV Export] Checking for EGM data in solution object...")
+    print(f"[DEBUG CSV Export] sol has EGM attr: {hasattr(sol, 'EGM')}")
+    if hasattr(sol, '_arr'):
+        print(f"[DEBUG CSV Export] sol._arr type: {type(sol._arr)}")
+    if hasattr(sol, '_jit'):
+        print(f"[DEBUG CSV Export] sol has _jit attr: True")
+        if hasattr(sol._jit, 'EGM'):
+            print(f"[DEBUG CSV Export] sol._jit has EGM attr: True")
+    
     if hasattr(sol, 'EGM'):
         egm_data = sol.EGM
+        print(f"[DEBUG CSV Export] Found EGM data in sol.EGM")
     elif hasattr(sol, '_arr') and isinstance(sol._arr, dict) and 'EGM' in sol._arr:
         egm_data = sol._arr['EGM']
+        print(f"[DEBUG CSV Export] Found EGM data in sol._arr['EGM']")
+    elif hasattr(sol, '_jit') and hasattr(sol._jit, 'EGM'):
+        egm_data = sol._jit.EGM
+        print(f"[DEBUG CSV Export] Found EGM data in sol._jit.EGM")
     else:
         egm_data = None
+        print(f"[DEBUG CSV Export] No EGM data found")
     
     if egm_data:
         # Export EGM grid data
@@ -112,8 +131,11 @@ def csv_generate_plots(model, method, image_dir, plot_period=0, bounds=None,
                         grid.H_nxt[H_idx] if grid.H_nxt is not None else H_idx
                     )
     
-    # Export policy function data
-    export_policy_data_csv(csv_dir, sol, grid, H_indices, y_idx_list)
+    # Export policy function data to appropriate directory
+    if image_dir.name == "images" and "bundles" in str(image_dir):
+        export_policy_data_csv(policy_csv_dir, sol, grid, H_indices, y_idx_list)
+    else:
+        export_policy_data_csv(csv_dir, sol, grid, H_indices, y_idx_list)
     
     # Save metadata
     metadata = {
@@ -128,8 +150,15 @@ def csv_generate_plots(model, method, image_dir, plot_period=0, bounds=None,
     with open(csv_dir / 'metadata.json', 'w') as f:
         json.dump(metadata, f, indent=2)
     
-    print(f"[CSV Export] Saved EGM data for {method} to: {csv_dir}")
-    print(f"[CSV Export] Files: metadata.json + {len(list(csv_dir.glob('*.csv')))} CSV files")
+    if image_dir.name == "images" and "bundles" in str(image_dir):
+        print(f"[CSV Export] Saved data for {method}:")
+        print(f"  - EGM data: {egm_csv_dir}")
+        print(f"  - Policy data: {policy_csv_dir}")
+        total_csv = len(list(egm_csv_dir.glob('*.csv'))) + len(list(policy_csv_dir.glob('*.csv')))
+        print(f"[CSV Export] Total files: metadata.json + {total_csv} CSV files")
+    else:
+        print(f"[CSV Export] Saved data for {method} to: {csv_dir}")
+        print(f"[CSV Export] Files: metadata.json + {len(list(csv_dir.glob('*.csv')))} CSV files")
 
 
 def export_egm_grid_csv(filepath, data_dict, grid_key, H_idx, y_idx, h_value):

@@ -2,7 +2,7 @@
 #PBS -N fues-dgxa100-single
 #PBS -P tp66
 #PBS -q dgxa100
-#PBS -l ncpus=16,mem=512GB,walltime=12:00:00
+#PBS -l ncpus=16,mem=612GB,walltime=12:00:00
 #PBS -l ngpus=1
 #PBS -l storage=gdata/tp66+scratch/tp66
 #PBS -l wd

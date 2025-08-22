@@ -483,7 +483,7 @@ def FUES(
         all_d = all_d[sort_idx]
         is_inter = is_inter[sort_idx]
 
-        post_mask = _postclean_double_jump_mask(all_e, all_p1, m_bar, is_inter, eps_d)
+        post_mask = _postclean_double_jump_mask(all_e, all_p2, m_bar, is_inter, eps_d)
 
         final_mask = post_mask
 
@@ -646,11 +646,12 @@ def _scan(
 
         # Classify turn direction and jump status
         left_turn_any = g_1 > g_jm1
-        jump_now = g_tilde_a > M_max or del_pol_2 < 0 or del_pol_a < 0
+        #jump_now = g_tilde_a > M_max or del_pol_2 < 0 or del_pol_a < 0
+        jump_now = g_tilde_a_2 > M_max
 
-        if del_pol_2> eps_d:
-            if g_tilde_a_2 > M_max:
-                jump_now = True
+        #if del_pol_2> eps_d:
+        #    if g_tilde_a_2 > M_max:
+        #        jump_now = True
 
         
         

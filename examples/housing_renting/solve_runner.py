@@ -455,7 +455,8 @@ def main(argv=None):
     )
     p.add_argument("--periods", type=int, default=3)
     p.add_argument("--ue-method", default="ALL")
-    p.add_argument("--plots", action="store_true")
+    p.add_argument("--plots", action="store_true", 
+                   help="Generate matplotlib plots")
     p.add_argument("--verbose", action="store_true")
     p.add_argument("--output-root", default="solutions/HR")
     p.add_argument("--bundle-prefix", default="HR")
@@ -489,7 +490,7 @@ def main(argv=None):
     p.add_argument("--load-stages", default=None,
                    help="JSON-formatted dict of period:stages to load (e.g., '{\"0\": [\"OWNC\"], \"1\": null}' loads only OWNC in period 0, all stages in period 1)")
     p.add_argument("--csv-export", action="store_true",
-                   help="Export plot data to CSV files instead of generating matplotlib plots (for cluster use)")
+                   help="Export plot data to CSV files (includes both policy and EGM data)")
     p.add_argument("--save-full-model", action="store_true",
                    help="Keep all solution data in memory for saving. Disables memory freeing during solve. Default: False (free memory)")
     
@@ -583,15 +584,21 @@ def main(argv=None):
     #  set-up plotting configuration -----------------------------------------------
     plot_config = settings.get_plot_config()
     
-    # Choose between CSV export or matplotlib plotting based on flag
+    # Set up plotting and CSV export functions
+    # Note: We'll handle both plots and CSV in the plotting section
+    if is_root:
+        if args.csv_export and args.plots:
+            print("\n*** BOTH MODE: Generating plots AND exporting CSV data ***\n")
+        elif args.csv_export:
+            print("\n*** CSV EXPORT MODE: Plot data will be saved as CSV files ***\n")
+        elif args.plots:
+            print("\n*** PLOT MODE: Generating matplotlib plots ***\n")
+    
+    # For metrics, use CSV factory if CSV export is requested
     if args.csv_export:
         plot_factory = csv_plot_comparison_factory
-        egm_plot_func = csv_generate_plots
-        if is_root:
-            print("\n*** CSV EXPORT MODE: Plot data will be saved as CSV files ***\n")
     else:
         plot_factory = plot_comparison_factory
-        egm_plot_func = generate_plots
     
     # Available metrics mapping
     AVAILABLE_METRICS = {
@@ -736,19 +743,28 @@ def main(argv=None):
             if is_root and ref_model is not None:
                 runner.ref_model_for_plotting = ref_model
 
-            # Generate plots immediately and delete model
-            if is_root and args.plots and ref_model is not None:
+            # Generate plots and/or CSV exports immediately and delete model
+            if is_root and (args.plots or args.csv_export) and ref_model is not None:
                 trace_print("19: Generating baseline plots")
                 
-                # Use bundle-specific directory for plots
+                # Use organized directory structure for outputs
                 if baseline_bundle_path:
                     from pathlib import Path
-                    baseline_plot_dir = Path(baseline_bundle_path) / "plots"
-                    baseline_plot_dir.mkdir(parents=True, exist_ok=True)
+                    # Create clean directory structure: bundle/VFI_HDGRID_GPU/images/...
+                    baseline_images_dir = Path(baseline_bundle_path) / "images"
+                    baseline_images_dir.mkdir(parents=True, exist_ok=True)
+                    
+                    # For CSV export mode, data goes to appropriate subdirectories
+                    if args.csv_export:
+                        baseline_output_dir = baseline_images_dir  # CSV function will handle subdirs
+                    else:
+                        # For regular plots, use policy_plots subdirectory
+                        baseline_output_dir = baseline_images_dir / "policy_plots"
+                        baseline_output_dir.mkdir(parents=True, exist_ok=True)
                 else:
                     # Fallback to original location if no bundle path
-                    baseline_plot_dir = settings.img_dir
-                    baseline_plot_dir.mkdir(exist_ok=True)
+                    baseline_output_dir = settings.img_dir
+                    baseline_output_dir.mkdir(exist_ok=True)
                 
                 # Clean up non-essential data before plotting if in low-memory mode
                 if args.low_memory:
@@ -756,10 +772,26 @@ def main(argv=None):
                     log_memory_usage("after baseline model cleanup")
                 
                 try:
-                    print(f"  Generating plots for {settings.baseline_method}...")
-                    if baseline_bundle_path:
-                        print(f"  Plots will be saved to: {baseline_plot_dir}")
-                    egm_plot_func(ref_model, settings.baseline_method, baseline_plot_dir, egm_bounds=plot_config['egm_bounds'])
+                    # Handle CSV export
+                    if args.csv_export:
+                        print(f"  Exporting CSV data for {settings.baseline_method}...")
+                        if baseline_bundle_path:
+                            print(f"  CSV data will be saved to: {baseline_images_dir}/egm_csv and {baseline_images_dir}/policy_csv")
+                        csv_generate_plots(ref_model, settings.baseline_method, baseline_images_dir, 
+                                         egm_bounds=plot_config['egm_bounds'])
+                    
+                    # Handle matplotlib plots
+                    if args.plots:
+                        print(f"  Generating plots for {settings.baseline_method}...")
+                        if baseline_bundle_path:
+                            plot_output_dir = baseline_images_dir / "policy_plots"
+                            plot_output_dir.mkdir(parents=True, exist_ok=True)
+                            print(f"  Plots will be saved to: {plot_output_dir}")
+                        else:
+                            plot_output_dir = baseline_output_dir
+                        
+                        generate_plots(ref_model, settings.baseline_method, plot_output_dir, 
+                                     egm_bounds=plot_config['egm_bounds'])
                 except Exception as err:
                     print(f"[warn] plot-gen for {settings.baseline_method} failed: {err}")
                 finally:
@@ -835,19 +867,20 @@ def main(argv=None):
                 metrics["latest_time_id"] = args.RUN_ID 
                 all_metrics.append(metrics)
                 
-                # Generate plots immediately and delete model
-                if is_root and args.plots and model is not None:
+                # Generate plots and/or CSV exports immediately and delete model
+                if is_root and (args.plots or args.csv_export) and model is not None:
                     trace_print(f"27.{i+1}: Generating {method} plots")
                     
-                    # Use bundle-specific directory for plots
+                    # Use organized directory structure for outputs
                     if method_bundle_path:
                         from pathlib import Path
-                        bundle_plot_dir = Path(method_bundle_path) / "plots"
-                        bundle_plot_dir.mkdir(parents=True, exist_ok=True)
+                        # Create clean directory structure: bundle/FUES/images/...
+                        bundle_images_dir = Path(method_bundle_path) / "images"
+                        bundle_images_dir.mkdir(parents=True, exist_ok=True)
                     else:
                         # Fallback to original location if no bundle path
-                        bundle_plot_dir = settings.img_dir
-                        bundle_plot_dir.mkdir(exist_ok=True)
+                        bundle_images_dir = settings.img_dir
+                        bundle_images_dir.mkdir(exist_ok=True)
                     
                     # Clean up non-essential data before plotting if in low-memory mode
                     if args.low_memory:
@@ -855,24 +888,28 @@ def main(argv=None):
                         log_memory_usage(f"after {method} model cleanup")
                     
                     try:
-                        print(f"  Generating plots for {method}...")
-                        if method_bundle_path:
-                            print(f"  Plots will be saved to: {bundle_plot_dir}")
+                        # Handle CSV export
+                        if args.csv_export:
+                            print(f"  Exporting CSV data for {method}...")
+                            if method_bundle_path:
+                                print(f"  CSV data will be saved to: {bundle_images_dir}/egm_csv and {bundle_images_dir}/policy_csv")
+                            csv_generate_plots(model, method, bundle_images_dir, 
+                                             egm_bounds=plot_config['egm_bounds'], 
+                                             y_idx_list=plot_config['y_idx_list'])
                         
-                        # Debug: Check if this model has EGM grids
-                        first_period = model.get_period(0)
-                        ownc_stage = first_period.get_stage("OWNC")
-                        if hasattr(ownc_stage.dcsn.sol, 'EGM'):
-                            unrefined_keys = list(ownc_stage.dcsn.sol.EGM.unrefined.keys()) if hasattr(ownc_stage.dcsn.sol.EGM, 'unrefined') else []
-                            refined_keys = list(ownc_stage.dcsn.sol.EGM.refined.keys()) if hasattr(ownc_stage.dcsn.sol.EGM, 'refined') else []
-                            print(f"[DEBUG] Model passed to plotting for {method}: "
-                                  f"unrefined={len(unrefined_keys)}, refined={len(refined_keys)}")
-                            print(f"[DEBUG] Model object id: {id(model)}, ownc_stage.dcsn.sol id: {id(ownc_stage.dcsn.sol)}")
-                        else:
-                            print(f"[DEBUG] Model passed to plotting for {method}: NO EGM grids!")
-                            print(f"[DEBUG] Model object id: {id(model)}, ownc_stage.dcsn.sol id: {id(ownc_stage.dcsn.sol)}")
-                        
-                        egm_plot_func(model, method, bundle_plot_dir, egm_bounds=plot_config['egm_bounds'], y_idx_list=plot_config['y_idx_list'])
+                        # Handle matplotlib plots (including policy plots when both flags are set)
+                        if args.plots:
+                            print(f"  Generating plots for {method}...")
+                            if method_bundle_path:
+                                # Pass base images dir, generate_plots will create subdirs
+                                plot_output_dir = bundle_images_dir
+                                print(f"  Plots will be saved to: {plot_output_dir}/{method}/")
+                            else:
+                                plot_output_dir = bundle_images_dir
+                            
+                            generate_plots(model, method, plot_output_dir, 
+                                         egm_bounds=plot_config['egm_bounds'], 
+                                         y_idx_list=plot_config['y_idx_list'])
                     except Exception as err:
                         print(f"[warn] plot-gen for {method} failed: {err}")
                     finally:
