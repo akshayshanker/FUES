@@ -43,151 +43,392 @@ def bellman_obj(a_nxt, w_val, H_val, beta, delta,
 @njit
 def piecewise_gradient_3rd(f, x, m_bar, eps=0.9):
     """
-    Third-order finite differences that
-      • never straddle jumps  |Δf/Δx| > m_bar
-      • enforce strictly-positive slopes
+    Compute piecewise gradients using up to 3rd-order finite differences.
+    
+    This function automatically detects segments by identifying jumps and uses
+    the highest-order accurate finite difference scheme available within each segment.
+    Enforces 0 < gradient <= 1 (gradient > 1 indicates a jump). Segments are 
+    non-overlapping with exclusive boundaries: [i,j), [j,k), [k,l), etc.
 
     Parameters
     ----------
     f, x : 1-D ndarrays (same length, x strictly increasing)
-    m_bar: float   – jump threshold in *slope* space
+    m_bar: float   – jump threshold in *slope* space (typically 1.0 for MPC)
     eps   : float  – fallback slope if no positive neighbour exists
 
     Returns
     -------
-    g : 1-D ndarray, positive slope at each x[i]
+    g : 1-D ndarray, slope at each x[i] with 0 < g[i] <= 1
     """
     n = len(x)
-    g_raw = np.empty(n)
-
-    def smooth(i, j):
-        """True if segment [i,j] is smooth (no jump)."""
-        df = f[j] - f[i]
-        dx = x[j] - x[i]
-        return np.abs(df / dx) <= m_bar
-
-    # ---- pass 1 : compute local derivatives or set NaN -------------
-    for i in range(n):
-        # indices we *might* use for the 5-point stencil
-        i_m2, i_m1, i_p1, i_p2 = i - 2, i - 1, i + 1, i + 2
-
-        # check which neighbours are inside the array and smooth
-        have_m2 = (i_m2 >= 0)   and smooth(i_m2, i_m1)
-        have_m1 = (i_m1 >= 0)   and smooth(i_m1, i)
-        have_p1 = (i_p1 < n)    and smooth(i, i_p1)
-        have_p2 = (i_p2 < n)    and smooth(i_p1, i_p2)
-
-        if have_m2 and have_m1 and have_p1 and have_p2:
-            # ---- 5-point Richardson (O(h^3)) -----------------------
-            h1  = x[i_p1] - x[i_m1]
-            D1  = (f[i_p1] - f[i_m1]) / h1
-
-            h2  = x[i_p2] - x[i_m2]
-            D2  = (f[i_p2] - f[i_m2]) / h2
-
-            g_raw[i] = (4.0 * D1 - D2) / 3.0
-        elif have_m1 and have_p1:
-            # ---- 3-point centred (O(h^2)) --------------------------
-            g_raw[i] = (f[i_p1] - f[i_m1]) / (x[i_p1] - x[i_m1])
-        elif have_p1:
-            # ---- 2-point forward  (O(h)) ---------------------------
-            g_raw[i] = (f[i_p1] - f[i]) / (x[i_p1] - x[i])
-        elif have_m1:
-            # ---- 2-point backward (O(h)) ---------------------------
-            g_raw[i] = (f[i] - f[i_m1]) / (x[i] - x[i_m1])
-        else:
-            g_raw[i] = np.nan
-
-        # mark non-positive slopes as invalid
-        if not np.isnan(g_raw[i]) and g_raw[i] <= 0.0:
-            g_raw[i] = np.nan
-
-    # ---- pass 2 : fill NaNs with nearest positive neighbour --------
     g = np.empty(n)
-    for i in range(n):
-        if not np.isnan(g_raw[i]):
-            g[i] = g_raw[i]
+    
+    # Step 1: Identify segment boundaries by detecting jumps (slope > 1 or < 0)
+    # Segments are [start, end) - start is inclusive, end is exclusive
+    segment_boundaries = np.zeros(n+1, dtype=np.int64)
+    segment_boundaries[0] = 0
+    n_segments = 1
+    
+    # Use 1.0 as the upper threshold - slopes > 1 indicate jumps (violate MPC bounds)
+    jump_threshold = min(m_bar, 1.0)
+    
+    for i in range(1, n):
+        # Check if derivative would exceed 1 or be negative (indicates jump)
+        local_slope = (f[i] - f[i-1]) / (x[i] - x[i-1])
+        if local_slope > jump_threshold or local_slope < 0:
+            segment_boundaries[n_segments] = i
+            n_segments += 1
+    segment_boundaries[n_segments] = n
+    n_segments += 1
+    
+    # Step 2: Calculate derivatives within each continuous segment using highest-order scheme
+    for seg_idx in range(n_segments - 1):
+        start = segment_boundaries[seg_idx]
+        end = segment_boundaries[seg_idx + 1]
+        seg_len = end - start
+        
+        if seg_len == 1:
+            # Single point segment - use nearest neighbor or fallback
+            if seg_idx > 0 and start > 0:
+                # Use slope from previous segment's end
+                g[start] = (f[start] - f[start-1]) / (x[start] - x[start-1])
+            elif seg_idx < n_segments - 2 and end < n:
+                # Use slope to next segment's start
+                g[start] = (f[end] - f[start]) / (x[end] - x[start])
+            else:
+                g[start] = eps
+            # Ensure positive
+            if g[start] <= 0:
+                g[start] = eps
             continue
-
-        # search outward
-        offset = 1
-        found  = False
-        while not found and (i - offset >= 0 or i + offset < n):
-            if i - offset >= 0 and not np.isnan(g_raw[i - offset]):
-                g[i] = g_raw[i - offset]
-                found = True
-            elif i + offset < n and not np.isnan(g_raw[i + offset]):
-                g[i] = g_raw[i + offset]
-                found = True
-            offset += 1
-
-        if not found:          # ultimate fallback
-            g[i] = eps
-
+        
+        # For multi-point segments, use highest-order scheme possible
+        for i in range(start, end):
+            # Determine how many points we have available in this segment
+            points_left = i - start
+            points_right = end - i - 1
+            
+            # Try 3rd order (5-point Richardson) if we have enough points
+            if points_left >= 2 and points_right >= 2:
+                # 5-point Richardson: O(h^4) accuracy
+                # g = (4*D1 - D2)/3 where D1 uses ±1 points, D2 uses ±2 points
+                h1 = x[i+1] - x[i-1]
+                D1 = (f[i+1] - f[i-1]) / h1
+                
+                h2 = x[i+2] - x[i-2]
+                D2 = (f[i+2] - f[i-2]) / h2
+                
+                g[i] = (4.0 * D1 - D2) / 3.0
+                # Clip to [0, 1] range
+                if g[i] > 1.0:
+                    g[i] = 1.0
+                elif g[i] < 0:
+                    g[i] = eps
+                
+            # Try 2nd order at segment boundaries (3-point one-sided)
+            elif i == start and seg_len >= 3:
+                # 3-point forward difference at segment start: O(h^2)
+                # f'(x) = (-3f(x) + 4f(x+h) - f(x+2h)) / 2h
+                h = x[start+1] - x[start]
+                h2 = x[start+2] - x[start]
+                # Use actual grid spacing for non-uniform grids
+                a0 = -h2 / (h * (h2 - h))
+                a1 = h2 / (h * h2)
+                a2 = -h / (h2 * (h2 - h))
+                g[i] = a0*f[start] + a1*f[start+1] + a2*f[start+2]
+                
+            elif i == end - 1 and seg_len >= 3:
+                # 3-point backward difference at segment end: O(h^2)
+                h = x[end-1] - x[end-2]
+                h2 = x[end-1] - x[end-3]
+                # Use actual grid spacing for non-uniform grids
+                a0 = h / (h2 * (h2 - h))
+                a1 = -h2 / (h * h2)
+                a2 = h2 / (h * (h2 - h))
+                g[i] = a0*f[end-3] + a1*f[end-2] + a2*f[end-1]
+                
+            # Try 2nd order centered (3-point) if we have neighbors
+            elif points_left >= 1 and points_right >= 1:
+                # Standard central difference: O(h^2)
+                g[i] = (f[i+1] - f[i-1]) / (x[i+1] - x[i-1])
+                
+            # Fall back to 1st order at edges
+            elif i == start:
+                # Forward difference at segment start: O(h)
+                if seg_len >= 2:
+                    g[i] = (f[start+1] - f[start]) / (x[start+1] - x[start])
+                else:
+                    g[i] = eps
+                    
+            elif i == end - 1:
+                # Backward difference at segment end: O(h)
+                g[i] = (f[i] - f[i-1]) / (x[i] - x[i-1])
+                
+            else:
+                # Should not reach here, but use central difference as fallback
+                g[i] = (f[i+1] - f[i-1]) / (x[i+1] - x[i-1])
+            
+            # Enforce slope in (0, 1] range
+            if g[i] <= 0 or g[i] > 1.0 or np.isnan(g[i]):
+                # Try lower-order schemes
+                if i < end - 1:
+                    g_forward = (f[i+1] - f[i]) / (x[i+1] - x[i])
+                    if 0 < g_forward <= 1.0:
+                        g[i] = g_forward
+                        continue
+                        
+                if i > start:
+                    g_backward = (f[i] - f[i-1]) / (x[i] - x[i-1])
+                    if 0 < g_backward <= 1.0:
+                        g[i] = g_backward
+                        continue
+                
+                # Last resort: use fallback or clip
+                if g[i] > 1.0:
+                    g[i] = 1.0
+                elif g[i] <= 0 or np.isnan(g[i]):
+                    g[i] = eps
+    
+    # Step 3: Final pass to ensure all gradients are in (0, 1] range
+    for i in range(n):
+        if g[i] <= 0 or g[i] > 1.0 or np.isnan(g[i]):
+            # Search for nearest valid gradient in same segment
+            best_dist = n
+            best_g = eps
+            
+            # Find which segment i belongs to
+            my_segment = -1
+            for seg_idx in range(n_segments - 1):
+                if i >= segment_boundaries[seg_idx] and i < segment_boundaries[seg_idx + 1]:
+                    my_segment = seg_idx
+                    break
+            
+            if my_segment >= 0:
+                # Search within same segment first
+                seg_start = segment_boundaries[my_segment]
+                seg_end = segment_boundaries[my_segment + 1]
+                for j in range(seg_start, seg_end):
+                    if j != i and 0 < g[j] <= 1.0 and not np.isnan(g[j]):
+                        dist = abs(i - j)
+                        if dist < best_dist:
+                            best_dist = dist
+                            best_g = g[j]
+            
+            # Final clipping to ensure bounds
+            if best_g > 1.0:
+                best_g = 1.0
+            elif best_g <= 0:
+                best_g = eps
+                
+            g[i] = best_g
+    
     return g
 
 @njit
 def piecewise_gradient(f, x, m_bar, eps=0.9):
     """
-    Finite differences that
-      • never straddle jumps  |f[i+1]-f[i]| > c_bar
-      • enforce g[i]  > 0  (monotone, strictly)
+    Compute piecewise gradients for a function with discontinuities.
+    
+    This function identifies continuous segments by detecting jumps and 
+    calculates robust derivatives within each segment. Segments are 
+    non-overlapping with exclusive boundaries: [i,j), [j,k), [k,l), etc.
 
     Parameters
     ----------
-    f      : 1-D ndarray, function values on a strictly-increasing grid
-    x      : 1-D ndarray, same length as f
-    c_bar  : float, threshold to flag a jump in *function* space
-    eps    : float, fallback slope if NO positive neighbour exists
+    f : 1-D ndarray
+        Function values on a strictly-increasing grid
+    x : 1-D ndarray
+        Grid points, same length as f
+    m_bar : float
+        Threshold to flag a jump in derivative space (max allowed |df/dx|)
+    eps : float, optional
+        Fallback slope if NO positive slope exists (default: 0.9)
 
     Returns
     -------
-    g      : 1-D ndarray, positive slope at each x[i]
+    g : 1-D ndarray
+        Positive slope at each x[i], computed segment-wise
     """
     n = len(x)
-    g_raw = np.empty(n)
-
-    # ---- pass 1: local finite differences, set NaN where invalid ----
-    for i in range(n):
-        left_ok  = (i > 0)   and (np.abs(f[i]   - f[i-1])/(x[i]   - x[i-1]) <= m_bar)
-        right_ok = (i < n-1) and (np.abs(f[i+1] - f[i]  )/(x[i+1] - x[i]) <= m_bar)
-
-        if left_ok and right_ok:
-            g_raw[i] = (f[i+1] - f[i-1]) / (x[i+1] - x[i-1])
-        elif right_ok:
-            g_raw[i] = (f[i+1] - f[i])   / (x[i+1] - x[i])
-        elif left_ok:
-            g_raw[i] = (f[i]   - f[i-1]) / (x[i]   - x[i-1])
-        else:                       # isolated jump
-            g_raw[i] = np.nan       # mark as invalid
-
-        # mark non-positive slopes as invalid
-        if not np.isnan(g_raw[i]) and g_raw[i] <= 0.0:
-            g_raw[i] = np.nan
-
-    # ---- pass 2: replace NaNs with nearest positive neighbour ----
     g = np.empty(n)
-    for i in range(n):
-        if not np.isnan(g_raw[i]):          # already positive
-            g[i] = g_raw[i]
+    
+    # Step 1: Identify segment boundaries by detecting jumps
+    # Segments are [start, end) - start is inclusive, end is exclusive
+    segment_boundaries = np.zeros(n+1, dtype=np.int64)
+    segment_boundaries[0] = 0
+    n_segments = 1
+    
+    for i in range(1, n):
+        # Check if derivative would exceed threshold (indicates jump)
+        local_slope = np.abs(f[i] - f[i-1]) / (x[i] - x[i-1])
+        if local_slope > m_bar:
+            # End current segment at i (exclusive), start new segment at i
+            segment_boundaries[n_segments] = i
+            n_segments += 1
+    segment_boundaries[n_segments] = n
+    n_segments += 1
+    
+    # Step 2: Calculate derivatives within each continuous segment
+    for seg_idx in range(n_segments - 1):
+        start = segment_boundaries[seg_idx]
+        end = segment_boundaries[seg_idx + 1]
+        seg_len = end - start
+        
+        if seg_len == 1:
+            # Single point segment - use nearest neighbor or fallback
+            if seg_idx > 0 and start > 0:
+                # Use slope from previous segment's end
+                g[start] = (f[start] - f[start-1]) / (x[start] - x[start-1])
+            elif seg_idx < n_segments - 2 and end < n:
+                # Use slope to next segment's start
+                g[start] = (f[end] - f[start]) / (x[end] - x[start])
+            else:
+                g[start] = eps
+            # Ensure positive
+            if g[start] <= 0:
+                g[start] = eps
             continue
+        
+        # For multi-point segments, use robust derivative estimation
+        for i in range(start, end):
+            if i == start:
+                # Forward difference at segment start
+                if seg_len >= 2:
+                    g[i] = (f[start+1] - f[start]) / (x[start+1] - x[start])
+                else:
+                    g[i] = eps
+            elif i == end - 1:
+                # Backward difference at segment end
+                g[i] = (f[i] - f[i-1]) / (x[i] - x[i-1])
+            else:
+                # Central difference in segment interior
+                # Use wider stencil if available for more stability
+                if i - start >= 2 and end - i >= 2:
+                    # 5-point stencil if possible
+                    g[i] = (-f[i+2] + 8*f[i+1] - 8*f[i-1] + f[i-2]) / (12*(x[i+1] - x[i]))
+                else:
+                    # Standard central difference
+                    g[i] = (f[i+1] - f[i-1]) / (x[i+1] - x[i-1])
+            
+            # Enforce positive slope
+            if g[i] <= 0:
+                # Try one-sided differences
+                if i < end - 1:
+                    g_forward = (f[i+1] - f[i]) / (x[i+1] - x[i])
+                    if g_forward > 0:
+                        g[i] = g_forward
+                        continue
+                if i > start:
+                    g_backward = (f[i] - f[i-1]) / (x[i] - x[i-1])
+                    if g_backward > 0:
+                        g[i] = g_backward
+                        continue
+                # Last resort: use segment average or fallback
+                g[i] = eps
+    
+    # Step 3: Final pass to ensure all gradients are positive
+    for i in range(n):
+        if g[i] <= 0 or np.isnan(g[i]):
+            # Search for nearest positive gradient
+            best_dist = n
+            best_g = eps
+            for j in range(n):
+                if g[j] > 0 and not np.isnan(g[j]):
+                    dist = abs(i - j)
+                    if dist < best_dist:
+                        best_dist = dist
+                        best_g = g[j]
+            g[i] = best_g
+    
+    return g
 
-        # search outward for nearest positive slope
-        offset = 1
-        replacement_found = False
-        while not replacement_found and (i-offset >= 0 or i+offset < n):
-            if i - offset >= 0 and not np.isnan(g_raw[i - offset]):
-                g[i] = g_raw[i - offset]
-                replacement_found = True
-            elif i + offset < n and not np.isnan(g_raw[i + offset]):
-                g[i] = g_raw[i + offset]
-                replacement_found = True
-            offset += 1
+@njit
+def piecewise_gradient_with_segments(f, x, segment_boundaries, eps=0.9):
+    """
+    Compute piecewise gradients using pre-computed segment boundaries.
+    
+    This is useful when segment boundaries are known from EGM intersection points.
+    Segments are non-overlapping with exclusive boundaries: [i,j), [j,k), [k,l), etc.
 
-        # ultimate fallback
-        if not replacement_found:
+    Parameters
+    ----------
+    f : 1-D ndarray
+        Function values on a strictly-increasing grid
+    x : 1-D ndarray
+        Grid points, same length as f
+    segment_boundaries : 1-D ndarray
+        Indices where segments begin/end (must include 0 and n).
+        Segments are [boundaries[i], boundaries[i+1]) - start inclusive, end exclusive.
+    eps : float, optional
+        Fallback slope if NO positive slope exists (default: 0.9)
+
+    Returns
+    -------
+    g : 1-D ndarray
+        Positive slope at each x[i], computed segment-wise
+    """
+    n = len(x)
+    g = np.empty(n)
+    n_segments = len(segment_boundaries)
+    
+    # Calculate derivatives within each continuous segment
+    for seg_idx in range(n_segments - 1):
+        start = segment_boundaries[seg_idx]
+        end = segment_boundaries[seg_idx + 1]
+        seg_len = end - start
+        
+        if seg_len == 1:
+            # Single point segment - use nearest neighbor or fallback
+            if seg_idx > 0 and start > 0:
+                # Use slope from previous segment's end
+                g[start] = (f[start] - f[start-1]) / (x[start] - x[start-1])
+            elif seg_idx < n_segments - 2 and end < n:
+                # Use slope to next segment's start
+                g[start] = (f[end] - f[start]) / (x[end] - x[start])
+            else:
+                g[start] = eps
+            # Ensure positive
+            if g[start] <= 0:
+                g[start] = eps
+            continue
+        
+        # For multi-point segments, use robust derivative estimation
+        for i in range(start, end):
+            if i == start:
+                # Forward difference at segment start
+                if seg_len >= 2:
+                    g[i] = (f[start+1] - f[start]) / (x[start+1] - x[start])
+                else:
+                    g[i] = eps
+            elif i == end - 1:
+                # Backward difference at segment end
+                g[i] = (f[i] - f[i-1]) / (x[i] - x[i-1])
+            else:
+                # Central difference in segment interior
+                g[i] = (f[i+1] - f[i-1]) / (x[i+1] - x[i-1])
+            
+            # Enforce positive slope
+            if g[i] <= 0:
+                # Try one-sided differences
+                if i < end - 1:
+                    g_forward = (f[i+1] - f[i]) / (x[i+1] - x[i])
+                    if g_forward > 0:
+                        g[i] = g_forward
+                        continue
+                if i > start:
+                    g_backward = (f[i] - f[i-1]) / (x[i] - x[i-1])
+                    if g_backward > 0:
+                        g[i] = g_backward
+                        continue
+                # Last resort: use fallback
+                g[i] = eps
+    
+    # Final pass to ensure all gradients are positive
+    for i in range(n):
+        if g[i] <= 0 or np.isnan(g[i]):
+            # Use simple fallback for now
             g[i] = eps
-
+    
     return g
 
 def uniqueEG(grid: np.ndarray, values: np.ndarray) -> np.ndarray:
@@ -421,109 +662,146 @@ def fast_vectorized_interpolation(values_grid, policies_grid, wealth_grid, valid
 def _egm_preprocess_core(e_old, vf_old, c_old, a_old,
                          vf_next,              # 1-D, same length as old grids
                          beta, u_func,         # u_func must be @njit-able
-                         m_bar,                # jump threshold
+                         m_bar,                # jump threshold (not currently used)
                          n_con,                # # constraint nodes
-                         n_con_nxt,
-                         c_max, h_nxt):               # upper end of [c*, c_max]
+                         n_con_nxt,            # # nodes per jump
+                         c_max, h_nxt,         # upper end of [c*, c_max] and housing
+                         add_jump_constraints): # whether to add jump constraints
     """
-    Returns new (e,vf,c,a) with
-
+    Returns new (e,vf,c,a) with:
         • n_con borrowing-constraint points, plus
-        • n_con points on every 'big' jump in a (|Δa| > m_bar),
+        • (optionally) n_con_nxt points on every jump in endogenous grid,
 
-    all prepended in one shot.  No np.concatenate used.
+    all prepended in one shot. No np.concatenate used.
+    
+    Parameters
+    ----------
+    e_old, vf_old, c_old, a_old : ndarray
+        Original EGM solution arrays
+    vf_next : ndarray
+        Next period value function (1-D, same length as old grids)
+    beta : float
+        Discount factor
+    u_func : callable
+        Utility function (must be @njit-able)
+    m_bar : float
+        Jump threshold (kept for compatibility, not currently used)
+    n_con : int
+        Number of borrowing constraint nodes
+    n_con_nxt : int
+        Number of nodes to add per jump
+    c_max : float
+        Upper bound on consumption (not currently used)
+    h_nxt : float
+        Next period housing
+    add_jump_constraints : bool
+        Whether to add jump constraint points (should be False when delta_pb == 1)
     """
 
-    # ---- 0.   basic sizes --------------------------------------------------
-    n_old   = e_old.size
-    #diff  = a_old[1:] - a_old[:-1]
-    #base  = e_old[1:] - e_old[:-1]
-    diff = e_old[1:] - e_old[:-1]
-    base = a_old[1:] - a_old[:-1]
-
-    del_vf =vf_next[1:] - vf_next[:-1]
-
-    # relative gap |Δa| / |a_{t}|   (robust to a_{t}=0)
-
-    if n_con_nxt>0:
-        rel_gap = np.empty_like(diff)
-        for i in range(diff.size):
-            b = base[i]
-            rel_gap[i] = np.abs(diff[i] / b) if b != 0.0 else np.inf
+    # ---- 0. Basic sizes and jump detection ----
+    n_old = e_old.size
     
-        #jumps  = rel_gap > m_bar          # m_bar is now a relative threshold
-        jumps  = diff<0 
-        #del_vf_bool = del_vf<0
-        #jumps = jumps*del_vf_bool
-        j_idx  = np.where(jumps)[0]
-        j_idx   = np.where(jumps)[0]          # jump i  ⇒  segment between i and i+1
-        n_jump  = j_idx.size
-        n_add   = n_con + n_jump * n_con_nxt      # total new nodes
-        n_total = n_old + n_add
-    else:
-        n_add = n_con
-        n_total = n_old + n_add
-        n_jump = 0
+    # Initialize jump tracking variables
+    n_jump = 0
+    n_add = n_con  # Always add borrowing constraint nodes
+    
+    # Only detect and process jumps if flag is True and n_con_nxt > 0
+    if add_jump_constraints and n_con_nxt > 0:
+        # Detect jumps in endogenous grid and value function
+        e_diff = e_old[1:] - e_old[:-1]
+        vf_diff = vf_next[1:] - vf_next[:-1]
+        
+        # Case 1: Negative jumps in endogenous grid
+        jumps_case_1 = e_diff < 0
+        j_idx_case_1 = np.where(jumps_case_1)[0]
+        n_jump_case_1 = j_idx_case_1.size
+        
+        # Case 2: Negative jumps in value function
+        jumps_case_2 = vf_diff < 0
+        j_idx_case_2 = np.where(jumps_case_2)[0]
+        n_jump_case_2 = j_idx_case_2.size
+        n_jump_case_2= 0    
 
-    #print(j_idx)
-    #print(beta)
-    # ---- 1.   allocate output containers ----------------------------------
-    e_new  = np.empty(n_total, dtype=e_old.dtype)
+        # temporry turn off case 2
+        #jumps_case_2 = np.zeros_like(jumps_case_2, dtype=np.bool_)
+        
+        # Total jumps and nodes to add
+        n_jump = n_jump_case_1 + n_jump_case_2
+        n_add = n_con + n_jump * n_con_nxt
+    
+    n_total = n_old + n_add
+
+    # ---- 1. Allocate output containers ----
+    e_new = np.empty(n_total, dtype=e_old.dtype)
     vf_new = np.empty(n_total, dtype=vf_old.dtype)
-    c_new  = np.empty(n_total, dtype=c_old.dtype)
-    a_new  = np.empty(n_total, dtype=a_old.dtype)
+    c_new = np.empty(n_total, dtype=c_old.dtype)
+    a_new = np.empty(n_total, dtype=a_old.dtype)
 
-    p = 0   # write pointer into the new arrays
-    # -----------------------------------------------------------------------
-    # 2.  Borrowing-constraint segment  (always first)
-    # -----------------------------------------------------------------------
-    min_c  = np.min(e_old) 
+    p = 0  # Write pointer into the new arrays
+    
+    # ---- 2. Borrowing-constraint segment (always first) ----
+    min_c = np.min(e_old)
     c_con = np.linspace(1e-100, min_c, n_con)
-    e_con  = c_con                        # m = c at the constraint
+    e_con = c_con  # m = c at the constraint
     vf_con = u_func(c_con, h_nxt) + beta * vf_next[0]
-    a_con  = np.empty_like(c_con)
-    a_con.fill(a_old[0])                  # borrowing limit
+    a_con = np.empty_like(c_con)
+    a_con.fill(a_old[0])  # Borrowing limit
 
-    e_new[p:p+n_con]  = e_con
+    e_new[p:p+n_con] = e_con
     vf_new[p:p+n_con] = vf_con
-    c_new[p:p+n_con]  = c_con
-    a_new[p:p+n_con]  = a_con
+    c_new[p:p+n_con] = c_con
+    a_new[p:p+n_con] = a_con
     p += n_con
 
-    # -----------------------------------------------------------------------
-    # 3.  Jump segments
-    # -----------------------------------------------------------------------
-
-    if n_con_nxt>0:
-        for k in j_idx:
+    # ---- 3. Jump segments (only if flag is True) ----
+    if add_jump_constraints and n_con_nxt > 0:
+        # Process Case 1 jumps (negative jumps in endogenous grid)
+        for k in j_idx_case_1:
             a_star = a_old[k+1]
             c_star = c_old[k+1]
-            e_star = e_old[k+1]
             
-            lb_c = max(1e-10,c_star-10)
-
+            # Create consumption segment approaching c_star from below
+            lb_c = max(1e-10, c_star - 5)
             c_seg = np.linspace(lb_c, c_star, n_con_nxt).astype(c_old.dtype)
-            #a_seg = np.linspace(a_star, a_star+2, n_con).astype(a_old.dtype)
             m_seg = a_star + c_seg
-
             vf_seg = u_func(c_seg, h_nxt) + beta * vf_next[k+1]
 
-            e_new[p:p+n_con]  = m_seg
-            vf_new[p:p+n_con] = vf_seg
-            c_new[p:p+n_con]  = c_seg
-            a_new[p:p+n_con]  = a_star
-            p += n_con
+            e_new[p:p+n_con_nxt] = m_seg
+            vf_new[p:p+n_con_nxt] = vf_seg
+            c_new[p:p+n_con_nxt] = c_seg
+            a_new[p:p+n_con_nxt] = a_star
+            p += n_con_nxt
+        
+        """" 
+        # Process Case 2 jumps (negative jumps in value function)
+        for k in j_idx_case_2:
+            a_star = a_old[k]
+            c_star = c_old[k]
             
+            # Create consumption segment extending from c_star
+            c_seg = np.linspace(c_star, c_star + 5, n_con_nxt).astype(c_old.dtype)
+            m_seg = a_star + c_seg
+            vf_seg = u_func(c_seg, h_nxt) + beta * vf_next[k]
 
-        # for 
+            e_new[p:p+n_con_nxt] = m_seg
+            vf_new[p:p+n_con_nxt] = vf_seg
+            c_new[p:p+n_con_nxt] = c_seg
+            a_new[p:p+n_con_nxt] = a_star
+            p += n_con_nxt
+        """
 
-    # -----------------------------------------------------------------------
-    # 4.  Copy the original solution after all extras
-    # -----------------------------------------------------------------------
-    e_new[n_add:]  = e_old
+    # ---- 4. Copy the original solution after all extras ----
+    e_new[n_add:] = e_old
     vf_new[n_add:] = vf_old
-    c_new[n_add:]  = c_old
-    a_new[n_add:]  = a_old
+    c_new[n_add:] = c_old
+    a_new[n_add:] = a_old
+
+    ## return sorted arrays
+    sort_idx = np.argsort(e_new)
+    e_new = e_new[sort_idx]
+    vf_new = vf_new[sort_idx]
+    c_new = c_new[sort_idx]
+    a_new = a_new[sort_idx]
 
     return e_new, vf_new, c_new, a_new
 
@@ -531,48 +809,81 @@ def egm_preprocess(egrid, vf, c, a,
                    beta, u_func, vf_next,
                    m_bar,
                    n_con=10,
-                   n_con_nxt = 0,
+                   n_con_nxt=0,
                    c_max=None,
                    h_nxt=None,
+                   add_jump_constraints=True,  # New parameter
                    **kwargs):
     """
-    Wrapper that
+    Wrapper that preprocesses EGM solution by:
+      • Adding borrowing constraint points
+      • Optionally adding jump constraint points  
+      • Removing duplicates with uniqueEG
+      • Returning cleaned arrays
 
-      • calls the @njit core above,
-      • removes duplicates with uniqueEG,
-      • returns cleaned arrays (same order as before).
-
-    Any extra kwargs are ignored so you can keep the
-    original signature (Pi, i_z, i_h_prime, h_nxt, …).
+    Parameters
+    ----------
+    egrid : ndarray
+        Endogenous grid (cash-on-hand)
+    vf : ndarray
+        Value function on egrid
+    c : ndarray
+        Consumption policy on egrid
+    a : ndarray
+        Asset policy on egrid
+    beta : float
+        Discount factor
+    u_func : callable
+        Utility function (must be @njit-able)
+    vf_next : ndarray
+        Next period value function
+    m_bar : float
+        Jump threshold (kept for compatibility)
+    n_con : int, optional
+        Number of borrowing constraint nodes (default: 10)
+    n_con_nxt : int, optional
+        Number of nodes per jump (default: 0)
+    c_max : float, optional
+        Upper bound on consumption (default: 1.05 * max(c))
+    h_nxt : float, optional
+        Next period housing
+    add_jump_constraints : bool, optional
+        Whether to add jump constraint points (default: True)
+        Should be False when delta_pb == 1.0
+    **kwargs
+        Additional arguments (ignored for compatibility)
+    
+    Returns
+    -------
+    tuple
+        (e_out, vf_out, c_out, a_out) - Preprocessed and cleaned arrays
     """
 
-    # choose a default c_max if the caller doesn't specify one
+    # Choose a default c_max if not specified
     if c_max is None:
-        c_max = 1.05 * np.max(c)          # 5 % above current max consumption
+        c_max = 1.05 * np.max(c)  # 5% above current max consumption
 
+    # remove points where egrid is negative
+    #valid_mask = egrid >= 0
+    #egrid = egrid[valid_mask]
+    #vf = vf[valid_mask]
+    #c = c[valid_mask]
+    #a = a[valid_mask]
 
-    #  (If you still need monotone sorting, re-enable the block below)
-    #sort_idx = np.argsort(egrid)
-    #egrid, vf,vf_next, c, a = (arr[sort_idx] for arr in (egrid, vf, vf_next,c, a))
-
-
-    # ---- run the fast core -------------------------------------------------
+    # Run the fast core with jump constraint flag
     e_cat, vf_cat, c_cat, a_cat = _egm_preprocess_core(
         egrid, vf, c, a,
         vf_next, beta, u_func,
-        m_bar, n_con,n_con_nxt, c_max, h_nxt)
+        m_bar, n_con, n_con_nxt, c_max, h_nxt,
+        add_jump_constraints)
 
-    # ---- uniqueness & (optional) sorting -----------------------------------
+    # Remove duplicates based on endogenous grid and value function
     unique_ids = uniqueEG(e_cat, vf_cat)
 
-    e_out  = e_cat[unique_ids]
+    e_out = e_cat[unique_ids]
     vf_out = vf_cat[unique_ids]
-    c_out  = c_cat[unique_ids]
-    a_out  = a_cat[unique_ids]
-
-    #  (If you still need monotone sorting, re-enable the block below)
-    # sort_idx = np.argsort(e_out)
-    # e_out, vf_out, c_out, a_out = (arr[sort_idx] for arr in (e_out, vf_out, c_out, a_out))
+    c_out = c_cat[unique_ids]
+    a_out = a_cat[unique_ids]
 
     return e_out, vf_out, c_out, a_out
 
