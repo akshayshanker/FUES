@@ -63,8 +63,14 @@ def generate_plots(model, method, image_dir, plot_period=0, bounds=None,
     If both save_dir and load_dir are None, behavior is unchanged (plots from live model).
     If model is None, load_dir must be provided to load saved solutions.
     """
-    # Base directory for this method
-    method_dir = os.path.join(image_dir, method)
+    # Check if we're already in a method-specific bundle directory
+    # If image_dir contains "bundles" and ends with "images", we're in the new structure
+    if "bundles" in str(image_dir) and str(image_dir).endswith("images"):
+        # Don't create another method subdirectory - we're already method-specific
+        method_dir = image_dir
+    else:
+        # Legacy structure - create method subdirectory
+        method_dir = os.path.join(image_dir, method)
 
     if load_dir is not None:
         method_dir_load = os.path.join(load_dir, method)

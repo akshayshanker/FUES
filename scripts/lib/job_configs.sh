@@ -27,7 +27,7 @@ STD_RES_SETTINGS_PB[vfi_ngrid]=2000
 STD_RES_SETTINGS_PB[hd_points]=2000
 STD_RES_SETTINGS_PB[grid_points]=6000
 STD_RES_SETTINGS_PB[version_suffix]="test_0.1"
-STD_RES_SETTINGS_PB[delta_pb]=0.6
+STD_RES_SETTINGS_PB[delta_pb]=0.95
 
 # --- Configuration Set 2: High Resolution Benchmark ---
 # A high-resolution run for producing final, accurate results.
@@ -35,7 +35,7 @@ declare -A HIGH_RES_SETTINGS_A
 HIGH_RES_SETTINGS_A[periods]=5
 HIGH_RES_SETTINGS_A[vfi_ngrid]=1E4
 HIGH_RES_SETTINGS_A[hd_points]=6000
-HIGH_RES_SETTINGS_A[grid_points]=2000
+HIGH_RES_SETTINGS_A[grid_points]=6000
 HIGH_RES_SETTINGS_A[version_suffix]="test_0.1"
 HIGH_RES_SETTINGS_A[delta_pb]=1
 
@@ -45,7 +45,7 @@ HIGH_RES_SETTINGS_A_PB[vfi_ngrid]=1E4
 HIGH_RES_SETTINGS_A_PB[hd_points]=6000
 HIGH_RES_SETTINGS_A_PB[grid_points]=2000
 HIGH_RES_SETTINGS_A_PB[version_suffix]="test_0.1"
-HIGH_RES_SETTINGS_A_PB[delta_pb]=0.95
+HIGH_RES_SETTINGS_A_PB[delta_pb]=0.6
 
 declare -A HIGH_RES_SETTINGS_B
 HIGH_RES_SETTINGS_B[periods]=5
@@ -71,6 +71,14 @@ HIGH_RES_SETTINGS_C[grid_points]=2000
 HIGH_RES_SETTINGS_C[version_suffix]="test_0.1"
 HIGH_RES_SETTINGS_C[delta_pb]=1
 
+declare -A HIGH_RES_SETTINGS_C_PB
+HIGH_RES_SETTINGS_C_PB[periods]=5
+HIGH_RES_SETTINGS_C_PB[vfi_ngrid]=1E6
+HIGH_RES_SETTINGS_C_PB[hd_points]=3E5
+HIGH_RES_SETTINGS_C_PB[grid_points]=2000
+HIGH_RES_SETTINGS_C_PB[version_suffix]="test_0.1"
+HIGH_RES_SETTINGS_C_PB[delta_pb]=0.6
+
 declare -A HIGH_RES_SETTINGS_D
 HIGH_RES_SETTINGS_D[periods]=5
 HIGH_RES_SETTINGS_D[vfi_ngrid]=1E6
@@ -82,10 +90,26 @@ HIGH_RES_SETTINGS_D[delta_pb]=1
 declare -A HIGH_RES_SETTINGS_E
 HIGH_RES_SETTINGS_E[periods]=5
 HIGH_RES_SETTINGS_E[vfi_ngrid]=1E6
-HIGH_RES_SETTINGS_E[hd_points]=9E5
+HIGH_RES_SETTINGS_E[hd_points]=12E5
 HIGH_RES_SETTINGS_E[grid_points]=2000
 HIGH_RES_SETTINGS_E[version_suffix]="test_0.1"
 HIGH_RES_SETTINGS_E[delta_pb]=1
+
+declare -A HIGH_RES_SETTINGS_E_PB
+HIGH_RES_SETTINGS_E_PB[periods]=5
+HIGH_RES_SETTINGS_E_PB[vfi_ngrid]=1E6
+HIGH_RES_SETTINGS_E_PB[hd_points]=12E5
+HIGH_RES_SETTINGS_E_PB[grid_points]=2000
+HIGH_RES_SETTINGS_E_PB[version_suffix]="test_0.1"
+HIGH_RES_SETTINGS_E_PB[delta_pb]=0.95
+
+declare -A HIGH_RES_SETTINGS_F
+HIGH_RES_SETTINGS_F[periods]=5
+HIGH_RES_SETTINGS_F[vfi_ngrid]=1E6
+HIGH_RES_SETTINGS_F[hd_points]=15E5
+HIGH_RES_SETTINGS_F[grid_points]=2000
+HIGH_RES_SETTINGS_F[version_suffix]="test_0.1"
+HIGH_RES_SETTINGS_F[delta_pb]=1
 
 # Aliases for commonly used configurations
 declare -A HIGH_RES_SETTINGS_K

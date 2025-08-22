@@ -720,10 +720,10 @@ def _egm_preprocess_core(e_old, vf_old, c_old, a_old,
         jumps_case_2 = vf_diff < 0
         j_idx_case_2 = np.where(jumps_case_2)[0]
         n_jump_case_2 = j_idx_case_2.size
-        n_jump_case_2= 0    
+        #n_jump_case_2= 0    
 
         # temporry turn off case 2
-        #jumps_case_2 = np.zeros_like(jumps_case_2, dtype=np.bool_)
+        jumps_case_2 = np.zeros_like(jumps_case_2, dtype=np.bool_)
         
         # Total jumps and nodes to add
         n_jump = n_jump_case_1 + n_jump_case_2
@@ -762,7 +762,7 @@ def _egm_preprocess_core(e_old, vf_old, c_old, a_old,
             
             # Create consumption segment approaching c_star from below
             lb_c = max(1e-10, c_star - 5)
-            c_seg = np.linspace(lb_c, c_star, n_con_nxt).astype(c_old.dtype)
+            c_seg = np.linspace(lb_c, c_star +2, n_con_nxt).astype(c_old.dtype)
             m_seg = a_star + c_seg
             vf_seg = u_func(c_seg, h_nxt) + beta * vf_next[k+1]
 
@@ -772,14 +772,16 @@ def _egm_preprocess_core(e_old, vf_old, c_old, a_old,
             a_new[p:p+n_con_nxt] = a_star
             p += n_con_nxt
         
-        """" 
+         
         # Process Case 2 jumps (negative jumps in value function)
         for k in j_idx_case_2:
             a_star = a_old[k]
             c_star = c_old[k]
             
+            lb_c = max(1e-10, c_star - 5)
+
             # Create consumption segment extending from c_star
-            c_seg = np.linspace(c_star, c_star + 5, n_con_nxt).astype(c_old.dtype)
+            c_seg = np.linspace(c_star, c_star + 2, n_con_nxt).astype(c_old.dtype)
             m_seg = a_star + c_seg
             vf_seg = u_func(c_seg, h_nxt) + beta * vf_next[k]
 
@@ -788,7 +790,7 @@ def _egm_preprocess_core(e_old, vf_old, c_old, a_old,
             c_new[p:p+n_con_nxt] = c_seg
             a_new[p:p+n_con_nxt] = a_star
             p += n_con_nxt
-        """
+        
 
     # ---- 4. Copy the original solution after all extras ----
     e_new[n_add:] = e_old
