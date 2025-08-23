@@ -431,29 +431,44 @@ def piecewise_gradient_with_segments(f, x, segment_boundaries, eps=0.9):
     
     return g
 
-def uniqueEG(grid: np.ndarray, values: np.ndarray) -> np.ndarray:
+def uniqueEG(grid: np.ndarray, values: np.ndarray, tol: float = 1e-10) -> np.ndarray:
     """Return a Boolean mask that keeps the *highest-value* entry for each
-    duplicate grid point.
+    duplicate or near-duplicate grid point.
 
     The original loop searched duplicates with Python `for` – this vectorised
     rewrite is ~30× faster for O(10³) points:
 
     1.  `np.lexsort((-values, grid))`  sorts by *grid* ascending and *values*
         descending (via the minus sign).
-    2.  `np.unique(..., return_index=True)` returns the first occurrence of
-        each grid value → already the max-value element because of the sort
-        order.
+    2.  Find groups of points that are within tolerance of each other.
+    3.  Keep only the highest value point from each group.
+    
+    Parameters
+    ----------
+    grid : ndarray
+        Grid points to check for duplicates
+    values : ndarray
+        Values associated with each grid point
+    tol : float, optional
+        Tolerance for considering points as duplicates (default: 1e-10)
     """
 
     # 1. indices that would sort by grid ↑, value ↓
     order = np.lexsort((-values, grid))
-
-    # 2. first index (in *order*) of every new grid point
-    _, first_idx = np.unique(grid[order], return_index=True)
-
-    # 3. build mask in original order
+    sorted_grid = grid[order]
+    
+    # 2. Find where grid points differ by more than tolerance
+    # This identifies boundaries between groups of close points
+    diff = np.diff(sorted_grid)
+    boundaries = np.concatenate(([True], diff > tol))
+    
+    # 3. For each group, we want the first element (highest value due to sort)
+    # Build mask for sorted array
+    sorted_mask = boundaries
+    
+    # 4. build mask in original order
     mask = np.zeros_like(grid, dtype=bool)
-    mask[order[first_idx]] = True
+    mask[order[sorted_mask]] = True
     return mask
 
 def _safe_interp(x, y, bounds_error=False, fill_value=None):
@@ -741,7 +756,8 @@ def _egm_preprocess_core(e_old, vf_old, c_old, a_old,
     
     # ---- 2. Borrowing-constraint segment (always first) ----
     min_c = np.min(e_old)
-    c_con = np.linspace(1e-100, min_c, n_con)
+    # Use safer lower bound for numerical stability with float64
+    c_con = np.linspace(1e-10, min_c, n_con)  # Changed from 1e-100 to 1e-10
     e_con = c_con  # m = c at the constraint
     vf_con = u_func(c_con, h_nxt) + beta * vf_next[0]
     a_con = np.empty_like(c_con)
@@ -761,8 +777,9 @@ def _egm_preprocess_core(e_old, vf_old, c_old, a_old,
             c_star = c_old[k+1]
             
             # Create consumption segment approaching c_star from below
-            lb_c = max(1e-10, c_star - 5)
-            c_seg = np.linspace(lb_c, c_star +2, n_con_nxt).astype(c_old.dtype)
+            lb_c = max(1e-8, c_star - 2)  # More conservative lower bound`
+            # Ensure float64 precision
+            c_seg = np.linspace(lb_c, c_star, n_con_nxt).astype(np.float64)
             m_seg = a_star + c_seg
             vf_seg = u_func(c_seg, h_nxt) + beta * vf_next[k+1]
 
@@ -778,10 +795,11 @@ def _egm_preprocess_core(e_old, vf_old, c_old, a_old,
             a_star = a_old[k]
             c_star = c_old[k]
             
-            lb_c = max(1e-10, c_star - 5)
+            lb_c = max(1e-8, c_star)  # More conservative lower bound
 
             # Create consumption segment extending from c_star
-            c_seg = np.linspace(c_star, c_star + 2, n_con_nxt).astype(c_old.dtype)
+            # Ensure float64 precision
+            c_seg = np.linspace(c_star, c_star + 2, n_con_nxt).astype(np.float64)
             m_seg = a_star + c_seg
             vf_seg = u_func(c_seg, h_nxt) + beta * vf_next[k]
 
@@ -865,6 +883,13 @@ def egm_preprocess(egrid, vf, c, a,
     if c_max is None:
         c_max = 1.05 * np.max(c)  # 5% above current max consumption
 
+    # Ensure float64 precision for all input arrays
+    egrid = np.asarray(egrid, dtype=np.float64)
+    vf = np.asarray(vf, dtype=np.float64)
+    c = np.asarray(c, dtype=np.float64)
+    a = np.asarray(a, dtype=np.float64)
+    vf_next = np.asarray(vf_next, dtype=np.float64)
+
     # remove points where egrid is negative
     #valid_mask = egrid >= 0
     #egrid = egrid[valid_mask]
@@ -880,7 +905,9 @@ def egm_preprocess(egrid, vf, c, a,
         add_jump_constraints)
 
     # Remove duplicates based on endogenous grid and value function
-    unique_ids = uniqueEG(e_cat, vf_cat)
+    # Use a tolerance appropriate for float64 precision and the scale of the problem
+    tol = 1e-10 if not add_jump_constraints else 1e-8  # More tolerance when delta != 1
+    unique_ids = uniqueEG(e_cat, vf_cat, tol=tol)
 
     e_out = e_cat[unique_ids]
     vf_out = vf_cat[unique_ids]

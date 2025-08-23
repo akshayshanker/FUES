@@ -14,11 +14,11 @@ from .helpers.math_funcs import (
     _force_crossing_inside,
 )
 
-# Constants
-EPS_D = 1e-50
+# Constants - adjusted for float64 numerical stability
+EPS_D = 1e-14  # Machine epsilon for float64 is ~2.2e-16, so 1e-14 is safe
 EPS_SEP = 1e-10
 EPS_fwd_back = 0.5
-PARALLEL_GUARD = 1e-12
+PARALLEL_GUARD = 1e-10  # Increased for better parallel line detection
 TURN_LEFT = 1
 TURN_RIGHT = 0
 JUMP_YES = 1
@@ -30,7 +30,10 @@ def check_same_seg(e_grid, kappa_hat, idx1, idx2, m_bar, eps_d=EPS_D, eps_fwd_ba
     """Check if two points are on the same segment (no jump in policy between them)."""
     if idx1 < 0 or idx2 < 0 or idx1 >= len(e_grid) or idx2 >= len(e_grid):
         return False
-    de = max(eps_d, e_grid[idx2] - e_grid[idx1]) # should give use positive value since e-grid sorted to be increasing 
+    de = max(eps_d, e_grid[idx2] - e_grid[idx1]) # should give use positive value since e-grid sorted to be increasing
+    # Guard against numerical overflow in gradient computation
+    if de < eps_d * 10:  # Very close points
+        return False
     g_a = np.abs((kappa_hat[idx2] - kappa_hat[idx1]) / de)
     return g_a < m_bar and de < eps_fwd_back
 
@@ -419,6 +422,14 @@ def FUES(
     eps_sep = eps_sep if eps_sep is not None else EPS_SEP
     eps_fwd_back = eps_fwd_back if eps_fwd_back is not None else EPS_fwd_back
     parallel_guard = parallel_guard if parallel_guard is not None else PARALLEL_GUARD
+    
+    # Ensure float64 precision for all arrays
+    e_grid = np.asarray(e_grid, dtype=np.float64)
+    vlu = np.asarray(vlu, dtype=np.float64)
+    policy_1 = np.asarray(policy_1, dtype=np.float64)
+    policy_2 = np.asarray(policy_2, dtype=np.float64)
+    del_a = np.asarray(del_a, dtype=np.float64)
+    
     idx = np.argsort(e_grid)
     e_grid = e_grid[idx]
     vlu = vlu[idx]
