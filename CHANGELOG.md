@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 ## [0.5.0dev0] - 2025-08-12 – Multi-GPU Support and FUES Algorithm Cleanup
 - [2025-08-16 10:00 AEST] Major refactoring: Removed MPI support from horses_c.py, removed unused F_ownc_cntn_to_dcsn factory, standardized terminology
 - [2025-08-17 17:00 AEST] Added DGX A100 support with specialized PBS scripts, GPU kernel optimizations, and log management utilities
+- [2025-08-23 11:21 AEST] Fixed numerical stability issues in FUES algorithm for delta != 1 case
+- [2025-10-25 16:30 AEST] Fixed ZeroDivisionError in piecewise_gradient_3rd_filtered by adding zero-division protection throughout gradient computation
+- [2025-10-25 17:00 AEST] Enhanced _egm_preprocess_core to only add jump constraints for segments with at least 4 points, improving numerical stability
+- [2025-10-25 17:30 AEST] Added asset policy monotonicity filter in horses_c.py to remove points where refined asset policy is decreasing
+- [2025-10-25 18:00 AEST] Fixed boolean operator error in _egm_preprocess_core (changed 'or' to '|' for array operations)
+- [2025-10-25 18:15 AEST] Fixed array allocation in _egm_preprocess_core to correctly account for 2 segments per jump
+- [2025-10-27 15:30 AEST] Added skip_egm_plots flag to conditionally skip EGM CSV exports (plot_csv_export.py, solve_runner.py)
+- [2025-10-27 16:00 AEST] Implemented conditional EGM grid storage: skip saving EGM grids to Solution object when --skip-egm-plots enabled, reducing memory usage and pickle sizes (horses_c.py, solve_runner.py)
+- [2025-10-27 16:35 AEST] Fixed AttributeError in make_housing_model: corrected mc.periods to mc.periods_list for flag injection (solve_runner.py)
+- [2025-10-27 16:45 AEST] Added optional asset policy gradient filtering: filter_a_jumps setting removes refined grid points where da/dm exceeds max_a_gradient threshold (horses_c.py, master.yml)
+- [2025-11-08 12:00 AEST] Implemented first-order condition (FOC) checks in _egm_preprocess_core to filter constraint points based on economic optimality: only add points that satisfy Kuhn-Tucker conditions with scaled lambda values (horses_common.py, horses_c.py)
+- [2025-11-08 12:15 AEST] Modified image saving to always use timestamped directories (images_YYYYMMDD_HHMMSS) to preserve all previous runs instead of overwriting old image files (execution_settings.py, solve_runner.py)
+- [2025-11-08 12:30 AEST] Added uc_test function in horses_common.py as a simple test marginal utility for FOC verification, imported into horses_c.py for testing purposes
+- [2025-11-08 12:45 AEST] Fixed incorrect double method directory creation: removed redundant method subdirectory since we're already in bundles/hash/METHOD/images_TIMESTAMP/ structure (plots.py, plot_csv_export.py)
 
 ### Added
 * **Multi-GPU MPI parallelization for housing model**
@@ -78,6 +92,12 @@ All notable changes to this project will be documented in this file.
   - Added parallel line guard (1e-12) for degenerate geometry detection
   - Intersection capacity increased to 2*(N-1) preventing silent truncation
   - Eliminated spurious Euler residuals at policy kinks
+  - [2025-08-23] Improved float64 numerical stability for delta != 1 case:
+    * Changed EPS_D from 1e-50 to 1e-14 (safe for float64 precision)
+    * Increased PARALLEL_GUARD to 1e-10 for better parallel line detection
+    * Added explicit float64 dtype enforcement in FUES and egm_preprocess
+    * Enhanced uniqueEG() to handle near-duplicate points with tolerance
+    * Fixed consumption lower bounds (1e-100 to 1e-10) in horses_common.py
 
 ### Performance
 * **Memory optimizations**

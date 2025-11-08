@@ -81,6 +81,7 @@ stage:
       inv_marginal_utility: ["inv_marginal_utility"]
       owner_marginal_utility: ["owner_marginal_utility"]
       u_func_gpu: ["u_func_gpu"]
+      uc_func: ["uc_func"]
       
       # Transition functions
       g_av:

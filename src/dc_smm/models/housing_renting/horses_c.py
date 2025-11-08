@@ -39,7 +39,8 @@ import os, time, numba, numpy as np
 import logging
 import gc
 from dc_smm.models.housing_renting.horses_common import (
-    egm_preprocess, build_njit_utility, piecewise_gradient, piecewise_gradient_3rd, get_u_func, bellman_obj
+    egm_preprocess, build_njit_utility, piecewise_gradient, piecewise_gradient_3rd, get_u_func, bellman_obj,
+    uc_test  # Test marginal utility function for FOC verification
 )  # Use relative import
 from numba import njit
 from dc_smm.uenvelope.upperenvelope import EGM_UE
@@ -302,7 +303,18 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
         utility_func = build_njit_utility(expr_str, param_vals)
     else:
         utility_func = get_u_func(expr_str, param_vals)
-    
+
+    # Build jittable marginal utility for FOC checks
+    # Extract marginal utility expression (same key for both owner and renter)
+    try:
+        uc_expr_str = model.math["functions"]["uc_func"]["expr"]
+        # Build the marginal utility function using cached version
+        uc_func = get_u_func(uc_expr_str, param_vals)
+    except (KeyError, AttributeError):
+        # If marginal utility expression not found, FOC checks will be skipped
+        uc_func = None
+        if model.verbose:
+            print(f"Warning: Marginal utility expression not found for {model.stage_name}. FOC checks will be skipped.")
 
     # parameters
     beta = model.param.beta
@@ -419,15 +431,28 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
             if ue_method != "CONSAV":
                 # Only add jump constraints when delta_pb != 1 (time inconsistent)
                 add_jump_constraints = (delta != 1.0)
-                
+
+                # Extract lambda for FOC checks (already scaled: beta*delta*lambda*R)
+                lambda_e = lam_sel[:, i_h, i_y] if add_jump_constraints and uc_func is not None else None
+
                 m_egm_unique, vlu_q_egm_unique, c_egm_unique, a_nxt_grid_unique = (
                     egm_preprocess(
                         m_egm, q_egm, c_egm, a_nxt_grid, delta*beta,
                         utility_func, vlu_e, m_bar=m_bar, n_con=n_con,
                         n_con_nxt=n_con_nxt, c_max=c_max, h_nxt=H_val,
-                        add_jump_constraints=add_jump_constraints
+                        add_jump_constraints=add_jump_constraints,
+                        # NEW: Pass FOC checking parameters
+                        lambda_next=lambda_e,  # Already scaled by beta*delta*Rfree
+                        uc_func=uc_test
                     )
                 )
+
+                # sort by m_egm_unique order 
+                index = np.argsort(m_egm_unique)
+                m_egm_unique = m_egm_unique[index]
+                vlu_q_egm_unique = vlu_q_egm_unique[index]
+                c_egm_unique = c_egm_unique[index]
+                a_nxt_grid_unique = a_nxt_grid_unique[index]
 
             else:
                 m_egm_unique = m_egm
@@ -490,6 +515,8 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
                 policy[:, i_h, i_y] = interp_clean(
                     m_refined, c_refined, w_grid, extrap=True)
 
+
+
             else:
                 Q_dcsn[:, i_h, i_y] = q_refined
                 policy[:, i_h, i_y] = c_refined
@@ -507,7 +534,7 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
 
             if delta < 1:
                 c_prime = piecewise_gradient_3rd(
-                    policy[:, i_h, i_y], w_grid, m_bar=m_bar)
+                    policy[:, i_h, i_y], w_grid, m_bar=m_bar,eps =0)
             else:
                 c_prime = np.zeros_like(policy[:, i_h, i_y])
 
