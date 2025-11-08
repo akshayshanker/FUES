@@ -990,9 +990,9 @@ def _egm_preprocess_core(e_old, vf_old, c_old, a_old,
             c_star = c_old[k+1]
 
             # Create consumption segment around c_star at k+1
-            lb_c = max(1e-8, c_star - 10)
+            lb_c = max(1e-8, c_star - 15)
            #lb_c = c_star
-            ub_c = c_star + 10
+            ub_c = c_star + 15
             c_seg = np.linspace(lb_c, ub_c, n_con_nxt).astype(np.float64)
 
             # FOC check: Filter points based on first-order condition
@@ -1030,9 +1030,9 @@ def _egm_preprocess_core(e_old, vf_old, c_old, a_old,
             c_star2 = c_old[k]
 
             # Create consumption segment around c_star at k
-            lb_c2 = max(1e-8, c_star2-10)
+            lb_c2 = max(1e-8, c_star2-15)
             lb_c2 = c_star2
-            ub_c2 = c_star2 + 10
+            ub_c2 = c_star2 + 15
             c_seg2 = np.linspace(lb_c2, ub_c2, n_con_nxt).astype(np.float64)
 
             # FOC check: Filter points based on first-order condition
