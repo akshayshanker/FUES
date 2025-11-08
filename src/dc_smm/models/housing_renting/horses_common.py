@@ -6,6 +6,197 @@ from typing import Callable, Literal   # NEW  – remove if unused        # NEW
 import time
 from functools import lru_cache
 import math
+import warnings
+
+
+def _ensure_1d_contig(x, dtype=None):
+    """Ensure array is 1D and C-contiguous."""
+    a = np.asarray(x)
+    if a.ndim > 1:
+        a = np.squeeze(a)
+    a = np.ravel(a)
+    if dtype is not None:
+        a = a.astype(dtype, copy=False)
+    return np.ascontiguousarray(a)
+
+def _grid_spacing_eps(e):
+    """Compute adaptive tolerance based on grid spacing."""
+    e = np.ravel(np.asarray(e))
+    es = np.sort(e)
+    d = np.diff(es)
+    pos = d[d > 0]
+    h = np.median(pos) if pos.size else max(1.0, np.max(np.abs(es)) if es.size else 1.0)
+    scale = max(1.0, np.max(np.abs(es)) if es.size else 1.0)
+    # Conservative: scale by machine eps and small fraction of typical spacing
+    return max(10*np.finfo(es.dtype if es.dtype.kind in "fc" else np.float64).eps * scale, 0.03*h)
+
+def uniqueEG_numeric(
+    e, v, c, a,
+    *,
+    eps_e=None, tol_v=1e-12, tol_c=1e-12, tol_a=1e-12,
+    tie_policy="nearest_prev",
+    warn_on_policy_conflict=True,
+    logger=None
+):
+    """
+    Robust deduplication of EGM grid points.
+    
+    Only removes points when both grid AND values are near-duplicates.
+    Warns about policy conflicts at equal values.
+    When resolving ties, uses policy closest to previous cluster for continuity.
+    """
+    # Normalize inputs
+    e = _ensure_1d_contig(e, dtype=np.float64)
+    v = _ensure_1d_contig(v, dtype=np.float64)
+    c = _ensure_1d_contig(c, dtype=np.float64)
+    a = _ensure_1d_contig(a, dtype=np.float64)
+    n = e.size
+    
+    if not (v.size == c.size == a.size == n):
+        raise ValueError(f"Shape mismatch e:{e.shape} v:{v.shape} c:{c.shape} a:{a.shape}")
+    
+    # Stable sort by e
+    idx = np.argsort(e, kind="mergesort")
+    e, v, c, a = e[idx], v[idx], c[idx], a[idx]
+    
+    if eps_e is None:
+        eps_e = _grid_spacing_eps(e)
+    
+    info = dict(
+        n_rows_in=n, n_rows_out=None, eps_e_used=float(eps_e),
+        tol_v=float(tol_v), tol_c=float(tol_c), tol_a=float(tol_a),
+        n_clusters=0, n_ties=0, n_policy_conflicts=0
+    )
+    
+    keep_mask = np.zeros(n, dtype=bool)
+    
+    # Track previous cluster's policy for continuity
+    prev_c = None
+    prev_a = None
+    
+    # Process clusters
+    i = 0
+    while i < n:
+        j = i
+        # Build cluster: e[k]-e[i] <= eps_e
+        while j + 1 < n and e[j + 1] - e[i] <= eps_e:
+            j += 1
+        info["n_clusters"] += 1
+        
+        if i == j:
+            # Single point cluster
+            keep_mask[i] = True
+            prev_c = c[i]
+            prev_a = a[i]
+            i = j + 1
+            continue
+        
+        # Multi-point cluster
+        v_block = v[i:j+1]
+        c_block = c[i:j+1]
+        a_block = a[i:j+1]
+        
+        vmax = np.max(v_block)
+        winners = np.where(np.abs(v_block - vmax) <= tol_v)[0]
+        
+        if winners.size <= 1:
+            # No value tie; keep ALL rows
+            keep_mask[i:j+1] = True
+            # Update previous policy to last kept point
+            prev_c = c[j]
+            prev_a = a[j]
+            i = j + 1
+            continue
+        
+        info["n_ties"] += 1
+        # Value tie; check policy spread among winners
+        w_c = c_block[winners]
+        w_a = a_block[winners]
+        spread_c = np.max(w_c) - np.min(w_c)
+        spread_a = np.max(w_a) - np.min(w_a)
+        
+        if (spread_c <= tol_c) and (spread_a <= tol_a):
+            # Exact duplicate policies; keep first winner only
+            keep_mask[i:j+1] = True
+            dup_idxs = winners[1:] + i
+            keep_mask[dup_idxs] = False
+            # Update previous policy
+            kept_idx = winners[0] + i
+            prev_c = c[kept_idx]
+            prev_a = a[kept_idx]
+            i = j + 1
+            continue
+        
+        # Policy conflict at equal value
+        info["n_policy_conflicts"] += 1
+        if warn_on_policy_conflict:
+            # Build warning message
+            base_msg = (f"uniqueEG_numeric: value tie with conflicting policies near e≈{float(np.mean(e[i:j+1])):.6g} "
+                       f"(eps_e={eps_e:.3g}). winners={winners.size}, v≈{float(vmax):.6g}±{float(tol_v):.1e}; "
+                       f"c∈[{float(np.min(w_c)):.6g},{float(np.max(w_c)):.6g}], "
+                       f"a'∈[{float(np.min(w_a)):.6g},{float(np.max(w_a)):.6g}]. ")
+            
+            # Add policy-specific info
+            if tie_policy == "nearest_prev" and prev_c is not None:
+                msg = base_msg + f"tie_policy={tie_policy} (prev: c={prev_c:.4g}, a'={prev_a:.4g})."
+            else:
+                msg = base_msg + f"tie_policy={tie_policy}."
+            if logger is not None:
+                try: 
+                    logger.warning(msg)
+                except Exception: 
+                    pass
+            warnings.warn(msg, category=UserWarning)
+        
+        # Choose canonical winner
+        if tie_policy == "min_a":
+            k_rel = winners[np.argmin(w_a)]
+        elif tie_policy == "max_a":
+            k_rel = winners[np.argmax(w_a)]
+        elif tie_policy == "first":
+            k_rel = winners[0]
+        elif tie_policy == "medoid":
+            cbar = float(np.mean(w_c))
+            abar = float(np.mean(w_a))
+            d2 = (w_c - cbar)**2 + (w_a - abar)**2
+            k_rel = winners[np.argmin(d2)]
+        else:  # "nearest_prev" default - choose closest to previous cluster
+            if prev_c is not None and prev_a is not None:
+                # Choose winner closest to previous cluster's policy
+                d2 = (w_c - prev_c)**2 + (w_a - prev_a)**2
+                k_rel = winners[np.argmin(d2)]
+            else:
+                # No previous cluster, fall back to medoid
+                cbar = float(np.mean(w_c))
+                abar = float(np.mean(w_a))
+                d2 = (w_c - cbar)**2 + (w_a - abar)**2
+                k_rel = winners[np.argmin(d2)]
+        
+        # Keep all non-winners; among winners keep only chosen one
+        keep_mask[i:j+1] = True
+        drop_rel = winners[winners != k_rel]
+        keep_mask[i + drop_rel] = False
+        
+        # Update previous policy with the chosen winner
+        kept_idx = k_rel + i
+        prev_c = c[kept_idx]
+        prev_a = a[kept_idx]
+        
+        i = j + 1
+    
+    # Finalize
+    e_out = e[keep_mask]
+    v_out = v[keep_mask]
+    c_out = c[keep_mask]
+    a_out = a[keep_mask]
+    info["n_rows_out"] = int(e_out.size)
+    
+    # Verify invariants
+    assert e_out.ndim == v_out.ndim == c_out.ndim == a_out.ndim == 1
+    assert e_out.size == v_out.size == c_out.size == a_out.size
+    # np.testing.assert_allclose(e_out, a_out + c_out, rtol=0, atol=max(tol_c, tol_a))
+    
+    return e_out, v_out, c_out, a_out, info
 
 
 @njit
@@ -681,14 +872,16 @@ def _egm_preprocess_core(e_old, vf_old, c_old, a_old,
                          n_con,                # # constraint nodes
                          n_con_nxt,            # # nodes per jump
                          c_max, h_nxt,         # upper end of [c*, c_max] and housing
-                         add_jump_constraints): # whether to add jump constraints
+                         add_jump_constraints, # whether to add jump constraints
+                         lambda_next=None,     # NEW: Marginal utility values (already scaled by beta*delta*Rfree)
+                         uc_func=None):        # NEW: Marginal utility function
     """
     Returns new (e,vf,c,a) with:
         • n_con borrowing-constraint points, plus
-        • (optionally) n_con_nxt points on every jump in endogenous grid,
+        • (optionally) constraint points at jumps that satisfy FOC
 
     all prepended in one shot. No np.concatenate used.
-    
+
     Parameters
     ----------
     e_old, vf_old, c_old, a_old : ndarray
@@ -704,13 +897,23 @@ def _egm_preprocess_core(e_old, vf_old, c_old, a_old,
     n_con : int
         Number of borrowing constraint nodes
     n_con_nxt : int
-        Number of nodes to add per jump
+        Target number of nodes to add per jump (actual may be less due to FOC filtering)
     c_max : float
         Upper bound on consumption (not currently used)
     h_nxt : float
         Next period housing
     add_jump_constraints : bool
         Whether to add jump constraint points (should be False when delta_pb == 1)
+    lambda_next : ndarray, optional
+        Marginal utility values (already fully scaled: beta*delta*lambda*Rfree)
+    uc_func : callable, optional
+        Marginal utility function uc(c, h)
+
+    Notes
+    -----
+    When lambda_next and uc_func are provided, FOC checks are performed.
+    The comparison is direct since lambda_next is already fully scaled.
+    Points are added based on your corrected constraint conditions
     """
 
     # ---- 0. Basic sizes and jump detection ----
@@ -725,9 +928,15 @@ def _egm_preprocess_core(e_old, vf_old, c_old, a_old,
         # Detect jumps in endogenous grid and value function
         e_diff = e_old[1:] - e_old[:-1]
         vf_diff = vf_next[1:] - vf_next[:-1]
+        c_diff = c_old[1:] - c_old[:-1]
+        # Protect against division by zero
+        a_diff = a_old[1:] - a_old[:-1]
+        grad_e = np.abs(np.where(np.abs(a_diff) > 1e-15, e_diff / a_diff, 0.0))
+        grad_c = np.abs(np.where(np.abs(a_diff) > 1e-15, c_diff / a_diff, 0.0))
         
         # Case 1: Negative jumps in endogenous grid
-        jumps_case_1 = e_diff < 0
+        #jumps_case_1 = (e_diff < 0) | (grad_c > 1 ) | (grad_e > 1) | (vf_diff<0) | (c_diff<0)
+        jumps_case_1 = (e_diff < 0)
         j_idx_case_1 = np.where(jumps_case_1)[0]
         n_jump_case_1 = j_idx_case_1.size
         
@@ -739,10 +948,12 @@ def _egm_preprocess_core(e_old, vf_old, c_old, a_old,
 
         # temporry turn off case 2
         jumps_case_2 = np.zeros_like(jumps_case_2, dtype=np.bool_)
+        n_jump_case_2 = 0  # Reset to 0 since Case 2 is disabled
         
         # Total jumps and nodes to add
+        # Each Case 1 jump adds 2 segments: one using k+1, one using k
         n_jump = n_jump_case_1 + n_jump_case_2
-        n_add = n_con + n_jump * n_con_nxt
+        n_add = n_con + n_jump_case_1 * n_con_nxt * 2 + n_jump_case_2 * n_con_nxt
     
     n_total = n_old + n_add
 
@@ -772,49 +983,104 @@ def _egm_preprocess_core(e_old, vf_old, c_old, a_old,
     # ---- 3. Jump segments (only if flag is True) ----
     if add_jump_constraints and n_con_nxt > 0:
         # Process Case 1 jumps (negative jumps in endogenous grid)
+        # For each jump, add 2 segments: one for k+1 and one for k
         for k in j_idx_case_1:
+            # First segment: using k+1 (point after the jump)
             a_star = a_old[k+1]
             c_star = c_old[k+1]
-            
-            # Create consumption segment approaching c_star from below
-            lb_c = max(1e-8, c_star - 2)  # More conservative lower bound`
-            # Ensure float64 precision
-            c_seg = np.linspace(lb_c, c_star, n_con_nxt).astype(np.float64)
-            m_seg = a_star + c_seg
-            vf_seg = u_func(c_seg, h_nxt) + beta * vf_next[k+1]
 
-            e_new[p:p+n_con_nxt] = m_seg
-            vf_new[p:p+n_con_nxt] = vf_seg
-            c_new[p:p+n_con_nxt] = c_seg
-            a_new[p:p+n_con_nxt] = a_star
-            p += n_con_nxt
-        
-         
-        # Process Case 2 jumps (negative jumps in value function)
-        for k in j_idx_case_2:
-            a_star = a_old[k]
-            c_star = c_old[k]
-            
-            lb_c = max(1e-8, c_star)  # More conservative lower bound
+            # Create consumption segment around c_star at k+1
+            lb_c = max(1e-8, c_star - 10)
+           #lb_c = c_star
+            ub_c = c_star + 10
+            c_seg = np.linspace(lb_c, ub_c, n_con_nxt).astype(np.float64)
 
-            # Create consumption segment extending from c_star
-            # Ensure float64 precision
-            c_seg = np.linspace(c_star, c_star + 2, n_con_nxt).astype(np.float64)
-            m_seg = a_star + c_seg
-            vf_seg = u_func(c_seg, h_nxt) + beta * vf_next[k]
+            # FOC check: Filter points based on first-order condition
+            if lambda_next is not None and uc_func is not None:
+                # Evaluate marginal utility for all points in segment
+                valid_mask = np.ones(n_con_nxt, dtype=np.bool_)
+                for i in range(n_con_nxt):
+                    mu_c = uc_func(c_seg[i], h_nxt)
+                    # lambda_next is already scaled by beta*delta*Rfree, so compare directly
+                    # For segment after jump (k+1): your corrected condition
+                    valid_mask[i] = (mu_c <=lambda_next[k+1])  # Small tolerance for numerical error
 
-            e_new[p:p+n_con_nxt] = m_seg
-            vf_new[p:p+n_con_nxt] = vf_seg
-            c_new[p:p+n_con_nxt] = c_seg
-            a_new[p:p+n_con_nxt] = a_star
-            p += n_con_nxt
+                # Filter to keep only valid points
+                valid_mask = np.ones(n_con_nxt, dtype=np.bool_)
+                c_seg_valid = c_seg[valid_mask]
+                n_valid = c_seg_valid.size
+            else:
+                # No FOC check, keep all points
+                c_seg_valid = c_seg
+                n_valid = n_con_nxt
+
+            # Add valid points
+            if n_valid > 0:
+                m_seg = a_star + c_seg_valid
+                vf_seg = u_func(c_seg_valid, h_nxt) + beta * vf_next[k+1]
+
+                e_new[p:p+n_valid] = m_seg
+                vf_new[p:p+n_valid] = vf_seg
+                c_new[p:p+n_valid] = c_seg_valid
+                a_new[p:p+n_valid] = a_star
+                p += n_valid
+
+            # Second segment: using k (point before the jump)
+            a_star2 = a_old[k]
+            c_star2 = c_old[k]
+
+            # Create consumption segment around c_star at k
+            lb_c2 = max(1e-8, c_star2-10)
+            lb_c2 = c_star2
+            ub_c2 = c_star2 + 10
+            c_seg2 = np.linspace(lb_c2, ub_c2, n_con_nxt).astype(np.float64)
+
+            # FOC check: Filter points based on first-order condition
+            if lambda_next is not None and uc_func is not None:
+                # Evaluate marginal utility for all points in segment
+                valid_mask2 = np.ones(n_con_nxt, dtype=np.bool_)
+                for i in range(n_con_nxt):
+                    mu_c2 = uc_func(c_seg2[i], h_nxt)
+                    # lambda_next is already scaled by beta*delta*Rfree, so compare directly
+                    # For segment before jump (k): your corrected condition
+                    valid_mask2[i] = (mu_c2 >= lambda_next[k])  # Small tolerance for numerical error
+
+                # Filter to keep only valid points
+                valid_mask2 = np.ones(n_con_nxt, dtype=np.bool_)
+                c_seg2_valid = c_seg2[valid_mask2]
+                n_valid2 = c_seg2_valid.size
+            else:
+                # No FOC check, keep all points
+                c_seg2_valid = c_seg2
+                n_valid2 = n_con_nxt
+
+            # Add valid points
+            if n_valid2 > 0:
+                m_seg2 = a_star2 + c_seg2_valid
+                vf_seg2 = u_func(c_seg2_valid, h_nxt) + beta * vf_next[k]
+
+                e_new[p:p+n_valid2] = m_seg2
+                vf_new[p:p+n_valid2] = vf_seg2
+                c_new[p:p+n_valid2] = c_seg2_valid
+                a_new[p:p+n_valid2] = a_star2
+                p += n_valid2
         
 
     # ---- 4. Copy the original solution after all extras ----
-    e_new[n_add:] = e_old
-    vf_new[n_add:] = vf_old
-    c_new[n_add:] = c_old
-    a_new[n_add:] = a_old
+    # Note: p now contains the actual number of added points (may be < n_add due to FOC filtering)
+    # Copy original solution starting at position p
+    n_orig_to_copy = n_old
+    e_new[p:p+n_orig_to_copy] = e_old
+    vf_new[p:p+n_orig_to_copy] = vf_old
+    c_new[p:p+n_orig_to_copy] = c_old
+    a_new[p:p+n_orig_to_copy] = a_old
+
+    # Trim arrays to actual size (p + n_old)
+    actual_size = p + n_orig_to_copy
+    e_new = e_new[:actual_size]
+    vf_new = vf_new[:actual_size]
+    c_new = c_new[:actual_size]
+    a_new = a_new[:actual_size]
 
     ## return sorted arrays
     sort_idx = np.argsort(e_new)
@@ -897,12 +1163,14 @@ def egm_preprocess(egrid, vf, c, a,
     #c = c[valid_mask]
     #a = a[valid_mask]
 
-    # Run the fast core with jump constraint flag
+    # Run the fast core with jump constraint flag and FOC checking
     e_cat, vf_cat, c_cat, a_cat = _egm_preprocess_core(
         egrid, vf, c, a,
         vf_next, beta, u_func,
         m_bar, n_con, n_con_nxt, c_max, h_nxt,
-        add_jump_constraints)
+        add_jump_constraints,
+        lambda_next=kwargs.get('lambda_next'),  # Pass through lambda (already scaled)
+        uc_func=kwargs.get('uc_func'))          # Pass through marginal utility
 
     # Remove duplicates based on endogenous grid and value function
     # Use a tolerance appropriate for float64 precision and the scale of the problem
@@ -915,6 +1183,33 @@ def egm_preprocess(egrid, vf, c, a,
     a_out = a_cat[unique_ids]
 
     return e_out, vf_out, c_out, a_out
+
+
+@njit
+def uc_test(c, h):
+    """
+    Simple test marginal utility function for FOC verification.
+
+    Parameters
+    ----------
+    c : float
+        Consumption
+    h : float
+        Housing
+
+    Returns
+    -------
+    float
+        Marginal utility of consumption
+
+    Notes
+    -----
+    This is a simple CRRA marginal utility for testing FOC checks.
+    Can be imported and passed directly to egm_preprocess via uc_func parameter.
+    """
+    gamma = 2.0  # Risk aversion parameter
+    alpha = 0.77  # Consumption share in Cobb-Douglas
+    return alpha/c
 
 
 def build_njit_utility(

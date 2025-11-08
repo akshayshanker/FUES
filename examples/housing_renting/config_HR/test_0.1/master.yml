@@ -51,7 +51,7 @@ settings:
   max_iter: 4000        # Maximum iterations
   
   # Grid parameters - Updated from Fella
-  a_min: 1E-20         # Minimum asset value
+  a_min: 1E-1         # Minimum asset value
   a_max: 35.0           # Maximum asset value (Fella's grid_max_A)
   a_points: 4000        # Number of asset grid points (Fella's grid_size)
 
@@ -64,24 +64,30 @@ settings:
   S_max: 5.0            # Maximum housing value (Fella's grid_max_H)
   S_points: 7           # Number of housing grid points (Fella's grid_size_H)
   
-  w_min: 1E-20               # Minimum cash-on-hand
+  w_min: 1E-1               # Minimum cash-on-hand
   w_max: 40.0           # Maximum cash-on-hand (increased to accommodate shock values)
   w_points: 4000        # Number of cash-on-hand grid points
   
-  a_nxt_min: 1E-20           # Minimum next-period asset value
+  a_nxt_min: 1E-1           # Minimum next-period asset value
   a_nxt_max: 35.0       # Maximum next-period asset value (matches a_max)
   a_nxt_points: 4000    # Number of next-period asset grid points
   
   # Income shock discretization - Now explicitly using Fella's values
   y_points: 3           # Number of shock grid points (length of z_vals)
   y_stop: 2 
-  m_bar: 1.000001           # Upper envelope parameter for FUES
+  m_bar: 1.0001           # Upper envelope parameter for FUES
   lb: 10                 # Look-back parameter for FUES
   rfc_radius: 0.75
   rfc_n_iter: 20
-  n_constraint_points: 2000
-  n_constraint_points_nxt: 100
+  n_constraint_points: 100
+  n_constraint_points_nxt: 600
   N_arg_grid_vfi: 500   # Number of grid points for VFI_GRID
+  filder_a_jumps: false
+  max_a_gradient: 1.5
+  
+  # Asset policy gradient filtering (optional)
+  filter_a_jumps: false  # If true, filter points where da/dm exceeds max_a_gradient
+  max_a_gradient: 1.0    # Maximum allowed gradient of asset policy (typically 1.0)
 
 ###################
 # 2) .math Section

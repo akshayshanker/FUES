@@ -78,6 +78,7 @@ stage:
       u_func: ["owner_utility"]          # Utility function from master
       uc_inv_func: ["inv_marginal_utility"] # Inverse marginal utility from master
       u_func_gpu: ["u_func_gpu"]
+      uc_func: ["uc_func"]
       
       # Transition functions
       g_av:

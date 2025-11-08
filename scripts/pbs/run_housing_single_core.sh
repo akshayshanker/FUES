@@ -1,8 +1,8 @@
 #!/bin/bash
 #PBS -N fues-single-core
 #PBS -P tp66
-#PBS -q hugemem
-#PBS -l ncpus=1,mem=1470GB,walltime=04:00:00
+#PBS -q express
+#PBS -l ncpus=1,mem=96GB,walltime=04:00:00
 #PBS -l storage=scratch/tp66
 #PBS -l wd
 #PBS -j oe
@@ -104,6 +104,11 @@ for CONFIG_NAME in "${CONFIG_TO_RUN[@]}"; do
     echo "Logs will be saved to: $LOG_DIR"
     echo "NOTE: Baseline will be loaded from existing bundles, not recomputed"
     echo "NOTE: Using selective loading for Euler error - loading only periods 0,1"
+    echo "NOTE: EGM plots are disabled for faster execution (--skip-egm-plots)"
+
+    # Optional: Set to empty string to enable EGM plots (slower but more detailed)
+    # EGM_PLOTS_FLAG="--skip-egm-plots"  # Comment this line to enable EGM plots
+    EGM_PLOTS_FLAG="--skip-egm-plots"
 
     # Selective loading: Euler error only needs:
     # - Period 0: OWNC stage (for current consumption)
@@ -124,6 +129,7 @@ for CONFIG_NAME in "${CONFIG_TO_RUN[@]}"; do
       --fresh-fast \
       --csv-export \
       --plots \
+      $EGM_PLOTS_FLAG \
       --trace \
       --load-periods "0,1" \
       --load-stages '{"0": ["OWNC"], "1": null}' \
