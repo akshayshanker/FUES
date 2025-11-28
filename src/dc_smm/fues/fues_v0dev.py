@@ -301,7 +301,13 @@ def _scan(e_grid, vf, a_prime,del_a, m_bar, LB, fwd_scan_do=True, endog_mbar= Tr
             # if right turn is made and jump registered
             # remove point or perform forward scan
 
-            if g_1 < g_j_minus_1 and  g_tilde_a > M_max:
+            # If value falls, remove points
+            if vf_full[i + 1] - vf_full[j] < 0:
+                vf[i + 1] = np.nan
+                # append index array of previously deleted points
+                m_array = append_push(m_array, i + 1)
+
+            elif g_1 < g_j_minus_1 and  g_tilde_a > M_max:
                 keep_i_1_point = False
 
                 if fwd_scan_do:
@@ -331,17 +337,13 @@ def _scan(e_grid, vf, a_prime,del_a, m_bar, LB, fwd_scan_do=True, endog_mbar= Tr
                         k = j
                         j = i + 1
 
-            # If value falls, remove points
-            elif vf_full[i + 1] - vf_full[j] < 0:
-                vf[i + 1] = np.nan
-                # append index array of previously deleted points
-                m_array = append_push(m_array, i + 1)
+            
 
             # assume value is monotone in policy and delete if not
             # satisfied
-            elif g_1 < g_j_minus_1 and d_p_prime < 0:
-                vf[i + 1] = np.nan
-                m_array = append_push(m_array, i + 1)
+            #elif g_1 < g_j_minus_1 and d_p_prime < 0:
+            #    vf[i + 1] = np.nan
+            #    m_array = append_push(m_array, i + 1)
 
             # if left turn is made or right turn with no jump, then
             # keep point provisionally and conduct backward scan

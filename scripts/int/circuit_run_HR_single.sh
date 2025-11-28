@@ -28,7 +28,7 @@ SCRIPTS_ROOT="$(dirname "$SCRIPT_DIR")"
 
 # --- Default Settings ---
 CLEAR_CACHE=false
-CONFIG_NAME="STD_RES_SETTINGS"
+CONFIG_NAME="HIGH_RES_SETTINGS_A_PB"
 METRICS="euler_error"
 ENABLE_PLOTS=true
 ENABLE_TRACE=false
@@ -249,15 +249,17 @@ echo "Log directory: $LOG_DIR"
 # --- Build Command Line Arguments ---
 ARGS=(
     --periods "${CONFIG_REF[periods]}"
-    --ue-method "FUES, CONSAV"
+    --ue-method "FUES"
     --output-root "$OUTPUT_DIR"
     --bundle-prefix "$VERSION_TAG"
     --RUN-ID "$RUN_ID"
     --vfi-ngrid "${CONFIG_REF[vfi_ngrid]}"
     --HD-points "${CONFIG_REF[hd_points]}"
     --grid-points "${CONFIG_REF[grid_points]}"
+    --delta-pb "${CONFIG_REF[delta_pb]}"
     --baseline-method "CONSAV"
     --fresh-fast
+    --csv-export 
     --metrics "$METRICS"
     --trace
     --precompile 

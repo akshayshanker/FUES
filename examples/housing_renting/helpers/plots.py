@@ -25,11 +25,11 @@ import seaborn as sns
 from dynx.stagecraft.solmaker import Solution
 
 def generate_plots(model, method, image_dir, plot_period=0, bounds=None,
-                  save_dir=None, load_dir=None, plot_all_H_idx=False, 
-                  y_idx_list=None, egm_bounds=None):
+                  save_dir=None, load_dir=None, plot_all_H_idx=False,
+                  y_idx_list=None, egm_bounds=None, skip_egm_plots=False):
     """
     Generate both EGM grid plots and policy function plots for a model using a specific method.
-    
+
     Parameters
     ----------
     model : ModelCircuit or None
@@ -57,20 +57,17 @@ def generate_plots(model, method, image_dir, plot_period=0, bounds=None,
         - 'assets': (xmin, xmax, ymin, ymax) for assets panel
         - 'he_space': (xmin, xmax, ymin, ymax) for h-e space plot
         Can also specify per y_idx: 'value_y0', 'assets_y1', etc.
-        
+    skip_egm_plots : bool, optional
+        If True, skip generating EGM plots (saves time with many points). Default False.
+
     Notes
     -----
     If both save_dir and load_dir are None, behavior is unchanged (plots from live model).
     If model is None, load_dir must be provided to load saved solutions.
     """
-    # Check if we're already in a method-specific bundle directory
-    # If image_dir contains "bundles" and ends with "images", we're in the new structure
-    if "bundles" in str(image_dir) and str(image_dir).endswith("images"):
-        # Don't create another method subdirectory - we're already method-specific
-        method_dir = image_dir
-    else:
-        # Legacy structure - create method subdirectory
-        method_dir = os.path.join(image_dir, method)
+    # We're already in the method-specific directory, don't create another one
+    # The path is: bundles/hash/METHOD/images_TIMESTAMP/
+    method_dir = image_dir  # Use image_dir directly, no subdirectory
 
     if load_dir is not None:
         method_dir_load = os.path.join(load_dir, method)
@@ -81,10 +78,10 @@ def generate_plots(model, method, image_dir, plot_period=0, bounds=None,
         method_dir_save = os.path.join(save_dir, method)
     else:
         method_dir_save = None
-    
-    # Create directories for different plot types
-    egm_dir = os.path.join(method_dir, "egm_plots")
-    policy_dir = os.path.join(method_dir, "policy_plots")
+
+    # Create directories for different plot types directly in image_dir
+    egm_dir = os.path.join(image_dir, "egm_plots")
+    policy_dir = os.path.join(image_dir, "policy_plots")
     os.makedirs(egm_dir, exist_ok=True)
     os.makedirs(policy_dir, exist_ok=True)
     
@@ -113,34 +110,37 @@ def generate_plots(model, method, image_dir, plot_period=0, bounds=None,
             ownc_sol.save(fname)
             print(f"Saved Solution → {fname}.npz")
     
-    # Generate EGM grid plots
-    #print(f"\nGenerating EGM grid plots for {method}...")
-    
-    # Get the grid dimensions from the solution
-    H_grid = ownc_stage.dcsn.grid.H_nxt if ownc_stage else None  # TODO: Store grid in Solution
-    
-    # Select housing values to plot
-    if plot_all_H_idx and H_grid is not None:
-        # Plot all H_idx values - useful for detailed analysis
-        H_indices = list(range(len(H_grid)))
-        print(f"Plotting EGM grids for all {len(H_grid)} housing values")
-    elif H_grid is not None:
-        # Select 3 housing values spread across the grid (default behavior)
-        H_indices = [0, len(H_grid) // 2, len(H_grid) - 1]  # Low, middle, and high housing values
+    # Generate EGM grid plots (unless skipped)
+    if not skip_egm_plots:
+        #print(f"\nGenerating EGM grid plots for {method}...")
+
+        # Get the grid dimensions from the solution
+        H_grid = ownc_stage.dcsn.grid.H_nxt if ownc_stage else None  # TODO: Store grid in Solution
+
+        # Select housing values to plot
+        if plot_all_H_idx and H_grid is not None:
+            # Plot all H_idx values - useful for detailed analysis
+            H_indices = list(range(len(H_grid)))
+            print(f"Plotting EGM grids for all {len(H_grid)} housing values")
+        elif H_grid is not None:
+            # Select 3 housing values spread across the grid (default behavior)
+            H_indices = [0, len(H_grid) // 2, len(H_grid) - 1]  # Low, middle, and high housing values
+        else:
+            H_indices = [0, 1, 2]  # Default indices if grid not available
+
+        # Default to first income state if not specified
+        if y_idx_list is None:
+            y_idx_list = [0]
+
+        # Plot EGM grid for selected housing and income values
+        for y_idx in y_idx_list:
+            for H_idx in H_indices:
+                plot_egm_grids(first_period, H_idx, y_idx, method, egm_dir,
+                              egm_bounds, sol_override=ownc_sol)
+
+        #print(f"EGM grid plots for {method} saved to {egm_dir}")
     else:
-        H_indices = [0, 1, 2]  # Default indices if grid not available
-    
-    # Default to first income state if not specified
-    if y_idx_list is None:
-        y_idx_list = [0]
-    
-    # Plot EGM grid for selected housing and income values
-    for y_idx in y_idx_list:
-        for H_idx in H_indices:
-            plot_egm_grids(first_period, H_idx, y_idx, method, egm_dir, 
-                          egm_bounds, sol_override=ownc_sol)
-    
-    #print(f"EGM grid plots for {method} saved to {egm_dir}")
+        print(f"Skipping EGM grid plots for {method} (--skip-egm-plots enabled)")
     
     # Generate policy function plots
     #print(f"\nGenerating policy function plots for {method}...")

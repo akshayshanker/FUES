@@ -227,6 +227,7 @@ import argparse
 import copy
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 import gc
 import resource
@@ -387,6 +388,17 @@ def make_housing_model(args, cfg_container: dict, periods: int, vf_ngrid: int, c
         # logger.error("Stage compilation failed – aborting make_housing_model()", exc_info=True)
         raise
 
+    # 4. Add runtime flags to model settings for operators to use
+    # This allows solver operators to skip expensive operations when not needed
+    if hasattr(args, 'skip_egm_plots'):
+        # Inject skip_egm_plots flag into each period's model settings
+        for period_idx in range(len(mc.periods_list)):
+            period = mc.get_period(period_idx)
+            for stage_name in period.stages.keys():
+                stage = period.get_stage(stage_name)
+                if hasattr(stage, 'model') and hasattr(stage.model, 'settings_dict'):
+                    stage.model.settings_dict['skip_egm_plots'] = args.skip_egm_plots
+
     return mc
 
 
@@ -455,8 +467,10 @@ def main(argv=None):
     )
     p.add_argument("--periods", type=int, default=3)
     p.add_argument("--ue-method", default="ALL")
-    p.add_argument("--plots", action="store_true", 
+    p.add_argument("--plots", action="store_true",
                    help="Generate matplotlib plots")
+    p.add_argument("--skip-egm-plots", action="store_true",
+                   help="Skip EGM plots when --plots is enabled (keeps policy plots only, saves time)")
     p.add_argument("--verbose", action="store_true")
     p.add_argument("--output-root", default="solutions/HR")
     p.add_argument("--bundle-prefix", default="HR")
@@ -495,7 +509,13 @@ def main(argv=None):
                    help="Keep all solution data in memory for saving. Disables memory freeing during solve. Default: False (free memory)")
     
     args = p.parse_args(argv or sys.argv[1:])
-    
+
+    # Generate timestamp suffix for image directories (shared across all plots in this run)
+    # Always generate timestamp to preserve old image files
+    timestamp_suffix = datetime.now().strftime("%Y%m%d_%H%M%S")
+    if args.plots or args.csv_export:
+        print(f"Images will be saved with timestamp suffix: {timestamp_suffix} (preserving previous runs)")
+
     # Enable tracing based on command line flag
     _TRACE_ENABLED = args.trace
     
@@ -517,7 +537,7 @@ def main(argv=None):
         sys.exit(0)
 
     # Initialize execution settings
-    settings = ExecutionSettings(args, CFG_DIR)
+    settings = ExecutionSettings(args, CFG_DIR, timestamp_suffix=timestamp_suffix)
     trace_print("4: Execution settings initialized")
     
     # Print settings summary
@@ -750,8 +770,8 @@ def main(argv=None):
                 # Use organized directory structure for outputs
                 if baseline_bundle_path:
                     from pathlib import Path
-                    # Create clean directory structure: bundle/VFI_HDGRID_GPU/images/...
-                    baseline_images_dir = Path(baseline_bundle_path) / "images"
+                    # Create clean directory structure: bundle/VFI_HDGRID_GPU/images_YYYYMMDD_HHMMSS/...
+                    baseline_images_dir = Path(baseline_bundle_path) / f"images_{timestamp_suffix}"
                     baseline_images_dir.mkdir(parents=True, exist_ok=True)
                     
                     # For CSV export mode, data goes to appropriate subdirectories
@@ -762,7 +782,7 @@ def main(argv=None):
                         baseline_output_dir = baseline_images_dir / "policy_plots"
                         baseline_output_dir.mkdir(parents=True, exist_ok=True)
                 else:
-                    # Fallback to original location if no bundle path
+                    # Fallback to original location if no bundle path (already has timestamp suffix)
                     baseline_output_dir = settings.img_dir
                     baseline_output_dir.mkdir(exist_ok=True)
                 
@@ -776,9 +796,13 @@ def main(argv=None):
                     if args.csv_export:
                         print(f"  Exporting CSV data for {settings.baseline_method}...")
                         if baseline_bundle_path:
-                            print(f"  CSV data will be saved to: {baseline_images_dir}/egm_csv and {baseline_images_dir}/policy_csv")
+                            if args.skip_egm_plots:
+                                print(f"  CSV data will be saved to: {baseline_images_dir}/policy_csv (EGM plots skipped)")
+                            else:
+                                print(f"  CSV data will be saved to: {baseline_images_dir}/egm_csv and {baseline_images_dir}/policy_csv")
                         csv_generate_plots(ref_model, settings.baseline_method, baseline_images_dir, 
-                                         egm_bounds=plot_config['egm_bounds'])
+                                         egm_bounds=plot_config['egm_bounds'],
+                                         skip_egm_plots=args.skip_egm_plots)
                     
                     # Handle matplotlib plots
                     if args.plots:
@@ -790,8 +814,9 @@ def main(argv=None):
                         else:
                             plot_output_dir = baseline_output_dir
                         
-                        generate_plots(ref_model, settings.baseline_method, plot_output_dir, 
-                                     egm_bounds=plot_config['egm_bounds'])
+                        generate_plots(ref_model, settings.baseline_method, plot_output_dir,
+                                     egm_bounds=plot_config['egm_bounds'],
+                                     skip_egm_plots=args.skip_egm_plots)
                 except Exception as err:
                     print(f"[warn] plot-gen for {settings.baseline_method} failed: {err}")
                 finally:
@@ -874,11 +899,11 @@ def main(argv=None):
                     # Use organized directory structure for outputs
                     if method_bundle_path:
                         from pathlib import Path
-                        # Create clean directory structure: bundle/FUES/images/...
-                        bundle_images_dir = Path(method_bundle_path) / "images"
+                        # Create clean directory structure: bundle/FUES/images_YYYYMMDD_HHMMSS/...
+                        bundle_images_dir = Path(method_bundle_path) / f"images_{timestamp_suffix}"
                         bundle_images_dir.mkdir(parents=True, exist_ok=True)
                     else:
-                        # Fallback to original location if no bundle path
+                        # Fallback to original location if no bundle path (already has timestamp suffix)
                         bundle_images_dir = settings.img_dir
                         bundle_images_dir.mkdir(exist_ok=True)
                     
@@ -892,10 +917,14 @@ def main(argv=None):
                         if args.csv_export:
                             print(f"  Exporting CSV data for {method}...")
                             if method_bundle_path:
-                                print(f"  CSV data will be saved to: {bundle_images_dir}/egm_csv and {bundle_images_dir}/policy_csv")
+                                if args.skip_egm_plots:
+                                    print(f"  CSV data will be saved to: {bundle_images_dir}/policy_csv (EGM plots skipped)")
+                                else:
+                                    print(f"  CSV data will be saved to: {bundle_images_dir}/egm_csv and {bundle_images_dir}/policy_csv")
                             csv_generate_plots(model, method, bundle_images_dir, 
                                              egm_bounds=plot_config['egm_bounds'], 
-                                             y_idx_list=plot_config['y_idx_list'])
+                                             y_idx_list=plot_config['y_idx_list'],
+                                             skip_egm_plots=args.skip_egm_plots)
                         
                         # Handle matplotlib plots (including policy plots when both flags are set)
                         if args.plots:
@@ -907,9 +936,10 @@ def main(argv=None):
                             else:
                                 plot_output_dir = bundle_images_dir
                             
-                            generate_plots(model, method, plot_output_dir, 
-                                         egm_bounds=plot_config['egm_bounds'], 
-                                         y_idx_list=plot_config['y_idx_list'])
+                            generate_plots(model, method, plot_output_dir,
+                                         egm_bounds=plot_config['egm_bounds'],
+                                         y_idx_list=plot_config['y_idx_list'],
+                                         skip_egm_plots=args.skip_egm_plots)
                     except Exception as err:
                         print(f"[warn] plot-gen for {method} failed: {err}")
                     finally:

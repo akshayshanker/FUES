@@ -31,7 +31,7 @@ def ensure_dir(path: Path) -> Path:
 
 def csv_generate_plots(model, method, image_dir, plot_period=0, bounds=None,
                        save_dir=None, load_dir=None, plot_all_H_idx=False, 
-                       y_idx_list=None, egm_bounds=None):
+                       y_idx_list=None, egm_bounds=None, skip_egm_plots=False):
     """
     Drop-in replacement for generate_plots that exports EGM data to CSV.
     
@@ -39,13 +39,19 @@ def csv_generate_plots(model, method, image_dir, plot_period=0, bounds=None,
     but exports the EGM grid data to CSV files instead of creating matplotlib plots.
     
     Parameters match generate_plots exactly for seamless replacement.
+    
+    Parameters
+    ----------
+    skip_egm_plots : bool, optional
+        If True, skip EGM CSV exports (only export policy data). Default is False.
     """
     # Convert image_dir to appropriate csv directories
     image_dir = Path(image_dir)
     
-    # Check if we're in the new organized structure (images directory)
-    if image_dir.name == "images" and "bundles" in str(image_dir):
-        # Create separate directories for different CSV types
+    # Check if we're in the new organized structure (images or timestamped images directory)
+    # We're already in bundles/hash/METHOD/images_TIMESTAMP/, don't create another method dir
+    if (image_dir.name.startswith("images") and "bundles" in str(image_dir)):
+        # Create separate directories for different CSV types directly in image_dir
         egm_csv_dir = ensure_dir(image_dir / "egm_csv")
         policy_csv_dir = ensure_dir(image_dir / "policy_csv")
         # Use egm_csv_dir as the main csv_dir for EGM data
@@ -77,59 +83,62 @@ def csv_generate_plots(model, method, image_dir, plot_period=0, bounds=None,
     if y_idx_list is None:
         y_idx_list = [0]
     
-    # Extract EGM data if available
-    print(f"[DEBUG CSV Export] Checking for EGM data in solution object...")
-    print(f"[DEBUG CSV Export] sol has EGM attr: {hasattr(sol, 'EGM')}")
-    if hasattr(sol, '_arr'):
-        print(f"[DEBUG CSV Export] sol._arr type: {type(sol._arr)}")
-    if hasattr(sol, '_jit'):
-        print(f"[DEBUG CSV Export] sol has _jit attr: True")
-        if hasattr(sol._jit, 'EGM'):
-            print(f"[DEBUG CSV Export] sol._jit has EGM attr: True")
-    
-    if hasattr(sol, 'EGM'):
-        egm_data = sol.EGM
-        print(f"[DEBUG CSV Export] Found EGM data in sol.EGM")
-    elif hasattr(sol, '_arr') and isinstance(sol._arr, dict) and 'EGM' in sol._arr:
-        egm_data = sol._arr['EGM']
-        print(f"[DEBUG CSV Export] Found EGM data in sol._arr['EGM']")
-    elif hasattr(sol, '_jit') and hasattr(sol._jit, 'EGM'):
-        egm_data = sol._jit.EGM
-        print(f"[DEBUG CSV Export] Found EGM data in sol._jit.EGM")
+    # Extract EGM data if available (skip if skip_egm_plots is True)
+    if not skip_egm_plots:
+        print(f"[DEBUG CSV Export] Checking for EGM data in solution object...")
+        print(f"[DEBUG CSV Export] sol has EGM attr: {hasattr(sol, 'EGM')}")
+        if hasattr(sol, '_arr'):
+            print(f"[DEBUG CSV Export] sol._arr type: {type(sol._arr)}")
+        if hasattr(sol, '_jit'):
+            print(f"[DEBUG CSV Export] sol has _jit attr: True")
+            if hasattr(sol._jit, 'EGM'):
+                print(f"[DEBUG CSV Export] sol._jit has EGM attr: True")
+        
+        if hasattr(sol, 'EGM'):
+            egm_data = sol.EGM
+            print(f"[DEBUG CSV Export] Found EGM data in sol.EGM")
+        elif hasattr(sol, '_arr') and isinstance(sol._arr, dict) and 'EGM' in sol._arr:
+            egm_data = sol._arr['EGM']
+            print(f"[DEBUG CSV Export] Found EGM data in sol._arr['EGM']")
+        elif hasattr(sol, '_jit') and hasattr(sol._jit, 'EGM'):
+            egm_data = sol._jit.EGM
+            print(f"[DEBUG CSV Export] Found EGM data in sol._jit.EGM")
+        else:
+            egm_data = None
+            print(f"[DEBUG CSV Export] No EGM data found")
+        
+        if egm_data:
+            # Export EGM grid data
+            for y_idx in y_idx_list:
+                for H_idx in H_indices:
+                    grid_key = f"{y_idx}-{H_idx}"
+                    
+                    # Check if egm_data is a dict or has dict-like attributes
+                    if isinstance(egm_data, dict):
+                        unrefined_data = egm_data.get('unrefined', {})
+                        refined_data = egm_data.get('refined', {})
+                    else:
+                        # Handle SimpleNamespace or other object types
+                        unrefined_data = getattr(egm_data, 'unrefined', {})
+                        refined_data = getattr(egm_data, 'refined', {})
+                    
+                    # Export unrefined data
+                    if unrefined_data:
+                        export_egm_grid_csv(
+                            csv_dir / f"egm_unrefined_y{y_idx}_h{H_idx}.csv",
+                            unrefined_data, grid_key, H_idx, y_idx,
+                            grid.H_nxt[H_idx] if grid.H_nxt is not None else H_idx
+                        )
+                    
+                    # Export refined data
+                    if refined_data:
+                        export_egm_grid_csv(
+                            csv_dir / f"egm_refined_y{y_idx}_h{H_idx}.csv",
+                            refined_data, grid_key, H_idx, y_idx,
+                            grid.H_nxt[H_idx] if grid.H_nxt is not None else H_idx
+                        )
     else:
-        egm_data = None
-        print(f"[DEBUG CSV Export] No EGM data found")
-    
-    if egm_data:
-        # Export EGM grid data
-        for y_idx in y_idx_list:
-            for H_idx in H_indices:
-                grid_key = f"{y_idx}-{H_idx}"
-                
-                # Check if egm_data is a dict or has dict-like attributes
-                if isinstance(egm_data, dict):
-                    unrefined_data = egm_data.get('unrefined', {})
-                    refined_data = egm_data.get('refined', {})
-                else:
-                    # Handle SimpleNamespace or other object types
-                    unrefined_data = getattr(egm_data, 'unrefined', {})
-                    refined_data = getattr(egm_data, 'refined', {})
-                
-                # Export unrefined data
-                if unrefined_data:
-                    export_egm_grid_csv(
-                        csv_dir / f"egm_unrefined_y{y_idx}_h{H_idx}.csv",
-                        unrefined_data, grid_key, H_idx, y_idx,
-                        grid.H_nxt[H_idx] if grid.H_nxt is not None else H_idx
-                    )
-                
-                # Export refined data
-                if refined_data:
-                    export_egm_grid_csv(
-                        csv_dir / f"egm_refined_y{y_idx}_h{H_idx}.csv",
-                        refined_data, grid_key, H_idx, y_idx,
-                        grid.H_nxt[H_idx] if grid.H_nxt is not None else H_idx
-                    )
+        print(f"[CSV Export] Skipping EGM CSV exports for {method} (--skip-egm-plots enabled)")
     
     # Export policy function data to appropriate directory
     if image_dir.name == "images" and "bundles" in str(image_dir):
@@ -150,11 +159,20 @@ def csv_generate_plots(model, method, image_dir, plot_period=0, bounds=None,
     with open(csv_dir / 'metadata.json', 'w') as f:
         json.dump(metadata, f, indent=2)
     
-    if image_dir.name == "images" and "bundles" in str(image_dir):
+    if image_dir.name.startswith("images") and "bundles" in str(image_dir):
         print(f"[CSV Export] Saved data for {method}:")
-        print(f"  - EGM data: {egm_csv_dir}")
+        if not skip_egm_plots:
+            print(f"  - EGM data: {egm_csv_dir}")
         print(f"  - Policy data: {policy_csv_dir}")
-        total_csv = len(list(egm_csv_dir.glob('*.csv'))) + len(list(policy_csv_dir.glob('*.csv')))
+        if 'egm_csv_dir' in locals():
+            egm_count = len(list(egm_csv_dir.glob('*.csv'))) if not skip_egm_plots else 0
+        else:
+            egm_count = 0
+        if 'policy_csv_dir' in locals():
+            policy_count = len(list(policy_csv_dir.glob('*.csv')))
+        else:
+            policy_count = 0
+        total_csv = egm_count + policy_count
         print(f"[CSV Export] Total files: metadata.json + {total_csv} CSV files")
     else:
         print(f"[CSV Export] Saved data for {method} to: {csv_dir}")

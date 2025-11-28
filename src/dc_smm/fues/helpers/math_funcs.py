@@ -219,16 +219,26 @@ def interp_clean(xp, yp, x, extrap=False):
         # Left extrapolation
         mask_left = x < xp[0]
         if np.any(mask_left):
-            # Use slope from first two points
-            slope_left = (yp[1] - yp[0]) / (xp[1] - xp[0])
-            evals[mask_left] = yp[0] + slope_left * (x[mask_left] - xp[0])
+            # Use slope from first two points, with zero-division protection
+            dx_left = xp[1] - xp[0]
+            if abs(dx_left) > 1e-14:
+                slope_left = (yp[1] - yp[0]) / dx_left
+                evals[mask_left] = yp[0] + slope_left * (x[mask_left] - xp[0])
+            else:
+                # If points are too close, use constant extrapolation
+                evals[mask_left] = yp[0]
         
         # Right extrapolation  
         mask_right = x > xp[-1]
         if np.any(mask_right):
-            # Use slope from last two points
-            slope_right = (yp[-1] - yp[-2]) / (xp[-1] - xp[-2])
-            evals[mask_right] = yp[-1] + slope_right * (x[mask_right] - xp[-1])
+            # Use slope from last two points, with zero-division protection
+            dx_right = xp[-1] - xp[-2]
+            if abs(dx_right) > 1e-14:
+                slope_right = (yp[-1] - yp[-2]) / dx_right
+                evals[mask_right] = yp[-1] + slope_right * (x[mask_right] - xp[-1])
+            else:
+                # If points are too close, use constant extrapolation
+                evals[mask_right] = yp[-1]
     
     return evals
 
@@ -360,6 +370,36 @@ def _force_crossing_inside(
     return (x, y)
 
 @njit
+def add_single_intersection_right(
+    intersections, n_inter, intr_x, intr_y, sep,
+    L, R, eps_d
+):
+    """
+    Add a single intersection point on the right side.
+    Uses RIGHT branch policies at intr_x + sep.
+    L and R format: (x1, y1, a1, p21, d1, x2, y2, a2, p22, d2)
+    """
+    L_x1, L_y1, L_a1, L_p21, L_d1, L_x2, L_y2, L_a2, L_p22, L_d2 = L
+    R_x1, R_y1, R_a1, R_p21, R_d1, R_x2, R_y2, R_a2, R_p22, R_d2 = R
+    
+    if not np.isnan(intr_x) and n_inter < intersections.shape[0]:
+        # Add only the right intersection point
+        intersections[n_inter, 0] = intr_x + sep
+        intersections[n_inter, 1] = intr_y
+        
+        # Use RIGHT branch policies
+        denom_R = R_x2 - R_x1
+        if np.abs(denom_R) < eps_d:
+            denom_R = eps_d if denom_R >= 0.0 else -eps_d
+        tR = (intr_x + sep - R_x1) / denom_R
+        intersections[n_inter, 2] = R_a1 + tR * (R_a2 - R_a1)
+        intersections[n_inter, 3] = R_p21 + tR * (R_p22 - R_p21)
+        intersections[n_inter, 4] = R_d1 + tR * (R_d2 - R_d1)
+        
+        return n_inter + 1
+    return n_inter
+
+@njit
 def add_intersection_from_pairs_with_sep(
     intersections, n_inter, intr_x, intr_y, sep,
     L, R, eps_d
@@ -403,7 +443,7 @@ def _forced_intersection_twopoint(
     e_lo, e_hi, sep_cap,
     L, R,
     eps_d, eps_sep, parallel_guard,
-    dbg_i, dbg_j
+    dbg_i, dbg_j, single_intersection=False
 ):
     """
     Forced crossing of two line segments with adaptive separation (FUES/DC‑EGM helper).
@@ -449,11 +489,14 @@ def _forced_intersection_twopoint(
         cross‑product denominator. Midpoint fallback is used if |den| < parallel_guard.
     dbg_i, dbg_j : int
         Loop indices used only in the rare fallback debug print.
+    single_intersection : bool, optional
+        If True, add only one intersection point (on the right) instead of two.
+        Default is False for backward compatibility.
 
     Returns
     -------
     n_inter_new : int
-        Updated number of filled rows in `intersections` (n_inter or n_inter+2).
+        Updated number of filled rows in `intersections` (n_inter, n_inter+1, or n_inter+2).
     intr_x, intr_y : float
         Crossing coordinates (after forcing inside (e_lo, e_hi)).
     seed_a_left, seed_d_left : float
@@ -470,7 +513,9 @@ def _forced_intersection_twopoint(
     3) Evaluate y from both segments at that x using sign‑preserving slopes,
        take the average, and clip into [min(yL, yR), max(yL, yR)].
     4) Set separation sep = min(eps_sep, 0.25*(e_hi − e_lo)); if sep_cap>0, sep=min(sep, sep_cap).
-    5) Emit **two** rows: (intr_x − sep, LEFT policies) and (intr_x + sep, RIGHT policies).
+    5) Emit rows based on single_intersection flag:
+       - If False: **two** rows: (intr_x − sep, LEFT policies) and (intr_x + sep, RIGHT policies)
+       - If True: **one** row: (intr_x + sep, RIGHT policies)
        Interpolate policies along the respective segments.
     """
  
@@ -513,10 +558,16 @@ def _forced_intersection_twopoint(
     if sep_cap > 0.0 and sep > sep_cap:
         sep = sep_cap
 
-    n_new = add_intersection_from_pairs_with_sep(
-        intersections, n_inter, intr_x, intr_y, sep,
-        L, R, eps_d
-    )
+    if single_intersection:
+        n_new = add_single_intersection_right(
+            intersections, n_inter, intr_x, intr_y, sep,
+            L, R, eps_d
+        )
+    else:
+        n_new = add_intersection_from_pairs_with_sep(
+            intersections, n_inter, intr_x, intr_y, sep,
+            L, R, eps_d
+        )
 
     if n_new > n_inter:
         denom_L = L_x2 - L_x1
