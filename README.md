@@ -4,6 +4,25 @@ Repository containing solvers and key functions to solve discrete-continuous dyn
 
 **Work in progress and incomplete branch.**
 
+## Installation
+
+```bash
+# Create and activate virtual environment
+python3 -m venv venv
+source venv/bin/activate  # Linux/macOS
+# venv\Scripts\activate   # Windows
+
+# Install from GitHub
+pip install "git+https://github.com/akshayshanker/FUES.git"
+
+# Or clone and install locally
+git clone https://github.com/akshayshanker/FUES.git
+cd FUES
+pip install .
+```
+
+Requires Python 3.11+.
+
 ## Core Modules
 
 - **Fast Upper-Envelope Scan (FUES)**: Original implementation of the FUES algorithm (serves as replication reference)

@@ -24,7 +24,8 @@ dependencies = [
   "tabulate",
   "pyDOE",
   "ConSav",
-  "EconModel"
+  "EconModel",
+  "psutil"
 ]
 
 [project.optional-dependencies]
