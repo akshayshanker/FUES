@@ -17,7 +17,7 @@ from .helpers.math_funcs import (
 # Constants - adjusted for float64 numerical stability
 EPS_D = 1e-14  # Machine epsilon for float64 is ~2.2e-16, so 1e-14 is safe
 EPS_SEP = 1e-10
-EPS_fwd_back = 0.1
+EPS_fwd_back = 0.5
 PARALLEL_GUARD = 1e-10  # Increased for better parallel line detection
 TURN_LEFT = 1
 TURN_RIGHT = 0
@@ -333,11 +333,11 @@ def _postclean_double_jump_mask(e_grid, a_prime, m_bar, skip_mask, eps_d=EPS_D):
 def FUES(
     e_grid, vlu, policy_1, policy_2, del_a,
     b=1e-10, m_bar=1.0, LB=4, endog_mbar=False, padding_mbar=0.0,
-    include_intersections=False,
+    include_intersections=True,
     return_intersections_separately=False,
     single_intersection=False,
-    no_double_jumps=False,
-    disable_jump_checks=True,  # NEW: Control manual overrides for jump checks
+    no_double_jumps=True,
+    disable_jump_checks=False,  # NEW: Control manual overrides for jump checks
     eps_d=None, eps_sep=None, eps_fwd_back=None, parallel_guard=None,
 ):
     """
@@ -679,7 +679,7 @@ def _scan(
 
         # Classify turn direction and jump status
         left_turn_any = g_1 > g_jm1
-        jump_now = (g_tilde_a > M_max) or (g_tilde_a_2 > M_max)
+        jump_now = (g_tilde_a > M_max) #or (g_tilde_a_2 > M_max)
         #jump_now = g_tilde_a > M_max
 
         #if del_pol_2> eps_d:
