@@ -82,12 +82,13 @@ settings:
   n_constraint_points: 100
   n_constraint_points_nxt: 2500
   N_arg_grid_vfi: 500   # Number of grid points for VFI_GRID
-  filder_a_jumps: false
-  max_a_gradient: 1.5
-  
+
   # Asset policy gradient filtering (optional)
   filter_a_jumps: false  # If true, filter points where da/dm exceeds max_a_gradient
-  max_a_gradient: 1.0    # Maximum allowed gradient of asset policy (typically 1.0)
+  max_a_gradient: 1.5    # Maximum allowed gradient of asset policy
+
+  # KT conditions override at jump constraints (for testing)
+  override_KT_conditions_at_jump: false  # When true, disables FOC filtering at jumps
 
 ###################
 # 2) .math Section

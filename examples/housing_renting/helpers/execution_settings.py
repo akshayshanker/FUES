@@ -20,23 +20,26 @@ class ExecutionSettings:
     # Class constants - moved from solve_runner.py
     DEFAULT_BASE = "VFI_HDGRID_GPU"
     ALL_METHODS = ["VFI_HDGRID", "VFI_HDGRID_GPU", "FUES", "DCEGM", "CONSAV", "FUES2DEV"]
-    DEFAULT_FAST_METHODS = ["FUES", "CONSAV", "DCEGM"]
+    DEFAULT_FAST_METHODS = ["FUES", "CONSAV", "DCEGM","FUES_V0DEV"]
     DEFAULT_COMPARISON_METRICS = "dev_c_L2,plot_c_comparison,plot_v_comparison"
     
-    def __init__(self, args, cfg_dir_base):
+    def __init__(self, args, cfg_dir_base, timestamp_suffix=None):
         """
         Initialize configuration manager.
-        
+
         Parameters
         ----------
         args : argparse.Namespace
             Parsed command-line arguments
         cfg_dir_base : Path
             Base directory for configuration files
+        timestamp_suffix : str, optional
+            Timestamp suffix for image directories
         """
         self.args = args
         self.cfg_dir_base = cfg_dir_base
-        
+        self.timestamp_suffix = timestamp_suffix
+
         # Initialize all configuration components
         self.setup_paths()
         self.setup_grid_sizes()
@@ -50,12 +53,23 @@ class ExecutionSettings:
         self.packroot = Path.cwd()
         self.output_root = self.packroot / self.args.output_root
         self.output_root.mkdir(parents=True, exist_ok=True)
-        
+
         # Config directory for this bundle
         self.cfg_dir_bundle = self.cfg_dir_base / self.args.bundle_prefix
-        
-        # Image directory for plots
-        self.img_dir = self.output_root / "images"
+
+        # Image directory for plots - ALWAYS use timestamp suffix to preserve old runs
+        if self.args.plots or self.args.csv_export:
+            # Always create timestamped directory to preserve previous runs
+            if self.timestamp_suffix:
+                self.img_dir = self.output_root / f"images_{self.timestamp_suffix}"
+            else:
+                # Fallback: generate timestamp here if not provided
+                from datetime import datetime
+                fallback_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                self.img_dir = self.output_root / f"images_{fallback_timestamp}"
+        else:
+            # No plots or csv export requested, use default
+            self.img_dir = self.output_root / "images"
         
     def setup_grid_sizes(self):
         """Parse and configure grid sizes."""

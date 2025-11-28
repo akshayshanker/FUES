@@ -17,7 +17,7 @@ from .helpers.math_funcs import (
 # Constants - adjusted for float64 numerical stability
 EPS_D = 1e-14  # Machine epsilon for float64 is ~2.2e-16, so 1e-14 is safe
 EPS_SEP = 1e-10
-EPS_fwd_back = 0.5
+EPS_fwd_back = 0.1
 PARALLEL_GUARD = 1e-10  # Increased for better parallel line detection
 TURN_LEFT = 1
 TURN_RIGHT = 0
@@ -333,8 +333,11 @@ def _postclean_double_jump_mask(e_grid, a_prime, m_bar, skip_mask, eps_d=EPS_D):
 def FUES(
     e_grid, vlu, policy_1, policy_2, del_a,
     b=1e-10, m_bar=1.0, LB=4, endog_mbar=False, padding_mbar=0.0,
-    include_intersections=True,
+    include_intersections=False,
     return_intersections_separately=False,
+    single_intersection=False,
+    no_double_jumps=False,
+    disable_jump_checks=True,  # NEW: Control manual overrides for jump checks
     eps_d=None, eps_sep=None, eps_fwd_back=None, parallel_guard=None,
 ):
     """
@@ -381,6 +384,14 @@ def FUES(
     return_intersections_separately : bool, default False
         If True, return a pair `(fues_result, inter_tuple)` instead of a
         single merged result. See Returns.
+    single_intersection : bool, default False
+        If True, create only one intersection point (on the right) instead of two.
+        This reduces the number of points but may affect envelope smoothness.
+    disable_jump_checks : bool, default False
+        If True, applies manual overrides to disable jump validity checks:
+        - Forces keep_i1=False in right turn cases
+        - Forces keep_j=True in left turn cases
+        Default is False (checks are enabled, no overrides).
     eps_d : float, optional
         Minimum separation between grid points. Defaults to `EPS_D`.
     eps_sep : float, optional
@@ -414,6 +425,9 @@ def FUES(
       order; merged outputs are resorted after adding intersections.
     - Intersections are forced to lie strictly within open intervals, using
       `eps_sep` and `parallel_guard` to avoid degenerate intersections.
+    - When `single_intersection=True`, only one intersection point is created on the
+      right side of the crossing, reducing the total number of points but potentially
+      affecting envelope smoothness at discrete choice switches.
     - Both policies are used to detect jumps. Policy 1 used in forward and backward scans.
 
     """
@@ -440,7 +454,8 @@ def FUES(
     e_out, keep_scan, intersections = _scan(
         e_grid, vlu, policy_1, policy_2, del_a,
         m_bar, LB, endog_mbar, padding_mbar,
-        include_intersections, True,
+        include_intersections, no_double_jumps, single_intersection,
+        disable_jump_checks,
         eps_d, eps_sep, eps_fwd_back, parallel_guard
     )
 
@@ -531,8 +546,10 @@ def _scan(
     LB,
     endog_mbar,
     padding_mbar,
-    include_intersections=True,
+    include_intersections=False,
     not_allow_2lefts=True,
+    single_intersection=False,
+    disable_jump_checks=False,
     eps_d=EPS_D,
     eps_sep=EPS_SEP,
     eps_fwd_back=EPS_fwd_back,
@@ -572,6 +589,10 @@ def _scan(
         Additional padding for endogenous threshold
     include_intersections : bool
         Track intersection points where value functions cross
+    single_intersection : bool
+        If True, create only one intersection point (on the right) instead of two
+    disable_jump_checks : bool
+        If True, applies manual overrides to disable jump validity checks
 
     Returns
     -------
@@ -587,7 +608,8 @@ def _scan(
     N = e_grid.size
     keep = np.ones(N, dtype=np.bool_)
 
-    max_inter = 2 * (N - 1)
+    # Adjust capacity based on whether we're using single or double intersections
+    max_inter = (N - 1) if single_intersection else 2 * (N - 1)
     intersections = np.full((max_inter, 5), np.nan)
     n_inter = 0
 
@@ -657,8 +679,8 @@ def _scan(
 
         # Classify turn direction and jump status
         left_turn_any = g_1 > g_jm1
-        #jump_now = g_tilde_a > M_max or del_pol_2 < 0 or del_pol_a < 0
-        jump_now = g_tilde_a_2 > M_max
+        jump_now = (g_tilde_a > M_max) or (g_tilde_a_2 > M_max)
+        #jump_now = g_tilde_a > M_max
 
         #if del_pol_2> eps_d:
         #    if g_tilde_a_2 > M_max:
@@ -689,7 +711,9 @@ def _scan(
             keep_i1, idx_f, found_forward_same_branch = forward_scan_case_a(
                 e_grid, vlu, a_prime, i, j, N, LB, M_max, g_1, eps_d, eps_fwd_back
             )
-            
+            # Apply manual override only if disable_jump_checks is True
+            if disable_jump_checks:
+                keep_i1 = False
             if keep_i1 and not last_was_jump:
                 created_intersection = False
 
@@ -741,7 +765,7 @@ def _scan(
                         e_grid[j], e_grid[i+1], -1.0,   # sep_cap disabled
                         L, R,
                         eps_d, eps_sep, parallel_guard,
-                        i, j
+                        i, j, single_intersection
                     )
 
                     if added:
@@ -771,7 +795,7 @@ def _scan(
         
 
         # Case C: Left turn
-        if left_turn_jump or left_turn_no_jump:
+        if left_turn_jump:
             keep_j, m_ind = backward_scan_combined(
                 m_buf,
                 m_head,
@@ -785,7 +809,9 @@ def _scan(
                 check_drop=True,
                 eps_d=eps_d,
             )
-
+            # Apply manual override only if disable_jump_checks is True
+            if disable_jump_checks:
+                keep_j = True
             # Case C.1: Left turn with j dropped
             if not keep_j and left_turn_jump:
                 keep[j] = False
@@ -809,7 +835,7 @@ def _scan(
                         e_grid[j], e_grid[i+1], -1.0,
                         L, R,
                         eps_d, eps_sep, parallel_guard,
-                        i, j
+                        i, j, single_intersection
                     )
 
                     if added:
@@ -824,7 +850,8 @@ def _scan(
                 if  not_allow_2lefts and jump_now and last_was_jump:
                     keep[j] = False
                     if include_intersections and added_intersection_last_iter and n_inter > 0:
-                        n_inter = n_inter - 2
+                        # Adjust based on whether we're using single or double intersections
+                        n_inter = n_inter - 1 if single_intersection else n_inter - 2
                     
                     j = prev_j
 
@@ -856,7 +883,7 @@ def _scan(
                         e_grid[j], e_grid[i+1], -1.0,
                         L, R,
                         eps_d, eps_sep, parallel_guard,
-                        i, j
+                        i, j, single_intersection
                     )
                     
                     if added:
@@ -876,7 +903,7 @@ def _scan(
             continue
 
         # Case R: Right turn without jump
-        if right_turn_no_jump:
+        if right_turn_no_jump or left_turn_no_jump:
             k = j
             prev_j = j
             j = i + 1

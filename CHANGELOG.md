@@ -19,6 +19,8 @@ All notable changes to this project will be documented in this file.
 - [2025-11-08 12:15 AEST] Modified image saving to always use timestamped directories (images_YYYYMMDD_HHMMSS) to preserve all previous runs instead of overwriting old image files (execution_settings.py, solve_runner.py)
 - [2025-11-08 12:30 AEST] Added uc_test function in horses_common.py as a simple test marginal utility for FOC verification, imported into horses_c.py for testing purposes
 - [2025-11-08 12:45 AEST] Fixed incorrect double method directory creation: removed redundant method subdirectory since we're already in bundles/hash/METHOD/images_TIMESTAMP/ structure (plots.py, plot_csv_export.py)
+- [2025-11-08 16:00 AEST] Added disable_jump_checks parameter to FUES algorithm to control manual jump check overrides: when True, forces keep_i1=False (right turn) and keep_j=True (left turn); default is False to enable checks (fues.py)
+- [2025-11-08 16:30 AEST] Optimized _egm_preprocess_core for speed: vectorized FOC checks, optimized jump detection with single mask computation, eliminated redundant array operations, replaced np.empty+fill with np.full (horses_common.py)
 
 ### Added
 * **Multi-GPU MPI parallelization for housing model**

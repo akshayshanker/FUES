@@ -338,6 +338,9 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
     n_con = model.settings_dict["n_constraint_points"]
     n_con_nxt = model.settings_dict["n_constraint_points_nxt"]
 
+    # KT conditions override setting (for testing)
+    override_KT = model.settings_dict.get("override_KT_conditions_at_jump", False)
+
     # methods
     ue_method = model.methods["upper_envelope"]
 
@@ -441,9 +444,10 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
                         utility_func, vlu_e, m_bar=m_bar, n_con=n_con,
                         n_con_nxt=n_con_nxt, c_max=c_max, h_nxt=H_val,
                         add_jump_constraints=add_jump_constraints,
-                        # NEW: Pass FOC checking parameters
+                        # Pass FOC checking parameters
                         lambda_next=lambda_e,  # Already scaled by beta*delta*Rfree
-                        uc_func=uc_test
+                        uc_func=uc_test,
+                        override_KT_conditions=override_KT  # NEW: Pass override setting
                     )
                 )
 
