@@ -2,6 +2,34 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.0dev1] - 2025-11-29 – Retirement Example Refactoring and Configuration
+
+### Changed
+* **Retirement example restructured** into modular components:
+  - `plots.py`: Plotting functions (EGM grids, consumption policy, DC-EGM comparison)
+  - `tables.py`: Markdown table generation with parameter captions
+  - `benchmarks.py`: Timing sweep and performance comparisons
+  - `run_experiment.py`: CLI runner with argparse for grid size, plot age, and sweep settings
+
+* **YAML-based model configuration** for retirement experiments:
+  - Added `experiments/retirement/params/` with baseline, high_beta, low_delta, and long_horizon configurations
+  - Model parameters (`m_bar`, `beta`, `delta`, etc.) now loaded from YAML and passed through the solver chain
+  - `m_bar` (FUES jump threshold) configurable from YAML → RetirementModel → Operator_Factory → EGM_UE → FUES
+
+* **Benchmark tables** now include parameter caption showing model configuration (r, β, T, y, b, A_max, m̄, σ)
+
+* **FUES defaults aligned** between `fues.py` and `upperenvelope.py`: `m_bar=1.0`, `lb=4`
+
+* **Upper envelope interface**: Added `include_intersections` parameter to `EGM_UE` and `_fues_engine`
+
+### Fixed
+* Removed deprecated `FUES_sep_intersect` import; replaced with `fues_alg(..., return_intersections_separately=True)`
+* Fixed hardcoded `m_bar` values in `worker_solver` and `iter_bell` to use model parameter
+
+### Added
+* `scripts/pbs/setup_public_venv.sh`: Creates virtual environment with dynx installed from GitHub (public installation)
+* `experiments/retirement/retirement_timings.sh`: Configurable bash wrapper with sweep settings (grid sizes, deltas, runs)
+
 ## [0.5.0dev0] - 2025-08-12 – Multi-GPU Support and FUES Algorithm Cleanup
 - [2025-08-16 10:00 AEST] Major refactoring: Removed MPI support from horses_c.py, removed unused F_ownc_cntn_to_dcsn factory, standardized terminology
 - [2025-08-17 17:00 AEST] Added DGX A100 support with specialized PBS scripts, GPU kernel optimizations, and log management utilities

@@ -72,7 +72,9 @@ class RetirementModel:
                  b=1e-2,
                  grid_max_A=50,
                  grid_size=50,
-                 T=60, padding_mbar= 0):
+                 T=60,
+                 m_bar=1.2,
+                 padding_mbar=0):
 
         self.grid_size = grid_size
         self.r, self.R = r, 1 + r
@@ -83,6 +85,7 @@ class RetirementModel:
         self.T = T
         self.y = y
         self.grid_max_A = grid_max_A
+        self.m_bar = m_bar
         self.padding_mbar = padding_mbar
 
         
@@ -184,6 +187,7 @@ def Operator_Factory(cp):
     R = cp.R
     b = cp.b
     T = cp.T
+    m_bar = cp.m_bar
     padding_mbar = cp.padding_mbar
 
     def EGM_UE(endog_grid,
@@ -362,8 +366,8 @@ def Operator_Factory(cp):
         # Step 2: Upper-envelope (remains in Python mode)
         time_start_fues = time.time()
         egrid1, vf_clean, sigma_clean, a_prime_clean, dela_clean = EGM_UE(
-            endog_grid, vf_work_t_inv, beta * VF_prime_work - delta, sigma_work_t_inv, 
-            asset_grid_A, del_a_unrefined, m_bar=1.00001, method=method, padding_mbar=padding_mbar)
+            endog_grid, vf_work_t_inv, beta * VF_prime_work - delta, sigma_work_t_inv,
+            asset_grid_A, del_a_unrefined, m_bar=m_bar, method=method, padding_mbar=padding_mbar)
         time_end_fues = time.time()
         
         # Step 3: JIT-compiled final interpolation and discrete choice
@@ -428,7 +432,7 @@ def Operator_Factory(cp):
             results = worker_solver(
                 next_worker_cons_derivative, next_euler_derivative, next_worker_value,
                 retiree_consumption[age, :], retiree_values[age, :],
-                retiree_asset_derivatives[age, :], age, 2, method = method)
+                retiree_asset_derivatives[age, :], age, policy_params.m_bar, method=method)
             
             (worker_cons_derivative, unrefined_consumption, worker_value, 
             unrefined_worker_value, endogenous_grid, refined_consumption, 

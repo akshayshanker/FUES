@@ -96,11 +96,12 @@ def EGM_UE(
     uc_func_partial: Callable,
     u_func: Callable,
     ue_method: str = "FUES",
-    m_bar: float = 1.2,
-    lb: int = 3,
+    m_bar: float = 1.0,
+    lb: int = 4,
     rfc_radius: float = 0.75,
     rfc_n_iter: int = 20,
     interpolate: bool = False,
+    include_intersections: bool = True,
 ) -> Tuple[Dict[str, np.ndarray], Dict[str, np.ndarray], Dict[str, np.ndarray]]:
     """Universal entry point for all upper-envelope algorithms.
 
@@ -139,6 +140,7 @@ def EGM_UE(
         lb=lb,
         rfc_radius=rfc_radius,
         rfc_n_iter=rfc_n_iter,
+        include_intersections=include_intersections,
     )
 
     ue_time = time.time() - t0
@@ -200,8 +202,8 @@ def _fues_v0dev_engine(
     v_cntn: Optional[np.ndarray] = None,
     X_dcsn: Optional[np.ndarray] = None,
     uc_func_partial: Callable[[np.ndarray], np.ndarray],
-    m_bar: float = 1.2,
-    lb: int = 3,
+    m_bar: float = 1.0,
+    lb: int = 4,
     **kwargs: Any,
 ) -> Dict[str, np.ndarray]:
     """Wrapper around original FUES (v0dev) implementation.
@@ -269,7 +271,7 @@ def _rfc_engine(
     v_cntn: Optional[np.ndarray] = None,
     X_dcsn: Optional[np.ndarray] = None,
     uc_func_partial: Callable[[np.ndarray], np.ndarray],
-    m_bar: float = 1.2,
+    m_bar: float = 1.0,
     rfc_radius: float = 0.75,
     rfc_n_iter: int = 20,
     **kwargs: Any,
@@ -313,13 +315,14 @@ def _fues_engine(
     v_cntn: Optional[np.ndarray] = None,
     X_dcsn: Optional[np.ndarray] = None,
     uc_func_partial: Callable[[np.ndarray], np.ndarray],
-    m_bar: float = 1.2,
-    lb: int = 3,
+    m_bar: float = 1.0,
+    lb: int = 4,
+    include_intersections: bool = True,
     **kwargs: Any,
 ) -> Dict[str, np.ndarray]:
     """Wrapper around current FUES implementation.
 
-    The optimized production version with pre-allocated scratch buffers, 
+    The optimized production version with pre-allocated scratch buffers,
     true circular buffer, and improved left turn interpolation.
     Uses the same interface as the original FUES implementation.
     """
@@ -331,7 +334,8 @@ def _fues_engine(
     lb_int = int(lb[0]) if isinstance(lb, (list, tuple)) else int(lb)
 
     x_dcsn_ref, qf_ref, kappa_ref, x_cntn_ref, _ = fues_current(
-        x_dcsn_hat, qf_hat, kappa_hat, X_cntn, X_cntn, m_bar=m_bar, LB=lb_int
+        x_dcsn_hat, qf_hat, kappa_hat, X_cntn, X_cntn,
+        m_bar=m_bar, LB=lb_int, include_intersections=include_intersections
     )
 
     return {
