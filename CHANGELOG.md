@@ -7,7 +7,7 @@ All notable changes to this project will be documented in this file.
 ### Changed
 * **Retirement example restructured** into modular components:
   - `plots.py`: Plotting functions (EGM grids, consumption policy, DC-EGM comparison)
-  - `tables.py`: Markdown table generation with parameter captions
+  - `tables.py`: Markdown and LaTeX table generation with parameter captions
   - `benchmarks.py`: Timing sweep and performance comparisons
   - `run_experiment.py`: CLI runner with argparse for grid size, plot age, and sweep settings
 
@@ -16,7 +16,11 @@ All notable changes to this project will be documented in this file.
   - Model parameters (`m_bar`, `beta`, `delta`, etc.) now loaded from YAML and passed through the solver chain
   - `m_bar` (FUES jump threshold) configurable from YAML → RetirementModel → Operator_Factory → EGM_UE → FUES
 
-* **Benchmark tables** now include parameter caption showing model configuration (r, β, T, y, b, A_max, m̄, σ)
+* **Benchmark tables** output both `.md` and `.tex` formats with parameter captions
+
+* **Experiments reorganized**: Moved `run_housing_single_core.sh` to `experiments/housing_renting/` with job configs
+
+* **PBS scripts** updated with `PBS_O_WORKDIR` handling for correct path resolution; logs output to `logs/`
 
 * **FUES defaults aligned** between `fues.py` and `upperenvelope.py`: `m_bar=1.0`, `lb=4`
 
@@ -25,10 +29,12 @@ All notable changes to this project will be documented in this file.
 ### Fixed
 * Removed deprecated `FUES_sep_intersect` import; replaced with `fues_alg(..., return_intersections_separately=True)`
 * Fixed hardcoded `m_bar` values in `worker_solver` and `iter_bell` to use model parameter
+* PBS path resolution for scripts submitted via `qsub`
 
 ### Added
-* `scripts/pbs/setup_public_venv.sh`: Creates virtual environment with dynx installed from GitHub (public installation)
-* `experiments/retirement/retirement_timings.sh`: Configurable bash wrapper with sweep settings (grid sizes, deltas, runs)
+* `scripts/setup_public_venv.sh`: Creates virtual environment with dynx from GitHub
+* `experiments/retirement/retirement_timings.sh`: Configurable bash wrapper with sweep settings
+* `logs/` directory for HPC job output; added `temp/` and `archive/` to `.gitignore`
 
 ## [0.5.0dev0] - 2025-08-12 – Multi-GPU Support and FUES Algorithm Cleanup
 - [2025-08-16 10:00 AEST] Major refactoring: Removed MPI support from horses_c.py, removed unused F_ownc_cntn_to_dcsn factory, standardized terminology

@@ -1,0 +1,13 @@
+# Low work disutility variant
+# Working is less costly
+
+model:
+  r: 0.02
+  beta: 0.98
+  delta: 0.5           # Lower cost of working
+  y: 20
+  b: 1.0e-10
+  grid_max_A: 500
+  T: 20
+  smooth_sigma: 0
+  m_bar: 1.2           # FUES jump detection threshold

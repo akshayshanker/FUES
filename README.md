@@ -1,8 +1,10 @@
-# Discrete-Continuous Dynamic Programming
+# Fast Upper-Envelope Scan (FUES)
 
-Repository containing solvers and key functions to solve discrete-continuous dynamic programming (DCDP) problems on high-performance clusters.
+Core FUES implementation and examples for Dobrescu and Shanker (2025).
 
-**Work in progress and incomplete branch.**
+Includes a general-purpose upper envelope class for one-dimensional discrete-continuous EGM problems.
+
+**Work in progress.**
 
 ## Installation
 
@@ -10,7 +12,6 @@ Repository containing solvers and key functions to solve discrete-continuous dyn
 # Create and activate virtual environment
 python3 -m venv venv
 source venv/bin/activate  # Linux/macOS
-# venv\Scripts\activate   # Windows
 
 # Install from GitHub
 pip install "git+https://github.com/akshayshanker/FUES.git"
@@ -25,40 +26,34 @@ Requires Python 3.11+.
 
 ## Core Modules
 
-- **Fast Upper-Envelope Scan (FUES)**: Original implementation of the FUES algorithm (serves as replication reference)
-- **Upper Envelope Comparison**: Benchmark class to compare performance of different DCEGM upper envelope algorithms in Python
-- **Example Solvers**:
-  1. Model with continuous durables
-  2. Simple retirement model
-  3. Housing-renting model with time-inconsistent preferences
+- **FUES Algorithm**: Fast Upper-Envelope Scan implementation
+- **Upper Envelope Comparison**: Benchmarking framework for DCEGM upper envelope algorithms
+- **Example Models**:
+  - Continuous durables model
+  - Retirement choice model (Ishkakov et al. 2017)
+  - Housing-renting model with time-inconsistent preferences
 
-## External Upper Envelope Packages
+## External Packages
 
-The upper envelope comparison framework includes:
-- **[ConsumptionSaving (ConSav)](https://github.com/NumEconCopenhagen/ConsumptionSaving)**: One dimensioanl version of G2EGM implementation
-- **[DCEGM](https://github.com/econ-ark/HARK)**: Implementation in HARK (econ-ark)
+- **[ConSav](https://github.com/NumEconCopenhagen/ConsumptionSaving)**: G2EGM implementation
+- **[HARK](https://github.com/econ-ark/HARK)**: DCEGM implementation
 
 ## Directory Structure
 
-- `docs/`: Documentation files (papers, slides)
-- `examples/`: Example model implementations
-  - `durables/`: Continuous durables model
-  - `housing_renting/`: Housing-renting model with time inconsistency
-  - `retirement/`: Retirement choice model
-- `experiments/`: Scripts for running experiments and parameter sweeps
-  - `durables/`
-  - `housing_renting/`
-  - `retirement/`
-- `results/`: Experiment results (plots, tables)
-- `scripts/`: Helper scripts for HPC deployment
-  - `int/`: Interactive session scripts
-  - `lib/`: Configuration and reference files
-  - `pbs/`: PBS job submission scripts
-    - `logs/`: HPC execution logs
-- `src/`: Main source code
-  - `dc_smm/`: Discrete-continuous SMM implementation
-    - `fues/`: FUES algorithm implementations
-    - `helpers/`: Generic helper functions
-    - `models/`: Model-specific solvers ("workhorses")
-    - `uenvelope/`: Upper envelope comparison framework
-- `tests/`: Test suite
+```
+├── src/dc_smm/           # Main source code
+│   ├── fues/             # FUES algorithm
+│   ├── uenvelope/        # Upper envelope comparison framework
+│   └── models/           # Model-specific solvers
+├── examples/             # Example implementations
+│   ├── durables/
+│   ├── housing_renting/
+│   └── retirement/       # Plotting, tables, benchmarks
+├── experiments/          # Experiment runners and configs
+│   ├── housing_renting/  # PBS scripts, job configs
+│   └── retirement/       # CLI runner, YAML params
+├── scripts/              # Utility scripts
+│   └── int/              # Interactive session scripts
+├── logs/                 # HPC job logs
+└── tests/
+```

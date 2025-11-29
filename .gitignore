@@ -55,6 +55,8 @@ examples/*/images/
 test_*.py
 verify_*.py
 *_test.py
+temp/
+archive/
 
 # Documentation drafts
 docs/*.tex

@@ -1,0 +1,14 @@
+# Long horizon variant
+# 50 period model for timing benchmarks
+
+model:
+  r: 0.02
+  beta: 0.96           # Lower beta for stability over longer horizon
+  delta: 1.0
+  y: 20
+  b: 1.0e-100          # Tighter borrowing constraint
+  grid_max_A: 500
+  T: 50                # Longer horizon
+  smooth_sigma: 0
+  m_bar: 1.2           # FUES jump detection threshold
+  padding_mbar: -0.011 # For timing benchmarks

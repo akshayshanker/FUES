@@ -1,0 +1,13 @@
+# High discount factor variant
+# More patient agents
+
+model:
+  r: 0.02
+  beta: 0.99           # Higher patience
+  delta: 1.0
+  y: 20
+  b: 1.0e-10
+  grid_max_A: 500
+  T: 20
+  smooth_sigma: 0
+  m_bar: 1.2           # FUES jump detection threshold
