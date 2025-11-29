@@ -402,15 +402,15 @@ def generate_results_table(data, errors, table_type, caption, results_dir="resul
 
         if include_l2:
             l2_row = l2_data[i]
-            rfc_l2 = l2_row[2]
-            fues_l2 = l2_row[3]
-            dcegm_l2 = l2_row[4]
-            consav_l2 = l2_row[5]
+            rfc_cdev = l2_row[2]
+            fues_cdev = l2_row[3]
+            dcegm_cdev = l2_row[4]
+            consav_cdev = l2_row[5]
             tex_lines.append(
                 f"{grid_size} & {delta:.2f} & {rfc_time:.3f} & {fues_time:.3f} & "
                 f"{dcegm_time:.3f} & {consav_time:.3f} & {rfc_error:.3f} & "
                 f"{fues_error:.3f} & {dcegm_error:.3f} & {consav_error:.3f} & "
-                f"{rfc_l2:.3f} & {fues_l2:.3f} & {dcegm_l2:.3f} & {consav_l2:.3f} \\\\"
+                f"{rfc_cdev:.3f} & {fues_cdev:.3f} & {dcegm_cdev:.3f} & {consav_cdev:.3f} \\\\"
             )
         else:
             tex_lines.append(
