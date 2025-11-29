@@ -154,6 +154,49 @@ def euler(cp,sigma_work):
     return np.nanmean(euler)
 
 
+def consumption_deviation(cp, c_solution, c_true, a_grid_true):
+    """Compute mean log absolute deviation from high-resolution 'true' solution.
+
+    Uses the same metric as Euler error: log10(|c - c_true| / c_true).
+    Compares a solution computed on a coarser grid to a high-resolution
+    reference solution (e.g., DCEGM with 20,000 points).
+
+    Parameters
+    ----------
+    cp : RetirementModel
+        Model parameters for the solution being tested.
+    c_solution : ndarray (T x grid_size)
+        Consumption policy from method being tested.
+    c_true : ndarray (T x true_grid_size)
+        High-resolution "true" solution.
+    a_grid_true : ndarray
+        Asset grid for the true solution.
+
+    Returns
+    -------
+    float
+        Mean log10 absolute relative deviation across periods and grid points.
+    """
+    a_grid = cp.asset_grid_A
+    T = cp.T
+
+    deviations = np.zeros((T - 1, len(a_grid)))
+    deviations.fill(np.nan)
+
+    for t in range(T - 1):
+        # Interpolate true solution to the test grid
+        c_true_interp = np.interp(a_grid, a_grid_true, c_true[t])
+        c_test = c_solution[t]
+
+        for i_a in range(len(a_grid)):
+            if c_true_interp[i_a] > 1e-10 and c_test[i_a] > 1e-10:
+                # Same metric as Euler: log10(|c - c_true| / c_true)
+                rel_error = np.abs(c_test[i_a] - c_true_interp[i_a]) / c_true_interp[i_a]
+                deviations[t, i_a] = np.log10(rel_error + 1e-16)
+
+    return np.nanmean(deviations)
+
+
 def Operator_Factory(cp):
     """
     Operator takes in a RetirementModel and returns functions

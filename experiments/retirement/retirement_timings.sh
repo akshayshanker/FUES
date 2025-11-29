@@ -29,9 +29,9 @@ OUTPUT_DIR=""               # Leave empty for default (results/retirement)
 
 # Timing sweep settings
 RUN_TIMINGS=true           # Run full timing comparison (slow)
-SWEEP_GRIDS="500,1000,2000,3000,10000"   # Grid sizes for sweep
+SWEEP_GRIDS="1000,2000,3000,6000,10000"   # Grid sizes for sweep
 SWEEP_DELTAS="0.25,0.5,1,2"              # Delta values for sweep
-SWEEP_RUNS=3                             # Number of runs per config (best of n)
+SWEEP_RUNS=3                            # Number of runs per config (best of n)
 
 # ======================================================================
 #  ENVIRONMENT SETUP

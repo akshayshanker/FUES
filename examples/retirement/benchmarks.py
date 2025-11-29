@@ -8,12 +8,13 @@ Author: Akshay Shanker, University of New South Wales, akshay.shanker@me.com
 import numpy as np
 import os
 
-from dc_smm.models.retirement.retirement import Operator_Factory, RetirementModel, euler
-from .tables import generate_timing_table, generate_results_table
+from dc_smm.models.retirement.retirement import Operator_Factory, RetirementModel, euler, consumption_deviation
+from .tables import generate_timing_table_combined, generate_accuracy_table
 from .plots import plot_egrids, plot_cons_pol, plot_dcegm_cf
 
 
-def test_Timings(grid_sizes, delta_values, n=3, results_dir="results", m_bar=1.2):
+def test_Timings(grid_sizes, delta_values, n=3, results_dir="results", m_bar=1.2,
+                 true_grid_size=20000, true_method='DCEGM'):
     """Run timing benchmarks across grid sizes and delta values.
 
     Parameters
@@ -28,6 +29,11 @@ def test_Timings(grid_sizes, delta_values, n=3, results_dir="results", m_bar=1.2
         Directory to save results. Default is "results".
     m_bar : float
         FUES jump detection threshold. Default is 1.2.
+    true_grid_size : int
+        Grid size for computing "true" reference solution. Default is 20000.
+    true_method : str
+        Method used for computing "true" reference solution. Default is 'DCEGM'.
+        Options: 'RFC', 'FUES', 'DCEGM', 'CONSAV'.
     """
     # Fixed parameters for the benchmark sweep
     benchmark_params = {
@@ -39,11 +45,42 @@ def test_Timings(grid_sizes, delta_values, n=3, results_dir="results", m_bar=1.2
         'grid_max_A': 500,
         'm_bar': m_bar,
         'smooth_sigma': 0,
+        'true_grid_size': true_grid_size,
+        'true_method': true_method,
     }
 
     latex_errors_data = []
     latex_timings_data = []
     latex_total_timing_data = []
+    latex_l2_data = []
+
+    # Pre-compute "true" solutions for each delta value
+    true_solutions = {}
+    for delta in delta_values:
+        print(f"\nComputing true solution for delta={delta} with {true_grid_size} grid points using {true_method}...")
+        cp_true = RetirementModel(
+            r=benchmark_params['r'],
+            beta=benchmark_params['beta'],
+            delta=delta,
+            y=benchmark_params['y'],
+            b=benchmark_params['b'],
+            grid_max_A=benchmark_params['grid_max_A'],
+            grid_size=true_grid_size,
+            T=benchmark_params['T'],
+            smooth_sigma=benchmark_params['smooth_sigma'],
+            m_bar=benchmark_params['m_bar'],
+            padding_mbar=-0.011,
+        )
+        _, _, iter_bell_true = Operator_Factory(cp_true)
+        # Warm-up run
+        _ = iter_bell_true(cp_true, method=true_method)
+        # Actual run
+        _, _, _, _, c_true, _, _ = iter_bell_true(cp_true, method=true_method)
+        true_solutions[delta] = {
+            'c_true': c_true,
+            'a_grid': cp_true.asset_grid_A
+        }
+        print(f"  True solution computed.")
 
     for g_size_baseline in grid_sizes:
         for delta in delta_values:
@@ -77,6 +114,14 @@ def test_Timings(grid_sizes, delta_values, n=3, results_dir="results", m_bar=1.2
             best_error_FUES = float('inf')
             best_error_DCEGM = float('inf')
             best_error_CONSAV = float('inf')
+            best_l2_RFC = float('inf')
+            best_l2_FUES = float('inf')
+            best_l2_DCEGM = float('inf')
+            best_l2_CONSAV = float('inf')
+
+            # Get true solution for this delta
+            c_true = true_solutions[delta]['c_true']
+            a_grid_true = true_solutions[delta]['a_grid']
 
             for _ in range(n):
                 # Test RFC
@@ -84,24 +129,28 @@ def test_Timings(grid_sizes, delta_values, n=3, results_dir="results", m_bar=1.2
                 time_end_RFC = np.mean(iter_time_age[0])
                 total_time_RFC = iter_time_age[1]
                 Euler_error_RFC = euler(cp, c_refined_RFC)
+                cons_dev_RFC = consumption_deviation(cp, c_refined_RFC, c_true, a_grid_true)
 
                 # Test FUES
                 _, _, _, _, c_refined_FUES, _, iter_time_age = iter_bell(cp, method='FUES')
                 time_end_FUES = np.mean(iter_time_age[0])
                 total_time_FUES = iter_time_age[1]
                 Euler_error_FUES = euler(cp, c_refined_FUES)
+                cons_dev_FUES = consumption_deviation(cp, c_refined_FUES, c_true, a_grid_true)
 
                 # Test DCEGM
                 _, _, _, _, c_refined_DCEGM, _, iter_time_age = iter_bell(cp, method='DCEGM')
                 time_end_DCEGM = np.mean(iter_time_age[0])
                 total_time_DCEGM = iter_time_age[1]
                 Euler_error_DCEGM = euler(cp, c_refined_DCEGM)
+                cons_dev_DCEGM = consumption_deviation(cp, c_refined_DCEGM, c_true, a_grid_true)
 
                 # Test CONSAV
                 _, _, _, _, c_refined_CONSAV, _, iter_time_age = iter_bell(cp, method='CONSAV')
                 time_end_CONSAV = np.mean(iter_time_age[0])
                 total_time_CONSAV = iter_time_age[1]
                 Euler_error_CONSAV = euler(cp, c_refined_CONSAV)
+                cons_dev_CONSAV = consumption_deviation(cp, c_refined_CONSAV, c_true, a_grid_true)
 
                 # Take the best of n runs
                 best_time_RFC = min(best_time_RFC, time_end_RFC)
@@ -119,6 +168,11 @@ def test_Timings(grid_sizes, delta_values, n=3, results_dir="results", m_bar=1.2
                 best_error_DCEGM = min(best_error_DCEGM, Euler_error_DCEGM)
                 best_error_CONSAV = min(best_error_CONSAV, Euler_error_CONSAV)
 
+                best_l2_RFC = min(best_l2_RFC, cons_dev_RFC)
+                best_l2_FUES = min(best_l2_FUES, cons_dev_FUES)
+                best_l2_DCEGM = min(best_l2_DCEGM, cons_dev_DCEGM)
+                best_l2_CONSAV = min(best_l2_CONSAV, cons_dev_CONSAV)
+
             latex_errors_data.append([
                 g_size_baseline, delta, best_error_RFC,
                 best_error_FUES, best_error_DCEGM, best_error_CONSAV
@@ -132,23 +186,31 @@ def test_Timings(grid_sizes, delta_values, n=3, results_dir="results", m_bar=1.2
                 best_total_time_FUES * 1000, best_total_time_DCEGM * 1000,
                 best_total_time_CONSAV * 1000
             ])
+            latex_l2_data.append([
+                g_size_baseline, delta, best_l2_RFC,
+                best_l2_FUES, best_l2_DCEGM, best_l2_CONSAV
+            ])
 
             print(
                 f'Euler errors: RFC: {best_error_RFC:.6f}, FUES: {best_error_FUES:.6f}, '
                 f'DCEGM: {best_error_DCEGM:.6f}, CONSAV: {best_error_CONSAV:.6f}'
             )
             print(
+                f'Cons. dev (log10): RFC: {best_l2_RFC:.6f}, FUES: {best_l2_FUES:.6f}, '
+                f'DCEGM: {best_l2_DCEGM:.6f}, CONSAV: {best_l2_CONSAV:.6f}'
+            )
+            print(
                 f'Timings (s): RFC: {best_time_RFC:.6f}, FUES: {best_time_FUES:.6f}, '
                 f'DCEGM: {best_time_DCEGM:.6f}, CONSAV: {best_time_CONSAV:.6f}'
             )
 
-    # Generate markdown tables with parameter caption
-    generate_results_table(latex_timings_data, latex_errors_data,
-                          "timing", "Retirement model", results_dir,
-                          params=benchmark_params)
-    generate_timing_table(latex_total_timing_data, "total_timing",
-                         "Retirement model", results_dir,
-                         params=benchmark_params)
+    # Generate tables with sub-columns
+    generate_timing_table_combined(latex_timings_data, latex_total_timing_data,
+                                   "timing", "Retirement model", results_dir,
+                                   params=benchmark_params)
+    generate_accuracy_table(latex_errors_data, latex_l2_data,
+                            "accuracy", "Retirement model", results_dir,
+                            params=benchmark_params)
 
 
 if __name__ == "__main__":
