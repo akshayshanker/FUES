@@ -1,6 +1,6 @@
 # Retirement Model Experiments
 
-Timing comparison of FUES vs DC-EGM for the Ishkakov et al (2017) retirement model.
+Timing comparison of FUES vs DC-EGM vs CONSAV for the Ishkakov et al (2017) retirement model.
 
 ## Quick Start
 
@@ -58,7 +58,44 @@ qsub experiments/retirement/retirement_timings.sh
 
 Results saved to `FUES/results/retirement/`:
 - `plots/` - PNG figures
-- `tables/` - Markdown tables (when RUN_TIMINGS=true)
+- `retirement_timing.tex/.md` - Timing table (UE and Total time per method)
+- `retirement_accuracy.tex/.md` - Accuracy table (Euler error and consumption deviation)
+
+## Benchmark Metrics
+
+The timing benchmarks compare four upper envelope methods: **RFC**, **FUES**, **DCEGM**, and **CONSAV**.
+
+### Timing Table
+- **UE**: Average upper envelope computation time per period (ms)
+- **Tot**: Total solution time including all periods (ms)
+
+### Accuracy Table
+- **Euler**: Euler equation error, `log₁₀(|u'(c) - βR·E[u'(c')]| / u'(c))`
+- **Dev**: Consumption deviation from true solution, `log₁₀(|c - c_true| / c_true)`
+
+The "true" reference solution is computed using a high-resolution grid (default: 20,000 points with DCEGM). This is configurable via YAML parameters.
+
+## Parameter Configuration
+
+Model and benchmark parameters are configured via YAML files in `params/`:
+
+```yaml
+# params/baseline.yml
+model:
+  r: 0.02
+  beta: 0.98
+  delta: 1.0
+  # ... other model params
+
+benchmark:
+  true_grid_size: 20000  # Grid size for reference solution
+  true_method: DCEGM     # Method for reference (RFC, FUES, DCEGM, CONSAV)
+```
+
+Use different parameter files:
+```bash
+python experiments/retirement/run_experiment.py --params params/long_horizon.yml --run-timings
+```
 
 ## Files
 

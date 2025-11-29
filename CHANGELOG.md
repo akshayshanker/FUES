@@ -36,6 +36,16 @@ All notable changes to this project will be documented in this file.
 * `experiments/retirement/retirement_timings.sh`: Configurable bash wrapper with sweep settings
 * `logs/` directory for HPC job output; added `temp/` and `archive/` to `.gitignore`
 
+* **Consumption deviation benchmarking** (PR #9):
+  - Added `consumption_deviation()` function in `retirement.py` to compare solutions against high-resolution "true" reference (default: 20k grid DCEGM)
+  - Metric uses same format as Euler error: `log₁₀(|c - c_true| / c_true)`
+  - Configurable `true_grid_size` and `true_method` parameters in YAML benchmark section
+  - Restructured benchmark tables into two cleaner formats:
+    * Timing table with UE/Tot sub-columns per method
+    * Accuracy table with Euler/Dev sub-columns per method
+  - Grid-grouped rows with delta as sub-rows for improved readability
+  - Renamed `l2` variables to `cdev` for clarity (consumption deviation, not L2 norm)
+
 ## [0.5.0dev0] - 2025-08-12 – Multi-GPU Support and FUES Algorithm Cleanup
 - [2025-08-16 10:00 AEST] Major refactoring: Removed MPI support from horses_c.py, removed unused F_ownc_cntn_to_dcsn factory, standardized terminology
 - [2025-08-17 17:00 AEST] Added DGX A100 support with specialized PBS scripts, GPU kernel optimizations, and log management utilities

@@ -28,7 +28,7 @@ def parse_list(s, dtype=float):
 
 
 def load_params(params_file):
-    """Load model parameters from YAML file."""
+    """Load model and benchmark parameters from YAML file."""
     # Handle relative paths from script directory
     if not os.path.isabs(params_file):
         params_file = os.path.join(SCRIPT_DIR, params_file)
@@ -36,7 +36,9 @@ def load_params(params_file):
     with open(params_file, 'r') as f:
         config = yaml.safe_load(f)
 
-    return config.get('model', {})
+    model_params = config.get('model', {})
+    benchmark_params = config.get('benchmark', {})
+    return model_params, benchmark_params
 
 
 def main():
@@ -67,7 +69,7 @@ def main():
     args = parser.parse_args()
 
     # Load parameters from YAML
-    params = load_params(args.params)
+    params, benchmark_params = load_params(args.params)
     print(f'Loaded parameters from: {args.params}')
 
     # Setup output directories
@@ -86,13 +88,17 @@ def main():
         grid_sizes = parse_list(args.sweep_grids, int)
         delta_values = parse_list(args.sweep_deltas, float)
         m_bar = params.get('m_bar', 1.2)
+        true_grid_size = benchmark_params.get('true_grid_size', 20000)
+        true_method = benchmark_params.get('true_method', 'DCEGM')
         print(f'\nRunning timing comparison...')
         print(f'  Grid sizes: {grid_sizes}')
         print(f'  Delta values: {delta_values}')
         print(f'  Runs per config: {args.sweep_runs}')
         print(f'  m_bar: {m_bar}')
+        print(f'  True solution: {true_method} with {true_grid_size} grid points')
         test_Timings(grid_sizes, delta_values, n=args.sweep_runs,
-                     results_dir=args.output_dir, m_bar=m_bar)
+                     results_dir=args.output_dir, m_bar=m_bar,
+                     true_grid_size=true_grid_size, true_method=true_method)
 
     # Create model and solve
     print('\nCreating model and solving...')
