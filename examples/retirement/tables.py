@@ -280,8 +280,8 @@ def generate_accuracy_table(euler_data, cdev_data, table_type, caption,
 
 
 def generate_results_table(data, errors, table_type, caption, results_dir="results",
-                           params=None, l2_data=None):
-    """Generate markdown and LaTeX tables with timing, Euler errors, and L2 deviation.
+                           params=None, cdev_data=None):
+    """Generate markdown and LaTeX tables with timing, Euler errors, and consumption deviation.
 
     Parameters
     ----------
@@ -299,16 +299,16 @@ def generate_results_table(data, errors, table_type, caption, results_dir="resul
         Directory to save results. Default is "results".
     params : dict, optional
         Model parameters to include in caption.
-    l2_data : list of lists, optional
+    cdev_data : list of lists, optional
         Data for consumption deviation from reference solution.
         Each row: [grid_size, delta, rfc_cdev, fues_cdev, dcegm_cdev, consav_cdev]
     """
     os.makedirs(results_dir, exist_ok=True)
-    include_l2 = l2_data is not None and len(l2_data) > 0
+    include_cdev = cdev_data is not None and len(cdev_data) > 0
 
     # --- Markdown output ---
     md_lines = []
-    if include_l2:
+    if include_cdev:
         md_lines.append(f"# {caption} - Timing, Euler Errors & Cons. Deviation\n")
         md_lines.append("| Grid | Delta | RFC (ms) | FUES (ms) | DCEGM (ms) | CONSAV (ms) | "
                         "RFC Err | FUES Err | DCEGM Err | CONSAV Err | "
@@ -336,12 +336,12 @@ def generate_results_table(data, errors, table_type, caption, results_dir="resul
         dcegm_error = error_row[4]
         consav_error = error_row[5]
 
-        if include_l2:
-            l2_row = l2_data[i]
-            rfc_cdev = l2_row[2]
-            fues_cdev = l2_row[3]
-            dcegm_cdev = l2_row[4]
-            consav_cdev = l2_row[5]
+        if include_cdev:
+            cdev_row = cdev_data[i]
+            rfc_cdev = cdev_row[2]
+            fues_cdev = cdev_row[3]
+            dcegm_cdev = cdev_row[4]
+            consav_cdev = cdev_row[5]
             md_lines.append(
                 f"| {grid_size} | {delta:.2f} | {rfc_time:.3f} | {fues_time:.3f} | "
                 f"{dcegm_time:.3f} | {consav_time:.3f} | {rfc_error:.3f} | "
@@ -366,7 +366,7 @@ def generate_results_table(data, errors, table_type, caption, results_dir="resul
     tex_lines = []
     tex_lines.append(r"\begin{table}[htbp]")
     tex_lines.append(r"\centering")
-    if include_l2:
+    if include_cdev:
         tex_lines.append(r"\caption{" + caption + " -- Timing, Euler Errors, and Cons. Deviation}")
         tex_lines.append(r"\label{tab:" + table_type + "}")
         tex_lines.append(r"\begin{tabular}{cccccccccccccc}")
@@ -400,12 +400,12 @@ def generate_results_table(data, errors, table_type, caption, results_dir="resul
         dcegm_error = error_row[4]
         consav_error = error_row[5]
 
-        if include_l2:
-            l2_row = l2_data[i]
-            rfc_cdev = l2_row[2]
-            fues_cdev = l2_row[3]
-            dcegm_cdev = l2_row[4]
-            consav_cdev = l2_row[5]
+        if include_cdev:
+            cdev_row = cdev_data[i]
+            rfc_cdev = cdev_row[2]
+            fues_cdev = cdev_row[3]
+            dcegm_cdev = cdev_row[4]
+            consav_cdev = cdev_row[5]
             tex_lines.append(
                 f"{grid_size} & {delta:.2f} & {rfc_time:.3f} & {fues_time:.3f} & "
                 f"{dcegm_time:.3f} & {consav_time:.3f} & {rfc_error:.3f} & "
