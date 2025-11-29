@@ -52,7 +52,7 @@ def test_Timings(grid_sizes, delta_values, n=3, results_dir="results", m_bar=1.2
     latex_errors_data = []
     latex_timings_data = []
     latex_total_timing_data = []
-    latex_l2_data = []
+    latex_cons_dev_data = []
 
     # Pre-compute "true" solutions for each delta value
     true_solutions = {}
@@ -114,10 +114,10 @@ def test_Timings(grid_sizes, delta_values, n=3, results_dir="results", m_bar=1.2
             best_error_FUES = float('inf')
             best_error_DCEGM = float('inf')
             best_error_CONSAV = float('inf')
-            best_l2_RFC = float('inf')
-            best_l2_FUES = float('inf')
-            best_l2_DCEGM = float('inf')
-            best_l2_CONSAV = float('inf')
+            best_cons_dev_RFC = float('inf')
+            best_cons_dev_FUES = float('inf')
+            best_cons_dev_DCEGM = float('inf')
+            best_cons_dev_CONSAV = float('inf')
 
             # Get true solution for this delta
             c_true = true_solutions[delta]['c_true']
@@ -168,10 +168,10 @@ def test_Timings(grid_sizes, delta_values, n=3, results_dir="results", m_bar=1.2
                 best_error_DCEGM = min(best_error_DCEGM, Euler_error_DCEGM)
                 best_error_CONSAV = min(best_error_CONSAV, Euler_error_CONSAV)
 
-                best_l2_RFC = min(best_l2_RFC, cons_dev_RFC)
-                best_l2_FUES = min(best_l2_FUES, cons_dev_FUES)
-                best_l2_DCEGM = min(best_l2_DCEGM, cons_dev_DCEGM)
-                best_l2_CONSAV = min(best_l2_CONSAV, cons_dev_CONSAV)
+                best_cons_dev_RFC = min(best_cons_dev_RFC, cons_dev_RFC)
+                best_cons_dev_FUES = min(best_cons_dev_FUES, cons_dev_FUES)
+                best_cons_dev_DCEGM = min(best_cons_dev_DCEGM, cons_dev_DCEGM)
+                best_cons_dev_CONSAV = min(best_cons_dev_CONSAV, cons_dev_CONSAV)
 
             latex_errors_data.append([
                 g_size_baseline, delta, best_error_RFC,
@@ -186,9 +186,9 @@ def test_Timings(grid_sizes, delta_values, n=3, results_dir="results", m_bar=1.2
                 best_total_time_FUES * 1000, best_total_time_DCEGM * 1000,
                 best_total_time_CONSAV * 1000
             ])
-            latex_l2_data.append([
-                g_size_baseline, delta, best_l2_RFC,
-                best_l2_FUES, best_l2_DCEGM, best_l2_CONSAV
+            latex_cons_dev_data.append([
+                g_size_baseline, delta, best_cons_dev_RFC,
+                best_cons_dev_FUES, best_cons_dev_DCEGM, best_cons_dev_CONSAV
             ])
 
             print(
@@ -196,8 +196,8 @@ def test_Timings(grid_sizes, delta_values, n=3, results_dir="results", m_bar=1.2
                 f'DCEGM: {best_error_DCEGM:.6f}, CONSAV: {best_error_CONSAV:.6f}'
             )
             print(
-                f'Cons. dev (log10): RFC: {best_l2_RFC:.6f}, FUES: {best_l2_FUES:.6f}, '
-                f'DCEGM: {best_l2_DCEGM:.6f}, CONSAV: {best_l2_CONSAV:.6f}'
+                f'Cons. dev (log10): RFC: {best_cons_dev_RFC:.6f}, FUES: {best_cons_dev_FUES:.6f}, '
+                f'DCEGM: {best_cons_dev_DCEGM:.6f}, CONSAV: {best_cons_dev_CONSAV:.6f}'
             )
             print(
                 f'Timings (s): RFC: {best_time_RFC:.6f}, FUES: {best_time_FUES:.6f}, '
@@ -208,7 +208,7 @@ def test_Timings(grid_sizes, delta_values, n=3, results_dir="results", m_bar=1.2
     generate_timing_table_combined(latex_timings_data, latex_total_timing_data,
                                    "timing", "Retirement model", results_dir,
                                    params=benchmark_params)
-    generate_accuracy_table(latex_errors_data, latex_l2_data,
+    generate_accuracy_table(latex_errors_data, latex_cons_dev_data,
                             "accuracy", "Retirement model", results_dir,
                             params=benchmark_params)
 
