@@ -300,7 +300,7 @@ def generate_results_table(data, errors, table_type, caption, results_dir="resul
     params : dict, optional
         Model parameters to include in caption.
     l2_data : list of lists, optional
-        Data for consumption deviation from true solution (20k grid DCEGM).
+        Data for consumption deviation from reference solution.
         Each row: [grid_size, delta, rfc_cdev, fues_cdev, dcegm_cdev, consav_cdev]
     """
     os.makedirs(results_dir, exist_ok=True)
