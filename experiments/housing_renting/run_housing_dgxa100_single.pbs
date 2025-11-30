@@ -161,8 +161,8 @@ python3 -m examples.housing_renting.solve_runner \
     --gpu \
     --trace \
     --low-memory \
-    2> >(tee "${LOG_DIR}/run.err") \
-    1> >(tee "${LOG_DIR}/run.log")
+    2> >(tee "${LOG_DIR}/run_${TIMESTAMP}.err") \
+    1> >(tee "${LOG_DIR}/run_${TIMESTAMP}.log")
 
 echo "GPU profiling run for ${CONFIG_NAME} completed successfully."
 
