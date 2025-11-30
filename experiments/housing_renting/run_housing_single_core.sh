@@ -48,14 +48,10 @@ cd "$FUES_HOME"
 # No MPI settings needed for single core
 export NUMBA_CACHE_DIR=/scratch/tp66/$USER/numba_cache
 
-# Optional: Clear cache if needed
-if [[ "${1:-}" == "--clear-cache" ]]; then
-    echo "Clearing Numba cache at $NUMBA_CACHE_DIR..."
-    rm -rf $NUMBA_CACHE_DIR
-    shift
-fi
-
-mkdir -p $NUMBA_CACHE_DIR
+# Always clear Numba cache to ensure fresh compilation with latest code
+echo "Clearing Numba cache at $NUMBA_CACHE_DIR..."
+rm -rf "$NUMBA_CACHE_DIR"
+mkdir -p "$NUMBA_CACHE_DIR"
 export NUMBA_NUM_THREADS=1
 
 # Hide GPUs from Numba to prevent CUDA initialization errors

@@ -71,7 +71,10 @@ export CUDA_MODULE_LOADING=EAGER
 export CUDA_LAUNCH_BLOCKING=0
 
 # Numba configuration for A100
-export NUMBA_DISABLE_CACHE=1
+export NUMBA_CACHE_DIR=/scratch/tp66/$USER/numba_cache
+echo "Clearing Numba cache at $NUMBA_CACHE_DIR..."
+rm -rf "$NUMBA_CACHE_DIR"
+mkdir -p "$NUMBA_CACHE_DIR"
 export NUMBA_NUM_THREADS=16
 export NUMBA_CUDA_MAX_THREADS=1024
 export NUMBA_CUDA_DEFAULT_PTX_CC="8.0"
