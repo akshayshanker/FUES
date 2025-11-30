@@ -7,9 +7,7 @@
 #PBS -l wd
 #PBS -j oe
 #PBS -r y
-# NOTE: Create logs/ directory before submitting: mkdir -p logs/
-#PBS -o logs/
-#PBS -e logs/
+# Logs go to $REPO_ROOT/logs/housing_renting/${VERSION_TAG}_${TRIAL_ID}/ via tee
 
 # ======================================================================
 #  Single Core Job - Load Baseline, Compute Fast Methods Only

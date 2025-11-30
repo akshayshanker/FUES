@@ -7,10 +7,7 @@
 #PBS -l storage=gdata/tp66+scratch/tp66
 #PBS -l wd
 #PBS -j oe
-#PBS -o logs/fues-dgxa100.o
-#PBS -e logs/fues-dgxa100.e
-
-# NOTE: Create logs/ directory before submitting: mkdir -p logs
+# Logs go to $REPO_ROOT/logs/housing_renting/${VERSION_TAG}_${TRIAL_ID}/ via tee
 
 set -euo pipefail
 
