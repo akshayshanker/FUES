@@ -550,6 +550,7 @@ def _scan(
     not_allow_2lefts=True,
     single_intersection=False,
     disable_jump_checks=False,
+    left_turn_no_jump_strict=False,
     eps_d=EPS_D,
     eps_sep=EPS_SEP,
     eps_fwd_back=EPS_fwd_back,
@@ -593,6 +594,9 @@ def _scan(
         If True, create only one intersection point (on the right) instead of two
     disable_jump_checks : bool
         If True, applies manual overrides to disable jump validity checks
+    left_turn_no_jump_strict : bool
+        If True, left turns without jumps use same logic as left turns with jumps
+        (backward scan, intersection creation). Default False uses simple pointer advance.
 
     Returns
     -------
@@ -794,8 +798,8 @@ def _scan(
 
         
 
-        # Case C: Left turn
-        if left_turn_jump or left_turn_no_jump:
+        # Case C: Left turn (with jump, or no-jump if strict mode)
+        if left_turn_jump or (left_turn_no_jump and left_turn_no_jump_strict):
             keep_j, m_ind = backward_scan_combined(
                 m_buf,
                 m_head,
@@ -902,8 +906,8 @@ def _scan(
             last_was_jump = jump_now
             continue
 
-        # Case R: Right turn without jump
-        if right_turn_no_jump:
+        # Case R: Right turn without jump (or left turn no-jump if not strict)
+        if right_turn_no_jump or (left_turn_no_jump and not left_turn_no_jump_strict):
             k = j
             prev_j = j
             j = i + 1

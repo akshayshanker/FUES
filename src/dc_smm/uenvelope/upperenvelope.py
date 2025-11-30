@@ -338,6 +338,7 @@ def _fues_engine(
     no_double_jumps: bool = True,
     disable_jump_checks: bool = False,
     return_intersections_separately: bool = False,
+    left_turn_no_jump_strict: bool = False,
     eps_d: Optional[float] = None,
     eps_sep: Optional[float] = None,
     eps_fwd_back: Optional[float] = None,
@@ -356,6 +357,7 @@ def _fues_engine(
         single_intersection: Only compute single intersection per jump
         no_double_jumps: Filter out consecutive jumps
         disable_jump_checks: Disable manual jump check overrides
+        left_turn_no_jump_strict: Treat left turns without jumps same as left turns with jumps
         eps_d, eps_sep, eps_fwd_back, parallel_guard: Numerical tolerances
     """
 
@@ -376,6 +378,7 @@ def _fues_engine(
         "no_double_jumps": no_double_jumps,
         "disable_jump_checks": disable_jump_checks,
         "return_intersections_separately": return_intersections_separately,
+        "left_turn_no_jump_strict": left_turn_no_jump_strict,
     }
     # Add optional numerical tolerances if specified
     if eps_d is not None:
