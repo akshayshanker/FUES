@@ -108,7 +108,8 @@ settings:
       padding_mbar: 0.0       # Padding for m_bar calculation
       no_double_jumps: true   # Filter out consecutive jumps
       disable_jump_checks: false  # Disable manual jump check overrides
-      use_post_state_jump_test: true
+      use_post_state_jump_test: true #if true, post-state also included in jump check
+      left_turn_no_jump_strict: false # if false, left turn with no jump treated like a right turn with no jump
       
       # Numerical tolerances
       eps_d: 1.0e-14          # Machine epsilon protection for divisions

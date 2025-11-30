@@ -99,21 +99,14 @@ GRID_POINTS=${CONFIG_REF["grid_points"]}
 VERSION_TAG="${CONFIG_REF[version_suffix]}"
 DELTA_PB=${CONFIG_REF["delta_pb"]:-1}
 
-# --- Logging and Paths (same structure as run_housing_gpu.pbs) ---
+# --- Logging and Paths ---
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
-# TRIAL_ID for DGX A100 runs
 TRIAL_ID="dgxa100"
+RUN_ID="${VERSION_TAG}_${TIMESTAMP}_${TRIAL_ID}"
 
-# Build paths based on whether TRIAL_ID is set
-if [[ -n "$TRIAL_ID" ]]; then
-    RUN_ID="${VERSION_TAG}_${TIMESTAMP}_${TRIAL_ID}"
-    LOG_DIR="$REPO_ROOT/logs/housing_renting/${VERSION_TAG}_${TRIAL_ID}"
-    OUTPUT_DIR="/scratch/tp66/$USER/FUES/solutions/housing_renting/${VERSION_TAG}_${TRIAL_ID}"
-else
-    RUN_ID="${VERSION_TAG}_${TIMESTAMP}"
-    LOG_DIR="$REPO_ROOT/logs/housing_renting/${VERSION_TAG}"
-    OUTPUT_DIR="/scratch/tp66/$USER/FUES/solutions/housing_renting/${VERSION_TAG}"
-fi
+# All logs go to experiments/housing_renting/logs/ (same as PBS -o)
+LOG_DIR="$SCRIPT_DIR/logs"
+OUTPUT_DIR="/scratch/tp66/$USER/FUES/solutions/housing_renting/${VERSION_TAG}_${TRIAL_ID}"
 
 CONFIG_ID="$VERSION_TAG"
 OUTPUT_ROOT="$OUTPUT_DIR"

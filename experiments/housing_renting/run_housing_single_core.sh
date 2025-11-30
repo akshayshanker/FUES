@@ -96,19 +96,12 @@ for CONFIG_NAME in "${CONFIG_TO_RUN[@]}"; do
 
     TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
     VERSION_TAG="${CONFIG_REF[version_suffix]}"
-    # TRIAL_ID can be set as environment variable or default to empty
-    TRIAL_ID="gpu_test"
+    TRIAL_ID="single_core"
+    RUN_ID="${VERSION_TAG}_${TIMESTAMP}_${TRIAL_ID}"
     
-    # Build paths based on whether TRIAL_ID is set
-    if [[ -n "$TRIAL_ID" ]]; then
-        RUN_ID="${VERSION_TAG}_${TIMESTAMP}_${TRIAL_ID}"
-        LOG_DIR="$REPO_ROOT/logs/housing_renting/${VERSION_TAG}_${TRIAL_ID}"
-        OUTPUT_DIR="/scratch/tp66/$USER/FUES/solutions/housing_renting/${VERSION_TAG}_${TRIAL_ID}"
-    else
-        RUN_ID="${VERSION_TAG}_${TIMESTAMP}"
-        LOG_DIR="$REPO_ROOT/logs/housing_renting/${VERSION_TAG}"
-        OUTPUT_DIR="/scratch/tp66/$USER/FUES/solutions/housing_renting/${VERSION_TAG}"
-    fi
+    # All logs go to experiments/housing_renting/logs/ (same as PBS -o)
+    LOG_DIR="$SCRIPT_DIR/logs"
+    OUTPUT_DIR="/scratch/tp66/$USER/FUES/solutions/housing_renting/${VERSION_TAG}_${TRIAL_ID}"
     mkdir -p "$LOG_DIR"
 
     echo "Starting single-core run for ${CONFIG_NAME} at $(date)"
