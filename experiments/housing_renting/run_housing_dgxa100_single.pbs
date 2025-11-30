@@ -2,7 +2,7 @@
 #PBS -N fues-dgxa100-single
 #PBS -P tp66
 #PBS -q dgxa100
-#PBS -l ncpus=16,mem=612GB,walltime=12:00:00
+#PBS -l ncpus=16,mem=256GB,walltime=04:00:00
 #PBS -l ngpus=1
 #PBS -l storage=gdata/tp66+scratch/tp66
 #PBS -l wd
@@ -15,8 +15,10 @@ set -euo pipefail
 # =====================================================
 # DGX A100 Single GPU Configuration
 # =====================================================
-# Optimized for single A100 GPU with 80GB memory
-# Uses 16 cores, 512GB RAM, 1 GPU (80GB HBM2e)
+# Optimal settings for 1 GPU on Gadi DGX A100 node:
+# - 16 CPUs = 1 NUMA node (best memory locality)
+# - 256GB RAM = 1 NUMA node's local memory
+# - 1 GPU = A100 80GB (sufficient for housing model)
 # =====================================================
 
 # --- Path Setup ---
