@@ -111,8 +111,7 @@ settings:
       single_intersection: false  # Only compute single intersection per jump
       no_double_jumps: true   # Filter out consecutive jumps
       disable_jump_checks: false  # Disable manual jump check overrides
-    DCEGM:
-      m_bar: 1.8
+    DCEGM: {}
     CONSAV: {}
 
 ###################
