@@ -76,6 +76,21 @@ export NUMBA_CUDA_MAX_THREADS=1024
 export NUMBA_CUDA_DEFAULT_PTX_CC="8.0"
 export NUMBA_CUDA_COMPUTE_CAPABILITY="8.0"
 
+# --- Log PBS Job Details ---
+echo "========================================================"
+echo "PBS JOB DETAILS"
+echo "========================================================"
+echo "Job ID: ${PBS_JOBID:-'interactive'}"
+echo "Job Name: ${PBS_JOBNAME:-'N/A'}"
+echo "Queue: ${PBS_QUEUE:-'N/A'}"
+echo "Node: $(hostname)"
+echo "Working Dir: $(pwd)"
+echo "Submit Dir: ${PBS_O_WORKDIR:-$(pwd)}"
+echo "Start Time: $(date)"
+echo "User: $USER"
+echo "========================================================"
+
+
 # --- 5. Error Handling and Logging ---
 export PYTHONPATH=$PWD:$PYTHONPATH
 export MAKEMOD_QUIET=true

@@ -64,6 +64,21 @@ export CUDA_VISIBLE_DEVICES=""
 export NUMBA_CUDA_LOG_LEVEL=WARNING
 export NUMBA_DISABLE_CUDA=1
 
+# --- Log PBS Job Details ---
+echo "========================================================"
+echo "PBS JOB DETAILS"
+echo "========================================================"
+echo "Job ID: ${PBS_JOBID:-'interactive'}"
+echo "Job Name: ${PBS_JOBNAME:-'N/A'}"
+echo "Queue: ${PBS_QUEUE:-'N/A'}"
+echo "Node: $(hostname)"
+echo "Working Dir: $(pwd)"
+echo "Submit Dir: ${PBS_O_WORKDIR:-$(pwd)}"
+echo "Start Time: $(date)"
+echo "User: $USER"
+echo "========================================================"
+
+
 # --- Suppress errors and warnings ---
 export PYTHONPATH=$PWD:$PYTHONPATH
 export MAKEMOD_QUIET=true           # Only errors
