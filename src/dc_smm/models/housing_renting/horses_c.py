@@ -343,6 +343,9 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
     ue_method = model.methods["upper_envelope"]
     
     # Method-specific kwargs (e.g., FUES: endog_mbar, padding_mbar, m_bar, lb, etc.)
+    # DEBUG: Print full settings_dict
+    print(f"[DEBUG horses_c] settings_dict keys: {list(model.settings_dict.keys())}")
+    print(f"[DEBUG horses_c] ue_kwargs raw: {model.settings_dict.get("ue_kwargs", "NOT FOUND")}")
     ue_kwargs = model.settings_dict.get("ue_kwargs", {}).get(ue_method, {})
     # DEBUG: Print to verify ue_kwargs from config
     print(f"[DEBUG horses_c] ue_method={ue_method}, ue_kwargs={ue_kwargs}")
