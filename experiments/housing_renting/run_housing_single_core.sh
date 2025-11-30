@@ -7,9 +7,7 @@
 #PBS -l wd
 #PBS -j oe
 #PBS -r y
-#PBS -o /dev/null
-#PBS -e /dev/null
-# Actual logs go to $REPO_ROOT/logs/housing_renting/${VERSION_TAG}_${TRIAL_ID}/ via tee
+# Logs go to $REPO_ROOT/logs/housing_renting/${VERSION_TAG}_${TRIAL_ID}/ via tee
 
 # ======================================================================
 #  Single Core Job - Load Baseline, Compute Fast Methods Only
@@ -63,21 +61,6 @@ export NUMBA_NUM_THREADS=1
 export CUDA_VISIBLE_DEVICES=""
 export NUMBA_CUDA_LOG_LEVEL=WARNING
 export NUMBA_DISABLE_CUDA=1
-
-# --- Log PBS Job Details ---
-echo "========================================================"
-echo "PBS JOB DETAILS"
-echo "========================================================"
-echo "Job ID: ${PBS_JOBID:-'interactive'}"
-echo "Job Name: ${PBS_JOBNAME:-'N/A'}"
-echo "Queue: ${PBS_QUEUE:-'N/A'}"
-echo "Node: $(hostname)"
-echo "Working Dir: $(pwd)"
-echo "Submit Dir: ${PBS_O_WORKDIR:-$(pwd)}"
-echo "Start Time: $(date)"
-echo "User: $USER"
-echo "========================================================"
-
 
 # --- Suppress errors and warnings ---
 export PYTHONPATH=$PWD:$PYTHONPATH
@@ -155,19 +138,19 @@ for CONFIG_NAME in "${CONFIG_TO_RUN[@]}"; do
       --plots \
       $EGM_PLOTS_FLAG \
       --trace \
-      2> >(tee "${LOG_DIR}/run_${TIMESTAMP}.err") \
-      1> >(tee "${LOG_DIR}/run_${TIMESTAMP}.log")
+      2> >(tee "${LOG_DIR}/run.err") \
+      1> >(tee "${LOG_DIR}/run.log")
 
     EXIT_CODE=$?
     if [ $EXIT_CODE -ne 0 ]; then
         echo "ERROR: Run for ${CONFIG_NAME} failed with exit code: $EXIT_CODE" >&2
-        echo "Check error log at: ${LOG_DIR}/run_${TIMESTAMP}.err" >&2
+        echo "Check error log at: ${LOG_DIR}/run.err" >&2
         
         # Check for common errors in the log
-        if grep -q "LLVM ERROR" "${LOG_DIR}/run_${TIMESTAMP}.err"; then
+        if grep -q "LLVM ERROR" "${LOG_DIR}/run.err"; then
             echo "HINT: LLVM error detected. Try running with --clear-cache flag" >&2
         fi
-        if grep -q "baseline.*not found" "${LOG_DIR}/run_${TIMESTAMP}.err"; then
+        if grep -q "baseline.*not found" "${LOG_DIR}/run.err"; then
             echo "HINT: Baseline bundle not found. Run MPI job first to compute baseline" >&2
         fi
         

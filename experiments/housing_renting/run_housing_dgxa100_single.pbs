@@ -7,9 +7,7 @@
 #PBS -l storage=gdata/tp66+scratch/tp66
 #PBS -l wd
 #PBS -j oe
-#PBS -o /dev/null
-#PBS -e /dev/null
-# Actual logs go to $REPO_ROOT/logs/housing_renting/${VERSION_TAG}_${TRIAL_ID}/ via tee
+# Logs go to $REPO_ROOT/logs/housing_renting/${VERSION_TAG}_${TRIAL_ID}/ via tee
 
 set -euo pipefail
 
@@ -75,21 +73,6 @@ export NUMBA_NUM_THREADS=16
 export NUMBA_CUDA_MAX_THREADS=1024
 export NUMBA_CUDA_DEFAULT_PTX_CC="8.0"
 export NUMBA_CUDA_COMPUTE_CAPABILITY="8.0"
-
-# --- Log PBS Job Details ---
-echo "========================================================"
-echo "PBS JOB DETAILS"
-echo "========================================================"
-echo "Job ID: ${PBS_JOBID:-'interactive'}"
-echo "Job Name: ${PBS_JOBNAME:-'N/A'}"
-echo "Queue: ${PBS_QUEUE:-'N/A'}"
-echo "Node: $(hostname)"
-echo "Working Dir: $(pwd)"
-echo "Submit Dir: ${PBS_O_WORKDIR:-$(pwd)}"
-echo "Start Time: $(date)"
-echo "User: $USER"
-echo "========================================================"
-
 
 # --- 5. Error Handling and Logging ---
 export PYTHONPATH=$PWD:$PYTHONPATH
@@ -176,8 +159,8 @@ python3 -m examples.housing_renting.solve_runner \
     --gpu \
     --trace \
     --low-memory \
-    2> >(tee "${LOG_DIR}/run_${TIMESTAMP}.err") \
-    1> >(tee "${LOG_DIR}/run_${TIMESTAMP}.log")
+    2> >(tee "${LOG_DIR}/run.err") \
+    1> >(tee "${LOG_DIR}/run.log")
 
 echo "GPU profiling run for ${CONFIG_NAME} completed successfully."
 
