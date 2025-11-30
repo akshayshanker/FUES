@@ -337,7 +337,9 @@ def FUES(
     return_intersections_separately=False,
     single_intersection=False,
     no_double_jumps=True,
-    disable_jump_checks=False,  # NEW: Control manual overrides for jump checks
+    disable_jump_checks=False,
+    left_turn_no_jump_strict=False,
+    use_post_state_jump_test=False,
     eps_d=None, eps_sep=None, eps_fwd_back=None, parallel_guard=None,
 ):
     """
@@ -392,6 +394,12 @@ def FUES(
         - Forces keep_i1=False in right turn cases
         - Forces keep_j=True in left turn cases
         Default is False (checks are enabled, no overrides).
+    left_turn_no_jump_strict : bool, default False
+        If True, left turns without jumps use same logic as left turns with jumps
+        (backward scan, intersection creation). Default False uses simple pointer advance.
+    use_post_state_jump_test : bool, default False
+        If True, jump detection also considers post-state gradient (g_tilde_a_2).
+        Default False uses only pre-state gradient (g_tilde_a).
     eps_d : float, optional
         Minimum separation between grid points. Defaults to `EPS_D`.
     eps_sep : float, optional
@@ -455,7 +463,7 @@ def FUES(
         e_grid, vlu, policy_1, policy_2, del_a,
         m_bar, LB, endog_mbar, padding_mbar,
         include_intersections, no_double_jumps, single_intersection,
-        disable_jump_checks,
+        disable_jump_checks, left_turn_no_jump_strict, use_post_state_jump_test,
         eps_d, eps_sep, eps_fwd_back, parallel_guard
     )
 

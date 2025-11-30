@@ -108,6 +108,7 @@ settings:
       padding_mbar: 0.0       # Padding for m_bar calculation
       no_double_jumps: true   # Filter out consecutive jumps
       disable_jump_checks: false  # Disable manual jump check overrides
+      use_post_state_jump_test: true
       
       # Numerical tolerances
       eps_d: 1.0e-14          # Machine epsilon protection for divisions
