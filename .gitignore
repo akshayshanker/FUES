@@ -21,8 +21,15 @@ build/
 *.o[0-9]*
 *.e[0-9]*
 *.out
-logs/*
-!logs/.gitkeep
+# Logs folders (anywhere in repo)
+**/logs/
+!**/logs/.gitkeep
+
+# PBS scripts (cluster-specific)
+scripts/pbs/
+
+# Old/deprecated code
+**/old/
 
 # Backup directories
 *_backup_*
