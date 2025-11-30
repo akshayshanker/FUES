@@ -59,6 +59,7 @@ stage:
     c_max: ["c_max"]
     N_arg_grid_vfi: ["N_arg_grid_vfi"]
     n_constraint_points_nxt: ["n_constraint_points_nxt"]
+    ue_kwargs: ["ue_kwargs"]  # Method-specific upper envelope kwargs from master
 
   methods:
     solution: "EGM"
