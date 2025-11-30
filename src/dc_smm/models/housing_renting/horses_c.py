@@ -331,8 +331,6 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
     c_max = model.settings_dict["c_max"]
 
     # Get functions and parameters
-    m_bar = model.settings_dict["m_bar"]
-    lb = model.settings_dict["lb"]
     rfc_radius = model.settings_dict["rfc_radius"]
     rfc_n_iter = model.settings_dict["rfc_n_iter"]
     n_con = model.settings_dict["n_constraint_points"]
@@ -344,8 +342,12 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
     # methods
     ue_method = model.methods["upper_envelope"]
     
-    # Method-specific kwargs (e.g., FUES: endog_mbar, padding_mbar, etc.)
+    # Method-specific kwargs (e.g., FUES: endog_mbar, padding_mbar, m_bar, lb, etc.)
     ue_kwargs = model.settings_dict.get("ue_kwargs", {}).get(ue_method, {})
+    
+    # Get m_bar and lb from ue_kwargs, with fallback to top-level settings for backward compatibility
+    m_bar = ue_kwargs.get("m_bar", model.settings_dict.get("m_bar", 1.0))
+    lb = ue_kwargs.get("lb", model.settings_dict.get("lb", 4))
 
     # ------------------------------------------------------------------
     # 2. Produce the grids we will fill

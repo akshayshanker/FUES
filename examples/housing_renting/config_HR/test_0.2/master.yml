@@ -99,6 +99,22 @@ settings:
   n_constraint_points_nxt: 100
   N_arg_grid_vfi: 500   # Number of grid points for VFI_GRID
 
+  # Method-specific upper envelope kwargs
+  # These are passed directly to the UE engine (FUES, DCEGM, etc.)
+  # Note: m_bar and lb can also be set at top-level settings for backward compatibility
+  ue_kwargs:
+    FUES:
+      m_bar: 1.8              # Jump threshold for same-branch tests
+      lb: 10                  # Look-back window size
+      endog_mbar: false       # Use endogenous m_bar based on policy gradients
+      padding_mbar: 0.0       # Padding for m_bar calculation
+      single_intersection: false  # Only compute single intersection per jump
+      no_double_jumps: true   # Filter out consecutive jumps
+      disable_jump_checks: false  # Disable manual jump check overrides
+    DCEGM:
+      m_bar: 1.8
+    CONSAV: {}
+
 ###################
 # 2) .math Section
 ###################
