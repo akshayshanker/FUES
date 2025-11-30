@@ -102,29 +102,176 @@ settings:
   # Method-specific upper envelope kwargs
   # These are passed directly to the UE engine (FUES, DCEGM, etc.)
   # Note: m_bar and lb can also be set at top-level settings for backward compatibility
-  # Method-specific upper envelope kwargs
-  # These are passed directly to the UE engine (FUES, DCEGM, etc.)
   ue_kwargs:
     FUES:
-      # Core parameters
-      m_bar: 1.0              # Jump threshold for same-branch tests
-      lb: 4                   # Look-back window size
-      
-      # Intersection handling
-      include_intersections: true       # Add intersection points at jumps
-      return_intersections_separately: false  # Return intersections in separate array
-      single_intersection: false        # Only compute single intersection per jump
-      
-      # Jump filtering
+      m_bar: 1.8              # Jump threshold for same-branch tests
+      lb: 10                  # Look-back window size
       endog_mbar: false       # Use endogenous m_bar based on policy gradients
       padding_mbar: 0.0       # Padding for m_bar calculation
+      single_intersection: false  # Only compute single intersection per jump
       no_double_jumps: true   # Filter out consecutive jumps
       disable_jump_checks: false  # Disable manual jump check overrides
-      
-      # Numerical tolerances
-      eps_d: 1.0e-14          # Machine epsilon protection for divisions
-      eps_sep: 1.0e-08        # Minimum separation when creating intersections
-      eps_fwd_back: 0.5       # Forward/backward scan proximity threshold
-      parallel_guard: 1.0e-10 # Tolerance for near-parallel segment detection
     DCEGM: {}
     CONSAV: {}
+
+###################
+# 2) .math Section
+###################
+math:
+  functions_CRRA:
+    # Generic utility and marginal utility functions (shared across stages)
+    owner_utility:
+      expr: "((c**alpha * (kappa*(H_nxt+iota))**(1-alpha))**(1-gamma) - 1)/(1-gamma)"
+      description: "Cobb–Douglas aggregator nested in CRRA utility for owners"
+
+    renter_utility:
+      expr: "((c**alpha * (kappa*(S+iota))**(1-alpha))**(1-gamma) - 1)/(1-gamma)"
+      description: "Cobb–Douglas aggregator nested in CRRA utility for renters"
+
+    marginal_utility:
+      expr: "alpha * (c**alpha * (kappa*(S+iota))**(1-alpha))**(1-gamma) / c"
+      description: "Marginal utility for Cobb–Douglas nested in CRRA"
+
+    owner_marginal_utility:
+      expr: "alpha * (c**alpha * (kappa*(H_nxt+iota))**(1-alpha))**(1-gamma) / c"
+      description: "Marginal utility for Cobb–Douglas nested in CRRA for owners"
+
+    inv_marginal_utility:
+      expr: "(lambda_e/(alpha*(kappa*(H_nxt+iota))**((1-alpha)*(1-gamma))))**(1/(alpha*(1-gamma)-1))"
+      description: "Inverse marginal utility under Cobb–Douglas/CRRA"
+
+    # Joint utility and marginal utility helpers
+    owner_util_mutil:
+      u_val: "((c**alpha * (kappa*(H_nxt+iota))**(1-alpha))**(1-gamma) - 1)/(1-gamma)"
+      uc_val: "alpha * (c**alpha * (kappa*(H_nxt+iota))**(1-alpha))**(1-gamma) / c"
+      description: "Returns Cobb–Douglas/CRRA utility and marginal utility for owners"
+
+    renter_util_mutil:
+      u_val: "((c**alpha * (kappa*(S+iota))**(1-alpha))**(1-gamma) - 1)/(1-gamma)"
+      uc_val: "alpha * (c**alpha * (kappa*(S+iota))**(1-alpha))**(1-gamma) / c"
+      description: "Returns Cobb–Douglas/CRRA utility and marginal utility for renters"
+    
+    # Override functions from master with local modifications
+    uc_func:
+      inherit: "uc_general"                   # Inherit but override expression
+      expr: "alpha * (c**alpha * (kappa*(H_nxt+iota))**(1-alpha))**(1-gamma) / c"
+      description: "Modified Cobb–Douglas/CRRA marginal utility"
+    
+    # Functions that build on master patterns
+    egm_consumption:
+      inherit: "egm_consumption"              # Inherit but override expression
+      expr: "(lambda_v/(alpha*(kappa*(H_nxt+iota))**((1-alpha)*(1-gamma))))**(1/(alpha*(1-gamma)-1))"
+      description: "EGM consumption formula for Cobb–Douglas/CRRA"
+    
+    # Purely local functions (no inheritance)
+    u_func:
+      expr: "((c**alpha * (kappa*(H_nxt+iota))**(1-alpha))**(1-gamma) - 1)/(1-gamma)"
+      description: "Stage-specific Cobb–Douglas/CRRA utility"
+    
+    # Complex operations
+    egm_operations:
+      c_egm: "(lambda_e/(alpha*(kappa*(H_nxt+iota))**((1-alpha)*(1-gamma))))**(1/(alpha*(1-gamma)-1))"
+      m_egm: "c_egm + a_nxt"
+      lambda_v_egm: "alpha * (c_egm**alpha * (kappa*(H_nxt+iota))**(1-alpha))**(1-gamma) / c_egm"
+      vlu_v_egm: "((c_egm**alpha * (kappa*(H_nxt+iota))**(1-alpha))**(1-gamma) - 1)/(1-gamma) + beta*vlu_e"
+      description: "EGM operations with Cobb–Douglas/CRRA"
+      compilation: "eval"
+    
+    rental_payment:
+        expr: "S = S; y = y; w_rent = w - P_r*S"
+        description: "Cash‑on‑hand after paying rent"
+  
+  functions:
+    # Generic utility and marginal utility functions (shared across stages)
+    owner_utility:
+      expr: "alpha*np.log(np.maximum(c, 1e-10)) + (1-alpha)*np.log(kappa*(H_nxt+iota))"
+      description: "Utility function for owners"
+
+    renter_utility:
+      expr: "alpha*np.log(np.maximum(c, 1e-10)) + (1-alpha)*np.log(kappa*(S+iota))"
+      description: "Utility function for renters"
+
+    marginal_utility:
+      expr: "alpha/(c + 1e-10) + S*0"
+      description: "Marginal utility of consumption with numerical stability"
+    
+    owner_marginal_utility:
+      expr: "alpha/(c + 1e-10) + H_nxt*0"
+      description: "Marginal utility of consumption with numerical stability"
+
+    inv_marginal_utility:
+      expr: "alpha/lambda_e + H_nxt*0"
+      description: "Inverse marginal utility (EGM consumption function)"
+
+    # Joint utility and marginal utility helpers
+    owner_util_mutil:
+      u_val: "alpha*np.log(c) + (1-alpha)*np.log(kappa*(H_nxt+iota))"
+      uc_val: "alpha/(c + 1e-10)"
+      description: "Returns both utility and marginal utility for owners"
+
+    renter_util_mutil:
+      u_val: "alpha*np.log(c) + (1-alpha)*np.log(kappa*(S+iota))"
+      uc_val: "alpha/(c + 1e-10)"
+      description: "Returns both utility and marginal utility for renters"
+    
+    # Override functions from master with local modifications
+    uc_func:
+      inherit: "uc_general"                   # Inherit but override expression
+      expr: "alpha/(c + 1e-10) +H_nxt*0"               # Override with local modification
+      description: "Modified marginal utility with numerical stability"
+    
+    # Functions that build on master patterns
+    egm_consumption:
+      inherit: "egm_consumption"              # Inherit but override expression
+      expr: "alpha/(beta*lambda_v) + H_nxt*0"           # Adapt to local variable names
+      description: "Adapted EGM consumption formula for local variables"
+    
+    # Purely local functions (no inheritance)
+    u_func:
+      expr: "alpha*np.log(c) + (1-alpha)*np.log(kappa*(H_nxt+iota))"
+      description: "Stage-specific utility function for housing"
+      compilation: "numba"
+    
+    # Complex operations
+    egm_operations:
+      c_egm: "alpha/(beta*lambda_e)"          # Uses pattern from egm_consumption
+      m_egm: "c_egm + a_nxt"
+      lambda_v_egm: "alpha/c_egm"
+      vlu_v_egm: "alpha*np.log(c_egm) + (1-alpha)*np.log(kappa*(H_nxt+iota)) + beta*vlu_e"
+      description: "Stage-specific EGM operations"
+      compilation: "eval"
+    
+    rental_payment:
+        expr: "S = S; y = y; w_rent = w - P_r*S"
+        description: "Cash‑on‑hand after paying rent"
+
+
+# Global methods
+methods:
+  sol_method: "EGM"
+  simulation: "Histogram"
+  integration_method: "discretize"
+  shock_method: "markov"  # Changed to Markov since we're using explicit transition matrix
+  compilation: 'eval'
+  default_grid: 'linspace'
+  upper_envelope: "FUES"
+
+# dont need to import 
+imports:
+  - file: "OWNH_stage.yml"
+    stage_name: "OwnerHousingChoice"
+    alias: "OWNH"
+  - file: "OWNC_stage.yml"
+    stage_name: "OwnerConsumptionChoice"
+    alias: "OWNC"
+  - file: "RNTH_stage.yml"
+    stage_name: "RenterHousingChoice"
+    alias: "RNTH"
+  - file: "RNTC_stage.yml"
+    stage_name: "RenterConsumptionChoice"
+    alias: "RNTC"
+  - file: "TENU_stage.yml"
+    stage_name: "TenureChoice"
+    alias: "TENU"
+    
+  

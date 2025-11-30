@@ -337,7 +337,6 @@ def _fues_engine(
     single_intersection: bool = False,
     no_double_jumps: bool = True,
     disable_jump_checks: bool = False,
-    return_intersections_separately: bool = False,
     eps_d: Optional[float] = None,
     eps_sep: Optional[float] = None,
     eps_fwd_back: Optional[float] = None,
@@ -375,7 +374,6 @@ def _fues_engine(
         "single_intersection": single_intersection,
         "no_double_jumps": no_double_jumps,
         "disable_jump_checks": disable_jump_checks,
-        "return_intersections_separately": return_intersections_separately,
     }
     # Add optional numerical tolerances if specified
     if eps_d is not None:
