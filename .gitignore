@@ -71,3 +71,4 @@ archive/
 # Documentation drafts
 docs/*.tex
 docs/*_draft.*
+dynx_repo/
