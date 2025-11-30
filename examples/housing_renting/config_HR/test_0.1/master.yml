@@ -111,7 +111,7 @@ settings:
       
       # Numerical tolerances
       eps_d: 1.0e-14          # Machine epsilon protection for divisions
-      eps_sep: 1.0e-08        # Minimum separation when creating intersections
+      eps_sep: 1.0e-10        # Minimum separation when creating intersections
       eps_fwd_back: 0.5       # Forward/backward scan proximity threshold
       parallel_guard: 1.0e-10 # Tolerance for near-parallel segment detection
     DCEGM: {}

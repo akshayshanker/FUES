@@ -138,19 +138,19 @@ for CONFIG_NAME in "${CONFIG_TO_RUN[@]}"; do
       --plots \
       $EGM_PLOTS_FLAG \
       --trace \
-      2> >(tee "${LOG_DIR}/run.err") \
-      1> >(tee "${LOG_DIR}/run.log")
+      2> >(tee "${LOG_DIR}/run_${TIMESTAMP}.err") \
+      1> >(tee "${LOG_DIR}/run_${TIMESTAMP}.log")
 
     EXIT_CODE=$?
     if [ $EXIT_CODE -ne 0 ]; then
         echo "ERROR: Run for ${CONFIG_NAME} failed with exit code: $EXIT_CODE" >&2
-        echo "Check error log at: ${LOG_DIR}/run.err" >&2
+        echo "Check error log at: ${LOG_DIR}/run_${TIMESTAMP}.err" >&2
         
         # Check for common errors in the log
-        if grep -q "LLVM ERROR" "${LOG_DIR}/run.err"; then
+        if grep -q "LLVM ERROR" "${LOG_DIR}/run_${TIMESTAMP}.err"; then
             echo "HINT: LLVM error detected. Try running with --clear-cache flag" >&2
         fi
-        if grep -q "baseline.*not found" "${LOG_DIR}/run.err"; then
+        if grep -q "baseline.*not found" "${LOG_DIR}/run_${TIMESTAMP}.err"; then
             echo "HINT: Baseline bundle not found. Run MPI job first to compute baseline" >&2
         fi
         
