@@ -102,6 +102,7 @@ def EGM_UE(
     rfc_n_iter: int = 20,
     interpolate: bool = False,
     include_intersections: bool = True,
+    ue_kwargs: Optional[Dict[str, Any]] = None,
 ) -> Tuple[Dict[str, np.ndarray], Dict[str, np.ndarray], Dict[str, np.ndarray]]:
     """Universal entry point for all upper-envelope algorithms.
 
@@ -109,6 +110,13 @@ def EGM_UE(
     registered in ``helpers.ue`` and performs common bookkeeping
     (raw dict assembly, interpolation onto ``X_dcsn``, timing).
     The public signature is kept intact for backward compatibility.
+    
+    Parameters
+    ----------
+    ue_kwargs : dict, optional
+        Method-specific keyword arguments passed directly to the engine.
+        For FUES, this can include: endog_mbar, padding_mbar, single_intersection,
+        no_double_jumps, disable_jump_checks, eps_d, eps_sep, etc.
     """
 
     if X_dcsn is None:
@@ -126,22 +134,27 @@ def EGM_UE(
 
     # -------- run -----------------------------------------------------
     t0 = time.time()
+    
+    # Merge method-specific kwargs
+    engine_kwargs = {
+        "x_dcsn_hat": x_dcsn_hat,
+        "qf_hat": qf_hat,
+        "kappa_hat": kappa_hat,
+        "X_cntn": X_cntn,
+        "v_cntn_hat": v_cntn_hat,
+        "X_dcsn": X_dcsn,
+        "uc_func_partial": uc_func_partial,
+        "u_func": u_func,
+        "m_bar": m_bar,
+        "lb": lb,
+        "rfc_radius": rfc_radius,
+        "rfc_n_iter": rfc_n_iter,
+        "include_intersections": include_intersections,
+    }
+    if ue_kwargs:
+        engine_kwargs.update(ue_kwargs)
 
-    refined = engine(
-        x_dcsn_hat=x_dcsn_hat,
-        qf_hat=qf_hat,
-        kappa_hat=kappa_hat,
-        X_cntn=X_cntn,
-        v_cntn_hat=v_cntn_hat,
-        X_dcsn=X_dcsn,
-        uc_func_partial=uc_func_partial,
-        u_func=u_func,
-        m_bar=m_bar,
-        lb=lb,
-        rfc_radius=rfc_radius,
-        rfc_n_iter=rfc_n_iter,
-        include_intersections=include_intersections,
-    )
+    refined = engine(**engine_kwargs)
 
     ue_time = time.time() - t0
 
@@ -318,6 +331,16 @@ def _fues_engine(
     m_bar: float = 1.0,
     lb: int = 4,
     include_intersections: bool = True,
+    # FUES-specific kwargs (forwarded from ue_kwargs)
+    endog_mbar: bool = False,
+    padding_mbar: float = 0.0,
+    single_intersection: bool = False,
+    no_double_jumps: bool = True,
+    disable_jump_checks: bool = False,
+    eps_d: Optional[float] = None,
+    eps_sep: Optional[float] = None,
+    eps_fwd_back: Optional[float] = None,
+    parallel_guard: Optional[float] = None,
     **kwargs: Any,
 ) -> Dict[str, np.ndarray]:
     """Wrapper around current FUES implementation.
@@ -325,6 +348,14 @@ def _fues_engine(
     The optimized production version with pre-allocated scratch buffers,
     true circular buffer, and improved left turn interpolation.
     Uses the same interface as the original FUES implementation.
+    
+    FUES-specific parameters (via ue_kwargs):
+        endog_mbar: Use endogenous m_bar based on policy gradients
+        padding_mbar: Padding for m_bar calculation
+        single_intersection: Only compute single intersection per jump
+        no_double_jumps: Filter out consecutive jumps
+        disable_jump_checks: Disable manual jump check overrides
+        eps_d, eps_sep, eps_fwd_back, parallel_guard: Numerical tolerances
     """
 
     if fues_current is None or correct_jumps1d is None:
@@ -333,9 +364,30 @@ def _fues_engine(
     # Guard against lb being a list (edge-case seen in original code)
     lb_int = int(lb[0]) if isinstance(lb, (list, tuple)) else int(lb)
 
+    # Build kwargs for fues_current, only include non-None values
+    fues_kwargs = {
+        "m_bar": m_bar,
+        "LB": lb_int,
+        "include_intersections": include_intersections,
+        "endog_mbar": endog_mbar,
+        "padding_mbar": padding_mbar,
+        "single_intersection": single_intersection,
+        "no_double_jumps": no_double_jumps,
+        "disable_jump_checks": disable_jump_checks,
+    }
+    # Add optional numerical tolerances if specified
+    if eps_d is not None:
+        fues_kwargs["eps_d"] = eps_d
+    if eps_sep is not None:
+        fues_kwargs["eps_sep"] = eps_sep
+    if eps_fwd_back is not None:
+        fues_kwargs["eps_fwd_back"] = eps_fwd_back
+    if parallel_guard is not None:
+        fues_kwargs["parallel_guard"] = parallel_guard
+
     x_dcsn_ref, qf_ref, kappa_ref, x_cntn_ref, _ = fues_current(
         x_dcsn_hat, qf_hat, kappa_hat, X_cntn, X_cntn,
-        m_bar=m_bar, LB=lb_int, include_intersections=include_intersections
+        **fues_kwargs
     )
 
     return {

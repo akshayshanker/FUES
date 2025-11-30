@@ -343,6 +343,9 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
 
     # methods
     ue_method = model.methods["upper_envelope"]
+    
+    # Method-specific kwargs (e.g., FUES: endog_mbar, padding_mbar, etc.)
+    ue_kwargs = model.settings_dict.get("ue_kwargs", {}).get(ue_method, {})
 
     # ------------------------------------------------------------------
     # 2. Produce the grids we will fill
@@ -487,7 +490,8 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
                     a_nxt_grid_unique, w_grid, partial_uc,
                     u_func={"func": utility_func, "args": {"H_nxt": H_val}},
                     ue_method=ue_method, m_bar=m_bar, lb=lb,
-                    rfc_radius=rfc_radius, rfc_n_iter=rfc_n_iter
+                    rfc_radius=rfc_radius, rfc_n_iter=rfc_n_iter,
+                    ue_kwargs=ue_kwargs
                 )
             except Exception as e:
                 print(f"[DEBUG] {ue_method}: EGM_UE failed for grid key {grid_key}: {e}")
