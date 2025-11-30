@@ -383,8 +383,6 @@ def _fues_engine(
         "left_turn_no_jump_strict": left_turn_no_jump_strict,
         "use_post_state_jump_test": use_post_state_jump_test,
     }
-    # DEBUG: Print to verify kwargs are being passed
-    print(f"[FUES DEBUG] left_turn_no_jump_strict={left_turn_no_jump_strict}, use_post_state_jump_test={use_post_state_jump_test}")
     # Add optional numerical tolerances if specified
     if eps_d is not None:
         fues_kwargs["eps_d"] = eps_d

@@ -95,8 +95,8 @@ settings:
   ue_kwargs:
     FUES:
       # Core parameters
-      m_bar: 1.00001              # Jump threshold for same-branch tests
-      lb: 10                   # Look-back window size
+      m_bar: 1.21              # Jump threshold for same-branch tests
+      lb: 5                   # Look-back window size
       
       # Intersection handling
       include_intersections: true       # Add intersection points at jumps
