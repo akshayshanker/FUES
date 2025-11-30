@@ -22,7 +22,10 @@ build/
 *.e[0-9]*
 *.out
 # Logs folders (anywhere in repo)
-**/logs/
+logs/
+logs/*/
+!logs/.gitkeep
+!logs/*/.gitkeep
 !**/logs/.gitkeep
 
 # PBS scripts (cluster-specific)
