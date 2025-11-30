@@ -7,6 +7,7 @@
 #PBS -l wd
 #PBS -j oe
 #PBS -r y
+# NOTE: Create logs/ directory before submitting: mkdir -p logs/
 #PBS -o logs/
 #PBS -e logs/
 
@@ -18,9 +19,10 @@
 set -euo pipefail
 
 # --- Path Setup (handle PBS vs local) ---
+# PBS_O_WORKDIR is the directory where qsub was invoked (experiments/housing_renting/)
 if [[ -n "${PBS_O_WORKDIR:-}" ]]; then
-    SCRIPT_DIR="$PBS_O_WORKDIR/experiments/housing_renting"
-    REPO_ROOT="$PBS_O_WORKDIR"
+    SCRIPT_DIR="$PBS_O_WORKDIR"
+    REPO_ROOT="$(cd "$PBS_O_WORKDIR/../.." && pwd)"
 else
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -101,11 +103,11 @@ for CONFIG_NAME in "${CONFIG_TO_RUN[@]}"; do
     # Build paths based on whether TRIAL_ID is set
     if [[ -n "$TRIAL_ID" ]]; then
         RUN_ID="${VERSION_TAG}_${TIMESTAMP}_${TRIAL_ID}"
-        LOG_DIR="$REPO_ROOT/logs/${VERSION_TAG}_${TRIAL_ID}"
+        LOG_DIR="$REPO_ROOT/logs/housing_renting/${VERSION_TAG}_${TRIAL_ID}"
         OUTPUT_DIR="/scratch/tp66/$USER/FUES/solutions/housing_renting/${VERSION_TAG}_${TRIAL_ID}"
     else
         RUN_ID="${VERSION_TAG}_${TIMESTAMP}"
-        LOG_DIR="$REPO_ROOT/logs/${VERSION_TAG}"
+        LOG_DIR="$REPO_ROOT/logs/housing_renting/${VERSION_TAG}"
         OUTPUT_DIR="/scratch/tp66/$USER/FUES/solutions/housing_renting/${VERSION_TAG}"
     fi
     mkdir -p "$LOG_DIR"
@@ -114,22 +116,18 @@ for CONFIG_NAME in "${CONFIG_TO_RUN[@]}"; do
     echo "Output will be saved to: $OUTPUT_DIR"
     echo "Logs will be saved to: $LOG_DIR"
     echo "NOTE: Baseline will be loaded from existing bundles, not recomputed"
-    echo "NOTE: Using selective loading for Euler error - loading only periods 0,1"
+    echo "NOTE: euler_error metric doesn't require baseline comparison"
     echo "NOTE: EGM plots are disabled for faster execution (--skip-egm-plots)"
 
     # Optional: Set to empty string to enable EGM plots (slower but more detailed)
     # EGM_PLOTS_FLAG="--skip-egm-plots"  # Comment this line to enable EGM plots
     EGM_PLOTS_FLAG="--skip-egm-plots"
 
-    # Selective loading: Euler error only needs:
-    # - Period 0: OWNC stage (for current consumption)
-    # - Period 1: All stages (OWNC, TENU, OWNH, RNTH, RNTC for next period policies)
-    # This reduces loading from 75 to 18 pickle files (76% reduction)
     python3 -m examples.housing_renting.solve_runner \
       --periods "${CONFIG_REF[periods]}" \
       --ue-method "FUES,VFI_HDGRID_GPU" \
       --output-root "$OUTPUT_DIR" \
-      --bundle-prefix "${VERSION_TAG}" \
+      --config-id "${VERSION_TAG}" \
       --RUN-ID "${VERSION_TAG}_${TIMESTAMP}" \
       --vfi-ngrid "${CONFIG_REF[vfi_ngrid]}" \
       --HD-points "${CONFIG_REF[hd_points]}" \
@@ -142,8 +140,6 @@ for CONFIG_NAME in "${CONFIG_TO_RUN[@]}"; do
       --plots \
       $EGM_PLOTS_FLAG \
       --trace \
-      --load-periods "0,1" \
-      --load-stages '{"0": ["OWNC"], "1": null}' \
       2> >(tee "${LOG_DIR}/run.err") \
       1> >(tee "${LOG_DIR}/run.log")
 
@@ -170,4 +166,4 @@ for CONFIG_NAME in "${CONFIG_TO_RUN[@]}"; do
 done
 
 echo "All single-core configurations processed."
-exit 0 
+exit 0
