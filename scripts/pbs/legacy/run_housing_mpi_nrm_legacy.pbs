@@ -75,7 +75,7 @@ mpiexec -np 45 \
           --periods 5 \
           --ue-method ALL \
           --output-root "$SOLUTION_ROOT/$VERSION" \
-          --bundle-prefix "$VERSION" \
+          --config-id "$VERSION" \
           --vfi-ngrid 1000 \
           --HD-points 300 \
           --grid-points 3000 \

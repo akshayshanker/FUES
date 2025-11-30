@@ -103,22 +103,18 @@ for CONFIG_NAME in "${CONFIG_TO_RUN[@]}"; do
     echo "Output will be saved to: $OUTPUT_DIR"
     echo "Logs will be saved to: $LOG_DIR"
     echo "NOTE: Baseline will be loaded from existing bundles, not recomputed"
-    echo "NOTE: Using selective loading for Euler error - loading only periods 0,1"
+    echo "NOTE: euler_error metric doesn't require baseline comparison"
     echo "NOTE: EGM plots are disabled for faster execution (--skip-egm-plots)"
 
     # Optional: Set to empty string to enable EGM plots (slower but more detailed)
     # EGM_PLOTS_FLAG="--skip-egm-plots"  # Comment this line to enable EGM plots
     EGM_PLOTS_FLAG="--skip-egm-plots"
 
-    # Selective loading: Euler error only needs:
-    # - Period 0: OWNC stage (for current consumption)
-    # - Period 1: All stages (OWNC, TENU, OWNH, RNTH, RNTC for next period policies)
-    # This reduces loading from 75 to 18 pickle files (76% reduction)
     python3 -m examples.housing_renting.solve_runner \
       --periods "${CONFIG_REF[periods]}" \
       --ue-method "FUES,VFI_HDGRID_GPU" \
       --output-root "$OUTPUT_DIR" \
-      --bundle-prefix "${VERSION_TAG}" \
+      --config-id "${VERSION_TAG}" \
       --RUN-ID "${VERSION_TAG}_${TIMESTAMP}" \
       --vfi-ngrid "${CONFIG_REF[vfi_ngrid]}" \
       --HD-points "${CONFIG_REF[hd_points]}" \
@@ -131,8 +127,6 @@ for CONFIG_NAME in "${CONFIG_TO_RUN[@]}"; do
       --plots \
       $EGM_PLOTS_FLAG \
       --trace \
-      --load-periods "0,1" \
-      --load-stages '{"0": ["OWNC"], "1": null}' \
       2> >(tee "${LOG_DIR}/run.err") \
       1> >(tee "${LOG_DIR}/run.log")
 

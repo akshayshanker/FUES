@@ -54,7 +54,7 @@ mpiexec python3 -m experiments.housing_renting.param_sweep_v2 \
   --param "master.parameters.beta=0.95,0.97" \
   --param "master.parameters.gamma=2.0,4.0" \
   --output-root "solutions/HR_param_sweep_normal" \
-  --bundle-prefix "HR_normal_sweep" \
+  --config-id "HR_normal_sweep" \
   --periods 3 \
   --vfi-ngrid 1000 \
   --HD-points 2000 \

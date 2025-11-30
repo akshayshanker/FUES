@@ -25,7 +25,7 @@ python3 -m examples.housing_renting.solve_runner \
     --ue-method VFI_HDGRID,FUES2DEV,CONSAV \
     --plots \
     --output-root solutions/HR \
-    --bundle-prefix HR \
+    --config-id HR \
     --vfi-ngrid 1000 \
     --HD-points 1000 \
     --grid-points 500 \

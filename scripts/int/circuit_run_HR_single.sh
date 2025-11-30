@@ -251,7 +251,7 @@ ARGS=(
     --periods "${CONFIG_REF[periods]}"
     --ue-method "FUES"
     --output-root "$OUTPUT_DIR"
-    --bundle-prefix "$VERSION_TAG"
+    --config-id "$VERSION_TAG"
     --RUN-ID "$RUN_ID"
     --vfi-ngrid "${CONFIG_REF[vfi_ngrid]}"
     --HD-points "${CONFIG_REF[hd_points]}"

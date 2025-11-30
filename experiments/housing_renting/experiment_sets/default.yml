@@ -1,0 +1,33 @@
+# Default Experiment Set Configuration
+# =====================================
+# This file defines which parameters are tracked in the bundle hash.
+#
+# To create a new experiment set:
+# 1. Copy this file to a new name (e.g., my_experiment.yml)
+# 2. Modify param_paths as needed
+# 3. Pass --experiment-set my_experiment to solve_runner.py
+
+# Parameter paths passed to CircuitRunner
+# These define what goes into the bundle hash.
+# Note: The first entry (method) is excluded from hash via method_param_path
+param_paths:
+  - master.methods.upper_envelope    # Method (excluded from hash)
+  - master.settings.a_points         # Grid points (asset)
+  - master.settings.a_nxt_points     # Grid points (next period asset)
+  - master.settings.w_points         # Grid points (wealth)
+  - master.parameters.delta_pb       # Price bound delta
+
+# =============================================================================
+# DOCUMENTATION ONLY (not read by code)
+# =============================================================================
+#
+# CLI argument mapping:
+#   master.methods.upper_envelope  ->  --ue-method / --baseline-method
+#   master.settings.a_points       ->  --HD-points (baseline) / --grid-points (fast)
+#   master.settings.a_nxt_points   ->  same as a_points
+#   master.settings.w_points       ->  same as a_points
+#   master.parameters.delta_pb     ->  --delta-pb
+#
+# Hardcoded params (NOT in bundle hash - change TRIAL_ID when varying):
+#   periods    --periods     master.horizon                  Number of lifecycle periods
+#   vfi_ngrid  --vfi-ngrid   master.settings.N_arg_grid_vfi  VFI grid density for baseline

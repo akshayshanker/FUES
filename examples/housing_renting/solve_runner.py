@@ -11,16 +11,11 @@ Passing Interface (MPI).
 
 Selective Loading and Caching
 -----------------------------
-**Reference Model Caching**: The reference model (baseline) uses a superset caching 
-strategy that always loads periods [0, 1] with all required stages. This ensures 
-all metrics share the same cached reference model, dramatically reducing memory usage.
-
-**Command Line Arguments Note**: The `--load-periods` and `--load-stages` arguments 
-are currently stored but not actively used. They were intended for selective loading 
-of primary models but are superseded by:
-- Automatic metric-based selective loading for reference models
-- Superset caching that ignores these arguments for reference models
-These arguments may be removed or reimplemented in future versions.
+**Reference Model Caching**: When metrics compare methods (e.g, FUES, CONSAV, etc.) 
+against the baseline (e.g, VFI_HDGRID), the baseline model is loaded once with the union 
+of all data required by any metric (all periods, all stages). This single load 
+is then shared across all metrics, avoiding redundant disk reads. If the baseline 
+was already solved in the same run, its model is reused directly from cache.
 
 Workflows
 ---------
@@ -36,7 +31,7 @@ Workflows
             --periods 3 \\
             --ue-method ALL \\
             --output-root solutions/HR \\
-            --bundle-prefix HR \\
+            --config-id HR \\
             --vfi-ngrid 10000 \\
             --HD-points 10000 \\
             --grid-points 4000 \\
@@ -46,7 +41,7 @@ Workflows
 
 2.  **Fast Methods Only (with existing baseline)**
     This runs only the "fast" solvers (e.g., `FUES`, `CONSAV`), relying
-    on a pre-computed baseline solution.
+    on a pre-computed baseline solution for comparison metrics.
 
     .. code-block:: bash
 
@@ -56,12 +51,13 @@ Workflows
             --output-root solutions/HR \\
             --vfi-ngrid 100 \\
             --HD-points 10000 \\
+            --baseline-method VFI_HDGRID \\
             --fresh-fast \\
             --plots
 
     .. note::
-       When ``--recompute-baseline`` is omitted, the runner searches for a
-       baseline bundle matching the ``vfi-ngrid`` and ``HD-points``.
+       If comparison metrics are requested (e.g., ``dev_c_L2``), the baseline 
+       is loaded from disk. Use ``--metrics euler_error`` to skip baseline loading entirely.
 
 **Parallel Execution (MPI)**
 
@@ -75,7 +71,7 @@ computation.
           --periods 3 \\
           --ue-method ALL \\
           --output-root /scratch/tp66/$USER/FUES/solutions/HR_test_v4 \\
-          --bundle-prefix HR_test_v4 \\
+          --config-id HR_test_v4 \\
           --vfi-ngrid 100 \\
           --HD-points 650 \\
           --grid-points 500 \\
@@ -97,7 +93,7 @@ For GPU-accelerated baseline computation:
         --periods 3 \\
         --ue-method ALL \\
         --output-root solutions/HR_gpu \\
-        --bundle-prefix HR_gpu \\
+        --config-id HR_gpu \\
         --vfi-ngrid 10000 \\
         --HD-points 10000 \\
         --grid-points 4000 \\
@@ -156,33 +152,26 @@ Custom fast methods can be specified using:
 
     --fast-methods "FUES,FUES2DEV,CONSAV,DCEGM"
 
-If not specified, defaults to: `FUES2DEV,CONSAV`
+If not specified, defaults to: `FUES,CONSAV,DCEGM`
 
-Comparison Metrics Optimization
-------------------------------
-When running only the baseline method, comparison metrics (dev_c_L2, plot comparisons) 
-are automatically skipped since comparing a model against itself is meaningless and wastes 
-computational time. This behavior prevents walltime exceeded errors on baseline-only runs.
-
-To customize which metrics are considered comparison metrics, use:
-``--comparison-metrics "dev_c_L2,my_custom_comparison"``
-
-Selective Model Loading
------------------------
-When loading existing models (e.g., for metric calculation), you can specify which
-periods and stages to load to reduce memory usage and I/O time:
+Metrics Configuration
+--------------------
+Use ``--metrics`` to specify which metrics to compute:
 
 .. code-block:: bash
 
-    # Load only periods 0 and 1 for Euler error calculation
-    python3 -m examples.housing_renting.solve_runner \\
-        --ue-method VFI_HDGRID_GPU \\
-        --load-periods "0,1" \\
-        --load-stages '{"0": ["OWNC"], "1": null}' \\
-        --metrics euler_error
+    --metrics "euler_error"           # Euler error only (no baseline needed)
+    --metrics "euler_error,dev_c_L2"  # Both (baseline loaded for dev_c_L2)
+    --metrics "all"                   # All metrics (default)
 
-This loads only OWNC from period 0 and all stages from period 1, reducing loading
-time by ~76% for a 5-period model.
+**Comparison metrics** (``dev_c_L2``, ``plot_c_comparison``, ``plot_v_comparison``) require 
+loading the baseline model from disk. Non-comparison metrics like ``euler_error`` do not.
+
+When running only the baseline method, comparison metrics are automatically skipped since 
+comparing a model against itself is meaningless.
+
+To customize which metrics require baseline comparison, use:
+``--comparison-metrics "dev_c_L2,my_custom_comparison"``
 
 Command-Line Arguments
 ---------------------
@@ -195,19 +184,31 @@ Key arguments for method configuration:
 - ``--mpi``: Enable MPI parallelization
 - ``--recompute-baseline``: Force recomputation of baseline even if bundle exists
 - ``--fresh-fast``: Force recomputation of fast methods
+- ``--metrics``: Comma-separated list of metrics to compute (default: all). Options: euler_error, dev_c_L2, plot_c_comparison, plot_v_comparison
 - ``--comparison-metrics``: Comma-separated list of metrics requiring baseline comparison (default: dev_c_L2,plot_c_comparison,plot_v_comparison)
-- ``--load-periods``: Comma-separated list of period indices to load (e.g., '0,1' for Euler error)
-- ``--load-stages``: JSON dict of period:stages to load (e.g., '{"0": ["OWNC"], "1": null}')
 
 Directory Organization
 ---------------------
 The runner uses a standardized directory structure for outputs:
 
-- Base path: ``{output-root}/{bundle-prefix}/``
-- With TRIAL_ID: ``{output-root}/{bundle-prefix}_{TRIAL_ID}/``
+::
 
-This allows organizing different experimental runs (e.g., GPU vs CPU baselines)
-by setting the TRIAL_ID environment variable in job scripts.
+    {output-root}/
+    ├── bundles/
+    │   └── {hash}/                    # 8-char MD5 hash of grid params
+    │       ├── VFI_HDGRID/            # Baseline method bundle
+    │       │   └── images_{timestamp}/
+    │       └── FUES/                  # Fast method bundle
+    │           └── images_{timestamp}/
+    ├── raw_metrics.csv                # All metrics (appended across runs)
+    ├── performance_summary.txt
+    └── comparison_table.tex
+
+Experiment grouping is done via ``--output-root``. For example, PBS scripts 
+set ``OUTPUT_DIR="/scratch/.../housing_renting/${VERSION_TAG}_${TRIAL_ID}"``
+to group related experiments together.
+
+Note: ``--config-id`` is used for config directory naming only, not bundle paths.
 
 """
 
@@ -231,7 +232,6 @@ from datetime import datetime
 from pathlib import Path
 import gc
 import resource
-import json
 
 trace_print("0.2: Basic imports done")
 import numpy as np
@@ -473,7 +473,10 @@ def main(argv=None):
                    help="Skip EGM plots when --plots is enabled (keeps policy plots only, saves time)")
     p.add_argument("--verbose", action="store_true")
     p.add_argument("--output-root", default="solutions/HR")
-    p.add_argument("--bundle-prefix", default="HR")
+    p.add_argument("--config-id", default="HR",
+                   help="Identifier for config directory (config_HR/{config-id}/)")
+    p.add_argument("--experiment-set", default="default",
+                   help="Experiment set name from experiments/housing_renting/experiment_sets/")
     p.add_argument("--vfi-ngrid", default="10000")
     p.add_argument("--HD-points", default="10000")
     p.add_argument("--grid-points", default="4000")
@@ -499,10 +502,6 @@ def main(argv=None):
                    help="Enable low memory mode - clears Q and lambda arrays after solving to save memory")
     p.add_argument("--comparison-metrics", default="dev_c_L2,plot_c_comparison,plot_v_comparison",
                    help="Comma-separated list of comparison metrics that require baseline loading (default: dev_c_L2,plot_c_comparison,plot_v_comparison)")
-    p.add_argument("--load-periods", default=None,
-                   help="Comma-separated list of period indices to load when loading existing models (e.g., '0,1' for Euler error). If not specified, loads all periods.")
-    p.add_argument("--load-stages", default=None,
-                   help="JSON-formatted dict of period:stages to load (e.g., '{\"0\": [\"OWNC\"], \"1\": null}' loads only OWNC in period 0, all stages in period 1)")
     p.add_argument("--csv-export", action="store_true",
                    help="Export plot data to CSV files (includes both policy and EGM data)")
     p.add_argument("--save-full-model", action="store_true",
@@ -574,13 +573,7 @@ def main(argv=None):
 
         precompile_runner = CircuitRunner(
             base_cfg=precompile_cfg, # Use the minimal config
-            param_paths=[
-                "master.methods.upper_envelope",
-                "master.settings.a_points",
-                "master.settings.a_nxt_points",
-                "master.settings.w_points",
-                "master.parameters.delta_pb",
-            ],
+            param_paths=ExecutionSettings.get_param_paths(args.experiment_set),
             model_factory=lambda cfg: make_housing_model(args,cfg, 2, 100, comm),
             solver=make_housing_solver(argparse.Namespace(verbose=False, periods=2), use_mpi=args.mpi, comm=comm, baseline_method=settings.baseline_method),
             metric_fns={},
@@ -665,31 +658,24 @@ def main(argv=None):
     
     trace_print("12: Creating CircuitRunner")
     #  set-up main runner ------------------------------------------------------
+    # Load param_paths from experiment set
+    param_paths = ExecutionSettings.get_param_paths(args.experiment_set)
+    if is_root:
+        print(f"Using experiment set: {args.experiment_set}")
+        print(f"  param_paths: {param_paths}")
+    
     runner = CircuitRunner(
         base_cfg=model_config,
-        param_paths=[
-            "master.methods.upper_envelope",
-            "master.settings.a_points",
-            "master.settings.a_nxt_points",
-            "master.settings.w_points",
-            "master.parameters.delta_pb",
-        ],
+        param_paths=param_paths,
         model_factory=lambda cfg: make_housing_model(args,cfg, args.periods, vf_ngrid, comm),
         solver=make_housing_solver(args, args.mpi, comm, baseline_method=settings.baseline_method),
         metric_fns=metric_fns,
         output_root=output_root,
-        bundle_prefix=args.bundle_prefix,
+        bundle_prefix=args.config_id,  # Legacy param name in CircuitRunner
         save_by_default=save_by_default,
         load_if_exists=True,
     )
     trace_print("13: CircuitRunner created")
-    
-    # Store loading requirements on the runner from config
-    if settings.periods_to_load is not None or settings.stages_to_load is not None:
-        runner.periods_to_load = settings.periods_to_load
-        runner.stages_to_load = settings.stages_to_load
-        if is_root:
-            print(f"Selective loading enabled: periods={settings.periods_to_load}, stages={settings.stages_to_load}")
     
     trace_print(f"14: Needs baseline loading: {settings.needs_baseline}")
     

@@ -102,7 +102,7 @@ else
     OUTPUT_DIR="/scratch/tp66/$USER/FUES/solutions/housing_renting/${VERSION_TAG}"
 fi
 
-BUNDLE_PREFIX="$VERSION_TAG"
+CONFIG_ID="$VERSION_TAG"
 OUTPUT_ROOT="$OUTPUT_DIR"
 
 # Create output directories
@@ -134,7 +134,7 @@ python3 -m examples.housing_renting.solve_runner \
     --periods "$PERIODS" \
     --ue-method "VFI_HDGRID_GPU" \
     --output-root "$OUTPUT_ROOT" \
-    --bundle-prefix "$BUNDLE_PREFIX" \
+    --config-id "$CONFIG_ID" \
     --vfi-ngrid "$VFI_GRID" \
     --HD-points "$HD_POINTS" \
     --grid-points "$GRID_POINTS" \
@@ -147,8 +147,6 @@ python3 -m examples.housing_renting.solve_runner \
     --gpu \
     --trace \
     --low-memory \
-    --load-periods "0,1" \
-    --load-stages '{"0": ["OWNC"], "1": null}' \
     2> >(tee "${LOG_DIR}/run.err") \
     1> >(tee "${LOG_DIR}/run.log")
 
