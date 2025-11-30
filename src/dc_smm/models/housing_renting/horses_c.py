@@ -344,10 +344,12 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
     
     # Method-specific kwargs (e.g., FUES: endog_mbar, padding_mbar, m_bar, lb, etc.)
     ue_kwargs = model.settings_dict.get("ue_kwargs", {}).get(ue_method, {})
+    # DEBUG: Print to verify ue_kwargs from config
+    print(f"[DEBUG horses_c] ue_method={ue_method}, ue_kwargs={ue_kwargs}")
     
     # Get m_bar and lb from ue_kwargs, with fallback to top-level settings for backward compatibility
-    m_bar = ue_kwargs.get("m_bar", 1.0)  # Only from ue_kwargs, default 1.0
-    lb = ue_kwargs.get("lb", 4)  # Only from ue_kwargs, default 4
+    m_bar = ue_kwargs.get("m_bar", model.settings_dict.get("m_bar", 1.0))
+    lb = ue_kwargs.get("lb", model.settings_dict.get("lb", 4))
 
     # ------------------------------------------------------------------
     # 2. Produce the grids we will fill
