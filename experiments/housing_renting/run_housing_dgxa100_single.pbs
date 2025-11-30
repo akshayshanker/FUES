@@ -7,7 +7,9 @@
 #PBS -l storage=gdata/tp66+scratch/tp66
 #PBS -l wd
 #PBS -j oe
-# Logs go to $REPO_ROOT/logs/housing_renting/${VERSION_TAG}_${TRIAL_ID}/ via tee
+#PBS -o /dev/null
+#PBS -e /dev/null
+# Actual logs go to $REPO_ROOT/logs/housing_renting/${VERSION_TAG}_${TRIAL_ID}/ via tee
 
 set -euo pipefail
 

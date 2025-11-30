@@ -7,7 +7,9 @@
 #PBS -l wd
 #PBS -j oe
 #PBS -r y
-# Logs go to $REPO_ROOT/logs/housing_renting/${VERSION_TAG}_${TRIAL_ID}/ via tee
+#PBS -o /dev/null
+#PBS -e /dev/null
+# Actual logs go to $REPO_ROOT/logs/housing_renting/${VERSION_TAG}_${TRIAL_ID}/ via tee
 
 # ======================================================================
 #  Single Core Job - Load Baseline, Compute Fast Methods Only
