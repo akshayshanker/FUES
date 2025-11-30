@@ -57,7 +57,25 @@ stage:
     rfc_n_iter: ["rfc_n_iter"]
     n_constraint_points: ["n_constraint_points"]
     n_constraint_points_nxt: ["n_constraint_points_nxt"]
-    ue_kwargs: ["ue_kwargs"]  # Method-specific upper envelope kwargs from master
+    ue_kwargs:
+      FUES:
+        m_bar: 1.0
+        lb: 4
+        include_intersections: true
+        return_intersections_separately: false
+        single_intersection: false
+        endog_mbar: false
+        padding_mbar: 0.0
+        no_double_jumps: true
+        disable_jump_checks: false
+        left_turn_no_jump_strict: true
+        use_post_state_jump_test: true
+        eps_d: 1.0e-14
+        eps_sep: 1.0e-08
+        eps_fwd_back: 0.5
+        parallel_guard: 1.0e-10
+      DCEGM: {}
+      CONSAV: {}
     c_max: ["c_max"]
     N_arg_grid_vfi: ["N_arg_grid_vfi"]
 
