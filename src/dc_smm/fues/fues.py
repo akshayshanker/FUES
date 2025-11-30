@@ -795,7 +795,7 @@ def _scan(
         
 
         # Case C: Left turn
-        if left_turn_jump:
+        if left_turn_jump or left_turn_no_jump:
             keep_j, m_ind = backward_scan_combined(
                 m_buf,
                 m_head,
@@ -903,7 +903,7 @@ def _scan(
             continue
 
         # Case R: Right turn without jump
-        if right_turn_no_jump or left_turn_no_jump:
+        if right_turn_no_jump:
             k = j
             prev_j = j
             j = i + 1
