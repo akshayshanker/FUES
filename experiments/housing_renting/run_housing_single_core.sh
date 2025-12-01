@@ -8,7 +8,7 @@
 #PBS -j oe
 #PBS -r y
 #PBS -o logs/
-#PBS -e logs/
+# Note: Create logs/ folder before submitting: mkdir -p experiments/housing_renting/logs
 
 # ======================================================================
 #  Single Core Job - Load Baseline, Compute Fast Methods Only
@@ -18,9 +18,10 @@
 set -euo pipefail
 
 # --- Path Setup (handle PBS vs local) ---
+# PBS_O_WORKDIR is the directory where qsub was invoked (experiments/housing_renting/)
 if [[ -n "${PBS_O_WORKDIR:-}" ]]; then
-    SCRIPT_DIR="$PBS_O_WORKDIR/experiments/housing_renting"
-    REPO_ROOT="$PBS_O_WORKDIR"
+    SCRIPT_DIR="$PBS_O_WORKDIR"
+    REPO_ROOT="$(cd "$PBS_O_WORKDIR/../.." && pwd)"
 else
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -30,31 +31,28 @@ fi
 source "$SCRIPT_DIR/configs/job_configs.sh"
 
 # --- Define the Sequence of Configurations to Run ---
-CONFIG_TO_RUN=("HIGH_RES_SETTINGS_A_PB")
+CONFIG_TO_RUN=("STD_RES_SETTINGS")
 
 
 # --- Environment Setup ---
 module purge
 module load python3/3.12.1
-export VENV_ROOT=/scratch/tp66/$USER/venvs
-source "$VENV_ROOT/fues02-py3121/bin/activate"
+
+# Use venv created by scripts/setup_public_venv.sh
+source "$REPO_ROOT/.venv_public/bin/activate"
 
 export FUES_HOME="$REPO_ROOT"
-export PYTHONPATH="$FUES_HOME${PYTHONPATH:+:$PYTHONPATH}"
+export PYTHONPATH="$FUES_HOME/src:$FUES_HOME${PYTHONPATH:+:$PYTHONPATH}"
 cd "$FUES_HOME"
 
 # --- Single Core Configuration ---
 # No MPI settings needed for single core
 export NUMBA_CACHE_DIR=/scratch/tp66/$USER/numba_cache
 
-# Optional: Clear cache if needed
-if [[ "${1:-}" == "--clear-cache" ]]; then
-    echo "Clearing Numba cache at $NUMBA_CACHE_DIR..."
-    rm -rf $NUMBA_CACHE_DIR
-    shift
-fi
-
-mkdir -p $NUMBA_CACHE_DIR
+# Always clear Numba cache to ensure fresh compilation with latest code
+echo "Clearing Numba cache at $NUMBA_CACHE_DIR..."
+rm -rf "$NUMBA_CACHE_DIR"
+mkdir -p "$NUMBA_CACHE_DIR"
 export NUMBA_NUM_THREADS=1
 
 # Hide GPUs from Numba to prevent CUDA initialization errors
@@ -95,41 +93,30 @@ for CONFIG_NAME in "${CONFIG_TO_RUN[@]}"; do
 
     TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
     VERSION_TAG="${CONFIG_REF[version_suffix]}"
-    # TRIAL_ID can be set as environment variable or default to empty
-    TRIAL_ID="gpu_test"
+    TRIAL_ID="single_core"
+    RUN_ID="${VERSION_TAG}_${TIMESTAMP}_${TRIAL_ID}"
     
-    # Build paths based on whether TRIAL_ID is set
-    if [[ -n "$TRIAL_ID" ]]; then
-        RUN_ID="${VERSION_TAG}_${TIMESTAMP}_${TRIAL_ID}"
-        LOG_DIR="$REPO_ROOT/logs/${VERSION_TAG}_${TRIAL_ID}"
-        OUTPUT_DIR="/scratch/tp66/$USER/FUES/solutions/housing_renting/${VERSION_TAG}_${TRIAL_ID}"
-    else
-        RUN_ID="${VERSION_TAG}_${TIMESTAMP}"
-        LOG_DIR="$REPO_ROOT/logs/${VERSION_TAG}"
-        OUTPUT_DIR="/scratch/tp66/$USER/FUES/solutions/housing_renting/${VERSION_TAG}"
-    fi
+    # All logs go to experiments/housing_renting/logs/ (same as PBS -o)
+    LOG_DIR="$SCRIPT_DIR/logs"
+    OUTPUT_DIR="/scratch/tp66/$USER/FUES/solutions/housing_renting/${VERSION_TAG}_${TRIAL_ID}"
     mkdir -p "$LOG_DIR"
 
     echo "Starting single-core run for ${CONFIG_NAME} at $(date)"
     echo "Output will be saved to: $OUTPUT_DIR"
     echo "Logs will be saved to: $LOG_DIR"
     echo "NOTE: Baseline will be loaded from existing bundles, not recomputed"
-    echo "NOTE: Using selective loading for Euler error - loading only periods 0,1"
+    echo "NOTE: euler_error metric doesn't require baseline comparison"
     echo "NOTE: EGM plots are disabled for faster execution (--skip-egm-plots)"
 
     # Optional: Set to empty string to enable EGM plots (slower but more detailed)
     # EGM_PLOTS_FLAG="--skip-egm-plots"  # Comment this line to enable EGM plots
     EGM_PLOTS_FLAG="--skip-egm-plots"
 
-    # Selective loading: Euler error only needs:
-    # - Period 0: OWNC stage (for current consumption)
-    # - Period 1: All stages (OWNC, TENU, OWNH, RNTH, RNTC for next period policies)
-    # This reduces loading from 75 to 18 pickle files (76% reduction)
     python3 -m examples.housing_renting.solve_runner \
       --periods "${CONFIG_REF[periods]}" \
-      --ue-method "FUES,VFI_HDGRID_GPU" \
+      --ue-method "FUES,VFI, CONSAV,VFI_HDGRID_GPU" \
       --output-root "$OUTPUT_DIR" \
-      --bundle-prefix "${VERSION_TAG}" \
+      --config-id "${VERSION_TAG}" \
       --RUN-ID "${VERSION_TAG}_${TIMESTAMP}" \
       --vfi-ngrid "${CONFIG_REF[vfi_ngrid]}" \
       --HD-points "${CONFIG_REF[hd_points]}" \
@@ -142,21 +129,19 @@ for CONFIG_NAME in "${CONFIG_TO_RUN[@]}"; do
       --plots \
       $EGM_PLOTS_FLAG \
       --trace \
-      --load-periods "0,1" \
-      --load-stages '{"0": ["OWNC"], "1": null}' \
-      2> >(tee "${LOG_DIR}/run.err") \
-      1> >(tee "${LOG_DIR}/run.log")
+      2> >(tee "${LOG_DIR}/run_${TIMESTAMP}.err") \
+      1> >(tee "${LOG_DIR}/run_${TIMESTAMP}.log")
 
     EXIT_CODE=$?
     if [ $EXIT_CODE -ne 0 ]; then
         echo "ERROR: Run for ${CONFIG_NAME} failed with exit code: $EXIT_CODE" >&2
-        echo "Check error log at: ${LOG_DIR}/run.err" >&2
+        echo "Check error log at: ${LOG_DIR}/run_${TIMESTAMP}.err" >&2
         
         # Check for common errors in the log
-        if grep -q "LLVM ERROR" "${LOG_DIR}/run.err"; then
+        if grep -q "LLVM ERROR" "${LOG_DIR}/run_${TIMESTAMP}.err"; then
             echo "HINT: LLVM error detected. Try running with --clear-cache flag" >&2
         fi
-        if grep -q "baseline.*not found" "${LOG_DIR}/run.err"; then
+        if grep -q "baseline.*not found" "${LOG_DIR}/run_${TIMESTAMP}.err"; then
             echo "HINT: Baseline bundle not found. Run MPI job first to compute baseline" >&2
         fi
         
@@ -170,4 +155,4 @@ for CONFIG_NAME in "${CONFIG_TO_RUN[@]}"; do
 done
 
 echo "All single-core configurations processed."
-exit 0 
+exit 0

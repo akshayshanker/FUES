@@ -25,14 +25,28 @@ source "$VENV_PATH/bin/activate"
 # Upgrade pip
 pip install --upgrade pip
 
-# Install dependencies from pyproject.toml (without editable install of this package)
-pip install numpy numba matplotlib pyyaml
+# Install all dependencies from pyproject.toml
+pip install \
+    numpy \
+    numba \
+    scipy \
+    matplotlib \
+    pyyaml \
+    dill \
+    quantecon \
+    econ-ark \
+    interpolation \
+    pykdtree \
+    tabulate \
+    pyDOE \
+    psutil \
+    jinja2 \
+    mpi4py \
+    consav \
+    EconModel
 
 # Install dynx from GitHub (public version)
 pip install "dynx @ git+https://github.com/akshayshanker/dynx.git"
-
-# Install consav
-pip install consav
 
 echo ""
 echo "Public venv created at: $VENV_PATH"

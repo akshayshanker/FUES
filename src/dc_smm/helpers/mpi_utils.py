@@ -16,6 +16,14 @@ class DummyComm:
         self.rank = 0
         self.size = 1
     
+    def Get_rank(self):
+        """Return rank (0 for serial execution)."""
+        return self.rank
+    
+    def Get_size(self):
+        """Return size (1 for serial execution)."""
+        return self.size
+    
     def Barrier(self):
         """No-op barrier for serial execution."""
         pass

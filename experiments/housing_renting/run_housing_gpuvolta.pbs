@@ -1,0 +1,132 @@
+#!/bin/bash
+#PBS -N fues-gpuvolta
+#PBS -P tp66
+#PBS -q gpuvolta
+#PBS -l ncpus=12,mem=382GB,walltime=04:00:00
+#PBS -l ngpus=1
+#PBS -l storage=gdata/tp66+scratch/tp66
+#PBS -l wd
+#PBS -j oe
+#PBS -o logs/
+
+set -euo pipefail
+
+# =====================================================
+# GPU Volta V100 Configuration
+# =====================================================
+
+# --- Path Setup ---
+if [[ -n "${PBS_O_WORKDIR:-}" ]]; then
+    SCRIPT_DIR="$PBS_O_WORKDIR"
+    REPO_ROOT="$(cd "$PBS_O_WORKDIR/../.." && pwd)"
+else
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+fi
+
+# --- 1. Source the Configuration Library ---
+source "$SCRIPT_DIR/configs/job_configs.sh"
+
+# --- 2. Define the Configuration to Run ---
+if [[ -n "${FUES_CONFIG:-}" ]]; then
+    CONFIG_NAME="$FUES_CONFIG"
+    echo "Using configuration from FUES_CONFIG: $CONFIG_NAME"
+else
+    CONFIG_NAME="HIGH_RES_SETTINGS_A"
+    echo "Using default configuration: $CONFIG_NAME"
+fi
+
+# --- 3. Environment Setup ---
+module purge
+module load python3/3.12.1 
+module load cuda/12.8.0
+
+# Use venv created by scripts/setup_public_venv.sh
+source "$REPO_ROOT/.venv_public/bin/activate"
+
+export FUES_HOME="$REPO_ROOT"
+export PYTHONPATH="$FUES_HOME/src:$FUES_HOME${PYTHONPATH:+:$PYTHONPATH}"
+cd "$FUES_HOME"
+
+# --- 4. Numba Configuration (matching historical working settings) ---
+export NUMBA_DISABLE_CACHE=1
+export NUMBA_NUM_THREADS=1
+
+# --- 5. Error Handling and Logging ---
+export PYTHONPATH=$PWD:$PYTHONPATH
+export MAKEMOD_QUIET=true
+export PERIOD_QUIET=true
+export SHOCKS_QUIET=true
+
+# --- 6. Verify Configuration Exists ---
+if ! declare -p "$CONFIG_NAME" &>/dev/null; then
+    echo "Error: Configuration '$CONFIG_NAME' not found in job_configs.sh"
+    exit 1
+fi
+
+declare -n CONFIG_REF=$CONFIG_NAME
+
+# --- 7. Extract Configuration Parameters ---
+PERIODS=${CONFIG_REF["periods"]}
+VFI_GRID=${CONFIG_REF["vfi_ngrid"]}
+HD_POINTS=${CONFIG_REF["hd_points"]}
+GRID_POINTS=${CONFIG_REF["grid_points"]}
+VERSION_TAG="${CONFIG_REF[version_suffix]}"
+DELTA_PB=${CONFIG_REF["delta_pb"]:-1}
+
+# --- Logging and Paths ---
+TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
+TRIAL_ID="gpuvolta"
+RUN_ID="${VERSION_TAG}_${TIMESTAMP}_${TRIAL_ID}"
+
+LOG_DIR="$SCRIPT_DIR/logs"
+OUTPUT_DIR="/scratch/tp66/$USER/FUES/solutions/housing_renting/${VERSION_TAG}_${TRIAL_ID}"
+CONFIG_ID="$VERSION_TAG"
+OUTPUT_ROOT="$OUTPUT_DIR"
+
+mkdir -p "$OUTPUT_ROOT" "$LOG_DIR"
+
+# --- 8. Display Configuration Information ---
+echo "========================================================"
+echo "Running GPU Profiling for: ${CONFIG_NAME}"
+echo "========================================================"
+echo "Output will be saved to: $OUTPUT_DIR"
+echo "Logs will be saved to: $LOG_DIR"
+echo ""
+echo "Configuration Details:"
+echo "  Periods: $PERIODS"
+echo "  Brute search points: $VFI_GRID"
+echo "  HD grid points: $HD_POINTS"
+echo "  Fast methods grid Points: $GRID_POINTS"
+echo ""
+echo "GPU Information:"
+nvidia-smi --query-gpu=index,name,memory.total,driver_version --format=csv
+echo "========================================================"
+
+# --- 9. Run the Solver ---
+echo "Starting run at $(date)"
+
+python3 -m examples.housing_renting.solve_runner \
+    --periods "$PERIODS" \
+    --ue-method "VFI_HDGRID_GPU" \
+    --output-root "$OUTPUT_ROOT" \
+    --config-id "$CONFIG_ID" \
+    --vfi-ngrid "$VFI_GRID" \
+    --HD-points "$HD_POINTS" \
+    --grid-points "$GRID_POINTS" \
+    --baseline-method "VFI_HDGRID_GPU" \
+    --recompute-baseline \
+    --include-baseline \
+    --delta-pb "$DELTA_PB" \
+    --plots \
+    --metrics "euler_error" \
+    --gpu \
+    --trace \
+    --low-memory \
+    2> >(tee "${LOG_DIR}/run_${TIMESTAMP}.err") \
+    1> >(tee "${LOG_DIR}/run_${TIMESTAMP}.log")
+
+echo "GPU profiling run completed at $(date)"
+echo "Results saved to: $OUTPUT_DIR"
+
+exit 0

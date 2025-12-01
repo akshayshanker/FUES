@@ -701,14 +701,22 @@ def _solve_vfi_numerical(vlu_cntn, w_grid, a_grid, H_grid,
                 a_low = a_grid[0]
                 a_high = min(w_val - 1e-12, a_grid[-1]+30) #TODO: HARDWIRE THIS
 
-                a_star, Q_star, _ = brent_max(
-                    bellman_obj,
-                    a_low, a_high,
-                    args=(w_val, H_val, beta, delta,
-                          a_grid, V_slice, u_func),
-                    xtol=1e-12
-                )
-                c_star = w_val - a_star
+                # Handle corner case: wealth too low to allow savings above a_low
+                if a_high <= a_low:
+                    # Consume everything above minimum savings
+                    a_star = a_low
+                    c_star = max(w_val - a_low, 1e-12)
+                    Q_star = bellman_obj(a_star, w_val, H_val, beta, delta,
+                                         a_grid, V_slice, u_func)
+                else:
+                    a_star, Q_star, _ = brent_max(
+                        bellman_obj,
+                        a_low, a_high,
+                        args=(w_val, H_val, beta, delta,
+                              a_grid, V_slice, u_func),
+                        xtol=1e-12
+                    )
+                    c_star = w_val - a_star
 
                 if np.isinf(Q_star):
                     c_star = 1e-100

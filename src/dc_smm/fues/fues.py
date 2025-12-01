@@ -509,7 +509,7 @@ def FUES(
         all_d = all_d[sort_idx]
         is_inter = is_inter[sort_idx]
 
-        post_mask = _postclean_double_jump_mask(all_e, all_p2, m_bar, is_inter, eps_d)
+        post_mask = _postclean_double_jump_mask(all_e, all_p1, m_bar, is_inter, eps_d)
 
         final_mask = post_mask
 

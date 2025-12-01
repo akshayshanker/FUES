@@ -216,12 +216,19 @@ from __future__ import annotations
 # Global trace flag - check for --trace in command line args early
 import sys
 _TRACE_ENABLED = '--trace' in sys.argv
+_MPI_RANK = 0  # Will be set once MPI comm is available
 
-def trace_print(message):
-    """Print trace message only if tracing is enabled"""
-    if _TRACE_ENABLED:
+def set_mpi_rank(rank: int):
+    """Set the MPI rank for trace filtering (only rank 0 prints)"""
+    global _MPI_RANK
+    _MPI_RANK = rank
+
+def trace_print(message, force_all_ranks=False):
+    """Print trace message only if tracing is enabled and rank is 0"""
+    if _TRACE_ENABLED and (force_all_ranks or _MPI_RANK == 0):
         print(f"[TRACE] {message}", flush=True)
 
+# Note: Early trace prints (before MPI init) go to rank 0 since _MPI_RANK defaults to 0
 trace_print("0.1: Starting imports")
 import argparse
 import copy
@@ -381,9 +388,12 @@ def make_housing_model(args, cfg_container: dict, periods: int, vf_ngrid: int, c
 
     # 3. numerically compile every Stage (grid creation, etc.)
     try:
-        # 'force=False': skip already-compiled stages when re-loading bundles
-        if comm is None or comm.rank == 0:
-            compile_all_stages(mc, force=False)
+        # Always compile when comm=None (sweep mode), otherwise only rank 0
+        # Use force=True to ensure grids are rebuilt with current config
+        if comm is None:
+            compile_all_stages(mc, force=True)  # Sweep mode: each rank compiles fresh
+        elif comm.rank == 0:
+            compile_all_stages(mc, force=False)  # Non-sweep: rank 0 compiles, skip if cached
     except Exception as exc:
         # logger.error("Stage compilation failed – aborting make_housing_model()", exc_info=True)
         raise
@@ -507,6 +517,8 @@ def main(argv=None):
                    help="Export plot data to CSV files (includes both policy and EGM data)")
     p.add_argument("--save-full-model", action="store_true",
                    help="Keep all solution data in memory for saving. Disables memory freeing during solve. Default: False (free memory)")
+    p.add_argument("--sweep", action="store_true",
+                   help="Enable sweep mode: distribute (method, grid_size, H_points) combinations across MPI ranks using mpi_map")
     
     args = p.parse_args(argv or sys.argv[1:])
 
@@ -522,15 +534,18 @@ def main(argv=None):
     # Configure memory management based on environment
     memory_config = get_memory_config("cluster")  # Default to cluster settings
     
-    # Log initial memory usage
-    log_memory_usage("at start of solve_runner")
-    
     trace_print("2: Args parsed")
 
     #  MPI communicator
     from dc_smm.helpers.mpi_utils import get_comm
     comm = get_comm(args.mpi)
-    trace_print(f"3: MPI comm created, rank={comm.rank if comm else 0}")
+    mpi_rank = comm.rank if comm else 0
+    set_mpi_rank(mpi_rank)  # Set rank for trace_print filtering
+    trace_print(f"3: MPI comm created, rank={mpi_rank}")
+    
+    # Log initial memory usage (rank 0 only)
+    if mpi_rank == 0:
+        log_memory_usage("at start of solve_runner")
     
     if comm.size > 1 and not args.mpi and comm.rank != 0:
         comm.Barrier()
@@ -699,6 +714,124 @@ def main(argv=None):
     runner.stages_to_save = [args.stages_L2dev]
     trace_print(f"15: Stages configured: load={runner.stages_to_load}, save={runner.stages_to_save}")
 
+    # ====================================================================
+    #  SWEEP MODE: Use mpi_map to distribute across MPI ranks
+    # ====================================================================
+    if args.sweep:
+        trace_print("SWEEP: Starting sweep mode")
+        from dynx.runner import mpi_map
+        
+        # Build design matrix from experiment set
+        design_matrix, sweep_param_paths, sweep_config = ExecutionSettings.build_sweep_design_matrix(args.experiment_set)
+        fixed_params = sweep_config.get("fixed", {})
+        
+        if is_root:
+            print("\n" + "="*60)
+            print("SWEEP MODE")
+            print("="*60)
+            print(f"Experiment set: {args.experiment_set}")
+            print(f"param_paths: {sweep_param_paths}")
+            print(f"Design matrix: {len(design_matrix)} configurations")
+            print(f"  Methods: {sweep_config['methods']}")
+            print(f"  Grid sizes: {sweep_config['grid_sizes']}")
+            print(f"  H sizes: {sweep_config['H_sizes']}")
+            print(f"  Fixed: {fixed_params}")
+            print("="*60 + "\n")
+        
+        # Create sweep-specific runner with the right param_paths
+        # Need to patch base config with fixed params (H_points -> S_points sync)
+        sweep_base_cfg = copy.deepcopy(model_config)
+        
+        # Set fixed parameters
+        if "delta_pb" in fixed_params:
+            sweep_base_cfg["master"]["parameters"]["delta_pb"] = fixed_params["delta_pb"]
+        if "periods" in fixed_params:
+            sweep_base_cfg["master"]["horizon"] = fixed_params["periods"]
+        
+        def make_sweep_model(cfg):
+            """Model factory that syncs H_points -> S_points and a_points -> a_nxt_points, w_points"""
+            # Sync grid sizes
+            a_points = cfg["master"]["settings"]["a_points"]
+            cfg["master"]["settings"]["a_nxt_points"] = a_points
+            cfg["master"]["settings"]["w_points"] = a_points
+            
+            # Sync H_points -> S_points (both are in settings, not parameters)
+            H_points = cfg["master"]["settings"]["H_points"]
+            cfg["master"]["settings"]["S_points"] = H_points
+            
+            # NOTE: Pass comm=None so each MPI rank compiles its own model independently.
+            # In sweep mode with mpi_map, each rank works on different configs in parallel.
+            return make_housing_model(args, cfg, args.periods, vf_ngrid, comm=None)
+        
+        # NOTE: In sweep mode with mpi_map, each rank solves different configs independently.
+        # Pass use_mpi=False and comm=None so each rank:
+        # 1. Compiles its own model (done via make_sweep_model's comm=None)
+        # 2. Initializes its own terminal values (solver needs comm=None)
+        # 3. Solves without MPI synchronization within a single model
+        sweep_runner = CircuitRunner(
+            base_cfg=sweep_base_cfg,
+            param_paths=sweep_param_paths,
+            model_factory=make_sweep_model,
+            solver=make_housing_solver(args, use_mpi=False, comm=None, baseline_method=None),
+            metric_fns=metric_fns,
+            output_root=output_root,
+            save_by_default=save_by_default,
+            load_if_exists=not args.fresh_fast,
+        )
+        sweep_runner.stages_to_load = [args.stages_L2dev]
+        sweep_runner.stages_to_save = [args.stages_L2dev]
+        
+        trace_print(f"SWEEP: Running mpi_map with {len(design_matrix)} configurations")
+        
+        # Run sweep using mpi_map
+        # Note: mpi_map returns None on non-root ranks when MPI is enabled
+        result = mpi_map(
+            sweep_runner, 
+            design_matrix, 
+            mpi=args.mpi, 
+            comm=comm,
+            return_models=False
+        )
+        
+        # Handle None return on non-root MPI ranks
+        if result is None:
+            # Non-root ranks just wait at barrier and exit
+            if comm is not None:
+                comm.Barrier()
+            trace_print("SWEEP: Non-root rank complete")
+            return
+        
+        results_df, _ = result
+        
+        # Only root has the aggregated results
+        if is_root and results_df is not None:
+            trace_print("SWEEP: Saving results")
+            
+            # Save results DataFrame
+            results_path = output_root / "sweep_results.csv"
+            results_df.to_csv(results_path, index=False)
+            print(f"\nSweep results saved to: {results_path}")
+            
+            # Print summary table
+            print("\n" + "="*60)
+            print("SWEEP RESULTS SUMMARY")
+            print("="*60)
+            print(results_df.to_string())
+            print("="*60 + "\n")
+            
+            # Also save design matrix
+            write_design_matrix_csv(sweep_runner, design_matrix)
+            print(f"Design matrix saved to: {output_root}/design_matrix.csv")
+        
+        if comm is not None:
+            comm.Barrier()
+        
+        trace_print("SWEEP: Complete")
+        return  # Exit after sweep mode
+    
+    # ====================================================================
+    #  STANDARD MODE: Sequential execution (original behavior)
+    # ====================================================================
     all_metrics = []
     all_param_vectors = []  # Collect all parameter vectors for design matrix
 
@@ -706,7 +839,7 @@ def main(argv=None):
     #  1) Solve, plot, and process baseline immediately (only if needed)
     # --------------------------------------------------------------------
     if settings.should_run_baseline:
-        with MemoryMonitor(f"Baseline computation ({settings.baseline_method})", log_start=True, log_end=True):
+        with MemoryMonitor(f"Baseline computation ({settings.baseline_method})", log_start=is_root, log_end=is_root):
             trace_print("16: Starting baseline computation")
             runner.load_if_exists = not args.recompute_baseline
             if is_root:  # print from root only
@@ -789,7 +922,7 @@ def main(argv=None):
                 # Clean up non-essential data before plotting if in low-memory mode
                 if args.low_memory:
                     cleanup_model(ref_model, aggressive=False)
-                    log_memory_usage("after baseline model cleanup")
+                    log_memory_usage("after baseline model cleanup", verbose=is_root)
                 
                 try:
                     # Handle CSV export
@@ -827,7 +960,7 @@ def main(argv=None):
             # Trigger cleanup if memory usage is high
             mem_config = settings.get_memory_config()
             cleanup_if_needed(memory_config.get("cleanup_threshold_gb", 32))
-            log_memory_usage("after baseline computation")
+            log_memory_usage("after baseline computation", verbose=is_root)
     
     # If baseline wasn't computed but we still have fast methods, create ref_params for them
     elif settings.needs_baseline and 'ref_params' not in locals():
@@ -863,7 +996,7 @@ def main(argv=None):
             print(f"\n» Fast methods: {', '.join(settings.fast_methods_to_run)}")
             
         for i, method in enumerate(settings.fast_methods_to_run):
-            with MemoryMonitor(f"Fast method computation ({method})", log_start=True, log_end=True):
+            with MemoryMonitor(f"Fast method computation ({method})", log_start=is_root, log_end=is_root):
                 trace_print(f"24.{i+1}: Starting {method}")
                 if is_root:
                     print(f"  Solving {method}...")
@@ -910,7 +1043,7 @@ def main(argv=None):
                     # Clean up non-essential data before plotting if in low-memory mode
                     if args.low_memory:
                         cleanup_model(model, aggressive=False)
-                        log_memory_usage(f"after {method} model cleanup")
+                        log_memory_usage(f"after {method} model cleanup", verbose=is_root)
                     
                     try:
                         # Handle CSV export
@@ -951,7 +1084,7 @@ def main(argv=None):
                 cleanup_if_needed(memory_config.get("cleanup_threshold_gb", 32))
                 
                 # Log memory usage periodically
-                if (i + 1) % 2 == 0:  # Log every 2 methods
+                if (i + 1) % 2 == 0 and is_root:  # Log every 2 methods, rank 0 only
                     log_memory_usage(f"after {i+1} fast methods")
 
     if comm is not None:
@@ -1035,7 +1168,8 @@ def main(argv=None):
             print("Low memory mode: ENABLED (Q and lambda arrays cleared)")
         print("="*60)
     
-    log_memory_usage("at end of solve_runner")
+    if is_root:
+        log_memory_usage("at end of solve_runner")
     
     trace_print("30: Main function complete")
 

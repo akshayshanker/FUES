@@ -1,0 +1,44 @@
+# Sweep Experiment Set - No Price Bound Variation
+# ================================================
+# For sweeping over grid sizes and H_points across methods
+# Trial ID: paper-v1
+#
+# This configuration is for running parameter sweeps using mpi_map.
+# Each MPI rank solves one (method, grid_size, H_points) combination.
+
+# Parameter paths passed to CircuitRunner
+# These define what goes into the bundle hash.
+param_paths:
+  - master.methods.upper_envelope    # Method (excluded from hash via method_param_path)
+  - master.settings.a_points         # Asset grid points
+  - master.settings.H_points         # Housing/Services grid points
+
+# Sweep configuration
+sweep:
+  # Methods to sweep over
+  methods:
+    - FUES
+    - CONSAV
+    - DCEGM
+    - VFI
+  
+  # Grid sizes to sweep (a_points = a_nxt_points = w_points)
+  grid_sizes:
+    - 500
+    - 1000
+    - 2000
+    - 4000
+    - 6000
+    - 8000
+  
+  # Housing grid sizes (H_points = S_points)
+  H_sizes:
+    - 7
+    - 10
+    - 15
+    - 20
+
+# Fixed parameters (not in sweep)
+fixed:
+  delta_pb: 1
+  periods: 5

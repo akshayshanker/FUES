@@ -10,8 +10,36 @@ the economic model itself.
 """
 
 from pathlib import Path
-import json
 import numpy as np
+import yaml
+
+
+def load_experiment_set(experiment_set_name: str = "default") -> dict:
+    """
+    Load experiment set configuration from YAML file.
+    
+    Parameters
+    ----------
+    experiment_set_name : str
+        Name of the experiment set (without .yml extension)
+        
+    Returns
+    -------
+    dict
+        Experiment set configuration
+    """
+    # Look for experiment set in experiments/housing_renting/experiment_sets/
+    experiment_sets_dir = Path(__file__).parent.parent.parent.parent / "experiments" / "housing_renting" / "experiment_sets"
+    config_path = experiment_sets_dir / f"{experiment_set_name}.yml"
+    
+    if not config_path.exists():
+        raise FileNotFoundError(
+            f"Experiment set '{experiment_set_name}' not found at {config_path}\n"
+            f"Available sets: {[f.stem for f in experiment_sets_dir.glob('*.yml')]}"
+        )
+    
+    with open(config_path, 'r') as f:
+        return yaml.safe_load(f)
 
 
 class ExecutionSettings:
@@ -19,9 +47,98 @@ class ExecutionSettings:
     
     # Class constants - moved from solve_runner.py
     DEFAULT_BASE = "VFI_HDGRID_GPU"
-    ALL_METHODS = ["VFI_HDGRID", "VFI_HDGRID_GPU", "FUES", "DCEGM", "CONSAV", "FUES2DEV"]
-    DEFAULT_FAST_METHODS = ["FUES", "CONSAV", "DCEGM","FUES_V0DEV"]
+    ALL_METHODS = ["VFI_HDGRID", "VFI_HDGRID_GPU", "FUES", "DCEGM", "CONSAV", "FUES2DEV", "VFI"]
+    DEFAULT_FAST_METHODS = ["FUES", "CONSAV", "DCEGM", "VFI"]
     DEFAULT_COMPARISON_METRICS = "dev_c_L2,plot_c_comparison,plot_v_comparison"
+    
+    # Default parameter paths (can be overridden by experiment set)
+    DEFAULT_PARAM_PATHS = [
+        "master.methods.upper_envelope",   # Method (excluded from hash)
+        "master.settings.a_points",        # Grid points (asset)
+        "master.settings.a_nxt_points",    # Grid points (next period asset)
+        "master.settings.w_points",        # Grid points (wealth)
+        "master.parameters.delta_pb",      # Price bound delta
+    ]
+    
+    @classmethod
+    def get_param_paths(cls, experiment_set: str = "default") -> list:
+        """
+        Get param_paths from experiment set configuration.
+        
+        Parameters
+        ----------
+        experiment_set : str
+            Name of experiment set to load
+            
+        Returns
+        -------
+        list
+            Parameter paths for CircuitRunner
+        """
+        try:
+            config = load_experiment_set(experiment_set)
+            return config.get("param_paths", cls.DEFAULT_PARAM_PATHS)
+        except FileNotFoundError:
+            print(f"Warning: Experiment set '{experiment_set}' not found, using defaults")
+            return cls.DEFAULT_PARAM_PATHS
+    
+    @classmethod
+    def get_sweep_config(cls, experiment_set: str) -> dict:
+        """
+        Get sweep configuration from experiment set.
+        
+        Parameters
+        ----------
+        experiment_set : str
+            Name of experiment set to load
+            
+        Returns
+        -------
+        dict
+            Sweep configuration with 'methods', 'grid_sizes', 'H_sizes', and 'fixed' params
+        """
+        config = load_experiment_set(experiment_set)
+        sweep = config.get("sweep", {})
+        fixed = config.get("fixed", {})
+        return {
+            "methods": sweep.get("methods", ["FUES", "CONSAV", "VFI"]),
+            "grid_sizes": sweep.get("grid_sizes", [500, 1000, 2000]),
+            "H_sizes": sweep.get("H_sizes", [7, 10, 15]),
+            "fixed": fixed,
+            "param_paths": config.get("param_paths", cls.DEFAULT_PARAM_PATHS),
+        }
+    
+    @classmethod 
+    def build_sweep_design_matrix(cls, experiment_set: str) -> tuple:
+        """
+        Build design matrix for parameter sweep.
+        
+        Parameters
+        ----------
+        experiment_set : str
+            Name of experiment set to load
+            
+        Returns
+        -------
+        tuple
+            (design_matrix as np.ndarray, param_paths list)
+        """
+        from itertools import product
+        
+        sweep_config = cls.get_sweep_config(experiment_set)
+        methods = sweep_config["methods"]
+        grid_sizes = sweep_config["grid_sizes"]
+        H_sizes = sweep_config["H_sizes"]
+        param_paths = sweep_config["param_paths"]
+        
+        # Build all combinations
+        rows = []
+        for method, grid, H in product(methods, grid_sizes, H_sizes):
+            # Row order must match param_paths order:
+            # [method, a_points, H_points]
+            rows.append([method, grid, H])
+        
+        return np.array(rows, dtype=object), param_paths, sweep_config
     
     def __init__(self, args, cfg_dir_base, timestamp_suffix=None):
         """
@@ -45,7 +162,6 @@ class ExecutionSettings:
         self.setup_grid_sizes()
         self.setup_methods()
         self.setup_metrics()
-        self.setup_loading_config()
         
     def setup_paths(self):
         """Configure all file system paths."""
@@ -54,8 +170,8 @@ class ExecutionSettings:
         self.output_root = self.packroot / self.args.output_root
         self.output_root.mkdir(parents=True, exist_ok=True)
 
-        # Config directory for this bundle
-        self.cfg_dir_bundle = self.cfg_dir_base / self.args.bundle_prefix
+        # Config directory for this configuration
+        self.cfg_dir_bundle = self.cfg_dir_base / self.args.config_id
 
         # Image directory for plots - ALWAYS use timestamp suffix to preserve old runs
         if self.args.plots or self.args.csv_export:
@@ -141,27 +257,6 @@ class ExecutionSettings:
             set(self.requested_metrics) & self.comparison_metrics
         ) or self.args.include_baseline
         
-    def setup_loading_config(self):
-        """Configure selective model loading settings."""
-        self.periods_to_load = None
-        self.stages_to_load = None
-        
-        # Parse periods to load
-        if self.args.load_periods:
-            try:
-                self.periods_to_load = [int(p.strip()) for p in self.args.load_periods.split(",")]
-            except ValueError:
-                print(f"Warning: Invalid --load-periods format, ignoring: {self.args.load_periods}")
-        
-        # Parse stages to load
-        if self.args.load_stages:
-            try:
-                stages_dict = json.loads(self.args.load_stages)
-                # Convert string keys to int keys
-                self.stages_to_load = {int(k): v for k, v in stages_dict.items()}
-            except (json.JSONDecodeError, ValueError):
-                print(f"Warning: Invalid --load-stages format, ignoring: {self.args.load_stages}")
-    
     def get_baseline_params(self):
         """
         Get parameter vector for baseline method.
@@ -302,10 +397,7 @@ class ExecutionSettings:
         print(f"Fast methods: {', '.join(self.fast_methods_to_run) if self.fast_methods_to_run else 'None'}")
         print(f"Grid sizes: VFI={self.vf_ngrid}, HD={self.hd_points}, STD={self.std_points}")
         print(f"Output root: {self.output_root}")
-        print(f"Bundle prefix: {self.args.bundle_prefix}")
-        
-        if self.periods_to_load or self.stages_to_load:
-            print(f"Selective loading: periods={self.periods_to_load}, stages={self.stages_to_load}")
+        print(f"Config ID: {self.args.config_id}")
         
         if self.args.gpu:
             print("GPU acceleration: ENABLED")

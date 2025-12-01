@@ -1,0 +1,32 @@
+# Small Sweep Experiment Set - For Testing
+# ==========================================
+# Smaller grid for quick testing of sweep mode
+# Trial ID: paper-v1-test
+
+param_paths:
+  - master.methods.upper_envelope    # Method (excluded from hash)
+  - master.settings.a_points         # Asset grid points
+  - master.settings.H_points         # Housing/Services grid points
+
+sweep:
+  # Methods to sweep over
+  methods:
+    - FUES
+    - CONSAV
+    - DCEGM
+    - VFI
+  
+  # Smaller grid sizes for testing
+  grid_sizes:
+    - 500
+    - 1000
+  
+  # Fewer H sizes for testing
+  H_sizes:
+    - 7
+    - 10
+
+# Fixed parameters
+fixed:
+  delta_pb: 1
+  periods: 5

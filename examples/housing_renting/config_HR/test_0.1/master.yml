@@ -90,6 +90,35 @@ settings:
   # KT conditions override at jump constraints (for testing)
   override_KT_conditions_at_jump: false  # When true, disables FOC filtering at jumps
 
+  # Method-specific upper envelope kwargs
+  # These are passed directly to the UE engine (FUES, DCEGM, etc.)
+  ue_kwargs:
+    FUES:
+      # Core parameters
+      m_bar: 1.0001              # Jump threshold for same-branch tests
+      lb: 5                   # Look-back window size
+      
+      # Intersection handling
+      include_intersections: true       # Add intersection points at jumps
+      return_intersections_separately: false  # Return intersections in separate array
+      single_intersection: false        # Only compute single intersection per jump
+      
+      # Jump filtering
+      endog_mbar: false       # Use endogenous m_bar based on policy gradients
+      padding_mbar: 0.0       # Padding for m_bar calculation
+      no_double_jumps: true   # Filter out consecutive jumps
+      disable_jump_checks: false  # Disable manual jump check overrides
+      use_post_state_jump_test: true #if true, post-state also included in jump check
+      left_turn_no_jump_strict: true # if false, left turn with no jump treated like a right turn with no jump
+      
+      # Numerical tolerances
+      eps_d: 1.0e-14          # Machine epsilon protection for divisions
+      eps_sep: 1.0e-10        # Minimum separation when creating intersections
+      eps_fwd_back: .25       # Forward/backward scan proximity threshold
+      parallel_guard: 1.0e-10 # Tolerance for near-parallel segment detection
+    DCEGM: {}
+    CONSAV: {}
+
 ###################
 # 2) .math Section
 ###################
