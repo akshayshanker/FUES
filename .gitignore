@@ -21,8 +21,18 @@ build/
 *.o[0-9]*
 *.e[0-9]*
 *.out
-logs/*
+# Logs folders (anywhere in repo)
+logs/
+logs/*/
 !logs/.gitkeep
+!logs/*/.gitkeep
+!**/logs/.gitkeep
+
+# PBS scripts (cluster-specific)
+scripts/pbs/
+
+# Old/deprecated code
+**/old/
 
 # Backup directories
 *_backup_*
@@ -61,3 +71,4 @@ archive/
 # Documentation drafts
 docs/*.tex
 docs/*_draft.*
+dynx_repo/

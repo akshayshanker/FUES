@@ -97,7 +97,7 @@ for CONFIG_NAME in "${CONFIG_TO_RUN[@]}"; do
       --periods "${CONFIG_REF[periods]}" \
       --ue-method "VFI_HDGRID_GPU,FUES2DEV" \
       --output-root "$OUTPUT_DIR" \
-      --bundle-prefix "$VERSION_TAG" \
+      --config-id "$VERSION_TAG" \
       --vfi-ngrid "${CONFIG_REF[vfi_ngrid]}" \
       --HD-points "${CONFIG_REF[hd_points]}" \
       --grid-points "${CONFIG_REF[grid_points]}" \

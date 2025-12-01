@@ -31,18 +31,17 @@ fi
 source "$SCRIPT_DIR/configs/job_configs.sh"
 
 # --- Define the Sequence of Configurations to Run ---
-CONFIG_TO_RUN=("STD_RES_SETTINGS")
+CONFIG_TO_RUN=("HIGH_RES_SETTINGS_A")
 
 
 # --- Environment Setup ---
 module purge
 module load python3/3.12.1
-
-# Use venv created by scripts/setup_public_venv.sh
-source "$REPO_ROOT/.venv_public/bin/activate"
+export VENV_ROOT=/scratch/tp66/$USER/venvs
+source "$VENV_ROOT/fues02-py3121/bin/activate"
 
 export FUES_HOME="$REPO_ROOT"
-export PYTHONPATH="$FUES_HOME/src:$FUES_HOME${PYTHONPATH:+:$PYTHONPATH}"
+export PYTHONPATH="$FUES_HOME${PYTHONPATH:+:$PYTHONPATH}"
 cd "$FUES_HOME"
 
 # --- Single Core Configuration ---
@@ -114,7 +113,7 @@ for CONFIG_NAME in "${CONFIG_TO_RUN[@]}"; do
 
     python3 -m examples.housing_renting.solve_runner \
       --periods "${CONFIG_REF[periods]}" \
-      --ue-method "FUES,VFI, CONSAV,VFI_HDGRID_GPU" \
+      --ue-method "FUES,VFI_HDGRID_GPU" \
       --output-root "$OUTPUT_DIR" \
       --config-id "${VERSION_TAG}" \
       --RUN-ID "${VERSION_TAG}_${TIMESTAMP}" \

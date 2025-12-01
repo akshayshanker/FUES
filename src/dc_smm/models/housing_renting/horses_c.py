@@ -331,8 +331,6 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
     c_max = model.settings_dict["c_max"]
 
     # Get functions and parameters
-    m_bar = model.settings_dict["m_bar"]
-    lb = model.settings_dict["lb"]
     rfc_radius = model.settings_dict["rfc_radius"]
     rfc_n_iter = model.settings_dict["rfc_n_iter"]
     n_con = model.settings_dict["n_constraint_points"]
@@ -343,6 +341,13 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
 
     # methods
     ue_method = model.methods["upper_envelope"]
+    
+    # Method-specific kwargs (e.g., FUES: endog_mbar, padding_mbar, m_bar, lb, etc.)
+    ue_kwargs = model.settings_dict.get("ue_kwargs", {}).get(ue_method, {})
+    
+    # Get m_bar and lb from ue_kwargs, with fallback to top-level settings for backward compatibility
+    m_bar = ue_kwargs.get("m_bar", model.settings_dict.get("m_bar", 1.0))
+    lb = ue_kwargs.get("lb", model.settings_dict.get("lb", 4))
 
     # ------------------------------------------------------------------
     # 2. Produce the grids we will fill
@@ -487,7 +492,8 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
                     a_nxt_grid_unique, w_grid, partial_uc,
                     u_func={"func": utility_func, "args": {"H_nxt": H_val}},
                     ue_method=ue_method, m_bar=m_bar, lb=lb,
-                    rfc_radius=rfc_radius, rfc_n_iter=rfc_n_iter
+                    rfc_radius=rfc_radius, rfc_n_iter=rfc_n_iter,
+                    ue_kwargs=ue_kwargs
                 )
             except Exception as e:
                 print(f"[DEBUG] {ue_method}: EGM_UE failed for grid key {grid_key}: {e}")

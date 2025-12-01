@@ -2,23 +2,38 @@
 #PBS -N fues-dgxa100-single
 #PBS -P tp66
 #PBS -q dgxa100
-#PBS -l ncpus=16,mem=612GB,walltime=12:00:00
+#PBS -l ncpus=16,mem=256GB,walltime=04:00:00
 #PBS -l ngpus=1
 #PBS -l storage=gdata/tp66+scratch/tp66
 #PBS -l wd
 #PBS -j oe
+#PBS -o logs/
+# Note: Create logs/ folder before submitting: mkdir -p experiments/housing_renting/logs
 
 set -euo pipefail
 
 # =====================================================
 # DGX A100 Single GPU Configuration
 # =====================================================
-# Optimized for single A100 GPU with 80GB memory
-# Uses 16 cores, 512GB RAM, 1 GPU (80GB HBM2e)
+# Optimal settings for 1 GPU on Gadi DGX A100 node:
+# - 16 CPUs = 1 NUMA node (best memory locality)
+# - 256GB RAM = 1 NUMA node's local memory
+# - 1 GPU = A100 80GB (sufficient for housing model)
 # =====================================================
 
+# --- Path Setup ---
+# When submitted via qsub, PBS_O_WORKDIR is set to submission directory
+if [[ -n "${PBS_O_WORKDIR:-}" ]]; then
+    SCRIPT_DIR="$PBS_O_WORKDIR"
+    REPO_ROOT="$(cd "$PBS_O_WORKDIR/../.." && pwd)"
+else
+    # Running interactively
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+fi
+
 # --- 1. Source the Configuration Library ---
-source ../lib/job_configs.sh
+source "$SCRIPT_DIR/configs/job_configs.sh"
 
 # --- 2. Define the Configuration to Run ---
 # Check if FUES_CONFIG environment variable is set, otherwise use default
@@ -39,7 +54,7 @@ module load cuda/12.8.0
 export VENV_ROOT=/scratch/tp66/$USER/venvs
 source "$VENV_ROOT/fues02-py3121/bin/activate"
 
-export FUES_HOME=$HOME/dev/fues.dev/FUES
+export FUES_HOME="$REPO_ROOT"
 export PYTHONPATH="$FUES_HOME${PYTHONPATH:+:$PYTHONPATH}"
 cd "$FUES_HOME"
 
@@ -56,7 +71,10 @@ export CUDA_MODULE_LOADING=EAGER
 export CUDA_LAUNCH_BLOCKING=0
 
 # Numba configuration for A100
-export NUMBA_DISABLE_CACHE=1
+export NUMBA_CACHE_DIR=/scratch/tp66/$USER/numba_cache
+echo "Clearing Numba cache at $NUMBA_CACHE_DIR..."
+rm -rf "$NUMBA_CACHE_DIR"
+mkdir -p "$NUMBA_CACHE_DIR"
 export NUMBA_NUM_THREADS=16
 export NUMBA_CUDA_MAX_THREADS=1024
 export NUMBA_CUDA_DEFAULT_PTX_CC="8.0"
@@ -86,23 +104,16 @@ GRID_POINTS=${CONFIG_REF["grid_points"]}
 VERSION_TAG="${CONFIG_REF[version_suffix]}"
 DELTA_PB=${CONFIG_REF["delta_pb"]:-1}
 
-# --- Logging and Paths (same structure as run_housing_gpu.pbs) ---
+# --- Logging and Paths ---
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
-# TRIAL_ID for DGX A100 runs
 TRIAL_ID="dgxa100"
+RUN_ID="${VERSION_TAG}_${TIMESTAMP}_${TRIAL_ID}"
 
-# Build paths based on whether TRIAL_ID is set
-if [[ -n "$TRIAL_ID" ]]; then
-    RUN_ID="${VERSION_TAG}_${TIMESTAMP}_${TRIAL_ID}"
-    LOG_DIR="logs/${VERSION_TAG}_${TRIAL_ID}"
-    OUTPUT_DIR="/scratch/tp66/$USER/FUES/solutions/housing_renting/${VERSION_TAG}_${TRIAL_ID}"
-else
-    RUN_ID="${VERSION_TAG}_${TIMESTAMP}"
-    LOG_DIR="logs/${VERSION_TAG}"
-    OUTPUT_DIR="/scratch/tp66/$USER/FUES/solutions/housing_renting/${VERSION_TAG}"
-fi
+# All logs go to experiments/housing_renting/logs/ (same as PBS -o)
+LOG_DIR="$SCRIPT_DIR/logs"
+OUTPUT_DIR="/scratch/tp66/$USER/FUES/solutions/housing_renting/${VERSION_TAG}_${TRIAL_ID}"
 
-BUNDLE_PREFIX="$VERSION_TAG"
+CONFIG_ID="$VERSION_TAG"
 OUTPUT_ROOT="$OUTPUT_DIR"
 
 # Create output directories
@@ -134,7 +145,7 @@ python3 -m examples.housing_renting.solve_runner \
     --periods "$PERIODS" \
     --ue-method "VFI_HDGRID_GPU" \
     --output-root "$OUTPUT_ROOT" \
-    --bundle-prefix "$BUNDLE_PREFIX" \
+    --config-id "$CONFIG_ID" \
     --vfi-ngrid "$VFI_GRID" \
     --HD-points "$HD_POINTS" \
     --grid-points "$GRID_POINTS" \
@@ -147,10 +158,8 @@ python3 -m examples.housing_renting.solve_runner \
     --gpu \
     --trace \
     --low-memory \
-    --load-periods "0,1" \
-    --load-stages '{"0": ["OWNC"], "1": null}' \
-    2> >(tee "${LOG_DIR}/run.err") \
-    1> >(tee "${LOG_DIR}/run.log")
+    2> >(tee "${LOG_DIR}/run_${TIMESTAMP}.err") \
+    1> >(tee "${LOG_DIR}/run_${TIMESTAMP}.log")
 
 echo "GPU profiling run for ${CONFIG_NAME} completed successfully."
 

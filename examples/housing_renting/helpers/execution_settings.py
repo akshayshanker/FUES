@@ -82,64 +82,6 @@ class ExecutionSettings:
             print(f"Warning: Experiment set '{experiment_set}' not found, using defaults")
             return cls.DEFAULT_PARAM_PATHS
     
-    @classmethod
-    def get_sweep_config(cls, experiment_set: str) -> dict:
-        """
-        Get sweep configuration from experiment set.
-        
-        Parameters
-        ----------
-        experiment_set : str
-            Name of experiment set to load
-            
-        Returns
-        -------
-        dict
-            Sweep configuration with 'methods', 'grid_sizes', 'H_sizes', and 'fixed' params
-        """
-        config = load_experiment_set(experiment_set)
-        sweep = config.get("sweep", {})
-        fixed = config.get("fixed", {})
-        return {
-            "methods": sweep.get("methods", ["FUES", "CONSAV", "VFI"]),
-            "grid_sizes": sweep.get("grid_sizes", [500, 1000, 2000]),
-            "H_sizes": sweep.get("H_sizes", [7, 10, 15]),
-            "fixed": fixed,
-            "param_paths": config.get("param_paths", cls.DEFAULT_PARAM_PATHS),
-        }
-    
-    @classmethod 
-    def build_sweep_design_matrix(cls, experiment_set: str) -> tuple:
-        """
-        Build design matrix for parameter sweep.
-        
-        Parameters
-        ----------
-        experiment_set : str
-            Name of experiment set to load
-            
-        Returns
-        -------
-        tuple
-            (design_matrix as np.ndarray, param_paths list)
-        """
-        from itertools import product
-        
-        sweep_config = cls.get_sweep_config(experiment_set)
-        methods = sweep_config["methods"]
-        grid_sizes = sweep_config["grid_sizes"]
-        H_sizes = sweep_config["H_sizes"]
-        param_paths = sweep_config["param_paths"]
-        
-        # Build all combinations
-        rows = []
-        for method, grid, H in product(methods, grid_sizes, H_sizes):
-            # Row order must match param_paths order:
-            # [method, a_points, H_points]
-            rows.append([method, grid, H])
-        
-        return np.array(rows, dtype=object), param_paths, sweep_config
-    
     def __init__(self, args, cfg_dir_base, timestamp_suffix=None):
         """
         Initialize configuration manager.
