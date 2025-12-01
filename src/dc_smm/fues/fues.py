@@ -337,7 +337,9 @@ def FUES(
     return_intersections_separately=False,
     single_intersection=False,
     no_double_jumps=True,
-    disable_jump_checks=False,  # NEW: Control manual overrides for jump checks
+    disable_jump_checks=False,
+    left_turn_no_jump_strict=False,
+    use_post_state_jump_test=False,
     eps_d=None, eps_sep=None, eps_fwd_back=None, parallel_guard=None,
 ):
     """
@@ -392,6 +394,12 @@ def FUES(
         - Forces keep_i1=False in right turn cases
         - Forces keep_j=True in left turn cases
         Default is False (checks are enabled, no overrides).
+    left_turn_no_jump_strict : bool, default False
+        If True, left turns without jumps use same logic as left turns with jumps
+        (backward scan, intersection creation). Default False uses simple pointer advance.
+    use_post_state_jump_test : bool, default False
+        If True, jump detection also considers post-state gradient (g_tilde_a_2).
+        Default False uses only pre-state gradient (g_tilde_a).
     eps_d : float, optional
         Minimum separation between grid points. Defaults to `EPS_D`.
     eps_sep : float, optional
@@ -455,7 +463,7 @@ def FUES(
         e_grid, vlu, policy_1, policy_2, del_a,
         m_bar, LB, endog_mbar, padding_mbar,
         include_intersections, no_double_jumps, single_intersection,
-        disable_jump_checks,
+        disable_jump_checks, left_turn_no_jump_strict, use_post_state_jump_test,
         eps_d, eps_sep, eps_fwd_back, parallel_guard
     )
 
@@ -550,6 +558,8 @@ def _scan(
     not_allow_2lefts=True,
     single_intersection=False,
     disable_jump_checks=False,
+    left_turn_no_jump_strict=False,
+    use_post_state_jump_test=False,
     eps_d=EPS_D,
     eps_sep=EPS_SEP,
     eps_fwd_back=EPS_fwd_back,
@@ -593,6 +603,12 @@ def _scan(
         If True, create only one intersection point (on the right) instead of two
     disable_jump_checks : bool
         If True, applies manual overrides to disable jump validity checks
+    left_turn_no_jump_strict : bool
+        If True, left turns without jumps use same logic as left turns with jumps
+        (backward scan, intersection creation). Default False uses simple pointer advance.
+    use_post_state_jump_test : bool
+        If True, jump detection also considers post-state gradient (g_tilde_a_2).
+        Default False uses only pre-state gradient (g_tilde_a).
 
     Returns
     -------
@@ -679,12 +695,10 @@ def _scan(
 
         # Classify turn direction and jump status
         left_turn_any = g_1 > g_jm1
-        jump_now = (g_tilde_a > M_max) #or (g_tilde_a_2 > M_max)
-        #jump_now = g_tilde_a > M_max
-
-        #if del_pol_2> eps_d:
-        #    if g_tilde_a_2 > M_max:
-        #        jump_now = True
+        if use_post_state_jump_test:
+            jump_now = (g_tilde_a > M_max) or (g_tilde_a_2 > M_max)
+        else:
+            jump_now = (g_tilde_a > M_max)
 
         
         
@@ -794,8 +808,8 @@ def _scan(
 
         
 
-        # Case C: Left turn
-        if left_turn_jump:
+        # Case C: Left turn (with jump, or no-jump if strict mode)
+        if left_turn_jump or (left_turn_no_jump and left_turn_no_jump_strict):
             keep_j, m_ind = backward_scan_combined(
                 m_buf,
                 m_head,
@@ -902,8 +916,8 @@ def _scan(
             last_was_jump = jump_now
             continue
 
-        # Case R: Right turn without jump
-        if right_turn_no_jump or left_turn_no_jump:
+        # Case R: Right turn without jump (or left turn no-jump if not strict)
+        if right_turn_no_jump or (left_turn_no_jump and not left_turn_no_jump_strict):
             k = j
             prev_j = j
             j = i + 1

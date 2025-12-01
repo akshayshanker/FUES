@@ -7,9 +7,8 @@
 #PBS -l wd
 #PBS -j oe
 #PBS -r y
-# NOTE: Create logs/ directory before submitting: mkdir -p logs/
 #PBS -o logs/
-#PBS -e logs/
+# Note: Create logs/ folder before submitting: mkdir -p experiments/housing_renting/logs
 
 # ======================================================================
 #  Single Core Job - Load Baseline, Compute Fast Methods Only
@@ -32,7 +31,7 @@ fi
 source "$SCRIPT_DIR/configs/job_configs.sh"
 
 # --- Define the Sequence of Configurations to Run ---
-CONFIG_TO_RUN=("HIGH_RES_SETTINGS_A_PB")
+CONFIG_TO_RUN=("HIGH_RES_SETTINGS_A")
 
 
 # --- Environment Setup ---
@@ -49,14 +48,10 @@ cd "$FUES_HOME"
 # No MPI settings needed for single core
 export NUMBA_CACHE_DIR=/scratch/tp66/$USER/numba_cache
 
-# Optional: Clear cache if needed
-if [[ "${1:-}" == "--clear-cache" ]]; then
-    echo "Clearing Numba cache at $NUMBA_CACHE_DIR..."
-    rm -rf $NUMBA_CACHE_DIR
-    shift
-fi
-
-mkdir -p $NUMBA_CACHE_DIR
+# Always clear Numba cache to ensure fresh compilation with latest code
+echo "Clearing Numba cache at $NUMBA_CACHE_DIR..."
+rm -rf "$NUMBA_CACHE_DIR"
+mkdir -p "$NUMBA_CACHE_DIR"
 export NUMBA_NUM_THREADS=1
 
 # Hide GPUs from Numba to prevent CUDA initialization errors
@@ -97,19 +92,12 @@ for CONFIG_NAME in "${CONFIG_TO_RUN[@]}"; do
 
     TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
     VERSION_TAG="${CONFIG_REF[version_suffix]}"
-    # TRIAL_ID can be set as environment variable or default to empty
-    TRIAL_ID="gpu_test"
+    TRIAL_ID="single_core"
+    RUN_ID="${VERSION_TAG}_${TIMESTAMP}_${TRIAL_ID}"
     
-    # Build paths based on whether TRIAL_ID is set
-    if [[ -n "$TRIAL_ID" ]]; then
-        RUN_ID="${VERSION_TAG}_${TIMESTAMP}_${TRIAL_ID}"
-        LOG_DIR="$REPO_ROOT/logs/housing_renting/${VERSION_TAG}_${TRIAL_ID}"
-        OUTPUT_DIR="/scratch/tp66/$USER/FUES/solutions/housing_renting/${VERSION_TAG}_${TRIAL_ID}"
-    else
-        RUN_ID="${VERSION_TAG}_${TIMESTAMP}"
-        LOG_DIR="$REPO_ROOT/logs/housing_renting/${VERSION_TAG}"
-        OUTPUT_DIR="/scratch/tp66/$USER/FUES/solutions/housing_renting/${VERSION_TAG}"
-    fi
+    # All logs go to experiments/housing_renting/logs/ (same as PBS -o)
+    LOG_DIR="$SCRIPT_DIR/logs"
+    OUTPUT_DIR="/scratch/tp66/$USER/FUES/solutions/housing_renting/${VERSION_TAG}_${TRIAL_ID}"
     mkdir -p "$LOG_DIR"
 
     echo "Starting single-core run for ${CONFIG_NAME} at $(date)"
@@ -140,19 +128,19 @@ for CONFIG_NAME in "${CONFIG_TO_RUN[@]}"; do
       --plots \
       $EGM_PLOTS_FLAG \
       --trace \
-      2> >(tee "${LOG_DIR}/run.err") \
-      1> >(tee "${LOG_DIR}/run.log")
+      2> >(tee "${LOG_DIR}/run_${TIMESTAMP}.err") \
+      1> >(tee "${LOG_DIR}/run_${TIMESTAMP}.log")
 
     EXIT_CODE=$?
     if [ $EXIT_CODE -ne 0 ]; then
         echo "ERROR: Run for ${CONFIG_NAME} failed with exit code: $EXIT_CODE" >&2
-        echo "Check error log at: ${LOG_DIR}/run.err" >&2
+        echo "Check error log at: ${LOG_DIR}/run_${TIMESTAMP}.err" >&2
         
         # Check for common errors in the log
-        if grep -q "LLVM ERROR" "${LOG_DIR}/run.err"; then
+        if grep -q "LLVM ERROR" "${LOG_DIR}/run_${TIMESTAMP}.err"; then
             echo "HINT: LLVM error detected. Try running with --clear-cache flag" >&2
         fi
-        if grep -q "baseline.*not found" "${LOG_DIR}/run.err"; then
+        if grep -q "baseline.*not found" "${LOG_DIR}/run_${TIMESTAMP}.err"; then
             echo "HINT: Baseline bundle not found. Run MPI job first to compute baseline" >&2
         fi
         
