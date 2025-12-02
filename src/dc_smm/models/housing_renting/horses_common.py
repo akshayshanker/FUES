@@ -1108,7 +1108,8 @@ def _egm_preprocess_core(e_old, vf_old, c_old, a_old,
     c_new = c_new[:actual_size]
     a_new = a_new[:actual_size]
 
-    ## return sorted arrays
+    # Always sort - EGM output (m = c + a') is NOT guaranteed to be sorted
+    # because c comes from inverse Euler and can vary non-monotonically
     sort_idx = np.argsort(e_new)
     e_new = e_new[sort_idx]
     vf_new = vf_new[sort_idx]
@@ -1175,19 +1176,12 @@ def egm_preprocess(egrid, vf, c, a,
     if c_max is None:
         c_max = 1.05 * np.max(c)  # 5% above current max consumption
 
-    # Ensure float64 precision for all input arrays
-    egrid = np.asarray(egrid, dtype=np.float64)
-    vf = np.asarray(vf, dtype=np.float64)
-    c = np.asarray(c, dtype=np.float64)
-    a = np.asarray(a, dtype=np.float64)
-    vf_next = np.asarray(vf_next, dtype=np.float64)
-
-    # remove points where egrid is negative
-    #valid_mask = egrid >= 0
-    #egrid = egrid[valid_mask]
-    #vf = vf[valid_mask]
-    #c = c[valid_mask]
-    #a = a[valid_mask]
+    # Ensure float64 precision for all input arrays (avoid copy if already float64)
+    egrid = np.ascontiguousarray(egrid, dtype=np.float64)
+    vf = np.ascontiguousarray(vf, dtype=np.float64)
+    c = np.ascontiguousarray(c, dtype=np.float64)
+    a = np.ascontiguousarray(a, dtype=np.float64)
+    vf_next = np.ascontiguousarray(vf_next, dtype=np.float64)
 
     # Run the fast core with jump constraint flag and FOC checking
     e_cat, vf_cat, c_cat, a_cat = _egm_preprocess_core(
@@ -1199,15 +1193,19 @@ def egm_preprocess(egrid, vf, c, a,
         uc_func=kwargs.get('uc_func'),          # Pass through marginal utility
         override_KT_conditions=kwargs.get('override_KT_conditions', False))  # Pass override setting
 
-    # Remove duplicates based on endogenous grid and value function
-    # Use a tolerance appropriate for float64 precision and the scale of the problem
-    tol = 1e-10 if not add_jump_constraints else 1e-8  # More tolerance when delta != 1
-    unique_ids = uniqueEG(e_cat, vf_cat, tol=tol)
-
-    e_out = e_cat[unique_ids]
-    vf_out = vf_cat[unique_ids]
-    c_out = c_cat[unique_ids]
-    a_out = a_cat[unique_ids]
+    # Only run uniqueEG when jump constraints added (duplicates possible)
+    # When pb=1 (no jump constraints), points are already unique
+    if add_jump_constraints and n_con_nxt > 0:
+        # Remove duplicates - use looser tolerance when delta != 1
+        tol = 1e-8
+        unique_ids = uniqueEG(e_cat, vf_cat, tol=tol)
+        e_out = e_cat[unique_ids]
+        vf_out = vf_cat[unique_ids]
+        c_out = c_cat[unique_ids]
+        a_out = a_cat[unique_ids]
+    else:
+        # No duplicates expected, skip expensive uniqueEG
+        e_out, vf_out, c_out, a_out = e_cat, vf_cat, c_cat, a_cat
 
     return e_out, vf_out, c_out, a_out
 

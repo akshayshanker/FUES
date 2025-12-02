@@ -263,6 +263,14 @@ def _dcegm_engine(
     if dcegm is None:
         raise ImportError("DCEGM algorithm not importable")
 
+    # Sort by x_dcsn_hat (DCEGM requires sorted grid for segment detection)
+    if not np.all(np.diff(x_dcsn_hat) > 0):
+        idx = np.argsort(x_dcsn_hat)
+        x_dcsn_hat = x_dcsn_hat[idx]
+        qf_hat = qf_hat[idx]
+        kappa_hat = kappa_hat[idx]
+        X_cntn = X_cntn[idx]
+
     x_cntn_ref, x_dcsn_ref, kappa_ref, qf_ref, _ = dcegm(kappa_hat, kappa_hat, qf_hat, X_cntn, x_dcsn_hat)
 
     return {
@@ -495,13 +503,19 @@ def _consav_engine(
     key = (u_func["func"].py_func.__code__.co_code, use_inv_w)
     if "_CONSAV_CACHE" not in globals():
         globals()["_CONSAV_CACHE"] = {}
-    #else:
-    #    print("Consav cache already exists")
+        globals()["_CONSAV_CACHE_STATS"] = {"hits": 0, "misses": 0}
+    
     env_cache = globals()["_CONSAV_CACHE"]
+    cache_stats = globals()["_CONSAV_CACHE_STATS"]
     env = env_cache.get(key)
     if env is None:
+        cache_stats["misses"] += 1
+        # print(f"[CONSAV] Cache MISS #{cache_stats['misses']} - compiling new upper envelope")
         env = upperenvelope.create(u_func["func"], use_inv_w)
         env_cache[key] = env
+    else:
+        cache_stats["hits"] += 1
+        # Uncomment to debug: print(f"[CONSAV] Cache HIT #{cache_stats['hits']}")
 
     # allocate outputs
     kappa_pol = np.empty_like(X_dcsn)
