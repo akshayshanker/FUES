@@ -875,7 +875,8 @@ def _egm_preprocess_core(e_old, vf_old, c_old, a_old,
                          add_jump_constraints, # whether to add jump constraints
                          lambda_next=None,     # Marginal utility values (already scaled by beta*delta*Rfree)
                          uc_func=None,         # Marginal utility function
-                         override_KT_conditions=False):  # NEW: Override FOC filtering when True
+                         override_KT_conditions=False,  # Override FOC filtering when True
+                         jump_extend="both"):  # NEW: Which segments to extend at jumps
     """
     Returns new (e,vf,c,a) with:
         • n_con borrowing-constraint points, plus
@@ -912,6 +913,11 @@ def _egm_preprocess_core(e_old, vf_old, c_old, a_old,
     override_KT_conditions : bool, optional
         If True, disables FOC filtering at jumps (keeps all points).
         Default is False (FOC filtering enabled).
+    jump_extend : str, optional
+        Which segments to extend at jumps. Options:
+        - "before": only extend segment before jump (using point k)
+        - "after": only extend segment after jump (using point k+1)
+        - "both": extend both segments (default)
 
     Notes
     -----
@@ -965,9 +971,13 @@ def _egm_preprocess_core(e_old, vf_old, c_old, a_old,
         #n_jump_case_2 = 0  # Reset to 0 since Case 2 is disabled
         
         # Total jumps and nodes to add
-        # Each Case 1 jump adds 2 segments: one using k+1, one using k
+        # Number of segments per jump depends on jump_extend setting
         n_jump = n_jump_case_1 #+ n_jump_case_2
-        n_add = n_con + n_jump_case_1 * n_con_nxt * 2 #+ n_jump_case_2 * n_con_nxt
+        if jump_extend == "both":
+            segments_per_jump = 2  # Both before and after
+        else:
+            segments_per_jump = 1  # Only before or only after
+        n_add = n_con + n_jump_case_1 * n_con_nxt * segments_per_jump #+ n_jump_case_2 * n_con_nxt
     
     n_total = n_old + n_add
 
@@ -997,99 +1007,106 @@ def _egm_preprocess_core(e_old, vf_old, c_old, a_old,
     # ---- 3. Jump segments (only if flag is True) ----
     if add_jump_constraints and n_con_nxt > 0:
         # Process Case 1 jumps (negative jumps in endogenous grid)
-        # For each jump, add 2 segments: one for k+1 and one for k
+        # Segments added depend on jump_extend setting:
+        #   "after": only add segment using k+1 (point after the jump)
+        #   "before": only add segment using k (point before the jump)
+        #   "both": add both segments
         for k in j_idx_case_1:
             # First segment: using k+1 (point after the jump)
-            a_star = a_old[k+1]
-            c_star = c_old[k+1]
+            # Only add if jump_extend is "after" or "both"
+            if jump_extend in ("after", "both"):
+                a_star = a_old[k+1]
+                c_star = c_old[k+1]
 
-            # Create consumption segment around c_star at k+1
-            lb_c = max(1e-8, c_star - 15)
-           #lb_c = c_star
-            ub_c = c_star + 15
-            c_seg = np.linspace(lb_c, ub_c, n_con_nxt).astype(np.float64)
+                # Create consumption segment around c_star at k+1
+                lb_c = max(1e-8, c_star - 15)
+               #lb_c = c_star
+                ub_c = c_star + 15
+                c_seg = np.linspace(lb_c, ub_c, n_con_nxt).astype(np.float64)
 
-            # FOC check: Filter points based on first-order condition (vectorized)
-            if lambda_next is not None and uc_func is not None:
-                # Vectorized evaluation of marginal utility for all points
-                valid_mask = np.ones(n_con_nxt, dtype=np.bool_)
-
-                # Create arrays for vectorized computation
-                h_array = np.full(n_con_nxt, h_nxt)
-
-                # Compute all marginal utilities at once (vectorized)
-                # This is much faster than the loop
-                mu_c_vec = np.zeros(n_con_nxt)
-                for i in range(n_con_nxt):
-                    mu_c_vec[i] = uc_func(c_seg[i], h_nxt)
-
-                # Vectorized comparison
-                valid_mask = (mu_c_vec >= lambda_next[k+1] - 1e-1)
-
-                # Override FOC filtering if requested (for testing)
-                if override_KT_conditions:
+                # FOC check: Filter points based on first-order condition (vectorized)
+                if lambda_next is not None and uc_func is not None:
+                    # Vectorized evaluation of marginal utility for all points
                     valid_mask = np.ones(n_con_nxt, dtype=np.bool_)
-                c_seg_valid = c_seg[valid_mask]
-                n_valid = c_seg_valid.size
-            else:
-                # No FOC check, keep all points
-                c_seg_valid = c_seg
-                n_valid = n_con_nxt
 
-            # Add valid points
-            if n_valid > 0:
-                m_seg = a_star + c_seg_valid
-                vf_seg = u_func(c_seg_valid, h_nxt) + beta * vf_next[k+1]
+                    # Create arrays for vectorized computation
+                    h_array = np.full(n_con_nxt, h_nxt)
 
-                e_new[p:p+n_valid] = m_seg
-                vf_new[p:p+n_valid] = vf_seg
-                c_new[p:p+n_valid] = c_seg_valid
-                a_new[p:p+n_valid] = a_star
-                p += n_valid
+                    # Compute all marginal utilities at once (vectorized)
+                    # This is much faster than the loop
+                    mu_c_vec = np.zeros(n_con_nxt)
+                    for i in range(n_con_nxt):
+                        mu_c_vec[i] = uc_func(c_seg[i], h_nxt)
+
+                    # Vectorized comparison
+                    valid_mask = (mu_c_vec >= lambda_next[k+1] - 1e-1)
+
+                    # Override FOC filtering if requested (for testing)
+                    if override_KT_conditions:
+                        valid_mask = np.ones(n_con_nxt, dtype=np.bool_)
+                    c_seg_valid = c_seg[valid_mask]
+                    n_valid = c_seg_valid.size
+                else:
+                    # No FOC check, keep all points
+                    c_seg_valid = c_seg
+                    n_valid = n_con_nxt
+
+                # Add valid points
+                if n_valid > 0:
+                    m_seg = a_star + c_seg_valid
+                    vf_seg = u_func(c_seg_valid, h_nxt) + beta * vf_next[k+1]
+
+                    e_new[p:p+n_valid] = m_seg
+                    vf_new[p:p+n_valid] = vf_seg
+                    c_new[p:p+n_valid] = c_seg_valid
+                    a_new[p:p+n_valid] = a_star
+                    p += n_valid
 
             # Second segment: using k (point before the jump)
-            a_star2 = a_old[k]
-            c_star2 = c_old[k]
+            # Only add if jump_extend is "before" or "both"
+            if jump_extend in ("before", "both"):
+                a_star2 = a_old[k]
+                c_star2 = c_old[k]
 
-            # Create consumption segment around c_star at k
-            lb_c2 = max(1e-8, c_star2-15)
-            # lb_c2 = c_star2  # Commented out duplicate assignment
-            ub_c2 = c_star2 + 15
-            c_seg2 = np.linspace(lb_c2, ub_c2, n_con_nxt).astype(np.float64)
+                # Create consumption segment around c_star at k
+                lb_c2 = max(1e-8, c_star2-15)
+                # lb_c2 = c_star2  # Commented out duplicate assignment
+                ub_c2 = c_star2 + 15
+                c_seg2 = np.linspace(lb_c2, ub_c2, n_con_nxt).astype(np.float64)
 
-            # FOC check: Filter points based on first-order condition (vectorized)
-            if lambda_next is not None and uc_func is not None:
-                # Vectorized evaluation of marginal utility for all points
-                valid_mask2 = np.ones(n_con_nxt, dtype=np.bool_)
-
-                # Compute all marginal utilities at once (vectorized)
-                mu_c2_vec = np.zeros(n_con_nxt)
-                for i in range(n_con_nxt):
-                    mu_c2_vec[i] = uc_func(c_seg2[i], h_nxt)
-
-                # Vectorized comparison
-                valid_mask2 = (mu_c2_vec <= lambda_next[k] + 1e-1)
-
-                # Override FOC filtering if requested (for testing)
-                if override_KT_conditions:
+                # FOC check: Filter points based on first-order condition (vectorized)
+                if lambda_next is not None and uc_func is not None:
+                    # Vectorized evaluation of marginal utility for all points
                     valid_mask2 = np.ones(n_con_nxt, dtype=np.bool_)
-                c_seg2_valid = c_seg2[valid_mask2]
-                n_valid2 = c_seg2_valid.size
-            else:
-                # No FOC check, keep all points
-                c_seg2_valid = c_seg2
-                n_valid2 = n_con_nxt
 
-            # Add valid points
-            if n_valid2 > 0:
-                m_seg2 = a_star2 + c_seg2_valid
-                vf_seg2 = u_func(c_seg2_valid, h_nxt) + beta * vf_next[k]
+                    # Compute all marginal utilities at once (vectorized)
+                    mu_c2_vec = np.zeros(n_con_nxt)
+                    for i in range(n_con_nxt):
+                        mu_c2_vec[i] = uc_func(c_seg2[i], h_nxt)
 
-                e_new[p:p+n_valid2] = m_seg2
-                vf_new[p:p+n_valid2] = vf_seg2
-                c_new[p:p+n_valid2] = c_seg2_valid
-                a_new[p:p+n_valid2] = a_star2
-                p += n_valid2
+                    # Vectorized comparison
+                    valid_mask2 = (mu_c2_vec <= lambda_next[k] + 1e-1)
+
+                    # Override FOC filtering if requested (for testing)
+                    if override_KT_conditions:
+                        valid_mask2 = np.ones(n_con_nxt, dtype=np.bool_)
+                    c_seg2_valid = c_seg2[valid_mask2]
+                    n_valid2 = c_seg2_valid.size
+                else:
+                    # No FOC check, keep all points
+                    c_seg2_valid = c_seg2
+                    n_valid2 = n_con_nxt
+
+                # Add valid points
+                if n_valid2 > 0:
+                    m_seg2 = a_star2 + c_seg2_valid
+                    vf_seg2 = u_func(c_seg2_valid, h_nxt) + beta * vf_next[k]
+
+                    e_new[p:p+n_valid2] = m_seg2
+                    vf_new[p:p+n_valid2] = vf_seg2
+                    c_new[p:p+n_valid2] = c_seg2_valid
+                    a_new[p:p+n_valid2] = a_star2
+                    p += n_valid2
         
 
     # ---- 4. Copy the original solution after all extras ----
@@ -1126,6 +1143,7 @@ def egm_preprocess(egrid, vf, c, a,
                    c_max=None,
                    h_nxt=None,
                    add_jump_constraints=True,  # New parameter
+                   jump_extend="both",  # NEW: Which segments to extend at jumps
                    **kwargs):
     """
     Wrapper that preprocesses EGM solution by:
@@ -1163,8 +1181,16 @@ def egm_preprocess(egrid, vf, c, a,
     add_jump_constraints : bool, optional
         Whether to add jump constraint points (default: True)
         Should be False when delta_pb == 1.0
+    jump_extend : str, optional
+        Which segments to extend at jumps. Options:
+        - "before": only extend segment before jump (using point k)
+        - "after": only extend segment after jump (using point k+1)
+        - "both": extend both segments (default)
     **kwargs
-        Additional arguments (ignored for compatibility)
+        Additional arguments passed to _egm_preprocess_core:
+        - lambda_next: Marginal utility values (already scaled)
+        - uc_func: Marginal utility function
+        - override_KT_conditions: Override FOC filtering
     
     Returns
     -------
@@ -1176,12 +1202,19 @@ def egm_preprocess(egrid, vf, c, a,
     if c_max is None:
         c_max = 1.05 * np.max(c)  # 5% above current max consumption
 
-    # Ensure float64 precision for all input arrays (avoid copy if already float64)
-    egrid = np.ascontiguousarray(egrid, dtype=np.float64)
-    vf = np.ascontiguousarray(vf, dtype=np.float64)
-    c = np.ascontiguousarray(c, dtype=np.float64)
-    a = np.ascontiguousarray(a, dtype=np.float64)
-    vf_next = np.ascontiguousarray(vf_next, dtype=np.float64)
+    # Ensure float64 precision for all input arrays
+    egrid = np.asarray(egrid, dtype=np.float64)
+    vf = np.asarray(vf, dtype=np.float64)
+    c = np.asarray(c, dtype=np.float64)
+    a = np.asarray(a, dtype=np.float64)
+    vf_next = np.asarray(vf_next, dtype=np.float64)
+
+    # remove points where egrid is negative
+    #valid_mask = egrid >= 0
+    #egrid = egrid[valid_mask]
+    #vf = vf[valid_mask]
+    #c = c[valid_mask]
+    #a = a[valid_mask]
 
     # Run the fast core with jump constraint flag and FOC checking
     e_cat, vf_cat, c_cat, a_cat = _egm_preprocess_core(
@@ -1191,21 +1224,18 @@ def egm_preprocess(egrid, vf, c, a,
         add_jump_constraints,
         lambda_next=kwargs.get('lambda_next'),  # Pass through lambda (already scaled)
         uc_func=kwargs.get('uc_func'),          # Pass through marginal utility
-        override_KT_conditions=kwargs.get('override_KT_conditions', False))  # Pass override setting
+        override_KT_conditions=kwargs.get('override_KT_conditions', False),  # Pass override setting
+        jump_extend=jump_extend)  # Pass through jump extend option
 
-    # Only run uniqueEG when jump constraints added (duplicates possible)
-    # When pb=1 (no jump constraints), points are already unique
-    if add_jump_constraints and n_con_nxt > 0:
-        # Remove duplicates - use looser tolerance when delta != 1
-        tol = 1e-8
-        unique_ids = uniqueEG(e_cat, vf_cat, tol=tol)
-        e_out = e_cat[unique_ids]
-        vf_out = vf_cat[unique_ids]
-        c_out = c_cat[unique_ids]
-        a_out = a_cat[unique_ids]
-    else:
-        # No duplicates expected, skip expensive uniqueEG
-        e_out, vf_out, c_out, a_out = e_cat, vf_cat, c_cat, a_cat
+    # Remove duplicates based on endogenous grid and value function
+    # Use a tolerance appropriate for float64 precision and the scale of the problem
+    tol = 1e-10 if not add_jump_constraints else 1e-8  # More tolerance when delta != 1
+    unique_ids = uniqueEG(e_cat, vf_cat, tol=tol)
+
+    e_out = e_cat[unique_ids]
+    vf_out = vf_cat[unique_ids]
+    c_out = c_cat[unique_ids]
+    a_out = a_cat[unique_ids]
 
     return e_out, vf_out, c_out, a_out
 
