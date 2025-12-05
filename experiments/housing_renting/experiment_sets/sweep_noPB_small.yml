@@ -18,8 +18,8 @@ sweep:
   
   # Smaller grid sizes for testing
   grid_sizes:
-    - 500
     - 1000
+    - 2000
   
   # Fewer H sizes for testing
   H_sizes:
@@ -29,4 +29,4 @@ sweep:
 # Fixed parameters
 fixed:
   delta_pb: 1
-  periods: 5
+  periods: 10

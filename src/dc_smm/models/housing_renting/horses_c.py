@@ -39,9 +39,14 @@ import os, time, numba, numpy as np
 import logging
 import gc
 from dc_smm.models.housing_renting.horses_common import (
-    egm_preprocess, build_njit_utility, piecewise_gradient, piecewise_gradient_3rd, get_u_func, bellman_obj,
-    uc_test  # Test marginal utility function for FOC verification
+    egm_preprocess, build_njit_utility, get_u_func, bellman_obj,
+    uc_test,  # Test marginal utility function for FOC verification
+    correct_jumps_policy_and_value  # Correct isolated jumps by extrapolation (post-interpolation)
 )  # Use relative import
+from dc_smm.models.housing_renting.gradients import (
+    piecewise_gradient, piecewise_gradient_3rd, piecewise_gradient_robust,
+    compute_gradient
+)
 from numba import njit
 from dc_smm.uenvelope.upperenvelope import EGM_UE
 from dc_smm.fues.helpers import interp_as, interp_clean
@@ -299,10 +304,9 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
         # add any extra constants referenced in expr_str
     }
 
-    if model.methods["upper_envelope"] == "CONSAV":
-        utility_func = build_njit_utility(expr_str, param_vals)
-    else:
-        utility_func = get_u_func(expr_str, param_vals)
+    # Use LRU-cached utility function for all methods (including CONSAV)
+    # This ensures consistent compilation behavior across methods
+    utility_func = get_u_func(expr_str, param_vals)
 
     # Build jittable marginal utility for FOC checks
     # Extract marginal utility expression (same key for both owner and renter)
@@ -339,6 +343,17 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
     # KT conditions override setting (for testing)
     override_KT = model.settings_dict.get("override_KT_conditions_at_jump", False)
 
+    # EGM preprocess jump detection settings
+    grad_c_threshold = model.settings_dict.get("grad_c_threshold", 1.04)
+    c_star_lb_pct = model.settings_dict.get("c_star_lb_pct", 0.10)  # 10% below c_star
+    c_star_ub_pct = model.settings_dict.get("c_star_ub_pct", 0.10)  # 10% above c_star
+
+    # Gradient computation settings
+    gradient_method = model.settings_dict.get("gradient_method", "robust")
+    gradient_guard_distance = model.settings_dict.get("gradient_guard_distance", 2)
+    gradient_smooth_segments = model.settings_dict.get("gradient_smooth_segments", True)
+    gradient_smoothing_window = model.settings_dict.get("gradient_smoothing_window", 3)
+
     # methods
     ue_method = model.methods["upper_envelope"]
     
@@ -348,6 +363,11 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
     # Get m_bar and lb from ue_kwargs, with fallback to top-level settings for backward compatibility
     m_bar = ue_kwargs.get("m_bar", model.settings_dict.get("m_bar", 1.0))
     lb = ue_kwargs.get("lb", model.settings_dict.get("lb", 4))
+    
+    # Post-interpolation jump correction settings (FUES only)
+    # Corrects isolated jumps by extrapolating from previous segment
+    correct_jumps_enabled = ue_kwargs.get("correct_jumps", False)
+    min_segment_length = ue_kwargs.get("min_segment_length", 3)
 
     # ------------------------------------------------------------------
     # 2. Produce the grids we will fill
@@ -452,7 +472,11 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
                         # Pass FOC checking parameters
                         lambda_next=lambda_e,  # Already scaled by beta*delta*Rfree
                         uc_func=uc_test,
-                        override_KT_conditions=override_KT  # NEW: Pass override setting
+                        override_KT_conditions=override_KT,
+                        # Pass jump detection thresholds
+                        grad_c_threshold=grad_c_threshold,
+                        c_star_lb_pct=c_star_lb_pct,
+                        c_star_ub_pct=c_star_ub_pct
                     )
                 )
 
@@ -524,6 +548,14 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
                     m_refined, q_refined, w_grid, extrap=True)
                 policy[:, i_h, i_y] = interp_clean(
                     m_refined, c_refined, w_grid, extrap=True)
+                
+                # Post-interpolation jump correction for FUES only
+                # Jump detection based on POLICY gradient, then correct BOTH policy and value
+                if correct_jumps_enabled and ue_method == "FUES":
+                    policy[:, i_h, i_y], Q_dcsn[:, i_h, i_y] = correct_jumps_policy_and_value(
+                        policy[:, i_h, i_y], Q_dcsn[:, i_h, i_y], 
+                        w_grid, m_bar, min_segment_length
+                    )
 
 
 
@@ -543,8 +575,11 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
             })
 
             if delta < 1:
-                c_prime = piecewise_gradient_3rd(
-                    policy[:, i_h, i_y], w_grid, m_bar=m_bar,eps =0)
+                c_prime = compute_gradient(
+                    policy[:, i_h, i_y], w_grid, m_bar=m_bar,
+                    method=gradient_method, eps=0, guard_distance=gradient_guard_distance,
+                    smooth_segments=gradient_smooth_segments, 
+                    smoothing_window=gradient_smoothing_window)
             else:
                 c_prime = np.zeros_like(policy[:, i_h, i_y])
 
@@ -734,7 +769,11 @@ def _solve_vfi_numerical(vlu_cntn, w_grid, a_grid, H_grid,
                 Q_dcsn[iw, h, y] = Q_star
 
             # ---- continuation value + λ --------------------------------
-            c_prime = piecewise_gradient(policy_c[:, h, y], w_grid, m_bar)
+            c_prime = compute_gradient(
+                policy_c[:, h, y], w_grid, m_bar,
+                method=gradient_method, guard_distance=gradient_guard_distance,
+                smooth_segments=gradient_smooth_segments, 
+                smoothing_window=gradient_smoothing_window)
 
             for iw in range(n_W):
                 c_now = policy_c[iw, h, y]
@@ -877,7 +916,11 @@ def _solve_vfi_block(h_idx, y_idx, vlu_cntn, w_grid, a_grid, H_grid,
             Q_dcsn[b, iw] = best_Q
         
         # Calculate continuation value and lambda for this (h,y)
-        c_prime = piecewise_gradient(policy_c[b, :], w_grid, m_bar)
+        c_prime = compute_gradient(
+            policy_c[b, :], w_grid, m_bar,
+            method=gradient_method, guard_distance=gradient_guard_distance,
+            smooth_segments=gradient_smooth_segments, 
+            smoothing_window=gradient_smoothing_window)
         
         for iw in range(n_W):
             c_now = policy_c[b, iw]

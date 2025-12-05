@@ -78,11 +78,12 @@ python3 -c "import numba; import quantecon; print('Numba version:', numba.__vers
 }
 
 # --- Sweep Configuration ---
+CONFIG_ID="test_0.1"
 TRIAL_ID="paper-v1"
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 RUN_ID="${TRIAL_ID}_${TIMESTAMP}"
 LOG_DIR="$SCRIPT_DIR/logs"
-OUTPUT_DIR="/scratch/tp66/$USER/FUES/solutions/housing_renting/${TRIAL_ID}"
+OUTPUT_DIR="/scratch/tp66/$USER/FUES/solutions/housing_renting/${CONFIG_ID}-${TRIAL_ID}"
 
 mkdir -p "$LOG_DIR"
 mkdir -p "$OUTPUT_DIR"
@@ -91,6 +92,7 @@ MPI_RANKS=96  # 96 configs, one per rank
 
 echo "========================================================"
 echo "Parameter Sweep: sweep_noPB"
+echo "Config ID: ${CONFIG_ID}"
 echo "Trial ID: ${TRIAL_ID}"
 echo "Output: ${OUTPUT_DIR}"
 echo "Node CPUs: ${PBS_NCPUS}, MPI Ranks: ${MPI_RANKS}"
@@ -101,7 +103,7 @@ echo "========================================================"
 mpirun -np ${MPI_RANKS} python3 -m examples.housing_renting.solve_runner \
     --sweep \
     --experiment-set "sweep_noPB" \
-    --config-id "test_0.1" \
+    --config-id "${CONFIG_ID}" \
     --output-root "$OUTPUT_DIR" \
     --RUN-ID "$RUN_ID" \
     --periods 5 \
@@ -123,12 +125,12 @@ else
     echo "Sweep completed successfully."
     echo "Results saved to: $OUTPUT_DIR"
     
-    # Generate paper tables from results (in trial-specific subfolder)
+    # Generate paper tables from results (in config-id/trial-id subfolder)
     echo "========================================================"
     echo "Generating paper tables..."
     echo "========================================================"
     
-    TABLES_OUTPUT="$REPO_ROOT/results/housing_renting/${TRIAL_ID}"
+    TABLES_OUTPUT="$REPO_ROOT/results/housing_renting/${CONFIG_ID}-${TRIAL_ID}"
     mkdir -p "$TABLES_OUTPUT"
     
     python3 "$REPO_ROOT/examples/housing_renting/helpers/generate_paper_tables.py" \

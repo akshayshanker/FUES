@@ -303,9 +303,9 @@ def housing_choice_solver_renter_cpu(w_grid, S_grid, y_grid, w_rent_grid,
     lambda_dcsn = np.zeros((n_w, n_y))
     S_policy = np.zeros((n_w, n_y), dtype=np.int32)
     
-    for i_y in prange(n_y):
+    for i_y in range(n_y):
         y_val = shock_grid[i_y]
-        for i_w in prange(n_w):
+        for i_w in range(n_w):
             w_dcsn_val = w_grid[i_w]
             
             best_q, best_lambda, best_S_idx, best_v = -np.inf, 0.0, 0, -np.inf

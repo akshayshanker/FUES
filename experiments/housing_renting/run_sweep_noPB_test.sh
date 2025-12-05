@@ -72,18 +72,27 @@ python3 -c "import numba; import quantecon; print('Numba version:', numba.__vers
 }
 
 # --- Sweep Configuration ---
+CONFIG_ID="test_0.1"
 TRIAL_ID="paper-v1-test"
+EXPERIMENT_SET="sweep_noPB_small"
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 RUN_ID="${TRIAL_ID}_${TIMESTAMP}"
 LOG_DIR="$SCRIPT_DIR/logs"
-OUTPUT_DIR="/scratch/tp66/$USER/FUES/solutions/housing_renting/${TRIAL_ID}"
+OUTPUT_DIR="/scratch/tp66/$USER/FUES/solutions/housing_renting/${CONFIG_ID}-${TRIAL_ID}"
+EXPERIMENT_YAML="$SCRIPT_DIR/experiment_sets/${EXPERIMENT_SET}.yml"
 
 mkdir -p "$LOG_DIR"
 mkdir -p "$OUTPUT_DIR"
 
+# Read periods from experiment set YAML
+PERIODS=$(python3 -c "import yaml; print(yaml.safe_load(open('$EXPERIMENT_YAML'))['fixed']['periods'])")
+echo "Periods from YAML: $PERIODS"
+
 echo "========================================================"
-echo "Parameter Sweep Test: sweep_noPB_small"
+echo "Parameter Sweep Test: ${EXPERIMENT_SET}"
+echo "Config ID: ${CONFIG_ID}"
 echo "Trial ID: ${TRIAL_ID}"
+echo "Periods: ${PERIODS}"
 echo "Output: ${OUTPUT_DIR}"
 echo "Mode: MPI (${PBS_NCPUS:-12} ranks)"
 echo "========================================================"
@@ -91,11 +100,11 @@ echo "========================================================"
 # Run sweep with MPI
 mpirun -np ${PBS_NCPUS:-12} python3 -m examples.housing_renting.solve_runner \
     --sweep \
-    --experiment-set "sweep_noPB_small" \
-    --config-id "test_0.1" \
+    --experiment-set "${EXPERIMENT_SET}" \
+    --config-id "${CONFIG_ID}" \
     --output-root "$OUTPUT_DIR" \
     --RUN-ID "$RUN_ID" \
-    --periods 5 \
+    --periods "$PERIODS" \
     --mpi \
     --metrics "euler_error" \
     --fresh-fast \
@@ -111,12 +120,12 @@ else
     echo "Sweep test completed successfully."
     echo "Results saved to: $OUTPUT_DIR"
     
-    # Generate paper tables from results (in trial-specific subfolder)
+    # Generate paper tables from results (in config-id/trial-id subfolder)
     echo "========================================================"
     echo "Generating paper tables..."
     echo "========================================================"
     
-    TABLES_OUTPUT="$REPO_ROOT/results/housing_renting/${TRIAL_ID}"
+    TABLES_OUTPUT="$REPO_ROOT/results/housing_renting/${CONFIG_ID}-${TRIAL_ID}"
     mkdir -p "$TABLES_OUTPUT"
     
     python3 "$REPO_ROOT/examples/housing_renting/helpers/generate_paper_tables.py" \

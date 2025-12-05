@@ -348,6 +348,10 @@ def _fues_engine(
     return_intersections_separately: bool = False,
     left_turn_no_jump_strict: bool = False,
     use_post_state_jump_test: bool = False,
+    detect_decreasing_policy: bool = False,
+    post_clean_double_jumps: bool = True,
+    post_clean_passes: int = 2,
+    jump_check_tol: float = 0.0,
     eps_d: Optional[float] = None,
     eps_sep: Optional[float] = None,
     eps_fwd_back: Optional[float] = None,
@@ -368,6 +372,10 @@ def _fues_engine(
         disable_jump_checks: Disable manual jump check overrides
         left_turn_no_jump_strict: Treat left turns without jumps same as left turns with jumps
         use_post_state_jump_test: Also use post-state gradient for jump detection
+        detect_decreasing_policy: Treat decreasing policy (del_pol < 0) as a jump (independent of other options)
+        post_clean_double_jumps: Post-process to remove points with double jumps on both sides
+        post_clean_passes: Number of cleaning passes for double-jump removal (default: 2)
+        jump_check_tol: Tolerance for value gradient check in forward scan (default: 0.0)
         eps_d, eps_sep, eps_fwd_back, parallel_guard: Numerical tolerances
     """
 
@@ -390,6 +398,10 @@ def _fues_engine(
         "return_intersections_separately": return_intersections_separately,
         "left_turn_no_jump_strict": left_turn_no_jump_strict,
         "use_post_state_jump_test": use_post_state_jump_test,
+        "detect_decreasing_policy": detect_decreasing_policy,
+        "post_clean_double_jumps": post_clean_double_jumps,
+        "post_clean_passes": post_clean_passes,
+        "jump_check_tol": jump_check_tol,
     }
     # Add optional numerical tolerances if specified
     if eps_d is not None:

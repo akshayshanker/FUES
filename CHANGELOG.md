@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [0.5.0dev1] - 2025-11-29 – Retirement Example Refactoring and Configuration
 
+- [2025-12-04 14:00 AEST] Added PCHIP-style monotone gradient method (`piecewise_gradient_pchip`) in gradients.py - uses weighted harmonic mean to preserve MPC bounds (0, 1]
+- [2025-12-04 14:15 AEST] Added q_diff > 0 condition to jump detection in `_egm_preprocess_core` - only add constraint points where value function is increasing
+- [2025-12-04 14:30 AEST] Modified solve_runner model factory to double a_points and a_nxt_points at runtime for improved accuracy while keeping w_points unchanged
+
 ### Changed
 * **Retirement example restructured** into modular components:
   - `plots.py`: Plotting functions (EGM grids, consumption policy, DC-EGM comparison)

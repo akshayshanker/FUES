@@ -218,7 +218,7 @@ def check_intersection_within_bounds(e_grid, vlu, j, idx_f, i_plus_1, idx_b, eps
         return False
 
 @njit
-def forward_scan_case_a(e_grid, vlu, a_prime, i, j, N, LB, m_bar, g_1, eps_d=EPS_D, eps_fwd_back=EPS_fwd_back):
+def forward_scan_case_a(e_grid, vlu, a_prime, i, j, N, LB, m_bar, g_1, eps_d=EPS_D, eps_fwd_back=EPS_fwd_back, jump_check_tol=0.0):
     """Forward scan validation for Case A (right-turn jump).
 
     When we detect a right-turn jump, point i+1 might be jumping from a dominated
@@ -243,6 +243,9 @@ def forward_scan_case_a(e_grid, vlu, a_prime, i, j, N, LB, m_bar, g_1, eps_d=EPS
         Jump threshold for same-branch detection
     g_1 : float
         Value gradient from j to i+1
+    jump_check_tol : float, optional
+        Tolerance for value gradient comparison (default: 0.0)
+        Higher values make the check more lenient, keeping more points.
 
     Returns
     -------
@@ -273,7 +276,8 @@ def forward_scan_case_a(e_grid, vlu, a_prime, i, j, N, LB, m_bar, g_1, eps_d=EPS
             # Compute g_f_vlu for this point
             de_1 = max(eps_d, e_grid[i + 2 + f] - e_grid[j])
             g_f_vlu_at_idx = (vlu[i + 2 + f] - vlu[j]) / de_1
-            if g_1 > g_f_vlu_at_idx:
+            # Use tolerance for more lenient comparison
+            if g_1 > g_f_vlu_at_idx - jump_check_tol:
                 keep_i1 = True
                 break
     
@@ -284,23 +288,11 @@ def forward_scan_case_a(e_grid, vlu, a_prime, i, j, N, LB, m_bar, g_1, eps_d=EPS
 
 
 @njit
-def _postclean_double_jump_mask(e_grid, a_prime, m_bar, skip_mask, eps_d=EPS_D):
+def _postclean_double_jump_mask_single(e_grid, a_prime, m_bar, skip_mask, eps_d=EPS_D):
     """
-    Keep[i] == False  iff BOTH neighbors of i are policy jumps > m_bar.
+    Single pass: Keep[i] == False iff BOTH neighbors of i are policy jumps > m_bar.
     First and last points are always kept. Points with skip_mask[i]==True
     (e.g., intersection rows) are always kept.
-
-    Parameters
-    ----------
-    e_grid : 1d array (sorted)
-    a_prime: 1d array (policy_1 in your outer API)
-    m_bar  : float
-    skip_mask : 1d bool array with same length as e_grid
-                True -> never drop (e.g., intersection rows)
-
-    Returns
-    -------
-    keep : 1d bool array
     """
     N = e_grid.size
     keep = np.ones(N, dtype=np.bool_)
@@ -312,6 +304,10 @@ def _postclean_double_jump_mask(e_grid, a_prime, m_bar, skip_mask, eps_d=EPS_D):
     keep[N - 1] = True
 
     for i in range(1, N - 1):
+        # Skip protected points (e.g., intersection rows)
+        if skip_mask[i]:
+            continue
+            
         deL = e_grid[i] - e_grid[i - 1]
         deR = e_grid[i + 1] - e_grid[i]
         # protect divisions but keep sign (not needed for abs, but consistent)
@@ -330,6 +326,70 @@ def _postclean_double_jump_mask(e_grid, a_prime, m_bar, skip_mask, eps_d=EPS_D):
     return keep
 
 
+@njit
+def _postclean_double_jump_mask(e_grid, a_prime, m_bar, skip_mask, eps_d=EPS_D, n_passes=2):
+    """
+    Keep[i] == False  iff BOTH neighbors of i are policy jumps > m_bar.
+    First and last points are always kept. Points with skip_mask[i]==True
+    (e.g., intersection rows) are always kept.
+    
+    Applies the cleaning multiple times (n_passes) to iteratively remove noise.
+    After each pass, new double-jump patterns may emerge as points are removed.
+
+    Parameters
+    ----------
+    e_grid : 1d array (sorted)
+    a_prime: 1d array (policy_1 in your outer API)
+    m_bar  : float
+    skip_mask : 1d bool array with same length as e_grid
+                True -> never drop (e.g., intersection rows)
+    eps_d : float
+        Minimum grid spacing for division protection
+    n_passes : int
+        Number of cleaning passes to apply (default: 2)
+        Set to 1 for original single-pass behavior
+
+    Returns
+    -------
+    keep : 1d bool array
+    """
+    N = e_grid.size
+    if N <= 2:
+        return np.ones(N, dtype=np.bool_)
+    
+    # Start with all points kept
+    current_mask = np.ones(N, dtype=np.bool_)
+    
+    for pass_num in range(n_passes):
+        # Get indices of currently kept points
+        kept_indices = np.where(current_mask)[0]
+        n_kept = kept_indices.size
+        
+        if n_kept <= 2:
+            break
+        
+        # Extract kept arrays
+        e_kept = e_grid[kept_indices]
+        a_kept = a_prime[kept_indices]
+        skip_kept = skip_mask[kept_indices]
+        
+        # Apply single pass on kept points
+        pass_mask = _postclean_double_jump_mask_single(e_kept, a_kept, m_bar, skip_kept, eps_d)
+        
+        # Update current mask: mark dropped points as False
+        for idx in range(n_kept):
+            if not pass_mask[idx]:
+                current_mask[kept_indices[idx]] = False
+        
+        # Check if any points were removed this pass
+        n_removed = n_kept - np.sum(pass_mask)
+        if n_removed == 0:
+            # No changes, stop early
+            break
+    
+    return current_mask
+
+
 def FUES(
     e_grid, vlu, policy_1, policy_2, del_a,
     b=1e-10, m_bar=1.0, LB=4, endog_mbar=False, padding_mbar=0.0,
@@ -340,6 +400,10 @@ def FUES(
     disable_jump_checks=False,
     left_turn_no_jump_strict=False,
     use_post_state_jump_test=False,
+    detect_decreasing_policy=False,
+    post_clean_double_jumps=True,
+    post_clean_passes=2,
+    jump_check_tol=0.0,
     eps_d=None, eps_sep=None, eps_fwd_back=None, parallel_guard=None,
 ):
     """
@@ -464,6 +528,7 @@ def FUES(
         m_bar, LB, endog_mbar, padding_mbar,
         include_intersections, no_double_jumps, single_intersection,
         disable_jump_checks, left_turn_no_jump_strict, use_post_state_jump_test,
+        detect_decreasing_policy, jump_check_tol, 
         eps_d, eps_sep, eps_fwd_back, parallel_guard
     )
 
@@ -517,30 +582,35 @@ def FUES(
         all_d = all_d[sort_idx]
         is_inter = is_inter[sort_idx]
 
-        post_mask = _postclean_double_jump_mask(all_e, all_p1, m_bar, is_inter, eps_d)
+        if post_clean_double_jumps:
+            post_mask = _postclean_double_jump_mask(all_e, all_p1, m_bar, is_inter, eps_d, post_clean_passes)
+            return (all_e[post_mask], all_v[post_mask],
+                    all_p1[post_mask], all_p2[post_mask], all_d[post_mask])
 
-        final_mask = post_mask
+        return (all_e, all_v, all_p1, all_p2, all_d)
 
-        return (all_e[final_mask], all_v[final_mask],
-                all_p1[final_mask], all_p2[final_mask], all_d[final_mask])
-
-    is_inter = np.zeros(e_kept.size, dtype=np.bool_)
-    post_mask = _postclean_double_jump_mask(e_kept, p2_kept, m_bar, is_inter, eps_d)
+    if post_clean_double_jumps:
+        is_inter = np.zeros(e_kept.size, dtype=np.bool_)
+        post_mask = _postclean_double_jump_mask(e_kept, all_p1, m_bar, is_inter, eps_d, post_clean_passes)
+        e_out_final = e_kept[post_mask]
+        v_out_final = v_kept[post_mask]
+        p1_out_final = p1_kept[post_mask]
+        p2_out_final = p2_kept[post_mask]
+        d_out_final = d_kept[post_mask]
+    else:
+        e_out_final = e_kept
+        v_out_final = v_kept
+        p1_out_final = p1_kept
+        p2_out_final = p2_kept
+        d_out_final = d_kept
 
     if return_intersections_separately:
         empty = np.zeros(0, dtype=e_kept.dtype)
         inter_tuple = (empty, empty, empty, empty, empty)
-        fues_result = (
-            e_kept[post_mask],
-            v_kept[post_mask],
-            p1_kept[post_mask],
-            p2_kept[post_mask],
-            d_kept[post_mask],
-        )
+        fues_result = (e_out_final, v_out_final, p1_out_final, p2_out_final, d_out_final)
         return fues_result, inter_tuple
 
-    return (e_kept[post_mask], v_kept[post_mask],
-            p1_kept[post_mask], p2_kept[post_mask], d_kept[post_mask])
+    return (e_out_final, v_out_final, p1_out_final, p2_out_final, d_out_final)
 
 
 @njit
@@ -560,6 +630,8 @@ def _scan(
     disable_jump_checks=False,
     left_turn_no_jump_strict=False,
     use_post_state_jump_test=False,
+    detect_decreasing_policy=False,
+    jump_check_tol=0.0,
     eps_d=EPS_D,
     eps_sep=EPS_SEP,
     eps_fwd_back=EPS_fwd_back,
@@ -699,6 +771,10 @@ def _scan(
             jump_now = (g_tilde_a > M_max) or (g_tilde_a_2 > M_max)
         else:
             jump_now = (g_tilde_a > M_max)
+        
+        # Independent option: treat decreasing policy (del_pol < 0) as a jump
+        if detect_decreasing_policy and (del_pol < 0 or del_pol_2<0):
+            jump_now = True
 
         
         
@@ -723,7 +799,7 @@ def _scan(
         # Case A: Right-turn with jump
         if right_turn_jump:
             keep_i1, idx_f, found_forward_same_branch = forward_scan_case_a(
-                e_grid, vlu, a_prime, i, j, N, LB, M_max, g_1, eps_d, eps_fwd_back
+                e_grid, vlu, a_prime, i, j, N, LB, M_max, g_1, eps_d, eps_fwd_back, jump_check_tol
             )
             # Apply manual override only if disable_jump_checks is True
             if disable_jump_checks:

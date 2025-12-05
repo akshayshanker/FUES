@@ -27,7 +27,7 @@ STD_RES_SETTINGS_PB[vfi_ngrid]=2000
 STD_RES_SETTINGS_PB[hd_points]=2000
 STD_RES_SETTINGS_PB[grid_points]=6000
 STD_RES_SETTINGS_PB[version_suffix]="test_0.1"
-STD_RES_SETTINGS_PB[delta_pb]=0.95
+STD_RES_SETTINGS_PB[delta_pb]=0.6
 
 # --- Configuration Set 2: High Resolution Benchmark ---
 # A high-resolution run for producing final, accurate results.
@@ -35,7 +35,7 @@ declare -A HIGH_RES_SETTINGS_A
 HIGH_RES_SETTINGS_A[periods]=5
 HIGH_RES_SETTINGS_A[vfi_ngrid]=1E4
 HIGH_RES_SETTINGS_A[hd_points]=6000
-HIGH_RES_SETTINGS_A[grid_points]=20000
+HIGH_RES_SETTINGS_A[grid_points]=6000
 HIGH_RES_SETTINGS_A[version_suffix]="test_0.1"
 HIGH_RES_SETTINGS_A[delta_pb]=1
 
@@ -46,6 +46,14 @@ HIGH_RES_SETTINGS_A_PB[hd_points]=6000
 HIGH_RES_SETTINGS_A_PB[grid_points]=6000
 HIGH_RES_SETTINGS_A_PB[version_suffix]="test_0.1"
 HIGH_RES_SETTINGS_A_PB[delta_pb]=0.6
+
+declare -A HIGH_RES_SETTINGS_A1_PB
+HIGH_RES_SETTINGS_A1_PB[periods]=5
+HIGH_RES_SETTINGS_A1_PB[vfi_ngrid]=1E4
+HIGH_RES_SETTINGS_A1_PB[hd_points]=6000
+HIGH_RES_SETTINGS_A1_PB[grid_points]=30000
+HIGH_RES_SETTINGS_A1_PB[version_suffix]="test_0.1"
+HIGH_RES_SETTINGS_A1_PB[delta_pb]=0.6
 
 declare -A HIGH_RES_SETTINGS_B
 HIGH_RES_SETTINGS_B[periods]=5

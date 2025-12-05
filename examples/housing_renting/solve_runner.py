@@ -735,10 +735,14 @@ def main(argv=None):
             sweep_base_cfg["master"]["horizon"] = fixed_params["periods"]
         
         def make_sweep_model(cfg):
-            """Model factory that syncs H_points -> S_points and a_points -> a_nxt_points, w_points"""
-            # Sync grid sizes
+            """Model factory that syncs H_points -> S_points and applies grid multiplier"""
+            # Get grid multiplier from settings (default to 1 if not set)
+            a_grid_mult = cfg["master"]["settings"].get("a_grid_multiplier", 1)
+            
+            # Apply multiplier to a_points and a_nxt_points (w_points stays at base)
             a_points = cfg["master"]["settings"]["a_points"]
-            cfg["master"]["settings"]["a_nxt_points"] = a_points
+            cfg["master"]["settings"]["a_points"] = a_points * a_grid_mult
+            cfg["master"]["settings"]["a_nxt_points"] = a_points * a_grid_mult
             cfg["master"]["settings"]["w_points"] = a_points
             
             # Sync H_points -> S_points (both are in settings, not parameters)

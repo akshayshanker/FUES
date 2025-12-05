@@ -118,6 +118,10 @@ settings:
       no_double_jumps: true   # Filter out consecutive jumps
       disable_jump_checks: false  # Disable manual jump check overrides
       
+      # Post-interpolation jump correction
+      correct_jumps: false         # Correct isolated jumps by extrapolating from previous segment
+      min_segment_length: 3        # Segments with fewer points are corrected by extrapolation
+      
       # Numerical tolerances
       eps_d: 1.0e-14          # Machine epsilon protection for divisions
       eps_sep: 1.0e-08        # Minimum separation when creating intersections

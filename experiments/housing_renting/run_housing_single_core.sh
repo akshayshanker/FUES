@@ -31,7 +31,7 @@ fi
 source "$SCRIPT_DIR/configs/job_configs.sh"
 
 # --- Define the Sequence of Configurations to Run ---
-CONFIG_TO_RUN=("HIGH_RES_SETTINGS_A")
+CONFIG_TO_RUN=("STD_RES_SETTINGS_PB")
 
 
 # --- Environment Setup ---

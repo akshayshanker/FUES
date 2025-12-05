@@ -103,12 +103,16 @@ def generate_accuracy_latex(df: pd.DataFrame, output_path: Path, model_params: s
         if i < len(grids) - 1:
             lines.append(r"\addlinespace[0.5em]")
     
-    # Close table
+    # Close table with centered footnote
     lines.extend([
         r"\bottomrule",
         r"\end{tabular}",
         r"\vspace{0.5em}",
-        f"\\footnotesize{{{model_params}}}",
+        r"\begin{minipage}{\textwidth}",
+        r"\centering",
+        r"\footnotesize",
+        r"\textit{Notes:} " + model_params,
+        r"\end{minipage}",
         r"\end{table}",
     ])
     
@@ -119,7 +123,11 @@ def generate_accuracy_latex(df: pd.DataFrame, output_path: Path, model_params: s
 
 
 def generate_timing_latex(df: pd.DataFrame, output_path: Path, model_params: str) -> None:
-    """Generate LaTeX timing table matching retirement format."""
+    """Generate LaTeX timing table matching retirement format.
+    
+    UE time is shown in milliseconds (×1000) for better readability.
+    Total time remains in seconds.
+    """
     
     # Get unique values
     methods = ["FUES", "DCEGM", "CONSAV", "VFI"]
@@ -130,7 +138,7 @@ def generate_timing_latex(df: pd.DataFrame, output_path: Path, model_params: str
     lines = [
         r"\begin{table}[htbp]",
         r"\centering",
-        r"\caption{Housing-renting model -- Timing (s)}",
+        r"\caption{Housing-renting model -- Timing (UE in ms, Tot in s)}",
         r"\label{tab:housing_timing}",
         r"\begin{tabular}{cc|cc|cc|cc|cc}",
         r"\toprule",
@@ -159,7 +167,8 @@ def generate_timing_latex(df: pd.DataFrame, output_path: Path, model_params: str
                     total_time = row_data["total_nonterminal_time"].values[0]
                     
                     if pd.notna(ue_time) and pd.notna(total_time):
-                        timing_vals.append(f"{ue_time:.2f}")
+                        # UE time in milliseconds (2 decimal places), total in seconds
+                        timing_vals.append(f"{ue_time * 1000:.2f}")
                         timing_vals.append(f"{total_time:.2f}")
                     else:
                         timing_vals.extend(["--", "--"])
@@ -174,12 +183,16 @@ def generate_timing_latex(df: pd.DataFrame, output_path: Path, model_params: str
         if i < len(grids) - 1:
             lines.append(r"\addlinespace[0.5em]")
     
-    # Close table
+    # Close table with centered footnote
     lines.extend([
         r"\bottomrule",
         r"\end{tabular}",
         r"\vspace{0.5em}",
-        f"\\footnotesize{{{model_params}}}",
+        r"\begin{minipage}{\textwidth}",
+        r"\centering",
+        r"\footnotesize",
+        r"\textit{Notes:} " + model_params,
+        r"\end{minipage}",
         r"\end{table}",
     ])
     
@@ -245,7 +258,11 @@ def generate_accuracy_markdown(df: pd.DataFrame, output_path: Path, model_params
 
 
 def generate_timing_markdown(df: pd.DataFrame, output_path: Path, model_params: str) -> None:
-    """Generate Markdown timing table matching retirement format."""
+    """Generate Markdown timing table matching retirement format.
+    
+    UE time is shown in milliseconds (×1000) for better readability.
+    Total time remains in seconds.
+    """
     
     # Get unique values
     methods = ["FUES", "DCEGM", "CONSAV", "VFI"]
@@ -253,11 +270,11 @@ def generate_timing_markdown(df: pd.DataFrame, output_path: Path, model_params: 
     H_sizes = sorted(df["H"].unique())
     
     lines = [
-        "# Housing-renting model - Timing (s)",
+        "# Housing-renting model - Timing (UE in ms, Tot in s)",
         "",
-        "|      |    |    FUES   |   DCEGM   |  CONSAV   |    VFI    |",
-        "| Grid | H  | UE  | Tot | UE  | Tot | UE  | Tot | UE  | Tot |",
-        "|------|----|----|------|-----|-----|-----|-----|-----|-----|",
+        "|      |    |     FUES    |    DCEGM    |   CONSAV    |     VFI     |",
+        "| Grid | H  | UE(ms)| Tot | UE(ms)| Tot | UE(ms)| Tot | UE(ms)| Tot |",
+        "|------|----|----- -|-----|-------|-----|-------|-----|-------|-----|",
     ]
     
     for grid in grids:
@@ -280,7 +297,8 @@ def generate_timing_markdown(df: pd.DataFrame, output_path: Path, model_params: 
                     total_time = row_data["total_nonterminal_time"].values[0]
                     
                     if pd.notna(ue_time) and pd.notna(total_time):
-                        timing_parts.append(f"{ue_time:5.2f} | {total_time:5.2f}")
+                        # UE time in milliseconds (2 decimal places), total in seconds
+                        timing_parts.append(f"{ue_time * 1000:6.2f} | {total_time:5.2f}")
                     else:
                         timing_parts.append("   -- |    --")
                 else:
@@ -331,10 +349,11 @@ def main():
     print(f"  Grid sizes: {sorted(df['grid'].unique())}")
     print(f"  H sizes: {sorted(df['H'].unique())}")
     
-    # Model parameters string
+    # Model parameters string with proper LaTeX math formatting
     model_params = (
-        r"Model parameters: r=0.06, $\beta$=0.93, T=5, $\phi$=0.07, "
-        r"$\alpha$=0.77, $\delta_{PB}$=1.0, $A_{\max}$=35, $H_{\max}$=5, $w_{\max}$=40"
+        r"Model parameters: $r=0.06$, $\beta=0.93$, $T=5$, $\phi=0.07$, "
+        r"$\alpha=0.77$, $\delta_{\mathrm{PB}}=1.0$, $A_{\max}=35$, $H_{\max}=5$, $w_{\max}=40$. "
+        r"Reference method: DCEGM."
     )
     
     # Generate tables - output in trial-specific subfolder

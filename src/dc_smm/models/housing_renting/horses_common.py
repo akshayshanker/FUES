@@ -8,6 +8,16 @@ from functools import lru_cache
 import math
 import warnings
 
+# Import gradient functions from dedicated module (backward compatibility re-export)
+from dc_smm.models.housing_renting.gradients import (
+    piecewise_gradient,
+    piecewise_gradient_3rd,
+    piecewise_gradient_with_segments,
+    piecewise_gradient_robust,
+    compute_gradient,
+    get_gradient_function,
+)
+
 
 def _ensure_1d_contig(x, dtype=None):
     """Ensure array is 1D and C-contiguous."""
@@ -231,396 +241,9 @@ def bellman_obj(a_nxt, w_val, H_val, beta, delta,
 
     return u_func(c, H_val) + beta * delta * V_nxt
 
-@njit
-def piecewise_gradient_3rd(f, x, m_bar, eps=0.9):
-    """
-    Compute piecewise gradients using up to 3rd-order finite differences.
-    
-    This function automatically detects segments by identifying jumps and uses
-    the highest-order accurate finite difference scheme available within each segment.
-    Enforces 0 < gradient <= 1 (gradient > 1 indicates a jump). Segments are 
-    non-overlapping with exclusive boundaries: [i,j), [j,k), [k,l), etc.
-
-    Parameters
-    ----------
-    f, x : 1-D ndarrays (same length, x strictly increasing)
-    m_bar: float   – jump threshold in *slope* space (typically 1.0 for MPC)
-    eps   : float  – fallback slope if no positive neighbour exists
-
-    Returns
-    -------
-    g : 1-D ndarray, slope at each x[i] with 0 < g[i] <= 1
-    """
-    n = len(x)
-    g = np.empty(n)
-    
-    # Step 1: Identify segment boundaries by detecting jumps (slope > 1 or < 0)
-    # Segments are [start, end) - start is inclusive, end is exclusive
-    segment_boundaries = np.zeros(n+1, dtype=np.int64)
-    segment_boundaries[0] = 0
-    n_segments = 1
-    
-    # Use 1.0 as the upper threshold - slopes > 1 indicate jumps (violate MPC bounds)
-    jump_threshold = min(m_bar, 1.0)
-    
-    for i in range(1, n):
-        # Check if derivative would exceed 1 or be negative (indicates jump)
-        local_slope = (f[i] - f[i-1]) / (x[i] - x[i-1])
-        if local_slope > jump_threshold or local_slope < 0:
-            segment_boundaries[n_segments] = i
-            n_segments += 1
-    segment_boundaries[n_segments] = n
-    n_segments += 1
-    
-    # Step 2: Calculate derivatives within each continuous segment using highest-order scheme
-    for seg_idx in range(n_segments - 1):
-        start = segment_boundaries[seg_idx]
-        end = segment_boundaries[seg_idx + 1]
-        seg_len = end - start
-        
-        if seg_len == 1:
-            # Single point segment - use nearest neighbor or fallback
-            if seg_idx > 0 and start > 0:
-                # Use slope from previous segment's end
-                g[start] = (f[start] - f[start-1]) / (x[start] - x[start-1])
-            elif seg_idx < n_segments - 2 and end < n:
-                # Use slope to next segment's start
-                g[start] = (f[end] - f[start]) / (x[end] - x[start])
-            else:
-                g[start] = eps
-            # Ensure positive
-            if g[start] <= 0:
-                g[start] = eps
-            continue
-        
-        # For multi-point segments, use highest-order scheme possible
-        for i in range(start, end):
-            # Determine how many points we have available in this segment
-            points_left = i - start
-            points_right = end - i - 1
-            
-            # Try 3rd order (5-point Richardson) if we have enough points
-            if points_left >= 2 and points_right >= 2:
-                # 5-point Richardson: O(h^4) accuracy
-                # g = (4*D1 - D2)/3 where D1 uses ±1 points, D2 uses ±2 points
-                h1 = x[i+1] - x[i-1]
-                D1 = (f[i+1] - f[i-1]) / h1
-                
-                h2 = x[i+2] - x[i-2]
-                D2 = (f[i+2] - f[i-2]) / h2
-                
-                g[i] = (4.0 * D1 - D2) / 3.0
-                # Clip to [0, 1] range
-                if g[i] > 1.0:
-                    g[i] = 1.0
-                elif g[i] < 0:
-                    g[i] = eps
-                
-            # Try 2nd order at segment boundaries (3-point one-sided)
-            elif i == start and seg_len >= 3:
-                # 3-point forward difference at segment start: O(h^2)
-                # f'(x) = (-3f(x) + 4f(x+h) - f(x+2h)) / 2h
-                h = x[start+1] - x[start]
-                h2 = x[start+2] - x[start]
-                # Use actual grid spacing for non-uniform grids
-                a0 = -h2 / (h * (h2 - h))
-                a1 = h2 / (h * h2)
-                a2 = -h / (h2 * (h2 - h))
-                g[i] = a0*f[start] + a1*f[start+1] + a2*f[start+2]
-                
-            elif i == end - 1 and seg_len >= 3:
-                # 3-point backward difference at segment end: O(h^2)
-                h = x[end-1] - x[end-2]
-                h2 = x[end-1] - x[end-3]
-                # Use actual grid spacing for non-uniform grids
-                a0 = h / (h2 * (h2 - h))
-                a1 = -h2 / (h * h2)
-                a2 = h2 / (h * (h2 - h))
-                g[i] = a0*f[end-3] + a1*f[end-2] + a2*f[end-1]
-                
-            # Try 2nd order centered (3-point) if we have neighbors
-            elif points_left >= 1 and points_right >= 1:
-                # Standard central difference: O(h^2)
-                g[i] = (f[i+1] - f[i-1]) / (x[i+1] - x[i-1])
-                
-            # Fall back to 1st order at edges
-            elif i == start:
-                # Forward difference at segment start: O(h)
-                if seg_len >= 2:
-                    g[i] = (f[start+1] - f[start]) / (x[start+1] - x[start])
-                else:
-                    g[i] = eps
-                    
-            elif i == end - 1:
-                # Backward difference at segment end: O(h)
-                g[i] = (f[i] - f[i-1]) / (x[i] - x[i-1])
-                
-            else:
-                # Should not reach here, but use central difference as fallback
-                g[i] = (f[i+1] - f[i-1]) / (x[i+1] - x[i-1])
-            
-            # Enforce slope in (0, 1] range
-            if g[i] <= 0 or g[i] > 1.0 or np.isnan(g[i]):
-                # Try lower-order schemes
-                if i < end - 1:
-                    g_forward = (f[i+1] - f[i]) / (x[i+1] - x[i])
-                    if 0 < g_forward <= 1.0:
-                        g[i] = g_forward
-                        continue
-                        
-                if i > start:
-                    g_backward = (f[i] - f[i-1]) / (x[i] - x[i-1])
-                    if 0 < g_backward <= 1.0:
-                        g[i] = g_backward
-                        continue
-                
-                # Last resort: use fallback or clip
-                if g[i] > 1.0:
-                    g[i] = 1.0
-                elif g[i] <= 0 or np.isnan(g[i]):
-                    g[i] = eps
-    
-    # Step 3: Final pass to ensure all gradients are in (0, 1] range
-    for i in range(n):
-        if g[i] <= 0 or g[i] > 1.0 or np.isnan(g[i]):
-            # Search for nearest valid gradient in same segment
-            best_dist = n
-            best_g = eps
-            
-            # Find which segment i belongs to
-            my_segment = -1
-            for seg_idx in range(n_segments - 1):
-                if i >= segment_boundaries[seg_idx] and i < segment_boundaries[seg_idx + 1]:
-                    my_segment = seg_idx
-                    break
-            
-            if my_segment >= 0:
-                # Search within same segment first
-                seg_start = segment_boundaries[my_segment]
-                seg_end = segment_boundaries[my_segment + 1]
-                for j in range(seg_start, seg_end):
-                    if j != i and 0 < g[j] <= 1.0 and not np.isnan(g[j]):
-                        dist = abs(i - j)
-                        if dist < best_dist:
-                            best_dist = dist
-                            best_g = g[j]
-            
-            # Final clipping to ensure bounds
-            if best_g > 1.0:
-                best_g = 1.0
-            elif best_g <= 0:
-                best_g = eps
-                
-            g[i] = best_g
-    
-    return g
-
-@njit
-def piecewise_gradient(f, x, m_bar, eps=0.9):
-    """
-    Compute piecewise gradients for a function with discontinuities.
-    
-    This function identifies continuous segments by detecting jumps and 
-    calculates robust derivatives within each segment. Segments are 
-    non-overlapping with exclusive boundaries: [i,j), [j,k), [k,l), etc.
-
-    Parameters
-    ----------
-    f : 1-D ndarray
-        Function values on a strictly-increasing grid
-    x : 1-D ndarray
-        Grid points, same length as f
-    m_bar : float
-        Threshold to flag a jump in derivative space (max allowed |df/dx|)
-    eps : float, optional
-        Fallback slope if NO positive slope exists (default: 0.9)
-
-    Returns
-    -------
-    g : 1-D ndarray
-        Positive slope at each x[i], computed segment-wise
-    """
-    n = len(x)
-    g = np.empty(n)
-    
-    # Step 1: Identify segment boundaries by detecting jumps
-    # Segments are [start, end) - start is inclusive, end is exclusive
-    segment_boundaries = np.zeros(n+1, dtype=np.int64)
-    segment_boundaries[0] = 0
-    n_segments = 1
-    
-    for i in range(1, n):
-        # Check if derivative would exceed threshold (indicates jump)
-        local_slope = np.abs(f[i] - f[i-1]) / (x[i] - x[i-1])
-        if local_slope > m_bar:
-            # End current segment at i (exclusive), start new segment at i
-            segment_boundaries[n_segments] = i
-            n_segments += 1
-    segment_boundaries[n_segments] = n
-    n_segments += 1
-    
-    # Step 2: Calculate derivatives within each continuous segment
-    for seg_idx in range(n_segments - 1):
-        start = segment_boundaries[seg_idx]
-        end = segment_boundaries[seg_idx + 1]
-        seg_len = end - start
-        
-        if seg_len == 1:
-            # Single point segment - use nearest neighbor or fallback
-            if seg_idx > 0 and start > 0:
-                # Use slope from previous segment's end
-                g[start] = (f[start] - f[start-1]) / (x[start] - x[start-1])
-            elif seg_idx < n_segments - 2 and end < n:
-                # Use slope to next segment's start
-                g[start] = (f[end] - f[start]) / (x[end] - x[start])
-            else:
-                g[start] = eps
-            # Ensure positive
-            if g[start] <= 0:
-                g[start] = eps
-            continue
-        
-        # For multi-point segments, use robust derivative estimation
-        for i in range(start, end):
-            if i == start:
-                # Forward difference at segment start
-                if seg_len >= 2:
-                    g[i] = (f[start+1] - f[start]) / (x[start+1] - x[start])
-                else:
-                    g[i] = eps
-            elif i == end - 1:
-                # Backward difference at segment end
-                g[i] = (f[i] - f[i-1]) / (x[i] - x[i-1])
-            else:
-                # Central difference in segment interior
-                # Use wider stencil if available for more stability
-                if i - start >= 2 and end - i >= 2:
-                    # 5-point stencil if possible
-                    g[i] = (-f[i+2] + 8*f[i+1] - 8*f[i-1] + f[i-2]) / (12*(x[i+1] - x[i]))
-                else:
-                    # Standard central difference
-                    g[i] = (f[i+1] - f[i-1]) / (x[i+1] - x[i-1])
-            
-            # Enforce positive slope
-            if g[i] <= 0:
-                # Try one-sided differences
-                if i < end - 1:
-                    g_forward = (f[i+1] - f[i]) / (x[i+1] - x[i])
-                    if g_forward > 0:
-                        g[i] = g_forward
-                        continue
-                if i > start:
-                    g_backward = (f[i] - f[i-1]) / (x[i] - x[i-1])
-                    if g_backward > 0:
-                        g[i] = g_backward
-                        continue
-                # Last resort: use segment average or fallback
-                g[i] = eps
-    
-    # Step 3: Final pass to ensure all gradients are positive
-    for i in range(n):
-        if g[i] <= 0 or np.isnan(g[i]):
-            # Search for nearest positive gradient
-            best_dist = n
-            best_g = eps
-            for j in range(n):
-                if g[j] > 0 and not np.isnan(g[j]):
-                    dist = abs(i - j)
-                    if dist < best_dist:
-                        best_dist = dist
-                        best_g = g[j]
-            g[i] = best_g
-    
-    return g
-
-@njit
-def piecewise_gradient_with_segments(f, x, segment_boundaries, eps=0.9):
-    """
-    Compute piecewise gradients using pre-computed segment boundaries.
-    
-    This is useful when segment boundaries are known from EGM intersection points.
-    Segments are non-overlapping with exclusive boundaries: [i,j), [j,k), [k,l), etc.
-
-    Parameters
-    ----------
-    f : 1-D ndarray
-        Function values on a strictly-increasing grid
-    x : 1-D ndarray
-        Grid points, same length as f
-    segment_boundaries : 1-D ndarray
-        Indices where segments begin/end (must include 0 and n).
-        Segments are [boundaries[i], boundaries[i+1]) - start inclusive, end exclusive.
-    eps : float, optional
-        Fallback slope if NO positive slope exists (default: 0.9)
-
-    Returns
-    -------
-    g : 1-D ndarray
-        Positive slope at each x[i], computed segment-wise
-    """
-    n = len(x)
-    g = np.empty(n)
-    n_segments = len(segment_boundaries)
-    
-    # Calculate derivatives within each continuous segment
-    for seg_idx in range(n_segments - 1):
-        start = segment_boundaries[seg_idx]
-        end = segment_boundaries[seg_idx + 1]
-        seg_len = end - start
-        
-        if seg_len == 1:
-            # Single point segment - use nearest neighbor or fallback
-            if seg_idx > 0 and start > 0:
-                # Use slope from previous segment's end
-                g[start] = (f[start] - f[start-1]) / (x[start] - x[start-1])
-            elif seg_idx < n_segments - 2 and end < n:
-                # Use slope to next segment's start
-                g[start] = (f[end] - f[start]) / (x[end] - x[start])
-            else:
-                g[start] = eps
-            # Ensure positive
-            if g[start] <= 0:
-                g[start] = eps
-            continue
-        
-        # For multi-point segments, use robust derivative estimation
-        for i in range(start, end):
-            if i == start:
-                # Forward difference at segment start
-                if seg_len >= 2:
-                    g[i] = (f[start+1] - f[start]) / (x[start+1] - x[start])
-                else:
-                    g[i] = eps
-            elif i == end - 1:
-                # Backward difference at segment end
-                g[i] = (f[i] - f[i-1]) / (x[i] - x[i-1])
-            else:
-                # Central difference in segment interior
-                g[i] = (f[i+1] - f[i-1]) / (x[i+1] - x[i-1])
-            
-            # Enforce positive slope
-            if g[i] <= 0:
-                # Try one-sided differences
-                if i < end - 1:
-                    g_forward = (f[i+1] - f[i]) / (x[i+1] - x[i])
-                    if g_forward > 0:
-                        g[i] = g_forward
-                        continue
-                if i > start:
-                    g_backward = (f[i] - f[i-1]) / (x[i] - x[i-1])
-                    if g_backward > 0:
-                        g[i] = g_backward
-                        continue
-                # Last resort: use fallback
-                g[i] = eps
-    
-    # Final pass to ensure all gradients are positive
-    for i in range(n):
-        if g[i] <= 0 or np.isnan(g[i]):
-            # Use simple fallback for now
-            g[i] = eps
-    
-    return g
+# Note: piecewise_gradient, piecewise_gradient_3rd, piecewise_gradient_with_segments, 
+# and piecewise_gradient_robust are now imported from gradients.py at the top of this file
+# for backward compatibility
 
 def uniqueEG(grid: np.ndarray, values: np.ndarray, tol: float = 1e-10) -> np.ndarray:
     """Return a Boolean mask that keeps the *highest-value* entry for each
@@ -661,6 +284,172 @@ def uniqueEG(grid: np.ndarray, values: np.ndarray, tol: float = 1e-10) -> np.nda
     mask = np.zeros_like(grid, dtype=bool)
     mask[order[sorted_mask]] = True
     return mask
+
+
+@njit
+def _calculate_gradient_1d(data, x):
+    """
+    Calculate gradient of 1D data array with respect to x.
+    
+    Parameters
+    ----------
+    data : ndarray
+        1D data values
+    x : ndarray  
+        1D x-coordinates
+        
+    Returns
+    -------
+    ndarray
+        Gradient array (same length as input, with boundary handling)
+    """
+    n = len(data)
+    grad = np.zeros(n)
+    
+    for i in range(1, n):
+        dx = x[i] - x[i - 1]
+        if abs(dx) > 1e-15:
+            grad[i] = (data[i] - data[i - 1]) / dx
+    
+    # Assume continuous gradient at start
+    if n > 1:
+        grad[0] = grad[1]
+    
+    return grad
+
+
+@njit
+def correct_jumps_1d_with_mask(policy, value, x, gradient_jump_threshold, min_segment_length=3):
+    """
+    Correct short segments and isolated points by extrapolating from good segments.
+    
+    Segments are defined by DECREASING policy (gradient <= 0).
+    Within a segment, policy should be increasing. Short segments are
+    replaced by extrapolation from the last good (long enough) segment.
+    
+    Parameters
+    ----------
+    policy : ndarray
+        1D policy array (consumption)
+    value : ndarray  
+        1D value array (Q_dcsn)
+    x : ndarray
+        1D grid (wealth)
+    gradient_jump_threshold : float
+        Not used for segment detection (kept for API compatibility)
+    min_segment_length : int
+        Minimum segment length. Shorter segments are extrapolated.
+        
+    Returns
+    -------
+    tuple
+        (corrected_policy, corrected_value)
+    """
+    n = len(policy)
+    if n < 4:
+        return policy.copy(), value.copy()
+    
+    corrected_policy = policy.copy()
+    corrected_value = value.copy()
+    
+    # Compute gradients
+    gradients = _calculate_gradient_1d(policy, x)
+    
+    # --- Pass 1: Find segment boundaries (where policy decreases) ---
+    segment_starts = np.zeros(n, dtype=np.int64)
+    segment_starts[0] = 0
+    n_segments = 1
+    
+    for i in range(1, n - 1):
+        if gradients[i] <= 0:  # Policy decreasing = new segment
+            segment_starts[n_segments] = i
+            n_segments += 1
+    segment_starts[n_segments] = n
+    n_segments += 1
+    
+    # --- Pass 2: Extrapolate short segments from last good segment ---
+    for seg_idx in range(1, n_segments - 2):
+        start = segment_starts[seg_idx]
+        end = segment_starts[seg_idx + 1]
+        seg_len = end - start
+        
+        if seg_len < min_segment_length:
+            # Find last good segment (searching backwards)
+            good_end = -1
+            for prev_idx in range(seg_idx - 1, -1, -1):
+                prev_start = segment_starts[prev_idx]
+                prev_end = segment_starts[prev_idx + 1]
+                if prev_end - prev_start >= min_segment_length:
+                    good_end = prev_end
+                    break
+            
+            if good_end >= 4:
+                # Richardson extrapolation from last 4 points
+                h1 = x[good_end - 1] - x[good_end - 2]
+                h2 = x[good_end - 1] - x[good_end - 4]
+                
+                if h1 > 1e-15 and h2 > 1e-15:
+                    D1_pol = (corrected_policy[good_end - 1] - corrected_policy[good_end - 2]) / h1
+                    D1_val = (corrected_value[good_end - 1] - corrected_value[good_end - 2]) / h1
+                    D2_pol = (corrected_policy[good_end - 1] - corrected_policy[good_end - 4]) / h2
+                    D2_val = (corrected_value[good_end - 1] - corrected_value[good_end - 4]) / h2
+                    
+                    slope_policy = (4.0 * D1_pol - D2_pol) / 3.0
+                    slope_value = (4.0 * D1_val - D2_val) / 3.0
+                    
+                    # Clamp policy slope to (0, 1]
+                    slope_policy = max(0.1, min(1.0, slope_policy))
+                    
+                    # Extrapolate all points in short segment
+                    x_anchor = x[good_end - 1]
+                    pol_anchor = corrected_policy[good_end - 1]
+                    val_anchor = corrected_value[good_end - 1]
+                    
+                    for i in range(start, end):
+                        corrected_policy[i] = pol_anchor + slope_policy * (x[i] - x_anchor)
+                        corrected_value[i] = val_anchor + slope_value * (x[i] - x_anchor)
+    
+    # --- Pass 3: Fix NaN values ---
+    for i in range(2, n - 2):
+        if np.isnan(corrected_policy[i]) and i >= 3:
+            dx = x[i - 2] - x[i - 3]
+            if abs(dx) > 1e-15:
+                slope_policy = (corrected_policy[i - 2] - corrected_policy[i - 3]) / dx
+                slope_value = (corrected_value[i - 2] - corrected_value[i - 3]) / dx
+                corrected_policy[i] = corrected_policy[i - 2] + slope_policy * (x[i] - x[i - 2])
+                corrected_value[i] = corrected_value[i - 2] + slope_value * (x[i] - x[i - 2])
+    
+    return corrected_policy, corrected_value
+
+
+@njit
+def correct_jumps_policy_and_value(policy_slice, value_slice, w_grid, m_bar, min_segment_length=3):
+    """
+    Correct isolated jumps in policy and value function by extrapolation.
+    
+    Jump detection is based on POLICY gradient only. When a jump is detected
+    in the policy, BOTH policy and value are corrected at those same points.
+    
+    Parameters
+    ----------
+    policy_slice : ndarray
+        1D policy array (e.g., consumption policy for fixed (h, y))
+    value_slice : ndarray
+        1D value array (e.g., Q_dcsn for fixed (h, y))
+    w_grid : ndarray
+        Wealth grid
+    m_bar : float
+        Jump threshold (policy gradient > m_bar indicates a jump)
+    min_segment_length : int
+        Minimum segment length (shorter segments are corrected)
+        
+    Returns
+    -------
+    tuple
+        (corrected_policy, corrected_value) - Both arrays corrected at same points
+    """
+    return correct_jumps_1d_with_mask(policy_slice, value_slice, w_grid, m_bar, min_segment_length)
+
 
 def _safe_interp(x, y, bounds_error=False, fill_value=None):
     """Create a 1D interpolation function with safe handling of edge cases.
@@ -876,7 +665,10 @@ def _egm_preprocess_core(e_old, vf_old, c_old, a_old,
                          lambda_next=None,     # Marginal utility values (already scaled by beta*delta*Rfree)
                          uc_func=None,         # Marginal utility function
                          override_KT_conditions=False,  # Override FOC filtering when True
-                         jump_extend="both"):  # NEW: Which segments to extend at jumps
+                         jump_extend="after",  # Which segments to extend at jumps
+                         grad_c_threshold=1.04,  # Threshold for grad_c jump detection
+                         c_star_lb_pct=0.10,  # Lower bound = c_star * (1 - lb_pct), e.g., 0.10 = 10%
+                         c_star_ub_pct=0.10):  # Upper bound = c_star * (1 + ub_pct), e.g., 0.10 = 10%
     """
     Returns new (e,vf,c,a) with:
         • n_con borrowing-constraint points, plus
@@ -918,6 +710,15 @@ def _egm_preprocess_core(e_old, vf_old, c_old, a_old,
         - "before": only extend segment before jump (using point k)
         - "after": only extend segment after jump (using point k+1)
         - "both": extend both segments (default)
+    grad_c_threshold : float, optional
+        Threshold for consumption gradient jump detection.
+        Jumps detected when |dc/da| > grad_c_threshold. Default: 1.04
+    c_star_lb_pct : float, optional
+        Percentage of c_star to subtract for lower bound of constraint segment.
+        Lower bound = max(1e-8, c_star * (1 - c_star_lb_pct)). Default: 0.10 (10%)
+    c_star_ub_pct : float, optional
+        Percentage of c_star to add for upper bound of constraint segment.
+        Upper bound = c_star * (1 + c_star_ub_pct). Default: 0.10 (10%)
 
     Notes
     -----
@@ -941,22 +742,24 @@ def _egm_preprocess_core(e_old, vf_old, c_old, a_old,
         vf_diff = vf_next[1:] - vf_next[:-1]
         c_diff = c_old[1:] - c_old[:-1]
         a_diff = a_old[1:] - a_old[:-1]
+        q_diff = vf_old[1:] - vf_old[:-1]
 
         # Optimized gradient computation - avoid redundant operations
         # Create mask once and reuse
         valid_diff_mask = np.abs(a_diff) > 1e-15
 
         # Pre-allocate gradient arrays
-        #grad_e = np.zeros_like(a_diff)
-        #grad_c = np.zeros_like(a_diff)
+        grad_e = np.zeros_like(a_diff)
+        grad_c = np.zeros_like(a_diff)
 
         # Compute gradients only where valid
-        #if np.any(valid_diff_mask):
-        #    grad_e[valid_diff_mask] = np.abs(e_diff[valid_diff_mask] / a_diff[valid_diff_mask])
-        #    grad_c[valid_diff_mask] = np.abs(c_diff[valid_diff_mask] / a_diff[valid_diff_mask])
+        if np.any(valid_diff_mask):
+            grad_e[valid_diff_mask] = np.abs(e_diff[valid_diff_mask] / a_diff[valid_diff_mask])
+            grad_c[valid_diff_mask] = np.abs(c_diff[valid_diff_mask] / a_diff[valid_diff_mask])
 
-        # Case 1: Negative jumps in endogenous grid
-        jumps_case_1 = (e_diff < 0)
+        # Case 1: Negative jumps in endogenous grid OR gradient of c exceeds threshold
+        # Additional condition: q_diff > 0 (value function must be increasing over the jump)
+        jumps_case_1 = ((e_diff < 0) | (grad_c > grad_c_threshold)) & (q_diff > 0)
         j_idx_case_1 = np.where(jumps_case_1)[0]
         n_jump_case_1 = j_idx_case_1.size
         
@@ -1019,9 +822,9 @@ def _egm_preprocess_core(e_old, vf_old, c_old, a_old,
                 c_star = c_old[k+1]
 
                 # Create consumption segment around c_star at k+1
-                lb_c = max(1e-8, c_star - 15)
-               #lb_c = c_star
-                ub_c = c_star + 15
+                # Use percentage-based bounds proportional to c_star
+                lb_c = max(1e-8, c_star - c_star_lb_pct)
+                ub_c = c_star * (1.0 + c_star_ub_pct) - 1e-4
                 c_seg = np.linspace(lb_c, ub_c, n_con_nxt).astype(np.float64)
 
                 # FOC check: Filter points based on first-order condition (vectorized)
@@ -1039,7 +842,7 @@ def _egm_preprocess_core(e_old, vf_old, c_old, a_old,
                         mu_c_vec[i] = uc_func(c_seg[i], h_nxt)
 
                     # Vectorized comparison
-                    valid_mask = (mu_c_vec >= lambda_next[k+1] - 1e-1)
+                    valid_mask = (mu_c_vec >= lambda_next[k+1])
 
                     # Override FOC filtering if requested (for testing)
                     if override_KT_conditions:
@@ -1069,9 +872,9 @@ def _egm_preprocess_core(e_old, vf_old, c_old, a_old,
                 c_star2 = c_old[k]
 
                 # Create consumption segment around c_star at k
-                lb_c2 = max(1e-8, c_star2-15)
-                # lb_c2 = c_star2  # Commented out duplicate assignment
-                ub_c2 = c_star2 + 15
+                # Use percentage-based bounds proportional to c_star
+                lb_c2 = max(1e-8, c_star2 * (1.0 - c_star_lb_pct))
+                ub_c2 = c_star2 * (1.0 + c_star_ub_pct)
                 c_seg2 = np.linspace(lb_c2, ub_c2, n_con_nxt).astype(np.float64)
 
                 # FOC check: Filter points based on first-order condition (vectorized)
@@ -1191,6 +994,9 @@ def egm_preprocess(egrid, vf, c, a,
         - lambda_next: Marginal utility values (already scaled)
         - uc_func: Marginal utility function
         - override_KT_conditions: Override FOC filtering
+        - grad_c_threshold: Threshold for grad_c jump detection (default: 1.04)
+        - c_star_lb_pct: Percentage for c_star lower bound (default: 0.10 = 10%)
+        - c_star_ub_pct: Percentage for c_star upper bound (default: 0.10 = 10%)
     
     Returns
     -------
@@ -1225,7 +1031,10 @@ def egm_preprocess(egrid, vf, c, a,
         lambda_next=kwargs.get('lambda_next'),  # Pass through lambda (already scaled)
         uc_func=kwargs.get('uc_func'),          # Pass through marginal utility
         override_KT_conditions=kwargs.get('override_KT_conditions', False),  # Pass override setting
-        jump_extend=jump_extend)  # Pass through jump extend option
+        jump_extend=jump_extend,  # Pass through jump extend option
+        grad_c_threshold=kwargs.get('grad_c_threshold', 1.04),  # Pass through grad_c threshold
+        c_star_lb_pct=kwargs.get('c_star_lb_pct', 0.10),  # Pass through c_star lb percentage
+        c_star_ub_pct=kwargs.get('c_star_ub_pct', 0.10))  # Pass through c_star ub percentage
 
     # Remove duplicates based on endogenous grid and value function
     # Use a tolerance appropriate for float64 precision and the scale of the problem

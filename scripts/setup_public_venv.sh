@@ -45,6 +45,10 @@ pip install \
     consav \
     EconModel
 
+# CUDA 12 support - required for Numba CUDA on Gadi GPU nodes
+# Without numba-cuda, cuMemGetMemPool segfaults occur
+pip install numba-cuda
+
 # Install dynx from GitHub (public version)
 pip install "dynx @ git+https://github.com/akshayshanker/dynx.git"
 

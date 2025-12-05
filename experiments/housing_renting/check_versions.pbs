@@ -1,0 +1,46 @@
+#!/bin/bash
+#PBS -P tp66
+#PBS -q gpuhopper
+#PBS -l walltime=00:05:00
+#PBS -l ncpus=12
+#PBS -l ngpus=1
+#PBS -l mem=64GB
+#PBS -l jobfs=100MB
+#PBS -l storage=scratch/tp66+gdata/tp66
+#PBS -l wd
+#PBS -N check_versions
+#PBS -j oe
+
+# Check package versions and available CUDA modules
+
+REPO_ROOT="$HOME/dev/fues.dev/FUES"
+cd "$REPO_ROOT"
+
+echo "=== Available CUDA modules ==="
+module avail cuda 2>&1 | head -20
+
+echo ""
+echo "=== Current venv packages ==="
+module load python3/3.12.1
+source /scratch/tp66/$USER/venvs/fues02-py3121/bin/activate
+
+echo "Numba version:"
+python3 -c "import numba; print(numba.__version__)"
+
+echo ""
+echo "nvidia-cuda-runtime version (if installed):"
+pip show nvidia-cuda-runtime 2>/dev/null || echo "Not installed"
+
+echo ""
+echo "cuda-python version (if installed):"
+pip show cuda-python 2>/dev/null || echo "Not installed"
+
+echo ""
+echo "=== Try installing older numba ==="
+echo "To try: pip install numba==0.58.1 (last version before CUDA 12 memory pool changes)"
+
+echo ""
+echo "=== CUDA Driver version from nvidia-smi ==="
+nvidia-smi | head -5
+
+
