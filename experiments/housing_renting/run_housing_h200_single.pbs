@@ -50,7 +50,8 @@ module load cuda/12.9.0  # Latest CUDA for H200
 module load openmpi/4.1.5  # Required for mpi4py
 
 # Use the venv with numba-cuda installed (fixes cuMemGetMemPool segfault)
-source "$REPO_ROOT/.venv_public/bin/activate"
+VENV_PUBLIC="${VENV_PUBLIC:-/scratch/tp66/$USER/venvs/fues_public}"
+source "$VENV_PUBLIC/bin/activate"
 
 export FUES_HOME="$REPO_ROOT"
 export PYTHONPATH="$FUES_HOME:$FUES_HOME/src${PYTHONPATH:+:$PYTHONPATH}"
@@ -76,6 +77,11 @@ export NUMBA_NUM_THREADS=12
 export NUMBA_CUDA_MAX_THREADS=1024
 export NUMBA_CUDA_DEFAULT_PTX_CC="9.0"
 export NUMBA_CUDA_COMPUTE_CAPABILITY="9.0"
+
+# Enable synchronous CUDA error reporting to surface kernel failures
+export CUDA_LAUNCH_BLOCKING=1
+export NUMBA_CUDA_LOG_LEVEL=INFO
+export NUMBA_CUDA_DEBUGINFO=1
 
 # Note: cuMemGetMemPool segfault fixed by using numba-cuda package
 

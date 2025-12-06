@@ -7,8 +7,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# Default venv location
-VENV_PATH="${1:-$REPO_ROOT/.venv_public}"
+# Default venv location (prefer scratch to save repo space)
+DEFAULT_VENV="/scratch/tp66/${USER}/venvs/fues_public"
+VENV_PATH="${1:-$DEFAULT_VENV}"
 
 echo "Creating public venv at: $VENV_PATH"
 
@@ -17,6 +18,9 @@ if [[ -d "$VENV_PATH" ]]; then
     echo "Removing existing venv..."
     rm -rf "$VENV_PATH"
 fi
+
+# Ensure parent dir exists
+mkdir -p "$(dirname "$VENV_PATH")"
 
 # Create new venv
 python3 -m venv "$VENV_PATH"

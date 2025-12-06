@@ -22,7 +22,8 @@ module avail cuda 2>&1 | head -20
 echo ""
 echo "=== Current venv packages ==="
 module load python3/3.12.1
-source /scratch/tp66/$USER/venvs/fues02-py3121/bin/activate
+VENV_PUBLIC="${VENV_PUBLIC:-/scratch/tp66/$USER/venvs/fues_public}"
+source "$VENV_PUBLIC/bin/activate"
 
 echo "Numba version:"
 python3 -c "import numba; print(numba.__version__)"
@@ -42,5 +43,6 @@ echo "To try: pip install numba==0.58.1 (last version before CUDA 12 memory pool
 echo ""
 echo "=== CUDA Driver version from nvidia-smi ==="
 nvidia-smi | head -5
+
 
 

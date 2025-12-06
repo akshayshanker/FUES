@@ -21,8 +21,9 @@ module purge
 module load python3/3.12.1 
 module load cuda/12.9.0
 
-# Activate venv (in repo root)
-source "$REPO_ROOT/.venv_public/bin/activate"
+# Activate venv (stored in scratch)
+VENV_PUBLIC="${VENV_PUBLIC:-/scratch/tp66/$USER/venvs/fues_public}"
+source "$VENV_PUBLIC/bin/activate"
 
 # Show GPU info
 echo "=== GPU Information ==="

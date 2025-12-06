@@ -57,6 +57,21 @@ def _get_neighbor_slope(f, x, idx, n, boundaries, n_seg, seg_idx, eps):
 
 
 @njit
+def _clip_mpc(val, tol):
+    """
+    Clamp MPC/consumption gradients to the open interval (tol, 1 - tol).
+    Ensures positivity and keeps away from the upper bound to avoid overshoot.
+    """
+    upper = 1.0 - tol
+    lower = tol
+    if np.isnan(val) or val <= lower:
+        return lower
+    if val >= upper:
+        return upper
+    return val
+
+
+@njit
 def _forward_diff(f, x, i, end, fallback):
     """Forward difference with fallback."""
     if i + 1 < end:
@@ -107,7 +122,7 @@ def _richardson_5pt(f, x, i, fallback):
 
 
 @njit
-def _pchip_slope(f, x, i, seg_start, seg_end):
+def _pchip_slope(f, x, i, seg_start, seg_end, tol):
     """
     PCHIP-style slope that preserves monotonicity and respects MPC bounds.
     
@@ -123,15 +138,15 @@ def _pchip_slope(f, x, i, seg_start, seg_end):
             h = x[i + 1] - x[i]
             if h > 1e-15:
                 slope = (f[i + 1] - f[i]) / h
-                return max(1e-10, min(1.0, slope))
-        return 1.0  # Default MPC at constraint
+                return _clip_mpc(slope, tol)
+        return _clip_mpc(1.0, tol)  # Default MPC at constraint
     
     if i == seg_end - 1:
         h = x[i] - x[i - 1]
         if h > 1e-15:
             slope = (f[i] - f[i - 1]) / h
-            return max(1e-10, min(1.0, slope))
-        return 1.0
+            return _clip_mpc(slope, tol)
+        return _clip_mpc(1.0, tol)
     
     # Interior point: weighted harmonic mean
     h_left = x[i] - x[i - 1]
@@ -144,8 +159,8 @@ def _pchip_slope(f, x, i, seg_start, seg_end):
     s_right = (f[i + 1] - f[i]) / h_right
     
     # Clamp individual slopes to valid MPC range
-    s_left = max(1e-10, min(1.0, s_left))
-    s_right = max(1e-10, min(1.0, s_right))
+    s_left = _clip_mpc(s_left, tol)
+    s_right = _clip_mpc(s_right, tol)
     
     # Both slopes positive (which they should be for MPC in (0,1])
     # Use weighted harmonic mean (Fritsch-Carlson formula)
@@ -155,7 +170,33 @@ def _pchip_slope(f, x, i, seg_start, seg_end):
     # Harmonic mean: avoids overshoots, preserves monotonicity
     slope = (w1 + w2) / (w1 / s_left + w2 / s_right)
     
-    return max(1e-10, min(1.0, slope))
+    return _clip_mpc(slope, tol)
+
+
+@njit
+def _merge_short_segments(segment_boundaries, n_segments, min_seg_len, n):
+    """
+    Merge segments shorter than min_seg_len into adjacent segments.
+    Keeps the final boundary at n; prefers merging forward.
+    """
+    merged = np.empty_like(segment_boundaries)
+    merged[0] = 0
+    new_n = 1
+    current_start = 0
+
+    for idx in range(1, n_segments):
+        seg_end = segment_boundaries[idx]
+        seg_len = seg_end - current_start
+
+        # If this is not the last boundary and the segment is too short, merge forward
+        if seg_len < min_seg_len and idx < n_segments - 1:
+            continue
+
+        merged[new_n] = seg_end
+        new_n += 1
+        current_start = seg_end
+
+    return merged, new_n
 
 
 # ============================================================
@@ -163,7 +204,7 @@ def _pchip_slope(f, x, i, seg_start, seg_end):
 # ============================================================
 
 @njit
-def piecewise_gradient_pchip(f, x, m_bar, eps=0.9):
+def piecewise_gradient_pchip(f, x, m_bar, eps=0.9, min_seg_len=3, tol=1e-8):
     """
     PCHIP-style monotone gradient for piecewise functions.
     
@@ -194,11 +235,12 @@ def piecewise_gradient_pchip(f, x, m_bar, eps=0.9):
     """
     n = len(x)
     g = np.empty(n)
+    eps_clipped = _clip_mpc(eps, tol)
     
     if n == 0:
         return g
     if n == 1:
-        g[0] = eps
+        g[0] = eps_clipped
         return g
     
     # ---- Step 1: Detect segment boundaries ----
@@ -207,18 +249,27 @@ def piecewise_gradient_pchip(f, x, m_bar, eps=0.9):
     n_segments = 1
     
     jump_threshold = min(m_bar, 1.0)
+    dec_tol = tol
     
     for i in range(1, n):
         dx = x[i] - x[i - 1]
         if dx > 1e-15:
-            local_slope = (f[i] - f[i - 1]) / dx
-            # Jump if slope exceeds threshold, is negative, or very small (near-zero denominator issues)
-            if local_slope > jump_threshold or local_slope < 0:
+            diff = f[i] - f[i - 1]
+            local_slope = diff / dx
+            is_decreasing = diff < -dec_tol or local_slope < -dec_tol
+
+            # Jump if slope exceeds threshold, is negative/decreasing, or very small (near-zero denominator issues)
+            if local_slope > jump_threshold or is_decreasing:
                 segment_boundaries[n_segments] = i
                 n_segments += 1
     
     segment_boundaries[n_segments] = n
     n_segments += 1
+
+    # ---- Step 1b: Merge short segments to enforce minimum length ----
+    segment_boundaries, n_segments = _merge_short_segments(
+        segment_boundaries, n_segments, min_seg_len, n
+    )
     
     # ---- Step 2: Compute PCHIP slopes within each segment ----
     for seg_idx in range(n_segments - 1):
@@ -227,15 +278,21 @@ def piecewise_gradient_pchip(f, x, m_bar, eps=0.9):
         seg_len = end - start
         
         if seg_len == 1:
-            # Single-point segment: use neighbor slope or fallback
-            g[start] = eps
-            # Try to get slope from neighboring segment
+            # Single-point segment: use neighbor slope or fallback (clamped)
+            g[start] = eps_clipped
+            # Try to get slope from neighboring segment (prefer previous)
             if seg_idx > 0 and start > 0:
                 dx = x[start] - x[start - 1]
                 if dx > 1e-15:
                     slope = (f[start] - f[start - 1]) / dx
-                    if 0 < slope <= 1.0:
-                        g[start] = slope
+                    if slope > 0:
+                        g[start] = _clip_mpc(slope, tol)
+            elif seg_idx < n_segments - 2 and end < n:
+                dx = x[end] - x[start]
+                if dx > 1e-15:
+                    slope = (f[end] - f[start]) / dx
+                    if slope > 0:
+                        g[start] = _clip_mpc(slope, tol)
             continue
         
         if seg_len == 2:
@@ -243,17 +300,17 @@ def piecewise_gradient_pchip(f, x, m_bar, eps=0.9):
             dx = x[end - 1] - x[start]
             if dx > 1e-15:
                 slope = (f[end - 1] - f[start]) / dx
-                slope = max(1e-10, min(1.0, slope))
+                slope = _clip_mpc(slope, tol)
                 g[start] = slope
                 g[start + 1] = slope
             else:
-                g[start] = eps
-                g[start + 1] = eps
+                g[start] = eps_clipped
+                g[start + 1] = eps_clipped
             continue
         
         # Multi-point segment: use PCHIP slopes
         for i in range(start, end):
-            g[i] = _pchip_slope(f, x, i, start, end)
+            g[i] = _pchip_slope(f, x, i, start, end, tol)
     
     return g
 
@@ -1018,7 +1075,8 @@ def get_gradient_function(method="robust"):
 
 
 def compute_gradient(f, x, m_bar, method="pchip", eps=0.9, guard_distance=2,
-                     smooth_segments=True, smoothing_window=3):
+                     smooth_segments=True, smoothing_window=3, tol=1e-8,
+                     min_seg_len=3):
     """
     Compute piecewise gradient using the specified method.
     
@@ -1043,6 +1101,10 @@ def compute_gradient(f, x, m_bar, method="pchip", eps=0.9, guard_distance=2,
         For "robust" method: apply local smoothing within segments (default: True)
     smoothing_window : int, optional
         For "robust" method: window size for smoothing (default: 3)
+    tol : float, optional
+        Clamp gradients to (tol, 1 - tol) to avoid boundary overshoot (default: 1e-8)
+    min_seg_len : int, optional
+        Minimum segment length for PCHIP segmentation (default: 3)
     
     Returns
     -------
@@ -1052,7 +1114,7 @@ def compute_gradient(f, x, m_bar, method="pchip", eps=0.9, guard_distance=2,
     method_lower = method.lower()
     
     if method_lower in ("pchip", "monotone", "shape_preserving"):
-        return piecewise_gradient_pchip(f, x, m_bar, eps=eps)
+        return piecewise_gradient_pchip(f, x, m_bar, eps=eps, min_seg_len=min_seg_len, tol=tol)
     elif method_lower in ("robust", "weighted"):
         return piecewise_gradient_robust(f, x, m_bar, eps=eps, guard_distance=guard_distance,
                                          smooth_segments=smooth_segments, 

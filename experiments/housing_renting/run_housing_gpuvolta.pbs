@@ -42,7 +42,8 @@ module load python3/3.12.1
 module load cuda/12.8.0
 
 # Use venv created by scripts/setup_public_venv.sh
-source "$REPO_ROOT/.venv_public/bin/activate"
+VENV_PUBLIC="${VENV_PUBLIC:-/scratch/tp66/$USER/venvs/fues_public}"
+source "$VENV_PUBLIC/bin/activate"
 
 export FUES_HOME="$REPO_ROOT"
 export PYTHONPATH="$FUES_HOME/src:$FUES_HOME${PYTHONPATH:+:$PYTHONPATH}"

@@ -51,8 +51,8 @@ module purge
 module load python3/3.12.1 
 module load cuda/12.8.0
 
-export VENV_ROOT=/scratch/tp66/$USER/venvs
-source "$VENV_ROOT/fues02-py3121/bin/activate"
+VENV_PUBLIC="${VENV_PUBLIC:-/scratch/tp66/$USER/venvs/fues_public}"
+source "$VENV_PUBLIC/bin/activate"
 
 export FUES_HOME="$REPO_ROOT"
 export PYTHONPATH="$FUES_HOME${PYTHONPATH:+:$PYTHONPATH}"

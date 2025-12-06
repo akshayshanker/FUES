@@ -659,7 +659,7 @@ def _egm_preprocess_core(e_old, vf_old, c_old, a_old,
                          beta, u_func,         # u_func must be @njit-able
                          m_bar,                # jump threshold (not currently used)
                          n_con,                # # constraint nodes
-                         n_con_nxt,            # # nodes per jump
+                         n_con_nxt,            # # nodes per jump (fallback if mean_e_diff not available)
                          c_max, h_nxt,         # upper end of [c*, c_max] and housing
                          add_jump_constraints, # whether to add jump constraints
                          lambda_next=None,     # Marginal utility values (already scaled by beta*delta*Rfree)
@@ -668,7 +668,8 @@ def _egm_preprocess_core(e_old, vf_old, c_old, a_old,
                          jump_extend="after",  # Which segments to extend at jumps
                          grad_c_threshold=1.04,  # Threshold for grad_c jump detection
                          c_star_lb_pct=0.10,  # Lower bound = c_star * (1 - lb_pct), e.g., 0.10 = 10%
-                         c_star_ub_pct=0.10):  # Upper bound = c_star * (1 + ub_pct), e.g., 0.10 = 10%
+                         c_star_ub_pct=0.10,  # Upper bound = c_star * (1 + ub_pct), e.g., 0.10 = 10%
+                         use_mean_spacing=True):  # Use mean e_diff for point spacing at jumps
     """
     Returns new (e,vf,c,a) with:
         • n_con borrowing-constraint points, plus
@@ -719,6 +720,10 @@ def _egm_preprocess_core(e_old, vf_old, c_old, a_old,
     c_star_ub_pct : float, optional
         Percentage of c_star to add for upper bound of constraint segment.
         Upper bound = c_star * (1 + c_star_ub_pct). Default: 0.10 (10%)
+    use_mean_spacing : bool, optional
+        If True (default), determines the number of constraint points at each jump
+        based on mean spacing of input grid (mean_e_diff). Points are spaced at
+        approximately mean_e_diff intervals. If False, uses n_con_nxt as fixed count.
 
     Notes
     -----
@@ -735,14 +740,25 @@ def _egm_preprocess_core(e_old, vf_old, c_old, a_old,
     n_jump = 0
     n_add = n_con  # Always add borrowing constraint nodes
     
+    # Compute mean spacing of input grid (used for spacing constraint points)
+    e_diff_all = e_old[1:] - e_old[:-1]
+    
+    
+    # Pre-allocate arrays for storing n_points per jump segment
+    # Will be populated if use_mean_spacing is True
+    n_points_after = None
+    n_points_before = None
+    
     # Only detect and process jumps if flag is True and n_con_nxt > 0
     if add_jump_constraints and n_con_nxt > 0:
         # Optimized jump detection - compute differences once
-        e_diff = e_old[1:] - e_old[:-1]
+        e_diff = e_diff_all  # Reuse already computed
         vf_diff = vf_next[1:] - vf_next[:-1]
         c_diff = c_old[1:] - c_old[:-1]
         a_diff = a_old[1:] - a_old[:-1]
         q_diff = vf_old[1:] - vf_old[:-1]
+
+        mean_e_diff = np.mean(np.abs(a_diff))
 
         # Optimized gradient computation - avoid redundant operations
         # Create mask once and reuse
@@ -763,24 +779,44 @@ def _egm_preprocess_core(e_old, vf_old, c_old, a_old,
         j_idx_case_1 = np.where(jumps_case_1)[0]
         n_jump_case_1 = j_idx_case_1.size
         
-        # Case 2: Negative jumps in value function
-        #jumps_case_2 = vf_diff < 0
-        #j_idx_case_2 = np.where(jumps_case_2)[0]
-        #n_jump_case_2 = j_idx_case_2.size
-        #n_jump_case_2= 0    
-
-        # temporry turn off case 2
-        #jumps_case_2 = np.zeros_like(jumps_case_2, dtype=np.bool_)
-        #n_jump_case_2 = 0  # Reset to 0 since Case 2 is disabled
+        # Total jumps
+        n_jump = n_jump_case_1
         
-        # Total jumps and nodes to add
-        # Number of segments per jump depends on jump_extend setting
-        n_jump = n_jump_case_1 #+ n_jump_case_2
-        if jump_extend == "both":
-            segments_per_jump = 2  # Both before and after
+        # Calculate number of points to add per jump segment
+        if use_mean_spacing and mean_e_diff > 0 and n_jump_case_1 > 0:
+            # Pre-compute n_points for each jump segment based on mean spacing
+            n_points_after = np.zeros(n_jump_case_1, dtype=np.int64)
+            n_points_before = np.zeros(n_jump_case_1, dtype=np.int64)
+            
+            for idx, k in enumerate(j_idx_case_1):
+                # "after" segment bounds (using k+1)
+                if jump_extend in ("after", "both"):
+                    c_star = c_old[k+1]
+                    lb_c = max(1e-8, c_star - c_star_lb_pct)
+                    ub_c = c_star * (1.0 + c_star_ub_pct) 
+                    interval_width = ub_c - lb_c
+                    n_pts = max(2, int(np.ceil(interval_width / mean_e_diff)))
+                    n_points_after[idx] = n_pts
+                
+                # "before" segment bounds (using k)
+                if jump_extend in ("before", "both"):
+                    c_star2 = c_old[k]
+                    lb_c2 = max(1e-8, c_star2 * (1.0 - c_star_lb_pct))
+                    ub_c2 = c_star2 * (1.0 + c_star_ub_pct)
+                    interval_width2 = ub_c2 - lb_c2
+                    n_pts2 = max(2, int(np.ceil(interval_width2 / mean_e_diff)))
+                    n_points_before[idx] = n_pts2
+            
+            # Total points to add from jumps
+            total_jump_points = int(np.sum(n_points_after) + np.sum(n_points_before))
+            n_add = n_con + total_jump_points
         else:
-            segments_per_jump = 1  # Only before or only after
-        n_add = n_con + n_jump_case_1 * n_con_nxt * segments_per_jump #+ n_jump_case_2 * n_con_nxt
+            # Fall back to fixed n_con_nxt per segment
+            if jump_extend == "both":
+                segments_per_jump = 2
+            else:
+                segments_per_jump = 1
+            n_add = n_con + n_jump_case_1 * n_con_nxt * segments_per_jump
     
     n_total = n_old + n_add
 
@@ -814,7 +850,19 @@ def _egm_preprocess_core(e_old, vf_old, c_old, a_old,
         #   "after": only add segment using k+1 (point after the jump)
         #   "before": only add segment using k (point before the jump)
         #   "both": add both segments
-        for k in j_idx_case_1:
+        for idx, k in enumerate(j_idx_case_1):
+            # Determine number of points for this segment
+            # Use pre-computed counts if using mean spacing, else fall back to n_con_nxt
+            if n_points_after is not None:
+                n_pts_after = int(n_points_after[idx])
+            else:
+                n_pts_after = n_con_nxt
+            
+            if n_points_before is not None:
+                n_pts_before = int(n_points_before[idx])
+            else:
+                n_pts_before = n_con_nxt
+            
             # First segment: using k+1 (point after the jump)
             # Only add if jump_extend is "after" or "both"
             if jump_extend in ("after", "both"):
@@ -824,21 +872,18 @@ def _egm_preprocess_core(e_old, vf_old, c_old, a_old,
                 # Create consumption segment around c_star at k+1
                 # Use percentage-based bounds proportional to c_star
                 lb_c = max(1e-8, c_star - c_star_lb_pct)
-                ub_c = c_star * (1.0 + c_star_ub_pct) - 1e-4
-                c_seg = np.linspace(lb_c, ub_c, n_con_nxt).astype(np.float64)
+                ub_c = c_star * (1.0 + c_star_ub_pct)
+                c_seg = np.linspace(lb_c, ub_c, n_pts_after).astype(np.float64)
 
                 # FOC check: Filter points based on first-order condition (vectorized)
                 if lambda_next is not None and uc_func is not None:
                     # Vectorized evaluation of marginal utility for all points
-                    valid_mask = np.ones(n_con_nxt, dtype=np.bool_)
-
-                    # Create arrays for vectorized computation
-                    h_array = np.full(n_con_nxt, h_nxt)
+                    valid_mask = np.ones(n_pts_after, dtype=np.bool_)
 
                     # Compute all marginal utilities at once (vectorized)
                     # This is much faster than the loop
-                    mu_c_vec = np.zeros(n_con_nxt)
-                    for i in range(n_con_nxt):
+                    mu_c_vec = np.zeros(n_pts_after)
+                    for i in range(n_pts_after):
                         mu_c_vec[i] = uc_func(c_seg[i], h_nxt)
 
                     # Vectorized comparison
@@ -846,13 +891,13 @@ def _egm_preprocess_core(e_old, vf_old, c_old, a_old,
 
                     # Override FOC filtering if requested (for testing)
                     if override_KT_conditions:
-                        valid_mask = np.ones(n_con_nxt, dtype=np.bool_)
+                        valid_mask = np.ones(n_pts_after, dtype=np.bool_)
                     c_seg_valid = c_seg[valid_mask]
                     n_valid = c_seg_valid.size
                 else:
                     # No FOC check, keep all points
                     c_seg_valid = c_seg
-                    n_valid = n_con_nxt
+                    n_valid = n_pts_after
 
                 # Add valid points
                 if n_valid > 0:
@@ -875,16 +920,16 @@ def _egm_preprocess_core(e_old, vf_old, c_old, a_old,
                 # Use percentage-based bounds proportional to c_star
                 lb_c2 = max(1e-8, c_star2 * (1.0 - c_star_lb_pct))
                 ub_c2 = c_star2 * (1.0 + c_star_ub_pct)
-                c_seg2 = np.linspace(lb_c2, ub_c2, n_con_nxt).astype(np.float64)
+                c_seg2 = np.linspace(lb_c2, ub_c2, n_pts_before).astype(np.float64)
 
                 # FOC check: Filter points based on first-order condition (vectorized)
                 if lambda_next is not None and uc_func is not None:
                     # Vectorized evaluation of marginal utility for all points
-                    valid_mask2 = np.ones(n_con_nxt, dtype=np.bool_)
+                    valid_mask2 = np.ones(n_pts_before, dtype=np.bool_)
 
                     # Compute all marginal utilities at once (vectorized)
-                    mu_c2_vec = np.zeros(n_con_nxt)
-                    for i in range(n_con_nxt):
+                    mu_c2_vec = np.zeros(n_pts_before)
+                    for i in range(n_pts_before):
                         mu_c2_vec[i] = uc_func(c_seg2[i], h_nxt)
 
                     # Vectorized comparison
@@ -892,13 +937,13 @@ def _egm_preprocess_core(e_old, vf_old, c_old, a_old,
 
                     # Override FOC filtering if requested (for testing)
                     if override_KT_conditions:
-                        valid_mask2 = np.ones(n_con_nxt, dtype=np.bool_)
+                        valid_mask2 = np.ones(n_pts_before, dtype=np.bool_)
                     c_seg2_valid = c_seg2[valid_mask2]
                     n_valid2 = c_seg2_valid.size
                 else:
                     # No FOC check, keep all points
                     c_seg2_valid = c_seg2
-                    n_valid2 = n_con_nxt
+                    n_valid2 = n_pts_before
 
                 # Add valid points
                 if n_valid2 > 0:
@@ -1034,7 +1079,8 @@ def egm_preprocess(egrid, vf, c, a,
         jump_extend=jump_extend,  # Pass through jump extend option
         grad_c_threshold=kwargs.get('grad_c_threshold', 1.04),  # Pass through grad_c threshold
         c_star_lb_pct=kwargs.get('c_star_lb_pct', 0.10),  # Pass through c_star lb percentage
-        c_star_ub_pct=kwargs.get('c_star_ub_pct', 0.10))  # Pass through c_star ub percentage
+        c_star_ub_pct=kwargs.get('c_star_ub_pct', 0.10),  # Pass through c_star ub percentage
+        use_mean_spacing=kwargs.get('use_mean_spacing', True))  # Use mean e_diff for point spacing
 
     # Remove duplicates based on endogenous grid and value function
     # Use a tolerance appropriate for float64 precision and the scale of the problem

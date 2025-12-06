@@ -22,7 +22,7 @@ cd FUES
 pip install .
 ```
 
-Requires Python 3.11+.
+Requires Python 3.11+. For MPI builds (e.g., mpi4py) install with an OpenMPI toolchain loaded (e.g., `openmpi/4.1.5` on Gadi) so `mpi.h` is available.
 
 ## Core Modules
 
