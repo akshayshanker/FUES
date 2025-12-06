@@ -734,6 +734,15 @@ def main(argv=None):
         if "periods" in fixed_params:
             sweep_base_cfg["master"]["horizon"] = fixed_params["periods"]
         
+        # Baseline reference params (for comparison metrics) — reuse existing baseline bundles
+        sweep_ref_params = None
+        if settings.needs_baseline:
+            sweep_ref_params = settings.get_baseline_params().copy()
+            if "delta_pb" in fixed_params:
+                sweep_ref_params[-1] = fixed_params["delta_pb"]
+            if is_root:
+                print(f"  Sweep baseline ref_params: {sweep_ref_params}")
+        
         def make_sweep_model(cfg):
             """Model factory that syncs H_points -> S_points and applies grid multiplier"""
             # Get grid multiplier from settings (default to 1 if not set)
@@ -768,6 +777,8 @@ def main(argv=None):
             save_by_default=save_by_default,
             load_if_exists=not args.fresh_fast,
         )
+        if settings.needs_baseline and sweep_ref_params is not None:
+            sweep_runner.ref_params = sweep_ref_params
         sweep_runner.stages_to_load = [args.stages_L2dev]
         sweep_runner.stages_to_save = [args.stages_L2dev]
         
