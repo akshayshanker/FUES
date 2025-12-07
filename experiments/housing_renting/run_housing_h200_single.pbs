@@ -32,14 +32,14 @@ else
 fi
 
 # --- 1. Source the Configuration Library ---
-source "$SCRIPT_DIR/configs/job_configs.sh"
+source "$SCRIPT_DIR/configs/pbs_run_presets.sh"
 
 # --- 2. Define the Configuration to Run ---
 if [[ -n "${FUES_CONFIG:-}" ]]; then
     CONFIG_NAME="$FUES_CONFIG"
     echo "Using configuration from FUES_CONFIG: $CONFIG_NAME"
 else
-    CONFIG_NAME="HIGH_RES_SETTINGS_A_PB"
+    CONFIG_NAME="HIGH_RES_SETTINGS_C_PB"
     echo "Using default configuration: $CONFIG_NAME"
 fi
 
@@ -93,7 +93,7 @@ export SHOCKS_QUIET=true
 
 # --- 6. Verify Configuration Exists ---
 if ! declare -p "$CONFIG_NAME" &>/dev/null; then
-    echo "Error: Configuration '$CONFIG_NAME' not found in job_configs.sh"
+    echo "Error: Configuration '$CONFIG_NAME' not found in pbs_run_presets.sh"
     echo "Available configurations:"
     compgen -v | grep -E '^(STD_RES|HIGH_RES)_SETTINGS' | sort -u
     exit 1

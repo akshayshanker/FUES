@@ -73,7 +73,7 @@ settings:
   a_nxt_points: 4000    # Number of next-period asset grid points
   
   # Grid multiplier (applied at runtime to a_points and a_nxt_points)
-  a_grid_multiplier: 1  # Multiplier for a_points/a_nxt_points (w_points stays at base) - reduced from 3 for testing
+  a_grid_multiplier: 2  # Multiplier for a_points/a_nxt_points (w_points stays at base) - reduced from 3 for testing
   
   # Income shock discretization - Now explicitly using Fella's values
   y_points: 3           # Number of shock grid points (length of z_vals)
@@ -82,7 +82,7 @@ settings:
   lb: 10                 # Look-back parameter for FUES
   rfc_radius: 0.75
   rfc_n_iter: 20
-  n_constraint_points: 100
+  n_constraint_points: 300
   n_constraint_points_nxt: 400
   N_arg_grid_vfi: 500   # Number of grid points for VFI_GRID
 
@@ -95,7 +95,7 @@ settings:
 
   # EGM preprocess jump detection settings
   grad_c_threshold: 1.01    # Threshold for grad_c jump detection (jumps detected when |dc/da| > threshold)
-  c_star_lb_pct: 15    # Lower bound = c_star * (1 - lb_pct), 0.10 = 10% below c_star
+  c_star_lb_pct: 5    # Lower bound = c_star * (1 - lb_pct), 0.10 = 10% below c_star
   c_star_ub_pct: 0    # Upper bound = c_star * (1 + ub_pct), 0.10 = 10% above c_star
 
   # Gradient computation settings for MPC/lambda calculation
@@ -110,23 +110,22 @@ settings:
     FUES:
       # Core parameters
       m_bar: 1.0001              # Jump threshold for same-branch tests
-      lb: 10                   # Look-back window size
+      lb: 5                   # Look-back window size
       
       # Intersection handling
       include_intersections: true       # Add intersection points at jumps
       return_intersections_separately: false  # Return intersections in separate array
-      single_intersection: true        # Only compute single intersection per jump
+      single_intersection: false        # Only compute single intersection per jump
       
       # Jump filtering
       endog_mbar: false       # Use endogenous m_bar based on policy gradients
       padding_mbar: 0.0       # Padding for m_bar calculation
       no_double_jumps: true   # Filter out consecutive jumps
-      disable_jump_checks: true  # Disable manual jump check overrides
-      use_post_state_jump_test: true #if true, post-state also included in jump check
-      detect_decreasing_policy: true  # Treat decreasing policy (del_pol < 0) as a jump
+      disable_jump_checks: false  # Disable manual jump check overrides
+      use_post_state_jump_test: false #if true, post-state also included in jump check
       left_turn_no_jump_strict: false # if false, left turn with no jump treated like a right turn with no jump
       post_clean_double_jumps: true  # Post-process to remove points with double jumps on both sides
-      post_clean_passes: 1  # Number of iterative cleaning passes (more passes = more noise removed)
+      post_clean_passes: 2  # Number of iterative cleaning passes (more passes = more noise removed)
       jump_check_tol: 0  # Tolerance for value gradient check (higher = more lenient, keeps more points)
       
       # Post-interpolation jump correction

@@ -14,7 +14,7 @@
 set -euo pipefail
 
 # --- 1. Source the Configuration Library ---
-source ../lib/job_configs.sh
+source ../lib/pbs_run_presets.sh
 
 # --- 2. Define the Sequence of Configurations to Run ---
 CONFIG_TO_RUN=(

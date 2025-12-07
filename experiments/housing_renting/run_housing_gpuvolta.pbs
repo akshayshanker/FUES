@@ -25,7 +25,7 @@ else
 fi
 
 # --- 1. Source the Configuration Library ---
-source "$SCRIPT_DIR/configs/job_configs.sh"
+source "$SCRIPT_DIR/configs/pbs_run_presets.sh"
 
 # --- 2. Define the Configuration to Run ---
 if [[ -n "${FUES_CONFIG:-}" ]]; then
@@ -61,7 +61,7 @@ export SHOCKS_QUIET=true
 
 # --- 6. Verify Configuration Exists ---
 if ! declare -p "$CONFIG_NAME" &>/dev/null; then
-    echo "Error: Configuration '$CONFIG_NAME' not found in job_configs.sh"
+    echo "Error: Configuration '$CONFIG_NAME' not found in pbs_run_presets.sh"
     exit 1
 fi
 

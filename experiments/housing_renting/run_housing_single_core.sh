@@ -28,7 +28,7 @@ else
 fi
 
 # --- Source the Configuration Library ---
-source "$SCRIPT_DIR/configs/job_configs.sh"
+source "$SCRIPT_DIR/configs/pbs_run_presets.sh"
 
 # --- Define the Sequence of Configurations to Run ---
 CONFIG_TO_RUN=("STD_RES_SETTINGS_PB")

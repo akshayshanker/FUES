@@ -748,6 +748,7 @@ def _egm_preprocess_core(e_old, vf_old, c_old, a_old,
     # Will be populated if use_mean_spacing is True
     n_points_after = None
     n_points_before = None
+    allow_after = None
     
     # Only detect and process jumps if flag is True and n_con_nxt > 0
     if add_jump_constraints and n_con_nxt > 0:
@@ -783,14 +784,22 @@ def _egm_preprocess_core(e_old, vf_old, c_old, a_old,
         n_jump = n_jump_case_1
         
         # Calculate number of points to add per jump segment
+        min_following_seg_len = 4  # Require at least this many points after the jump
         if use_mean_spacing and mean_e_diff > 0 and n_jump_case_1 > 0:
             # Pre-compute n_points for each jump segment based on mean spacing
             n_points_after = np.zeros(n_jump_case_1, dtype=np.int64)
             n_points_before = np.zeros(n_jump_case_1, dtype=np.int64)
+            allow_after = np.ones(n_jump_case_1, dtype=np.bool_)
             
             for idx, k in enumerate(j_idx_case_1):
+                # Determine available length of the following segment before the next jump
+                next_jump_idx = j_idx_case_1[idx + 1] if idx + 1 < n_jump_case_1 else n_old - 1
+                after_len = (next_jump_idx - (k + 1)) + 1  # inclusive length
+                if after_len < min_following_seg_len:
+                    allow_after[idx] = False
+                
                 # "after" segment bounds (using k+1)
-                if jump_extend in ("after", "both"):
+                if jump_extend in ("after", "both") and allow_after[idx]:
                     c_star = c_old[k+1]
                     lb_c = max(1e-8, c_star - c_star_lb_pct)
                     ub_c = c_star * (1.0 + c_star_ub_pct) 
@@ -811,6 +820,7 @@ def _egm_preprocess_core(e_old, vf_old, c_old, a_old,
             total_jump_points = int(np.sum(n_points_after) + np.sum(n_points_before))
             n_add = n_con + total_jump_points
         else:
+            allow_after = np.ones(n_jump_case_1, dtype=np.bool_)
             # Fall back to fixed n_con_nxt per segment
             if jump_extend == "both":
                 segments_per_jump = 2
@@ -863,9 +873,13 @@ def _egm_preprocess_core(e_old, vf_old, c_old, a_old,
             else:
                 n_pts_before = n_con_nxt
             
+            # Skip adding "after" segment if the following segment is too short
+            if not allow_after[idx]:
+                n_pts_after = 0
+            
             # First segment: using k+1 (point after the jump)
             # Only add if jump_extend is "after" or "both"
-            if jump_extend in ("after", "both"):
+            if jump_extend in ("after", "both") and n_pts_after > 0:
                 a_star = a_old[k+1]
                 c_star = c_old[k+1]
 

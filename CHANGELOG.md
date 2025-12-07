@@ -7,6 +7,7 @@ All notable changes to this project will be documented in this file.
 - [2025-12-04 14:00 AEST] Added PCHIP-style monotone gradient method (`piecewise_gradient_pchip`) in gradients.py - uses weighted harmonic mean to preserve MPC bounds (0, 1]
 - [2025-12-04 14:15 AEST] Added q_diff > 0 condition to jump detection in `_egm_preprocess_core` - only add constraint points where value function is increasing
 - [2025-12-04 14:30 AEST] Modified solve_runner model factory to double a_points and a_nxt_points at runtime for improved accuracy while keeping w_points unchanged
+- [2025-12-06 10:00 AEST] Changed constraint point spacing at jumps from fixed count to mean e_diff based - points now spaced at input grid density via `use_mean_spacing` parameter in `_egm_preprocess_core`
 
 ### Changed
 * **Retirement example restructured** into modular components:

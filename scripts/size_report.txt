@@ -1,0 +1,10 @@
+0	size_report.txt
+4.0K	._circuit_run_1.sh
+4.0K	._hr_param_sweep_mpi.sh
+4.0K	move_housing_logs.sh
+4.0K	setup_public_venv.sh
+8.0K	lib
+12K	test_stateful_gpu.py
+28K	int
+36K	interactive_plots
+60K	pbs

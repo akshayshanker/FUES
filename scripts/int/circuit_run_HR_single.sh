@@ -93,10 +93,10 @@ if [[ "$SHOW_HELP" == true ]]; then
 fi
 
 # --- Source the Configuration Library ---
-if [[ -f "$SCRIPTS_ROOT/lib/job_configs.sh" ]]; then
-    source "$SCRIPTS_ROOT/lib/job_configs.sh"
+if [[ -f "$SCRIPTS_ROOT/lib/pbs_run_presets.sh" ]]; then
+    source "$SCRIPTS_ROOT/lib/pbs_run_presets.sh"
 else
-    echo "ERROR: Configuration library not found at $SCRIPTS_ROOT/lib/job_configs.sh" >&2
+    echo "ERROR: Configuration library not found at $SCRIPTS_ROOT/lib/pbs_run_presets.sh" >&2
     exit 1
 fi
 
@@ -202,7 +202,7 @@ fi
 
 # Validate configuration exists
 if ! declare -p "$CONFIG_NAME" &>/dev/null; then
-    echo "ERROR: Configuration '$CONFIG_NAME' not found in job_configs.sh" >&2
+    echo "ERROR: Configuration '$CONFIG_NAME' not found in pbs_run_presets.sh" >&2
     exit 1
 fi
 

@@ -3,7 +3,7 @@
 ## Quick Start
 
 ```bash
-# 1. Edit configs/job_configs.sh to set your parameters
+# 1. Edit configs/pbs_run_presets.sh to set your parameters
 # 2. Edit run_housing_single_core.sh to select which config to run
 # 3. Submit:
 qsub run_housing_single_core.sh
@@ -28,7 +28,7 @@ Note: If `hd_points = grid_points`, all methods share the same hash folder.
 
 ## The Two Things You Change
 
-### 1. `configs/job_configs.sh` - Define parameter sets
+### 1. `configs/pbs_run_presets.sh` - Define parameter sets
 
 ```bash
 declare -A MY_EXPERIMENT
@@ -73,7 +73,7 @@ MY_EXPERIMENT[version_suffix]="test_0.1"
 ### 2. `run_housing_single_core.sh` - Select what to run
 
 ```bash
-CONFIG_TO_RUN=("MY_EXPERIMENT")    # Which config from job_configs.sh
+CONFIG_TO_RUN=("MY_EXPERIMENT")    # Which config from pbs_run_presets.sh
 TRIAL_ID="Nov2025"                 # ← Your experimental trial name
 ```
 
@@ -164,7 +164,7 @@ These settings **do NOT create different bundles** - changing them overwrites pr
 
 | File | Purpose |
 |------|---------|
-| `configs/job_configs.sh` | Parameter configurations (grid sizes, periods) |
+| `configs/pbs_run_presets.sh` | Parameter configurations (grid sizes, periods) |
 | `experiment_sets/default.yml` | Defines `param_paths` for bundle hashing |
 | `run_housing_single_core.sh` | PBS job script |
 | `../../examples/housing_renting/solve_runner.py` | Main solver |
@@ -196,7 +196,7 @@ param_paths:
 ## Common Workflows
 
 ### Run a new experiment
-1. Add new config in `configs/job_configs.sh`
+1. Add new config in `configs/pbs_run_presets.sh`
 2. Set `CONFIG_TO_RUN=("NEW_CONFIG")` in script
 3. Set unique `TRIAL_ID`
 4. Submit

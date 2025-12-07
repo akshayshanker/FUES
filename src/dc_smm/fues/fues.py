@@ -282,7 +282,7 @@ def forward_scan_case_a(e_grid, vlu, a_prime, i, j, N, LB, m_bar, g_1, eps_d=EPS
                 break
     
     if not found_forward_same_branch:
-        keep_i1 = True
+        keep_i1 = False
 
     return keep_i1, idx_f_return, found_forward_same_branch
 
