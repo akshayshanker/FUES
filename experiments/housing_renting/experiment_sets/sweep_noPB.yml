@@ -30,15 +30,15 @@ sweep:
     - 4000
     - 6000
     - 8000
+    - 10000
   
   # Housing grid sizes (H_points = S_points)
   H_sizes:
     - 7
     - 10
     - 15
-    - 20
 
 # Fixed parameters (not in sweep)
 fixed:
   delta_pb: 1
-  periods: 5
+  periods: 10

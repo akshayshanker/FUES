@@ -263,9 +263,10 @@ def _dcegm_engine(
     if dcegm is None:
         raise ImportError("DCEGM algorithm not importable")
 
-    # Sort by x_dcsn_hat (DCEGM requires sorted grid for segment detection)
-    if not np.all(np.diff(x_dcsn_hat) > 0):
-        idx = np.argsort(x_dcsn_hat)
+    # Sort by X_cntn (next-period assets) to preserve original EGM iteration order
+    # DCEGM detects backward-bending segments in x_dcsn_hat (endogenous grid)
+    if not np.all(np.diff(X_cntn) >= 0):
+        idx = np.argsort(X_cntn)
         x_dcsn_hat = x_dcsn_hat[idx]
         qf_hat = qf_hat[idx]
         kappa_hat = kappa_hat[idx]

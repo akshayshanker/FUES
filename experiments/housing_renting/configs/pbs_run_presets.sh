@@ -13,7 +13,7 @@
 # --- Configuration Set 1 (LOW POINTS FOR TESTING): Standard Resolution ---
 # A standard, medium-sized run for quick validation.
 declare -A STD_RES_SETTINGS
-STD_RES_SETTINGS[periods]=5
+STD_RES_SETTINGS[periods]=10
 STD_RES_SETTINGS[vfi_ngrid]=2000
 STD_RES_SETTINGS[hd_points]=2000
 STD_RES_SETTINGS[grid_points]=2000
@@ -42,8 +42,8 @@ HIGH_RES_SETTINGS_A[delta_pb]=1
 declare -A HIGH_RES_SETTINGS_A_PB
 HIGH_RES_SETTINGS_A_PB[periods]=5
 HIGH_RES_SETTINGS_A_PB[vfi_ngrid]=1E4
-HIGH_RES_SETTINGS_A_PB[hd_points]=6000
-HIGH_RES_SETTINGS_A_PB[grid_points]=6000
+HIGH_RES_SETTINGS_A_PB[hd_points]=2000
+HIGH_RES_SETTINGS_A_PB[grid_points]=2000
 HIGH_RES_SETTINGS_A_PB[version_suffix]="test_0.1"
 HIGH_RES_SETTINGS_A_PB[delta_pb]=0.6
 

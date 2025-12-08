@@ -569,14 +569,8 @@ def main(argv=None):
     trace_print("6: Model config loaded")
 
     # Apply a_grid_multiplier in standard (non-sweep) runs:
-    # scale a_points and a_nxt_points, keep w_points unchanged.
-    a_grid_mult = 1
-    if not args.sweep:
-        a_grid_mult = model_config["master"]["settings"].get("a_grid_multiplier", 1)
-        if a_grid_mult != 1:
-            a_pts = model_config["master"]["settings"]["a_points"]
-            model_config["master"]["settings"]["a_points"] = a_pts * a_grid_mult
-            model_config["master"]["settings"]["a_nxt_points"] = a_pts * a_grid_mult
+    a_grid_mult = model_config["master"]["settings"].get("a_grid_multiplier", 1)
+
     
     save_by_default = is_root
     solver_rank = comm.rank if comm is not None else 0
@@ -1017,6 +1011,9 @@ def main(argv=None):
                 if not args.sweep and a_grid_mult != 1 and method not in ["VFI_HDGRID", "VFI_HDGRID_GPU"]:
                     params[1] = params[1] * a_grid_mult  # a_points
                     params[2] = params[2] * a_grid_mult  # a_nxt_points
+
+                print(params)
+                
                 all_param_vectors.append(params)  # Add to design matrix
                 
                 # Print parameter hash and bundle path for this method

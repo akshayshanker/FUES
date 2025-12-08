@@ -24,7 +24,7 @@ PARAMS_FILE="params/baseline.yml"   # Options: baseline.yml, high_beta.yml, low_
 
 # Baseline model settings
 GRID_SIZE=2000              # Baseline grid size for plots (overrides params file)
-PLOT_AGE=17                 # Age to plot EGM grids
+PLOT_AGE=16                 # Age to plot EGM grids
 OUTPUT_DIR=""               # Leave empty for default (results/retirement)
 
 # Timing sweep settings

@@ -37,15 +37,17 @@ F_h_cntn_to_dcsn_renter(mover, use_mpi, comm)
     Operator factory for the renter's housing choice, with CPU/GPU dispatch.
 """
 import numpy as np
-from numba import njit, prange, cuda
+from numba import njit, prange
 from dc_smm.models.housing_renting.horses_common import interp_as
 from dynx.stagecraft.solmaker import Solution
 import os
 
-# --- GPU Availability Check ---
+# --- Conditional CUDA import and GPU Availability Check ---
 try:
+    from numba import cuda
     GPU_AVAILABLE = cuda.is_available()
 except Exception:
+    cuda = None
     GPU_AVAILABLE = False
 
 
@@ -87,26 +89,28 @@ def _interp_scalar_cpu(x_grid, y_grid, x):
     return (1.0 - w_hi) * y_grid[lo] + w_hi * y_grid[hi]
 
 
-@cuda.jit(device=True)
-def _interp_scalar_gpu(x_grid, y_grid, x):
-    """C-style linear interpolation of one point for the GPU."""
-    if x <= x_grid[0]:
-        return y_grid[0]
-    if x >= x_grid[-1]:
-        return y_grid[-1]
+# GPU device function - only defined when CUDA is available
+if GPU_AVAILABLE and cuda is not None:
+    @cuda.jit(device=True)
+    def _interp_scalar_gpu(x_grid, y_grid, x):
+        """C-style linear interpolation of one point for the GPU."""
+        if x <= x_grid[0]:
+            return y_grid[0]
+        if x >= x_grid[-1]:
+            return y_grid[-1]
 
-    lo, hi = 0, len(x_grid) - 1
-    while hi - lo > 1:
-        mid = (lo + hi) // 2
-        if x_grid[mid] <= x:
-            lo = mid
-        else:
-            hi = mid
+        lo, hi = 0, len(x_grid) - 1
+        while hi - lo > 1:
+            mid = (lo + hi) // 2
+            if x_grid[mid] <= x:
+                lo = mid
+            else:
+                hi = mid
 
-    x_lo = x_grid[lo]
-    inv_dx = 1.0 / (x_grid[hi] - x_lo)
-    w_hi = (x - x_lo) * inv_dx
-    return (1.0 - w_hi) * y_grid[lo] + w_hi * y_grid[hi]
+        x_lo = x_grid[lo]
+        inv_dx = 1.0 / (x_grid[hi] - x_lo)
+        w_hi = (x - x_lo) * inv_dx
+        return (1.0 - w_hi) * y_grid[lo] + w_hi * y_grid[hi]
 
 
 def F_shocks_dcsn_to_arvl(mover):
@@ -250,11 +254,15 @@ def F_shocks_dcsn_to_arvl(mover):
 # ==============================================================================
 
 
-@njit(cache=True, parallel=True)
+@njit(cache=True)
 def housing_choice_solver_owner_cpu(resources_liquid_3d, H_grid, H_nxt_grid,
                                     w_grid, Q_cntn, v_cntn, lambda_cntn,
                                     tau, min_wealth):
-    """Fully-compiled housing-choice kernel for the CPU (owner version)."""
+    """Fully-compiled housing-choice kernel for the CPU (owner version).
+    
+    Optimized for single-core: deferred interpolation (only interpolate 
+    lambda/v when Q improves) and pre-computed transition costs.
+    """
     n_a, n_h, n_y = resources_liquid_3d.shape
     n_h_next = H_nxt_grid.size
 
@@ -263,38 +271,53 @@ def housing_choice_solver_owner_cpu(resources_liquid_3d, H_grid, H_nxt_grid,
     best_v = np.zeros((n_a, n_h, n_y))
     best_idx = np.zeros((n_a, n_h, n_y), dtype=np.int32)
 
-    for i_y in range(n_y): # Parallelized over income states
+    # Pre-compute transition costs for all (ih, ih_next) pairs
+    # This avoids redundant computation in the inner loop
+    trans_costs = np.zeros((n_h, n_h_next))
+    net_housing = np.zeros((n_h, n_h_next))
+    for ih in range(n_h):
+        h_now = H_grid[ih]
+        for ih_next in range(n_h_next):
+            h_next = H_nxt_grid[ih_next]
+            moved = (h_now != h_next)
+            trans_costs[ih, ih_next] = tau * h_next if moved else 0.0
+            net_housing[ih, ih_next] = (h_now - h_next) if moved else 0.0
+
+    for i_y in range(n_y):
         for ia in range(n_a):
             for ih in range(n_h):
                 res_now = resources_liquid_3d[ia, ih, i_y]
-                h_now = H_grid[ih]
-                best_q_here, best_l_here, best_v_here, best_i_next = -np.inf, 0.0, -np.inf, 0
+                best_q_here = -np.inf
+                best_i_next = 0
 
                 for ih_next in range(n_h_next):
-                    h_next = H_nxt_grid[ih_next]
-                    moved = (h_now != h_next)
-                    trans_fee = tau * h_next if moved else 0.0
-                    w_dcsn = res_now + moved * (h_now - h_next) - trans_fee
+                    w_dcsn = res_now + net_housing[ih, ih_next] - trans_costs[ih, ih_next]
 
                     if w_dcsn >= min_wealth:
                         q_here = _interp_scalar_cpu(w_grid, Q_cntn[:, ih_next, i_y], w_dcsn)
                         if q_here > best_q_here:
                             best_q_here = q_here
-                            best_l_here = _interp_scalar_cpu(w_grid, lambda_cntn[:, ih_next, i_y], w_dcsn)
-                            best_v_here = _interp_scalar_cpu(w_grid, v_cntn[:, ih_next, i_y], w_dcsn)
                             best_i_next = ih_next
 
-                best_Q[ia, ih, i_y] = best_q_here
-                best_lambda[ia, ih, i_y] = best_l_here
-                best_v[ia, ih, i_y] = best_v_here
-                best_idx[ia, ih, i_y] = best_i_next
+                # Only interpolate lambda and v once we know the best choice
+                if best_q_here > -np.inf:
+                    ih_next_best = best_i_next
+                    w_dcsn_best = res_now + net_housing[ih, ih_next_best] - trans_costs[ih, ih_next_best]
+                    best_Q[ia, ih, i_y] = best_q_here
+                    best_lambda[ia, ih, i_y] = _interp_scalar_cpu(w_grid, lambda_cntn[:, ih_next_best, i_y], w_dcsn_best)
+                    best_v[ia, ih, i_y] = _interp_scalar_cpu(w_grid, v_cntn[:, ih_next_best, i_y], w_dcsn_best)
+                    best_idx[ia, ih, i_y] = best_i_next
 
     return best_Q, best_v, best_lambda, best_idx
 
-@njit(cache=True, parallel=True)
+@njit(cache=True)
 def housing_choice_solver_renter_cpu(w_grid, S_grid, y_grid, w_rent_grid, 
                                      q_cntn, vlu_cntn, lambda_cntn, Pr, shock_grid):
-    """Jitted function to solve the renter housing choice problem on the CPU."""
+    """Jitted function to solve the renter housing choice problem on the CPU.
+    
+    Optimized for single-core: deferred interpolation (only interpolate 
+    lambda/v after finding the best service flow choice).
+    """
     n_w, n_y = len(w_grid), len(y_grid)
     n_S = len(S_grid)
     
@@ -303,110 +326,116 @@ def housing_choice_solver_renter_cpu(w_grid, S_grid, y_grid, w_rent_grid,
     lambda_dcsn = np.zeros((n_w, n_y))
     S_policy = np.zeros((n_w, n_y), dtype=np.int32)
     
+    # Pre-compute rental costs
+    rental_costs = Pr * S_grid
+    
     for i_y in range(n_y):
         y_val = shock_grid[i_y]
         for i_w in range(n_w):
             w_dcsn_val = w_grid[i_w]
             
-            best_q, best_lambda, best_S_idx, best_v = -np.inf, 0.0, 0, -np.inf
+            best_q = -np.inf
+            best_S_idx = 0
             
+            # First pass: find optimal S by only interpolating q
             for i_S in range(n_S):
-                S_val = S_grid[i_S]
-                w_cntn_val = w_dcsn_val - Pr * S_val + y_val
+                w_cntn_val = w_dcsn_val - rental_costs[i_S] + y_val
                 
                 if w_cntn_val >= w_rent_grid[0]:
                     maximand = _interp_scalar_cpu(w_rent_grid, q_cntn[:, i_S, i_y], w_cntn_val)
                     if maximand > best_q:
                         best_q = maximand
-                        best_lambda = _interp_scalar_cpu(w_rent_grid, lambda_cntn[:, i_S, i_y], w_cntn_val)
-                        best_v = _interp_scalar_cpu(w_rent_grid, vlu_cntn[:, i_S, i_y], w_cntn_val)
+                        best_S_idx = i_S
+            
+            # Second pass: interpolate lambda and v only for optimal choice
+            if best_q > -np.inf:
+                w_cntn_best = w_dcsn_val - rental_costs[best_S_idx] + y_val
+                q_dcsn[i_w, i_y] = best_q
+                lambda_dcsn[i_w, i_y] = _interp_scalar_cpu(w_rent_grid, lambda_cntn[:, best_S_idx, i_y], w_cntn_best)
+                vlu_dcsn[i_w, i_y] = _interp_scalar_cpu(w_rent_grid, vlu_cntn[:, best_S_idx, i_y], w_cntn_best)
+                S_policy[i_w, i_y] = best_S_idx
+    
+    return q_dcsn, vlu_dcsn, lambda_dcsn, S_policy
+
+# ==============================================================================
+# --- GPU Jitted Functions (only defined when CUDA is available) ---
+# ==============================================================================
+
+if GPU_AVAILABLE and cuda is not None:
+    @cuda.jit
+    def shock_integration_kernel(vlu_dcsn, Pi, vlu_arvl, n_a, n_h, n_j, n_i):
+        """GPU kernel for shock integration: vlu_arvl[a,h,i] = sum_j vlu_dcsn[a,h,j] * Pi[i,j]"""
+        a, h, i = cuda.grid(3)
+        
+        if a < n_a and h < n_h and i < n_i:
+            sum_val = 0.0
+            for j in range(n_j):
+                sum_val += vlu_dcsn[a, h, j] * Pi[i, j]
+            vlu_arvl[a, h, i] = sum_val
+
+    @cuda.jit
+    def housing_choice_solver_owner_gpu(
+        resources_liquid_3d, H_grid, H_nxt_grid, w_grid,
+        Q_cntn, v_cntn, lambda_cntn,
+        tau, min_wealth,
+        best_Q, best_v, best_lambda, best_idx
+    ):
+        """3D CUDA kernel for the owner housing choice. One thread per (a, h, y) state."""
+        ia, ih, i_y = cuda.grid(3)
+        n_a, n_h, n_y = resources_liquid_3d.shape
+
+        if ia < n_a and ih < n_h and i_y < n_y:
+            res_now, h_now = resources_liquid_3d[ia, ih, i_y], H_grid[ih]
+            best_q_here, best_l_here, best_v_here, best_i_next = -np.inf, 0.0, -np.inf, 0
+
+            for ih_next in range(H_nxt_grid.size):
+                h_next = H_nxt_grid[ih_next]
+                moved = (h_now != h_next)
+                trans_fee = tau * h_next if moved else 0.0
+                w_dcsn = res_now + moved * (h_now - h_next) - trans_fee
+
+                if w_dcsn >= min_wealth:
+                    q_here = _interp_scalar_gpu(w_grid, Q_cntn[:, ih_next, i_y], w_dcsn)
+                    if q_here > best_q_here:
+                        best_q_here = q_here
+                        best_l_here = _interp_scalar_gpu(w_grid, lambda_cntn[:, ih_next, i_y], w_dcsn)
+                        best_v_here = _interp_scalar_gpu(w_grid, v_cntn[:, ih_next, i_y], w_dcsn)
+                        best_i_next = ih_next
+
+            best_Q[ia, ih, i_y] = best_q_here
+            best_lambda[ia, ih, i_y] = best_l_here
+            best_v[ia, ih, i_y] = best_v_here
+            best_idx[ia, ih, i_y] = best_i_next
+
+    @cuda.jit
+    def housing_choice_solver_renter_gpu(w_grid, S_grid, y_grid, w_rent_grid,
+                                         q_cntn, vlu_cntn, lambda_cntn, Pr, shock_grid,
+                                         q_dcsn, vlu_dcsn, lambda_dcsn, S_policy):
+        """CUDA kernel for the renter housing choice solver."""
+        i_w, i_y = cuda.grid(2)
+        n_w, n_y = len(w_grid), len(y_grid)
+        n_S = len(S_grid)
+
+        if i_w < n_w and i_y < n_y:
+            y_val, w_dcsn_val = shock_grid[i_y], w_grid[i_w]
+            best_q, best_lambda, best_S_idx, best_v = -np.inf, 0.0, 0, -np.inf
+
+            for i_S in range(n_S):
+                S_val = S_grid[i_S]
+                w_cntn_val = w_dcsn_val - Pr * S_val + y_val
+
+                if w_cntn_val >= w_rent_grid[0]:
+                    maximand = _interp_scalar_gpu(w_rent_grid, q_cntn[:, i_S, i_y], w_cntn_val)
+                    if maximand > best_q:
+                        best_q = maximand
+                        best_lambda = _interp_scalar_gpu(w_rent_grid, lambda_cntn[:, i_S, i_y], w_cntn_val)
+                        best_v = _interp_scalar_gpu(w_rent_grid, vlu_cntn[:, i_S, i_y], w_cntn_val)
                         best_S_idx = i_S
             
             q_dcsn[i_w, i_y] = best_q
             lambda_dcsn[i_w, i_y] = best_lambda
             S_policy[i_w, i_y] = best_S_idx
             vlu_dcsn[i_w, i_y] = best_v
-    
-    return q_dcsn, vlu_dcsn, lambda_dcsn, S_policy
-
-# ==============================================================================
-# --- GPU Jitted Functions ---
-# ==============================================================================
-
-@cuda.jit
-def shock_integration_kernel(vlu_dcsn, Pi, vlu_arvl, n_a, n_h, n_j, n_i):
-    """GPU kernel for shock integration: vlu_arvl[a,h,i] = sum_j vlu_dcsn[a,h,j] * Pi[i,j]"""
-    a, h, i = cuda.grid(3)
-    
-    if a < n_a and h < n_h and i < n_i:
-        sum_val = 0.0
-        for j in range(n_j):
-            sum_val += vlu_dcsn[a, h, j] * Pi[i, j]
-        vlu_arvl[a, h, i] = sum_val
-
-@cuda.jit
-def housing_choice_solver_owner_gpu(
-    resources_liquid_3d, H_grid, H_nxt_grid, w_grid,
-    Q_cntn, v_cntn, lambda_cntn,
-    tau, min_wealth,
-    best_Q, best_v, best_lambda, best_idx
-):
-    """3D CUDA kernel for the owner housing choice. One thread per (a, h, y) state."""
-    ia, ih, i_y = cuda.grid(3)
-    n_a, n_h, n_y = resources_liquid_3d.shape
-
-    if ia < n_a and ih < n_h and i_y < n_y:
-        res_now, h_now = resources_liquid_3d[ia, ih, i_y], H_grid[ih]
-        best_q_here, best_l_here, best_v_here, best_i_next = -np.inf, 0.0, -np.inf, 0
-
-        for ih_next in range(H_nxt_grid.size):
-            h_next = H_nxt_grid[ih_next]
-            moved = (h_now != h_next)
-            trans_fee = tau * h_next if moved else 0.0
-            w_dcsn = res_now + moved * (h_now - h_next) - trans_fee
-
-            if w_dcsn >= min_wealth:
-                q_here = _interp_scalar_gpu(w_grid, Q_cntn[:, ih_next, i_y], w_dcsn)
-                if q_here > best_q_here:
-                    best_q_here = q_here
-                    best_l_here = _interp_scalar_gpu(w_grid, lambda_cntn[:, ih_next, i_y], w_dcsn)
-                    best_v_here = _interp_scalar_gpu(w_grid, v_cntn[:, ih_next, i_y], w_dcsn)
-                    best_i_next = ih_next
-
-        best_Q[ia, ih, i_y] = best_q_here
-        best_lambda[ia, ih, i_y] = best_l_here
-        best_v[ia, ih, i_y] = best_v_here
-        best_idx[ia, ih, i_y] = best_i_next
-
-@cuda.jit
-def housing_choice_solver_renter_gpu(w_grid, S_grid, y_grid, w_rent_grid,
-                                     q_cntn, vlu_cntn, lambda_cntn, Pr, shock_grid,
-                                     q_dcsn, vlu_dcsn, lambda_dcsn, S_policy):
-    """CUDA kernel for the renter housing choice solver."""
-    i_w, i_y = cuda.grid(2)
-    n_w, n_y = len(w_grid), len(y_grid)
-    n_S = len(S_grid)
-
-    if i_w < n_w and i_y < n_y:
-        y_val, w_dcsn_val = shock_grid[i_y], w_grid[i_w]
-        best_q, best_lambda, best_S_idx, best_v = -np.inf, 0.0, 0, -np.inf
-
-        for i_S in range(n_S):
-            S_val = S_grid[i_S]
-            w_cntn_val = w_dcsn_val - Pr * S_val + y_val
-
-            if w_cntn_val >= w_rent_grid[0]:
-                maximand = _interp_scalar_gpu(w_rent_grid, q_cntn[:, i_S, i_y], w_cntn_val)
-                if maximand > best_q:
-                    best_q = maximand
-                    best_lambda = _interp_scalar_gpu(w_rent_grid, lambda_cntn[:, i_S, i_y], w_cntn_val)
-                    best_v = _interp_scalar_gpu(w_rent_grid, vlu_cntn[:, i_S, i_y], w_cntn_val)
-                    best_S_idx = i_S
-        
-        q_dcsn[i_w, i_y] = best_q
-        lambda_dcsn[i_w, i_y] = best_lambda
-        S_policy[i_w, i_y] = best_S_idx
-        vlu_dcsn[i_w, i_y] = best_v
 
 # ==============================================================================
 # --- Main Operator Functions with GPU Dispatch (Efficient Version) ---

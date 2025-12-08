@@ -591,7 +591,7 @@ def FUES(
 
     if post_clean_double_jumps:
         is_inter = np.zeros(e_kept.size, dtype=np.bool_)
-        post_mask = _postclean_double_jump_mask(e_kept, all_p1, m_bar, is_inter, eps_d, post_clean_passes)
+        post_mask = _postclean_double_jump_mask(e_kept, p1_kept, m_bar, is_inter, eps_d, post_clean_passes)
         e_out_final = e_kept[post_mask]
         v_out_final = v_kept[post_mask]
         p1_out_final = p1_kept[post_mask]

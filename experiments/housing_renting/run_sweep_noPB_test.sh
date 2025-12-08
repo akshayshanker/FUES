@@ -31,7 +31,8 @@ module purge
 module load python3/3.12.1
 module load openmpi/4.1.5
 
-source "$REPO_ROOT/.venv_public/bin/activate"
+export VENV_ROOT=/scratch/tp66/$USER/venvs
+source "$VENV_ROOT/fues02-py3121/bin/activate"
 
 export FUES_HOME="$REPO_ROOT"
 export PYTHONPATH="$FUES_HOME/src:$FUES_HOME${PYTHONPATH:+:$PYTHONPATH}"

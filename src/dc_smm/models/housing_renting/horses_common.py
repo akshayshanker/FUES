@@ -1,12 +1,20 @@
 import numpy as np
 from scipy.interpolate import interp1d
-from numba import njit, cuda
+from numba import njit
 from numba.typed import Dict    
 from typing import Callable, Literal   # NEW  – remove if unused        # NEW
 import time
 from functools import lru_cache
 import math
 import warnings
+
+# Conditional CUDA import - only load if available
+try:
+    from numba import cuda
+    CUDA_AVAILABLE = cuda.is_available()
+except Exception:
+    cuda = None
+    CUDA_AVAILABLE = False
 
 # Import gradient functions from dedicated module (backward compatibility re-export)
 from dc_smm.models.housing_renting.gradients import (
@@ -1189,107 +1197,108 @@ def get_u_func(expr_str, param_vals):
     return build_njit_utility_cached(expr_str, frozen)
 
 # ======================================================================
-#  GPU Device Functions
+#  GPU Device Functions (only defined when CUDA is available)
 # ======================================================================
 
-@cuda.jit(device=True)
-def searchsorted_gpu(a, v):
-    """
-    A GPU-compatible binary search implementation, equivalent to
-    np.searchsorted(a, v, side='right').
-    """
-    lower_bound = 0
-    upper_bound = len(a)
-    while lower_bound < upper_bound:
-        # Use bit shift for faster division by 2
-        i = lower_bound + ((upper_bound - lower_bound) >> 1)
-        if a[i] < v:
-            lower_bound = i + 1
-        else:
-            upper_bound = i
-    return lower_bound
+if CUDA_AVAILABLE and cuda is not None:
+    @cuda.jit(device=True)
+    def searchsorted_gpu(a, v):
+        """
+        A GPU-compatible binary search implementation, equivalent to
+        np.searchsorted(a, v, side='right').
+        """
+        lower_bound = 0
+        upper_bound = len(a)
+        while lower_bound < upper_bound:
+            # Use bit shift for faster division by 2
+            i = lower_bound + ((upper_bound - lower_bound) >> 1)
+            if a[i] < v:
+                lower_bound = i + 1
+            else:
+                upper_bound = i
+        return lower_bound
 
-@cuda.jit(device=True)
-def interp_gpu(x_new, x_old, y_old):
-    """
-    A simple linear interpolation function that is compatible with Numba's
-    CUDA target.
-    """
-    i = searchsorted_gpu(x_old, x_new)
-    
-    # Handle edges
-    if i == 0:
-        return y_old[0]
-    if i >= len(x_old):
-        return y_old[-1]
+    @cuda.jit(device=True)
+    def interp_gpu(x_new, x_old, y_old):
+        """
+        A simple linear interpolation function that is compatible with Numba's
+        CUDA target.
+        """
+        i = searchsorted_gpu(x_old, x_new)
+        
+        # Handle edges
+        if i == 0:
+            return y_old[0]
+        if i >= len(x_old):
+            return y_old[-1]
 
-    # Linear interpolation formula
-    x0, x1 = x_old[i - 1], x_old[i]
-    y0, y1 = y_old[i - 1], y_old[i]
-    
-    # Avoid division by zero if grid points are not unique
-    if x1 == x0:
-        return y0
-    
-    return y0 + (y1 - y0) * (x_new - x0) / (x1 - x0)
+        # Linear interpolation formula
+        x0, x1 = x_old[i - 1], x_old[i]
+        y0, y1 = y_old[i - 1], y_old[i]
+        
+        # Avoid division by zero if grid points are not unique
+        if x1 == x0:
+            return y0
+        
+        return y0 + (y1 - y0) * (x_new - x0) / (x1 - x0)
 
-@cuda.jit(device=True)
-def u_func_gpu_crra(c, H, alpha, kappa, iota):
-    """GPU device version of the CRRA utility function."""
-    if c <= 0:
-        return -1e12
-    return (c**(1 - alpha) / (1 - alpha)) * (H**kappa * iota)
+    @cuda.jit(device=True)
+    def u_func_gpu_crra(c, H, alpha, kappa, iota):
+        """GPU device version of the CRRA utility function."""
+        if c <= 0:
+            return -1e12
+        return (c**(1 - alpha) / (1 - alpha)) * (H**kappa * iota)
 
-@cuda.jit(device=True)
-def u_func_gpu_log(c, H, alpha, kappa, iota):
-    """GPU device version of the log-utility function."""
-    if c <= 0:
-        return -1e12
-    return alpha * math.log(c) + (1 - alpha) * math.log(kappa * H + iota)
+    @cuda.jit(device=True)
+    def u_func_gpu_log(c, H, alpha, kappa, iota):
+        """GPU device version of the log-utility function."""
+        if c <= 0:
+            return -1e12
+        return alpha * math.log(c) + (1 - alpha) * math.log(kappa * H + iota)
 
-@cuda.jit(device=True)
-def bellman_obj_gpu(a_prime, w, H, beta, delta, a_grid, V_next,
-                    h_nxt_ind, y_ind,
-                    alpha, kappa, iota):
-    """
-    GPU device version of the Bellman object function (CRRA only).
-    """
-    c = w - a_prime
-    if c <= 0:
-        return -1e110
+    @cuda.jit(device=True)
+    def bellman_obj_gpu(a_prime, w, H, beta, delta, a_grid, V_next,
+                        h_nxt_ind, y_ind,
+                        alpha, kappa, iota):
+        """
+        GPU device version of the Bellman object function (CRRA only).
+        """
+        c = w - a_prime
+        if c <= 0:
+            return -1e110
 
-    v_next_slice = V_next[:, h_nxt_ind, y_ind]
-    v_interp = interp_gpu(a_prime, a_grid, v_next_slice)
-    
-    util = u_func_gpu_log(c, H, alpha, kappa, iota)
-    
-    return util + beta * delta * v_interp
+        v_next_slice = V_next[:, h_nxt_ind, y_ind]
+        v_interp = interp_gpu(a_prime, a_grid, v_next_slice)
+        
+        util = u_func_gpu_log(c, H, alpha, kappa, iota)
+        
+        return util + beta * delta * v_interp
 
-# --- NEW FUNCTIONS FOR EULER ERROR CALCULATION GPU LOG UTILITY ---
+    # --- NEW FUNCTIONS FOR EULER ERROR CALCULATION GPU LOG UTILITY ---
 
-@cuda.jit(device=True)
-def uc_owner_gpu(c, H, alpha):
-    """
-    GPU device function for the owner's marginal utility.
-    """
-    if c <= 0: 
-        return 1e112
-    return alpha/c
+    @cuda.jit(device=True)
+    def uc_owner_gpu(c, H, alpha):
+        """
+        GPU device function for the owner's marginal utility.
+        """
+        if c <= 0: 
+            return 1e112
+        return alpha/c
 
-@cuda.jit(device=True)
-def uc_renter_gpu(c, S, alpha):
-    """
-    GPU device function for the renter's marginal utility (H represents S).
-    """
-    if c <= 0: 
-        return 1e112
-    return alpha/c
-    
-@cuda.jit(device=True)
-def inv_uc_owner_gpu(lambda_e, H, alpha):
-    """
-    GPU device function for the owner's inverse marginal utility.
-    """
-    if lambda_e <= 0: 
-        return 1e-12
-    return alpha/lambda_e
+    @cuda.jit(device=True)
+    def uc_renter_gpu(c, S, alpha):
+        """
+        GPU device function for the renter's marginal utility (H represents S).
+        """
+        if c <= 0: 
+            return 1e112
+        return alpha/c
+        
+    @cuda.jit(device=True)
+    def inv_uc_owner_gpu(lambda_e, H, alpha):
+        """
+        GPU device function for the owner's inverse marginal utility.
+        """
+        if lambda_e <= 0: 
+            return 1e-12
+        return alpha/lambda_e

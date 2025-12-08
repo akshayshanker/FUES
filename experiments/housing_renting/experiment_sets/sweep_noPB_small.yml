@@ -20,11 +20,13 @@ sweep:
   grid_sizes:
     - 1000
     - 2000
+    - 4000
   
   # Fewer H sizes for testing
   H_sizes:
     - 7
     - 10
+    - 15
 
 # Fixed parameters
 fixed:

@@ -73,7 +73,7 @@ settings:
   a_nxt_points: 4000    # Number of next-period asset grid points
   
   # Grid multiplier (applied at runtime to a_points and a_nxt_points)
-  a_grid_multiplier: 2  # Multiplier for a_points/a_nxt_points (w_points stays at base) - reduced from 3 for testing
+  a_grid_multiplier: 1.5  # Multiplier for a_points/a_nxt_points (w_points stays at base) - reduced from 3 for testing
   
   # Income shock discretization - Now explicitly using Fella's values
   y_points: 3           # Number of shock grid points (length of z_vals)
@@ -94,15 +94,15 @@ settings:
   override_KT_conditions_at_jump: false  # When true, disables FOC filtering at jumps
 
   # EGM preprocess jump detection settings
-  grad_c_threshold: 1.01    # Threshold for grad_c jump detection (jumps detected when |dc/da| > threshold)
+  grad_c_threshold: 0.95    # Threshold for grad_c jump detection (jumps detected when |dc/da| > threshold)
   c_star_lb_pct: 5    # Lower bound = c_star * (1 - lb_pct), 0.10 = 10% below c_star
   c_star_ub_pct: 0    # Upper bound = c_star * (1 + ub_pct), 0.10 = 10% above c_star
 
   # Gradient computation settings for MPC/lambda calculation
-  gradient_method: "pchip"   # Options: "basic", "3rd_order", "robust", "pchip" (recommended)
+  gradient_method: "robust"   # Options: "basic", "3rd_order", "robust", "pchip" (recommended)
   gradient_guard_distance: 2  # Guard zone size near segment boundaries (for "robust" method)
   gradient_smooth_segments: true  # Apply local smoothing within segments
-  gradient_smoothing_window: 5    # Window size for smoothing (must be odd, e.g., 3, 5, 7)
+  gradient_smoothing_window: 3    # Window size for smoothing (must be odd, e.g., 3, 5, 7)
 
   # Method-specific upper envelope kwargs
   # These are passed directly to the UE engine (FUES, DCEGM, etc.)
@@ -110,7 +110,7 @@ settings:
     FUES:
       # Core parameters
       m_bar: 1.0001              # Jump threshold for same-branch tests
-      lb: 5                   # Look-back window size
+      lb: 6                   # Look-back window size
       
       # Intersection handling
       include_intersections: true       # Add intersection points at jumps
@@ -122,15 +122,16 @@ settings:
       padding_mbar: 0.0       # Padding for m_bar calculation
       no_double_jumps: true   # Filter out consecutive jumps
       disable_jump_checks: false  # Disable manual jump check overrides
-      use_post_state_jump_test: false #if true, post-state also included in jump check
+      use_post_state_jump_test: true #if true, post-state also included in jump check
       left_turn_no_jump_strict: false # if false, left turn with no jump treated like a right turn with no jump
-      post_clean_double_jumps: true  # Post-process to remove points with double jumps on both sides
-      post_clean_passes: 2  # Number of iterative cleaning passes (more passes = more noise removed)
+      post_clean_double_jumps: false  # Post-process to remove points with double jumps on both sides
+      detect_decreasing_policy: true # If true, detect decreasing policy and remove points with decreasing policy
+      post_clean_passes: 1  # Number of iterative cleaning passes (more passes = more noise removed)
       jump_check_tol: 0  # Tolerance for value gradient check (higher = more lenient, keeps more points)
       
       # Post-interpolation jump correction
       correct_jumps: true         # Correct isolated jumps by extrapolating from previous segment
-      min_segment_length: 3        # Segments with fewer points are corrected by extrapolation
+      min_segment_length: 4        # Segments with fewer points are corrected by extrapolation
       
       # Numerical tolerances
       eps_d: 1.0e-12         # Machine epsilon protection for divisions

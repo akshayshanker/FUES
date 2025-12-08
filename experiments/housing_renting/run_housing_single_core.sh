@@ -1,8 +1,8 @@
 #!/bin/bash
 #PBS -N fues-single-core
 #PBS -P tp66
-#PBS -q express
-#PBS -l ncpus=1,mem=96GB,walltime=04:00:00
+#PBS -q expresssr
+#PBS -l ncpus=1,mem=30GB,walltime=04:00:00
 #PBS -l storage=scratch/tp66
 #PBS -l wd
 #PBS -j oe
@@ -31,7 +31,7 @@ fi
 source "$SCRIPT_DIR/configs/pbs_run_presets.sh"
 
 # --- Define the Sequence of Configurations to Run ---
-CONFIG_TO_RUN=("STD_RES_SETTINGS_PB")
+CONFIG_TO_RUN=("STD_RES_SETTINGS")
 
 
 # --- Environment Setup ---
@@ -113,7 +113,7 @@ for CONFIG_NAME in "${CONFIG_TO_RUN[@]}"; do
 
     python3 -m examples.housing_renting.solve_runner \
       --periods "${CONFIG_REF[periods]}" \
-      --ue-method "FUES,VFI_HDGRID_GPU" \
+      --ue-method "FUES,DCEGM,CONSAV,VFI,VFI_HDGRID_GPU" \
       --output-root "$OUTPUT_DIR" \
       --config-id "${VERSION_TAG}" \
       --RUN-ID "${VERSION_TAG}_${TIMESTAMP}" \

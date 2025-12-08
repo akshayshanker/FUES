@@ -52,7 +52,19 @@ from dc_smm.uenvelope.upperenvelope import EGM_UE
 from dc_smm.fues.helpers import interp_as, interp_clean
 from quantecon.optimize.scalar_maximization import brent_max
 from dynx.stagecraft.solmaker import Solution
-from dc_smm.models.housing_renting.horses_c_gpu import solve_vfi_gpu
+
+# Conditional GPU import - only load if CUDA is available
+try:
+    from numba import cuda
+    if cuda.is_available():
+        from dc_smm.models.housing_renting.horses_c_gpu import solve_vfi_gpu
+        GPU_SOLVER_AVAILABLE = True
+    else:
+        solve_vfi_gpu = None
+        GPU_SOLVER_AVAILABLE = False
+except Exception:
+    solve_vfi_gpu = None
+    GPU_SOLVER_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -481,11 +493,11 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
                 )
 
                 # sort by m_egm_unique order 
-                index = np.argsort(m_egm_unique)
-                m_egm_unique = m_egm_unique[index]
-                vlu_q_egm_unique = vlu_q_egm_unique[index]
-                c_egm_unique = c_egm_unique[index]
-                a_nxt_grid_unique = a_nxt_grid_unique[index]
+                #index = np.argsort(m_egm_unique)
+                #m_egm_unique = m_egm_unique[index]
+                #vlu_q_egm_unique = vlu_q_egm_unique[index]
+                #c_egm_unique = c_egm_unique[index]
+                #a_nxt_grid_unique = a_nxt_grid_unique[index]
 
             else:
                 m_egm_unique = m_egm
@@ -769,11 +781,7 @@ def _solve_vfi_numerical(vlu_cntn, w_grid, a_grid, H_grid,
                 Q_dcsn[iw, h, y] = Q_star
 
             # ---- continuation value + λ --------------------------------
-            c_prime = compute_gradient(
-                policy_c[:, h, y], w_grid, m_bar,
-                method=gradient_method, guard_distance=gradient_guard_distance,
-                smooth_segments=gradient_smooth_segments, 
-                smoothing_window=gradient_smoothing_window)
+            c_prime = piecewise_gradient(policy_c[:, h, y], w_grid, m_bar)
 
             for iw in range(n_W):
                 c_now = policy_c[iw, h, y]

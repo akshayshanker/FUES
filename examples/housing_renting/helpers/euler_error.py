@@ -1,68 +1,82 @@
 import numpy as np
-from numba import njit, cuda
+from numba import njit
 
-# Import the shared interpolation and NEW static GPU utility functions
-from dc_smm.models.housing_renting.horses_common import (
-    interp_as, interp_gpu, uc_owner_gpu, uc_renter_gpu, inv_uc_owner_gpu
-)
+# Conditional CUDA import
+try:
+    from numba import cuda
+    CUDA_AVAILABLE = cuda.is_available()
+except Exception:
+    cuda = None
+    CUDA_AVAILABLE = False
 
-@cuda.jit
-def _calculate_euler_error_cuda_kernel(
-    z_vals, H_grid, w_dcsn_now, c_now, tenure_pol, H_pol, S_pol,
-    c_owner_n, c_renter_n, tenure_a_grid, owner_a_grid, renter_a_grid,
-    H_nxt_grid, S_grid, w_dcsn_o, w_dcsn_r, Pi, beta, R, Pr, tau_phi,
-    alpha,
-    output_logs
-):
-    """
-    CUDA kernel to calculate Euler errors in parallel on the GPU.
-    """
-    iw, ih, iy = cuda.grid(3)
-    w_stride, h_stride, y_stride = cuda.gridsize(3)
-    
-    for i_w_loop in range(iw, w_dcsn_now.shape[0], w_stride):
-        for i_h_loop in range(ih, H_grid.shape[0], h_stride):
-            for i_y_loop in range(iy, z_vals.shape[0], y_stride):
+# Import non-GPU functions unconditionally
+from dc_smm.models.housing_renting.horses_common import interp_as
 
-                w_now, H_now = w_dcsn_now[i_w_loop], H_grid[i_h_loop]
-                c0 = c_now[i_w_loop, i_h_loop, i_y_loop]
-                if c0 <= 1e-12: 
-                    continue
-                a_next = w_now - c0
-                if a_next <= 0.1: 
-                    continue
+# Import GPU functions only if CUDA is available
+if CUDA_AVAILABLE:
+    from dc_smm.models.housing_renting.horses_common import (
+        interp_gpu, uc_owner_gpu, uc_renter_gpu, inv_uc_owner_gpu
+    )
 
-                E_lam = 0.0
-                for jy, y_next in enumerate(z_vals):
-                    # Use proper GPU interpolation function instead of manual loops
-                    tenure_val = interp_gpu(a_next, tenure_a_grid, tenure_pol[:, i_h_loop, jy])
-                    τ = int(tenure_val)
+# GPU kernel only defined when CUDA is available
+if CUDA_AVAILABLE and cuda is not None:
+    @cuda.jit
+    def _calculate_euler_error_cuda_kernel(
+        z_vals, H_grid, w_dcsn_now, c_now, tenure_pol, H_pol, S_pol,
+        c_owner_n, c_renter_n, tenure_a_grid, owner_a_grid, renter_a_grid,
+        H_nxt_grid, S_grid, w_dcsn_o, w_dcsn_r, Pi, beta, R, Pr, tau_phi,
+        alpha,
+        output_logs
+    ):
+        """
+        CUDA kernel to calculate Euler errors in parallel on the GPU.
+        """
+        iw, ih, iy = cuda.grid(3)
+        w_stride, h_stride, y_stride = cuda.gridsize(3)
+        
+        for i_w_loop in range(iw, w_dcsn_now.shape[0], w_stride):
+            for i_h_loop in range(ih, H_grid.shape[0], h_stride):
+                for i_y_loop in range(iy, z_vals.shape[0], y_stride):
 
-                    if τ == 1: # Owner
-                        # Use proper GPU interpolation
-                        h_idx_val = interp_gpu(a_next, owner_a_grid, H_pol[:, i_h_loop, jy])
-                        H1 = H_nxt_grid[int(h_idx_val)]
-                        w_dcsn_vals = (R * a_next + y_next - H1 + H_now - (tau_phi*H1 if H1 != H_now else 0.0))
-                        
-                        # Use proper GPU interpolation for consumption
-                        c1 = interp_gpu(w_dcsn_vals, w_dcsn_o, c_owner_n[:, int(h_idx_val), jy])
-                        lam_next = uc_owner_gpu(c1, H1, alpha)
-                        
-                    else: # Renter
-                        # Use proper GPU interpolation
-                        s_idx_val = interp_gpu(R * a_next + y_next, renter_a_grid, S_pol[:, jy])
-                        S1 = S_grid[int(s_idx_val)]
-                        # User-specified change: Keep renter wealth calculation as is
-                        w_dcsn_vals = (R * a_next + y_next + H_now - Pr * S1)
-                        
-                        # Use proper GPU interpolation for consumption
-                        c1 = interp_gpu(w_dcsn_vals, w_dcsn_r, c_renter_n[:, int(s_idx_val), jy])
-                        lam_next = uc_renter_gpu(c1, S1, alpha)
+                    w_now, H_now = w_dcsn_now[i_w_loop], H_grid[i_h_loop]
+                    c0 = c_now[i_w_loop, i_h_loop, i_y_loop]
+                    if c0 <= 1e-12: 
+                        continue
+                    a_next = w_now - c0
+                    if a_next <= 0.1: 
+                        continue
 
-                    E_lam += Pi[i_y_loop, jy] * lam_next
-                
-                c_star = inv_uc_owner_gpu(beta * R * E_lam, H_now, alpha)
-                output_logs[i_w_loop, i_h_loop, i_y_loop] = cuda.libdevice.log10(abs((c_star - c0)/ c0) + 1e-16)
+                    E_lam = 0.0
+                    for jy, y_next in enumerate(z_vals):
+                        # Use proper GPU interpolation function instead of manual loops
+                        tenure_val = interp_gpu(a_next, tenure_a_grid, tenure_pol[:, i_h_loop, jy])
+                        τ = int(tenure_val)
+
+                        if τ == 1: # Owner
+                            # Use proper GPU interpolation
+                            h_idx_val = interp_gpu(a_next, owner_a_grid, H_pol[:, i_h_loop, jy])
+                            H1 = H_nxt_grid[int(h_idx_val)]
+                            w_dcsn_vals = (R * a_next + y_next - H1 + H_now - (tau_phi*H1 if H1 != H_now else 0.0))
+                            
+                            # Use proper GPU interpolation for consumption
+                            c1 = interp_gpu(w_dcsn_vals, w_dcsn_o, c_owner_n[:, int(h_idx_val), jy])
+                            lam_next = uc_owner_gpu(c1, H1, alpha)
+                            
+                        else: # Renter
+                            # Use proper GPU interpolation
+                            s_idx_val = interp_gpu(R * a_next + y_next, renter_a_grid, S_pol[:, jy])
+                            S1 = S_grid[int(s_idx_val)]
+                            # User-specified change: Keep renter wealth calculation as is
+                            w_dcsn_vals = (R * a_next + y_next + H_now - Pr * S1)
+                            
+                            # Use proper GPU interpolation for consumption
+                            c1 = interp_gpu(w_dcsn_vals, w_dcsn_r, c_renter_n[:, int(s_idx_val), jy])
+                            lam_next = uc_renter_gpu(c1, S1, alpha)
+
+                        E_lam += Pi[i_y_loop, jy] * lam_next
+                    
+                    c_star = inv_uc_owner_gpu(beta * R * E_lam, H_now, alpha)
+                    output_logs[i_w_loop, i_h_loop, i_y_loop] = cuda.libdevice.log10(abs((c_star - c0)/ c0) + 1e-16)
 
 def calculate_euler_error_gpu(model, sample_size=10000, debug=False):
     """
@@ -77,6 +91,12 @@ def calculate_euler_error_gpu(model, sample_size=10000, debug=False):
     debug : bool
         Whether to print debug information
     """
+    # Fall back to CPU if CUDA is not available
+    if not CUDA_AVAILABLE:
+        if debug:
+            print("[GPU Euler] CUDA not available, falling back to CPU")
+        return calculate_euler_error_cpu(model, debug=debug)
+    
     p0, p1 = model.get_period(0), model.get_period(1)
     ownc_now = p0.get_stage("OWNC")
     ownc, tenu, ownh, rnth, rntc = (p1.get_stage("OWNC"), p1.get_stage("TENU"), p1.get_stage("OWNH"),

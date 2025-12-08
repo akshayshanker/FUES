@@ -39,7 +39,7 @@ if [[ -n "${FUES_CONFIG:-}" ]]; then
     CONFIG_NAME="$FUES_CONFIG"
     echo "Using configuration from FUES_CONFIG: $CONFIG_NAME"
 else
-    CONFIG_NAME="HIGH_RES_SETTINGS_C_PB"
+    CONFIG_NAME="HIGH_RES_SETTINGS_A_PB"
     echo "Using default configuration: $CONFIG_NAME"
 fi
 
