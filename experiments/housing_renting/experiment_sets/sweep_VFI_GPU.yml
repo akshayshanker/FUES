@@ -1,0 +1,39 @@
+# VFI_HDGRID_GPU Sweep Experiment Set
+# =====================================
+# For computing VFI baselines on GPU across H_points variations
+# Uses MPI across multiple GPUs - each rank processes one configuration
+#
+# Total configs: 1 method × 1 grid_size × 3 H_sizes = 3 configs
+# With 4 GPUs: all 3 configs run in parallel (1 GPU idle)
+#
+# Usage: qsub run_sweep_vfi_gpu.pbs
+
+# Parameter paths for bundle hashing (must match design matrix column order)
+param_paths:
+  - master.methods.upper_envelope    # Method (excluded from hash via method_param_path)
+  - master.settings.a_points         # Asset grid points
+  - master.settings.H_points         # Housing/Services grid points
+
+# Sweep configuration
+sweep:
+  # Single method for GPU baseline sweep
+  methods:
+    - VFI_HDGRID_GPU
+  
+  # Single high-resolution grid size for benchmark baseline
+  # Note: Use integers, not scientific notation (YAML treats 1E5 as string)
+  grid_sizes:
+    - 200000
+  
+  # Housing grid sizes (H_points = S_points)
+  H_sizes:
+    - 7
+    - 10
+    - 15
+
+# Fixed parameters (not in sweep)
+fixed:
+  delta_pb: 1
+  periods: 20
+  vfi_ngrid: 50000  # VFI brute-force search points (use integer, not 1E6)
+

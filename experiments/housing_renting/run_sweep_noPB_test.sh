@@ -80,32 +80,27 @@ TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 RUN_ID="${TRIAL_ID}_${TIMESTAMP}"
 LOG_DIR="$SCRIPT_DIR/logs"
 OUTPUT_DIR="/scratch/tp66/$USER/FUES/solutions/housing_renting/${CONFIG_ID}-${TRIAL_ID}"
-EXPERIMENT_YAML="$SCRIPT_DIR/experiment_sets/${EXPERIMENT_SET}.yml"
 
 mkdir -p "$LOG_DIR"
 mkdir -p "$OUTPUT_DIR"
-
-# Read periods from experiment set YAML
-PERIODS=$(python3 -c "import yaml; print(yaml.safe_load(open('$EXPERIMENT_YAML'))['fixed']['periods'])")
-echo "Periods from YAML: $PERIODS"
 
 echo "========================================================"
 echo "Parameter Sweep Test: ${EXPERIMENT_SET}"
 echo "Config ID: ${CONFIG_ID}"
 echo "Trial ID: ${TRIAL_ID}"
-echo "Periods: ${PERIODS}"
 echo "Output: ${OUTPUT_DIR}"
 echo "Mode: MPI (${PBS_NCPUS:-12} ranks)"
+echo "Note: periods/vfi_ngrid read from experiment set YAML"
 echo "========================================================"
 
 # Run sweep with MPI
+# Note: periods/vfi_ngrid come from experiment set YAML fixed section
 mpirun -np ${PBS_NCPUS:-12} python3 -m examples.housing_renting.solve_runner \
     --sweep \
     --experiment-set "${EXPERIMENT_SET}" \
     --config-id "${CONFIG_ID}" \
     --output-root "$OUTPUT_DIR" \
     --RUN-ID "$RUN_ID" \
-    --periods "$PERIODS" \
     --mpi \
     --metrics "euler_error" \
     --fresh-fast \

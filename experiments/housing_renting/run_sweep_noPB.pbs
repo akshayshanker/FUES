@@ -101,13 +101,13 @@ echo "========================================================"
 
 # Run sweep with MPI
 # Each rank gets one (method, grid_size, H_points) combination
+# Note: periods/vfi_ngrid come from experiment set YAML fixed section
 mpirun -np ${MPI_RANKS} python3 -m examples.housing_renting.solve_runner \
     --sweep \
     --experiment-set "sweep_noPB" \
     --config-id "${CONFIG_ID}" \
     --output-root "$OUTPUT_DIR" \
     --RUN-ID "$RUN_ID" \
-    --periods 5 \
     --mpi \
     --metrics "euler_error" \
     --fresh-fast \

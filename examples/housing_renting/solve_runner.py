@@ -432,8 +432,18 @@ def make_housing_solver(args, use_mpi: bool, comm, baseline_method=None):
             final_period.get_stage(tag).status_flags["is_terminal"] = True
         
         # 1b. Warm up GPU kernels if using GPU solver (happens once before solving)
-        # Use baseline_method passed from outer scope
-        solver_method = baseline_method or ""
+        # Detect method from model config (works for sweep mode where baseline_method=None)
+        # The method is set in the config by patch_cfg() during model creation
+        if baseline_method:
+            solver_method = baseline_method
+        else:
+            # Get method from stage model (reliable across all modes)
+            try:
+                stage = mc.get_period(0).get_stage("OWNC")
+                solver_method = stage.model.methods.get("upper_envelope", "")
+            except (AttributeError, KeyError):
+                solver_method = ""
+        
         if solver_method.endswith("_GPU") and (comm is None or comm.rank == 0):
             try:
                 from src.dc_smm.models.housing_renting.horses_c_gpu import warmup_gpu_kernels
@@ -732,11 +742,21 @@ def main(argv=None):
         # Need to patch base config with fixed params (H_points -> S_points sync)
         sweep_base_cfg = copy.deepcopy(model_config)
         
-        # Set fixed parameters
+        # Set fixed parameters from sweep config (override command-line args)
         if "delta_pb" in fixed_params:
             sweep_base_cfg["master"]["parameters"]["delta_pb"] = fixed_params["delta_pb"]
+        
+        # Use periods from sweep config if specified, otherwise fall back to args
+        sweep_periods = fixed_params.get("periods", args.periods)
         if "periods" in fixed_params:
             sweep_base_cfg["master"]["horizon"] = fixed_params["periods"]
+            if is_root:
+                print(f"  Using periods from sweep config: {sweep_periods}")
+        
+        # Use vfi_ngrid from sweep config if specified, otherwise fall back to args
+        sweep_vfi_ngrid = int(float(fixed_params.get("vfi_ngrid", args.vfi_ngrid)))
+        if "vfi_ngrid" in fixed_params and is_root:
+            print(f"  Using vfi_ngrid from sweep config: {sweep_vfi_ngrid}")
         
         # Baseline reference params (for comparison metrics) — reuse existing baseline bundles
         sweep_ref_params = None
@@ -752,11 +772,22 @@ def main(argv=None):
             # Get grid multiplier from settings (default to 1 if not set)
             a_grid_mult = cfg["master"]["settings"].get("a_grid_multiplier", 1)
             
+            # Get the method from config to check if it's VFI-based
+            method = cfg["master"]["methods"].get("upper_envelope", "")
+            
             # Apply multiplier to a_points and a_nxt_points (w_points stays at base)
+            # BUT skip for VFI methods - they need all grids to match exactly
             a_points = cfg["master"]["settings"]["a_points"]
-            cfg["master"]["settings"]["a_points"] = a_points * a_grid_mult
-            cfg["master"]["settings"]["a_nxt_points"] = a_points * a_grid_mult
-            cfg["master"]["settings"]["w_points"] = a_points
+            if method in ["VFI_HDGRID", "VFI_HDGRID_GPU", "VFI", "VFI_POOL"]:
+                # VFI methods: all grid sizes must be identical
+                cfg["master"]["settings"]["a_points"] = a_points
+                cfg["master"]["settings"]["a_nxt_points"] = a_points
+                cfg["master"]["settings"]["w_points"] = a_points
+            else:
+                # EGM methods: apply multiplier to a_points/a_nxt_points, keep w_points at base
+                cfg["master"]["settings"]["a_points"] = a_points * a_grid_mult
+                cfg["master"]["settings"]["a_nxt_points"] = a_points * a_grid_mult
+                cfg["master"]["settings"]["w_points"] = a_points
             
             # Sync H_points -> S_points (both are in settings, not parameters)
             H_points = cfg["master"]["settings"]["H_points"]
@@ -764,7 +795,8 @@ def main(argv=None):
             
             # NOTE: Pass comm=None so each MPI rank compiles its own model independently.
             # In sweep mode with mpi_map, each rank works on different configs in parallel.
-            return make_housing_model(args, cfg, args.periods, vf_ngrid, comm=None)
+            # Use sweep_periods and sweep_vfi_ngrid from fixed params (not args)
+            return make_housing_model(args, cfg, sweep_periods, sweep_vfi_ngrid, comm=None)
         
         # NOTE: In sweep mode with mpi_map, each rank solves different configs independently.
         # Pass use_mpi=False and comm=None so each rank:
@@ -788,6 +820,51 @@ def main(argv=None):
         
         trace_print(f"SWEEP: Running mpi_map with {len(design_matrix)} configurations")
         
+        # Add plot generation metric if plots requested (runs locally on each rank)
+        if args.plots or args.csv_export:
+            plot_config = settings.get_plot_config()
+            
+            def sweep_plot_metric(model, cfg, runner):
+                """Generate plots for each sweep config - runs locally on each MPI rank."""
+                try:
+                    # Get method from config
+                    method = cfg.get("master", {}).get("methods", {}).get("upper_envelope", "UNKNOWN")
+                    
+                    # Build param vector for hashing
+                    param_vec = runner._extract_param_vec(cfg, runner._cfg_param_paths)
+                    param_hash = runner._hash_param_vec(param_vec)
+                    bundle_path = runner._bundle_path(param_hash, method)
+                    
+                    if bundle_path:
+                        bundle_images_dir = bundle_path / f"images_{timestamp_suffix}"
+                    else:
+                        bundle_images_dir = Path(runner.output_root) / f"images_{timestamp_suffix}" / method
+                    bundle_images_dir.mkdir(parents=True, exist_ok=True)
+                    
+                    # Handle CSV export
+                    if args.csv_export:
+                        print(f"  [Sweep] Exporting CSV for {method} to {bundle_images_dir}")
+                        csv_generate_plots(model, method, bundle_images_dir,
+                                         egm_bounds=plot_config['egm_bounds'],
+                                         skip_egm_plots=args.skip_egm_plots)
+                    
+                    # Handle matplotlib plots
+                    if args.plots:
+                        plot_output_dir = bundle_images_dir / method
+                        plot_output_dir.mkdir(parents=True, exist_ok=True)
+                        print(f"  [Sweep] Generating plots for {method} to {plot_output_dir}")
+                        generate_plots(model, method, plot_output_dir,
+                                     egm_bounds=plot_config['egm_bounds'],
+                                     skip_egm_plots=args.skip_egm_plots)
+                    
+                    return 1  # Success indicator
+                except Exception as err:
+                    print(f"[warn] sweep plot-gen failed: {err}")
+                    return 0  # Failure indicator
+            
+            # Add to metric functions (runs on each rank for its assigned configs)
+            sweep_runner.metric_fns["_sweep_plots"] = sweep_plot_metric
+        
         # Run sweep using mpi_map
         # Note: mpi_map returns None on non-root ranks when MPI is enabled
         result = mpi_map(
@@ -795,7 +872,7 @@ def main(argv=None):
             design_matrix, 
             mpi=args.mpi, 
             comm=comm,
-            return_models=False
+            return_models=False  # Don't gather models - plots generated via metric
         )
         
         # Handle None return on non-root MPI ranks

@@ -1,0 +1,158 @@
+#!/bin/bash
+#PBS -N sweep-vfi-gpu
+#PBS -P tp66
+#PBS -q gpuhopper
+#PBS -l ncpus=36,mem=675GB,walltime=10:00:00
+#PBS -l ngpus=3
+#PBS -l storage=gdata/tp66+scratch/tp66
+#PBS -l wd
+#PBS -j oe
+#PBS -r y
+#PBS -o logs/
+
+# ======================================================================
+#  VFI_HDGRID_GPU Parameter Sweep - Multi-GPU with MPI
+# ======================================================================
+#  Uses MPI to distribute H_points configs across GPUs.
+#  Each MPI rank binds to one GPU using OMPI_COMM_WORLD_LOCAL_RANK.
+#
+#  H200 node: 4 GPUs × 12 CPUs/GPU = 48 CPUs, ~1TB RAM
+#  This job: 3 GPUs, 3 MPI ranks (one config per GPU)
+#  Configs: 3 (grid=20000 × H_sizes=[7,10,15]) - all run in parallel
+#
+#  For more configs, adjust experiment_sets/sweep_VFI_GPU.yml
+# ======================================================================
+
+set -euo pipefail
+
+# --- Path Setup ---
+if [[ -n "${PBS_O_WORKDIR:-}" ]]; then
+    SCRIPT_DIR="$PBS_O_WORKDIR"
+    REPO_ROOT="$(cd "$PBS_O_WORKDIR/../.." && pwd)"
+else
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+fi
+
+# --- Environment Setup ---
+module purge
+module load python3/3.12.1
+module load cuda/12.9.0
+module load openmpi/4.1.5
+
+VENV_PUBLIC="${VENV_PUBLIC:-/scratch/tp66/$USER/venvs/fues_public}"
+source "$VENV_PUBLIC/bin/activate"
+
+export FUES_HOME="$REPO_ROOT"
+export PYTHONPATH="$FUES_HOME/src:$FUES_HOME${PYTHONPATH:+:$PYTHONPATH}"
+cd "$FUES_HOME"
+
+# --- GPU + MPI Configuration ---
+# Each MPI rank will set CUDA_VISIBLE_DEVICES based on local rank
+# This is handled by the wrapper script below
+export CUDA_ARCH_BIN="9.0"
+export CUDA_ARCH_PTX="9.0"
+export CUBLAS_MATH_MODE="TENSOR_OP"
+export CUDA_MODULE_LOADING=EAGER
+
+# MPI settings
+export OMP_NUM_THREADS=1
+export NUMBA_NUM_THREADS=12  # Each rank gets 12 CPUs
+
+# Numba cache - separate per rank to avoid conflicts
+export NUMBA_CACHE_DIR=/scratch/tp66/$USER/numba_cache_gpu_sweep
+rm -rf "$NUMBA_CACHE_DIR"
+mkdir -p "$NUMBA_CACHE_DIR"
+
+export NUMBA_CUDA_MAX_THREADS=1024
+export NUMBA_CUDA_DEFAULT_PTX_CC="9.0"
+export NUMBA_CUDA_COMPUTE_CAPABILITY="9.0"
+
+# Suppress verbose output
+export OMPI_MCA_coll_hcoll_enable=0
+export OMPI_MCA_coll=^hcoll
+export PMIX_MCA_gds=hash
+export MAKEMOD_QUIET=true
+export PERIOD_QUIET=true
+export SHOCKS_QUIET=true
+
+# --- Sweep Configuration ---
+CONFIG_ID="test_0.1"
+TRIAL_ID="vfi-gpu-sweep"
+TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
+LOG_DIR="$SCRIPT_DIR/logs"
+OUTPUT_DIR="/scratch/tp66/$USER/FUES/solutions/housing_renting/${CONFIG_ID}-${TRIAL_ID}"
+
+mkdir -p "$LOG_DIR" "$OUTPUT_DIR"
+
+# Number of GPUs (MPI ranks) - matches number of configs
+N_GPUS=3
+
+echo "========================================================"
+echo "VFI_HDGRID_GPU Parameter Sweep"
+echo "Config ID: ${CONFIG_ID}"
+echo "Trial ID: ${TRIAL_ID}"
+echo "GPUs: ${N_GPUS}"
+echo "Output: ${OUTPUT_DIR}"
+echo "========================================================"
+echo ""
+echo "GPU Information:"
+nvidia-smi --query-gpu=index,name,memory.total --format=csv
+echo ""
+
+# --- Create GPU-binding wrapper ---
+# This wrapper sets CUDA_VISIBLE_DEVICES based on MPI local rank
+# BEFORE Python imports numba.cuda
+GPU_WRAPPER="$SCRIPT_DIR/.gpu_wrapper_$$.sh"
+cat > "$GPU_WRAPPER" << 'WRAPPER_EOF'
+#!/bin/bash
+# Set GPU based on local MPI rank
+export CUDA_VISIBLE_DEVICES=$OMPI_COMM_WORLD_LOCAL_RANK
+echo "Rank $OMPI_COMM_WORLD_RANK (local $OMPI_COMM_WORLD_LOCAL_RANK) using GPU $CUDA_VISIBLE_DEVICES"
+exec python3 "$@"
+WRAPPER_EOF
+chmod +x "$GPU_WRAPPER"
+
+# --- Run Sweep ---
+echo "Starting VFI_HDGRID_GPU sweep at $(date)"
+
+# Note: In sweep mode, method/periods/vfi_ngrid come from experiment set (sweep_VFI_GPU.yml)
+# --fresh-fast forces computation (--recompute-baseline only works in standard mode)
+# --baseline-method is VFI_HDGRID_GPU since we're computing baselines
+mpirun -np ${N_GPUS} "$GPU_WRAPPER" -m examples.housing_renting.solve_runner \
+    --sweep \
+    --experiment-set "sweep_VFI_GPU" \
+    --config-id "${CONFIG_ID}" \
+    --output-root "$OUTPUT_DIR" \
+    --RUN-ID "${TRIAL_ID}_${TIMESTAMP}" \
+    --baseline-method "VFI_HDGRID_GPU" \
+    --include-baseline \
+    --fresh-fast \
+    --mpi \
+    --gpu \
+    --metrics "euler_error" \
+    --plots \
+    --skip-egm-plots \
+    --trace \
+    --low-memory \
+    2> >(tee "${LOG_DIR}/sweep_vfi_gpu_${TIMESTAMP}.err") \
+    1> >(tee "${LOG_DIR}/sweep_vfi_gpu_${TIMESTAMP}.log")
+
+EXIT_CODE=$?
+
+# Cleanup wrapper
+rm -f "$GPU_WRAPPER"
+
+if [ $EXIT_CODE -ne 0 ]; then
+    echo "ERROR: Sweep failed with exit code: $EXIT_CODE" >&2
+    exit $EXIT_CODE
+fi
+
+echo ""
+echo "========================================================"
+echo "VFI_HDGRID_GPU sweep completed at $(date)"
+echo "Results saved to: $OUTPUT_DIR"
+echo "========================================================"
+
+exit 0
+
