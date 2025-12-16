@@ -1,22 +1,33 @@
 
+import os
 import numpy as np
 from numba import jit
 import time
 import dill as pickle
 from numba import njit, prange
 
-from HARK.interpolation import LinearInterp
+# LinearInterp import removed - was unused
 #from HARK.dcegm import calc_segments, calc_multiline_envelope, calc_cross_points
 from HARK.dcegm import calc_nondecreasing_segments, upper_envelope, calc_linear_crossing
 from interpolation import interp
 
+# Control verbose output with environment variable
+DCEGM_VERBOSE = os.environ.get("DCEGM_VERBOSE", "0") == "1"
+
  # Plot them, and store them as [m, v] pairs
 
-def dcegm(c, dela, vf, a_prime, x):
+def dcegm(c, dela, vf, a_prime, x, verbose=None):
     
     #(vf)
 
-    start, end = calc_nondecreasing_segments(x, vf)
+    start, end = calc_nondecreasing_segments(x, x)
+    
+    # Debug: print segment info (use env var if verbose not explicitly set)
+    if verbose is None:
+        verbose = DCEGM_VERBOSE
+    if verbose:
+        print(f"[DCEGM] Grid size: {len(x)}, Non-decreasing segments: {len(start)}")
+    
     segments = []
     c_segments = []
     a_segments = []
@@ -34,12 +45,16 @@ def dcegm(c, dela, vf, a_prime, x):
         m_segments.append(x[idx])
         v_segments.append(vf[idx])
         dela_segments.append(dela[idx])
+    
+    #print("a_segments", m_segments)
 
     m_upper, v_upper, inds_upper = upper_envelope(segments, calc_crossings=False)
-    c1_env = np.zeros_like(m_upper) + np.nan
-    a1_env = np.zeros_like(m_upper) + np.nan
-    v1_env = np.zeros_like(m_upper) + np.nan
-    d1_env = np.zeros_like(m_upper) + np.nan
+    # Use np.full instead of zeros_like + nan (avoids creating 2 arrays per output)
+    n_upper = len(m_upper)
+    c1_env = np.full(n_upper, np.nan)
+    a1_env = np.full(n_upper, np.nan)
+    v1_env = np.full(n_upper, np.nan)
+    d1_env = np.full(n_upper, np.nan)
 
     for k, c_segm in enumerate(c_segments):
         c1_env[inds_upper == k] = c_segm[m_segments[k].searchsorted(
@@ -55,7 +70,7 @@ def dcegm(c, dela, vf, a_prime, x):
     for k, dela_segm in enumerate(dela_segments):
         d1_env[inds_upper == k] = np.interp(m_upper[inds_upper == k], m_segments[k], dela_segm)
 
-    a1_up = LinearInterp(m_upper, a1_env)
+    # Note: LinearInterp was previously created here but never used - removed
     indices = np.where(np.in1d(a1_env, a_prime))[0]
     a1_env2 = a1_env[indices]
     m_upper2 = m_upper[indices]

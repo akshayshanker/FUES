@@ -1,10 +1,18 @@
 # Sweep Experiment Set - No Price Bound Variation
 # ================================================
 # For sweeping over grid sizes and H_points across methods
-# Trial ID: paper-v1
 #
 # This configuration is for running parameter sweeps using mpi_map.
 # Each MPI rank solves one (method, grid_size, H_points) combination.
+
+# Experiment identification
+config_id: "test_0.1"
+trial_id: "paper-sweep"  # Shared with sweep_VFI_GPU for baseline lookup
+output_dir: "/scratch/tp66/${USER}/FUES/solutions/housing_renting"  # Base output directory
+
+# Reference method for baseline comparison
+# ref_params uses same sweep params but with method=ref_method and ref_params_override applied
+ref_method: VFI_HDGRID_GPU
 
 # Parameter paths passed to CircuitRunner
 # These define what goes into the bundle hash.
@@ -41,4 +49,9 @@ sweep:
 # Fixed parameters (not in sweep)
 fixed:
   delta_pb: 1
-  periods: 10
+  periods: 20
+
+# Override specific params when constructing ref_params
+# (ref_params = sweep params with method=ref_method + these overrides)
+ref_params_override:
+  grid_sizes: 200000  # Compare fast methods to high-res VFI baseline

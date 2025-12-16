@@ -79,12 +79,18 @@ python3 -c "import numba; import quantecon; print('Numba version:', numba.__vers
 }
 
 # --- Sweep Configuration ---
-CONFIG_ID="test_0.1"
-TRIAL_ID="paper-v1"
+EXPERIMENT_SET="sweep_noPB"
+EXPERIMENT_SET_FILE="$SCRIPT_DIR/experiment_sets/${EXPERIMENT_SET}.yml"
+
+# Read config from YAML (falls back to defaults if not found)
+CONFIG_ID=$(python3 -c "import yaml; d=yaml.safe_load(open('$EXPERIMENT_SET_FILE')); print(d.get('config_id', 'test_0.1'))")
+TRIAL_ID=$(python3 -c "import yaml; d=yaml.safe_load(open('$EXPERIMENT_SET_FILE')); print(d.get('trial_id', 'sweep-noPB'))")
+OUTPUT_BASE=$(python3 -c "import yaml,os; d=yaml.safe_load(open('$EXPERIMENT_SET_FILE')); print(os.path.expandvars(d.get('output_dir', '/scratch/tp66/\$USER/FUES/solutions/housing_renting')))")
+
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 RUN_ID="${TRIAL_ID}_${TIMESTAMP}"
 LOG_DIR="$SCRIPT_DIR/logs"
-OUTPUT_DIR="/scratch/tp66/$USER/FUES/solutions/housing_renting/${CONFIG_ID}-${TRIAL_ID}"
+OUTPUT_DIR="${OUTPUT_BASE}/${CONFIG_ID}-${TRIAL_ID}"
 
 mkdir -p "$LOG_DIR"
 mkdir -p "$OUTPUT_DIR"
@@ -104,7 +110,7 @@ echo "========================================================"
 # Note: periods/vfi_ngrid come from experiment set YAML fixed section
 mpirun -np ${MPI_RANKS} python3 -m examples.housing_renting.solve_runner \
     --sweep \
-    --experiment-set "sweep_noPB" \
+    --experiment-set "${EXPERIMENT_SET}" \
     --config-id "${CONFIG_ID}" \
     --output-root "$OUTPUT_DIR" \
     --RUN-ID "$RUN_ID" \

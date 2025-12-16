@@ -1,7 +1,14 @@
 # Small Sweep Experiment Set - For Testing
 # ==========================================
 # Smaller grid for quick testing of sweep mode
-# Trial ID: paper-v1-test
+
+# Experiment identification
+config_id: "paper-v1-test"
+trial_id: "sweep-noPB-small"
+output_dir: "/scratch/tp66/${USER}/FUES/solutions/housing_renting"  # Base output directory
+
+# Reference method for baseline comparison
+ref_method: VFI_HDGRID_GPU
 
 param_paths:
   - master.methods.upper_envelope    # Method (excluded from hash)
@@ -31,4 +38,8 @@ sweep:
 # Fixed parameters
 fixed:
   delta_pb: 1
-  periods: 10
+  periods: 20
+
+# Override params when constructing ref_params for baseline comparison
+ref_params_override:
+  grid_sizes: 200000  # Compare to high-res VFI baseline

@@ -224,14 +224,31 @@ def set_mpi_rank(rank: int):
     global _MPI_RANK
     _MPI_RANK = rank
 
-def trace_print(message, force_all_ranks=False):
-    """Print trace message only if tracing is enabled and rank is 0"""
-    if _TRACE_ENABLED and (force_all_ranks or _MPI_RANK == 0):
+# Trace verbosity: 0=off, 1=major milestones only, 2=all details
+_TRACE_VERBOSITY = 1
+
+def trace_print(message, force_all_ranks=False, detail=False):
+    """Print trace message only if tracing is enabled and rank is 0.
+    
+    Args:
+        message: Message to print
+        force_all_ranks: Print on all MPI ranks (default: only rank 0)
+        detail: If True, only print when verbosity >= 2 (default: False)
+    """
+    if not _TRACE_ENABLED:
+        return
+    if detail and _TRACE_VERBOSITY < 2:
+        return
+    if force_all_ranks or _MPI_RANK == 0:
         print(f"[TRACE] {message}", flush=True)
 
 # Note: Early trace prints (before MPI init) go to rank 0 since _MPI_RANK defaults to 0
-trace_print("0.1: Starting imports")
+# These are detail traces - only shown at verbosity 2
 import argparse
+try:
+    from helpers.cli import create_argument_parser
+except ImportError:
+    from .helpers.cli import create_argument_parser
 import copy
 import sys
 import time
@@ -240,16 +257,16 @@ from pathlib import Path
 import gc
 import resource
 
-trace_print("0.2: Basic imports done")
+trace_print("0.2: Basic imports done", detail=True)
 import numpy as np
 import pandas as pd
 
-trace_print("0.3: Numpy/Pandas imported")
+trace_print("0.3: Numpy/Pandas imported", detail=True)
 from dynx.runner import CircuitRunner, write_design_matrix_csv
 from dynx.stagecraft.io import load_config
 from dynx.stagecraft.makemod import initialize_model_Circuit, compile_all_stages
 
-trace_print("0.4: DynX imports done")
+trace_print("0.4: DynX imports done", detail=True)
 
 # ────────────────────────────────────────────────────────────────────────────
 #  local helpers (imported lazily to keep fall-back stubs tiny)
@@ -273,29 +290,36 @@ except ImportError:
     from .helpers.memory_utils import MemoryMonitor, log_memory_usage, cleanup_if_needed, get_memory_config, get_memory_usage, get_available_memory
     from .helpers.execution_settings import ExecutionSettings
 
-trace_print("0.5: Local helpers imported")
+trace_print("0.5: Local helpers imported", detail=True)
 
 CFG_DIR = Path(__file__).parent / "config_HR"
 
-trace_print("0.6: Constants and globals set")
+trace_print("0.6: Constants and globals set", detail=True)
 
 
-def cleanup_model(model, aggressive=False):
+def cleanup_model(model, aggressive=False, preserve_period_0=True):
     """Clean up model data to free memory.
-    
+
     Parameters
     ----------
     model : ModelCircuit
         The model to clean up
     aggressive : bool
         If True, clear all solution data. If False, keep only essential data.
+    preserve_period_0 : bool
+        If True, preserve period 0 data for plotting (Q, lambda, EGM grids).
+        Default: True.
     """
     if model is None:
         return
-        
+
     try:
         # Clear large arrays from all periods and stages
         for period_idx in range(len(model.periods_list)):
+            # Skip period 0 if preserving for plots
+            if preserve_period_0 and period_idx == 0:
+                continue
+                
             period = model.get_period(period_idx)
             for stage_name, stage in period.stages.items():
                 for perch_name, perch in stage.perches.items():
@@ -311,7 +335,7 @@ def cleanup_model(model, aggressive=False):
                                 # Just clear Q and lambda
                                 perch.sol._jit.Q = np.empty((0,), dtype=np.float64)
                                 perch.sol._jit.lambda_ = np.empty((0,), dtype=np.float64)
-                        
+
                         # Clear EGM intermediate arrays if present
                         if hasattr(perch.sol, '_jit') and hasattr(perch.sol._jit, 'EGM'):
                             for layer in ["unrefined", "refined", "interpolated"]:
@@ -387,16 +411,32 @@ def make_housing_model(args, cfg_container: dict, periods: int, vf_ngrid: int, c
     )
 
     # 3. numerically compile every Stage (grid creation, etc.)
-    try:
-        # Always compile when comm=None (sweep mode), otherwise only rank 0
-        # Use force=True to ensure grids are rebuilt with current config
-        if comm is None:
-            compile_all_stages(mc, force=True)  # Sweep mode: each rank compiles fresh
-        elif comm.rank == 0:
-            compile_all_stages(mc, force=False)  # Non-sweep: rank 0 compiles, skip if cached
-    except Exception as exc:
-        # logger.error("Stage compilation failed – aborting make_housing_model()", exc_info=True)
-        raise
+    # Skip if lazy_compile is enabled - compilation will happen per-period in run_time_iteration
+    lazy_compile = getattr(args, 'low_memory', False)
+    
+    if lazy_compile:
+        print("[INFO] Lazy compilation enabled - skipping upfront compile_all_stages")
+        # Still need to set num_rep on stages for lazy compilation to work
+        from dynx.heptapodx.core.api import generate_numerical_model
+        for period_idx in range(len(mc.periods_list)):
+            period = mc.get_period(period_idx)
+            for stage_name, stage in period.stages.items():
+                if stage.num_rep is None:
+                    stage.num_rep = generate_numerical_model
+    else:
+        try:
+            # Always compile when comm=None (sweep mode), otherwise only rank 0
+            # Use force=True to ensure grids are rebuilt with current config
+            if comm is None:
+                compile_all_stages(mc, force=True)  # Sweep mode: each rank compiles fresh
+            elif comm.rank == 0:
+                compile_all_stages(mc, force=False)  # Non-sweep: rank 0 compiles, skip if cached
+        except Exception as exc:
+            # logger.error("Stage compilation failed – aborting make_housing_model()", exc_info=True)
+            raise
+    
+    # DEBUG: Print model info to trace period mismatch
+    print(f"[DEBUG] make_housing_model: periods param={periods}, model has {len(mc.periods_list)} periods, cfg horizon={cfg['master'].get('horizon', 'NOT SET')}")
 
     # 4. Add runtime flags to model settings for operators to use
     # This allows solver operators to skip expensive operations when not needed
@@ -410,6 +450,71 @@ def make_housing_model(args, cfg_container: dict, periods: int, vf_ngrid: int, c
                     stage.model.settings_dict['skip_egm_plots'] = args.skip_egm_plots
 
     return mc
+
+
+def make_sweep_model(cfg, args, sweep_periods: int, sweep_vfi_ngrid: int):
+    """
+    Model factory for sweep mode that syncs H_points -> S_points and applies grid multiplier.
+    
+    This is used by CircuitRunner in parameter sweep mode. Each configuration
+    gets its own model with appropriate grid settings based on the method type.
+    
+    Parameters
+    ----------
+    cfg : dict
+        Configuration dictionary with 'master', 'stages', 'connections' keys.
+    args : argparse.Namespace
+        Command-line arguments.
+    sweep_periods : int
+        Number of periods to solve (from sweep config or args).
+    sweep_vfi_ngrid : int
+        VFI grid size (from sweep config or args).
+    
+    Returns
+    -------
+    ModelCircuit
+        A fully initialized and compiled model circuit.
+    """
+    # DEBUG: Print horizon values to trace period mismatch
+    print(f"[DEBUG] make_sweep_model: sweep_periods={sweep_periods}, cfg horizon={cfg['master'].get('horizon', 'NOT SET')}")
+    
+    # Get grid multiplier from settings (default to 1 if not set)
+    a_grid_mult = cfg["master"]["settings"].get("a_grid_multiplier", 1)
+    
+    # Get the method from config to check if it's VFI-based
+    method = cfg["master"]["methods"].get("upper_envelope", "")
+    
+    # Apply multiplier to a_points and a_nxt_points (w_points stays at base)
+    # BUT skip for VFI methods - they need all grids to match exactly
+    a_points = cfg["master"]["settings"]["a_points"]
+    H_points = cfg["master"]["settings"]["H_points"]
+    
+    if method in ["VFI_HDGRID", "VFI_HDGRID_GPU"]:
+        # VFI methods: all grid sizes must be identical
+        cfg["master"]["settings"]["a_points"] = a_points
+        cfg["master"]["settings"]["a_nxt_points"] = a_points
+        cfg["master"]["settings"]["w_points"] = a_points
+    else:
+        # EGM methods: apply multiplier to a_points/a_nxt_points, keep w_points at base
+        cfg["master"]["settings"]["a_points"] = a_points * a_grid_mult
+        cfg["master"]["settings"]["a_nxt_points"] = a_points * a_grid_mult
+        cfg["master"]["settings"]["w_points"] = a_points
+    
+    # Sync H_points -> S_points (both are in settings, not parameters)
+    cfg["master"]["settings"]["S_points"] = H_points
+    
+    # NOTE: Pass comm=None so each MPI rank compiles its own model independently.
+    # In sweep mode with mpi_map, each rank works on different configs in parallel.
+    # Use sweep_periods and sweep_vfi_ngrid from fixed params (not args)
+    model = make_housing_model(args, cfg, sweep_periods, sweep_vfi_ngrid, comm=None)
+    
+    # Store original params on model for correct bundle path computation in metrics
+    model._sweep_params = {
+        'method': method,
+        'a_points': a_points,
+        'H_points': H_points,
+    }
+    return model
 
 
 # ---------------------------------------------------------------------
@@ -454,8 +559,12 @@ def make_housing_solver(args, use_mpi: bool, comm, baseline_method=None):
         # 2. backward time iteration
         # Free memory during solving if we're not saving the model
         free_memory = not getattr(args, 'save_full_model', False)
-        # For Euler error, we only need periods 0 and 1
+        # Keep periods 0 and 1: period 0 for plots, both for Euler error calculation
         periods_to_keep = [0, 1] if free_memory else None
+        # Enable lazy compilation in low-memory mode to reduce peak memory usage
+        # This compiles each period's grids just before solving, then clears them
+        lazy_compile = getattr(args, 'low_memory', False)
+        
         run_time_iteration(
             mc,
             n_periods=args.periods,
@@ -464,10 +573,57 @@ def make_housing_solver(args, use_mpi: bool, comm, baseline_method=None):
             recorder=recorder,
             free_memory=free_memory,
             periods_to_keep=periods_to_keep,
+            lazy_compile=lazy_compile,
         )
         return mc
 
     return _solve
+
+
+def cleanup_model_complete(model):
+    """Aggressively free ALL memory used by a model.
+    
+    Call this when an MPI process is done with a model and won't need it again.
+    This goes beyond cleanup_model() by deleting the entire model structure.
+    """
+    if model is None:
+        return
+    
+    import gc
+    
+    try:
+        # Clear all periods and stages completely
+        for period_idx in range(len(model.periods_list)):
+            period = model.get_period(period_idx)
+            for stage_name, stage in list(period.stages.items()):
+                # Clear all perch solutions
+                for perch_name in ["arvl", "dcsn", "cntn"]:
+                    perch = getattr(stage, perch_name, None)
+                    if perch is not None:
+                        if hasattr(perch, 'sol'):
+                            perch.sol = None
+                        if hasattr(perch, 'model'):
+                            perch.model = None
+                
+                # Clear stage model and numerical data
+                if hasattr(stage, 'model'):
+                    if hasattr(stage.model, 'num'):
+                        stage.model.num = None
+                    stage.model = None
+                
+                # Clear operators
+                if hasattr(stage, '_ops'):
+                    stage._ops = None
+        
+        # Clear periods list
+        if hasattr(model, 'periods_list'):
+            model.periods_list.clear()
+        
+    except Exception as e:
+        print(f"[cleanup_model_complete] Warning: {e}")
+    
+    # Force garbage collection
+    gc.collect()
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -481,54 +637,7 @@ def main(argv=None):
     
     trace_print("1: Starting main()")
     
-    p = argparse.ArgumentParser(
-        prog="solve_runner.py",
-        description="Solve baseline and fast UE methods for the HR model"
-    )
-    p.add_argument("--periods", type=int, default=3)
-    p.add_argument("--ue-method", default="ALL")
-    p.add_argument("--plots", action="store_true",
-                   help="Generate matplotlib plots")
-    p.add_argument("--skip-egm-plots", action="store_true",
-                   help="Skip EGM plots when --plots is enabled (keeps policy plots only, saves time)")
-    p.add_argument("--verbose", action="store_true")
-    p.add_argument("--output-root", default="solutions/HR")
-    p.add_argument("--config-id", default="HR",
-                   help="Identifier for config directory (config_HR/{config-id}/)")
-    p.add_argument("--experiment-set", default="default",
-                   help="Experiment set name from experiments/housing_renting/experiment_sets/")
-    p.add_argument("--vfi-ngrid", default="10000")
-    p.add_argument("--HD-points", default="10000")
-    p.add_argument("--grid-points", default="4000")
-    p.add_argument("--mpi", action="store_true")
-    p.add_argument("--fresh-fast", action="store_true")
-    p.add_argument("--recompute-baseline", action="store_true")
-    p.add_argument("--precompile", action="store_true", help="Run a small VFI job to pre-compile Numba functions.")
-    p.add_argument("--RUN-ID", default="")
-    p.add_argument("--stages-L2dev", default="OWNC")
-    p.add_argument("--delta-pb", default="1")
-    p.add_argument("--gpu", action="store_true")
-    p.add_argument("--baseline-method", default=None, 
-                   help="Baseline method to use (default: auto-detect based on --gpu flag)")
-    p.add_argument("--fast-methods", default=None,
-                   help="Comma-separated list of fast methods (default: FUES,CONSAV)")
-    p.add_argument("--include-baseline", action="store_true",
-                   help="Automatically include baseline method in the method list")
-    p.add_argument("--trace", action="store_true",
-                   help="Enable debug trace statements to help diagnose memory issues")
-    p.add_argument("--metrics", default="all",
-                   help="Comma-separated list of metrics to compute: euler_error, dev_c_L2, plots, all (default: all)")
-    p.add_argument("--low-memory", action="store_true",
-                   help="Enable low memory mode - clears Q and lambda arrays after solving to save memory")
-    p.add_argument("--comparison-metrics", default="dev_c_L2,plot_c_comparison,plot_v_comparison",
-                   help="Comma-separated list of comparison metrics that require baseline loading (default: dev_c_L2,plot_c_comparison,plot_v_comparison)")
-    p.add_argument("--csv-export", action="store_true",
-                   help="Export plot data to CSV files (includes both policy and EGM data)")
-    p.add_argument("--save-full-model", action="store_true",
-                   help="Keep all solution data in memory for saving. Disables memory freeing during solve. Default: False (free memory)")
-    p.add_argument("--sweep", action="store_true",
-                   help="Enable sweep mode: distribute (method, grid_size, H_points) combinations across MPI ranks using mpi_map")
-    
+    p = create_argument_parser()
     args = p.parse_args(argv or sys.argv[1:])
 
     # Generate timestamp suffix for image directories (shared across all plots in this run)
@@ -543,14 +652,14 @@ def main(argv=None):
     # Configure memory management based on environment
     memory_config = get_memory_config("cluster")  # Default to cluster settings
     
-    trace_print("2: Args parsed")
+    trace_print("2: Args parsed", detail=True)
 
     #  MPI communicator
     from dc_smm.helpers.mpi_utils import get_comm
     comm = get_comm(args.mpi)
     mpi_rank = comm.rank if comm else 0
     set_mpi_rank(mpi_rank)  # Set rank for trace_print filtering
-    trace_print(f"3: MPI comm created, rank={mpi_rank}")
+    trace_print(f"3: MPI comm created, rank={mpi_rank}", detail=True)
     
     # Log initial memory usage (rank 0 only)
     if mpi_rank == 0:
@@ -562,7 +671,7 @@ def main(argv=None):
 
     # Initialize execution settings
     settings = ExecutionSettings(args, CFG_DIR, timestamp_suffix=timestamp_suffix)
-    trace_print("4: Execution settings initialized")
+    trace_print("4: Execution settings initialized", detail=True)
     
     # Print settings summary
     is_root = (comm is None) or (comm.rank == 0)
@@ -572,23 +681,24 @@ def main(argv=None):
     vf_ngrid = settings.vf_ngrid
     output_root = settings.output_root
     cfg_dir_bundle = settings.cfg_dir_bundle
-    trace_print("5: Execution settings complete")
+    trace_print("5: Execution settings complete", detail=True)
     
     #  set-up runner ------------------------------------------------------
     model_config = load_config(settings.cfg_dir_bundle)
-    trace_print("6: Model config loaded")
+    trace_print("6: Model config loaded", detail=True)
 
     # Apply a_grid_multiplier in standard (non-sweep) runs:
     a_grid_mult = model_config["master"]["settings"].get("a_grid_multiplier", 1)
 
-    
-    save_by_default = is_root
+    # Skip bundle saving if --skip-bundle-save flag is set (useful for timing runs)
+    skip_bundle_save = getattr(args, 'skip_bundle_save', False)
+    save_by_default = is_root and not skip_bundle_save
     solver_rank = comm.rank if comm is not None else 0
-    trace_print(f"7: is_root={is_root}, solver_rank={solver_rank}")
+    trace_print(f"7: is_root={is_root}, solver_rank={solver_rank}", detail=True)
 
     # --- Optional Pre-compilation Step ---
     if args.precompile and is_root:
-        trace_print("8: Starting precompilation")
+        trace_print("8: Starting precompilation", detail=True)
         print("\n--- Running Numba Pre-compilation ---")
         
         # --- Create a minimal config for the pre-compilation run ---
@@ -617,12 +727,12 @@ def main(argv=None):
             if is_root:
                 print(f"--- Pre-compilation Failed: {e} ---", file=sys.stderr)
         
-        trace_print("9: Precompilation complete")
+        trace_print("9: Precompilation complete", detail=True)
 
     if comm is not None:
         comm.Barrier()
 
-    trace_print("10: Setting up metric functions")
+    trace_print("10: Setting up metric functions", detail=True)
     #  set-up plotting configuration -----------------------------------------------
     plot_config = settings.get_plot_config()
     
@@ -664,6 +774,9 @@ def main(argv=None):
 
     # Build metric_fns based on requested metrics from config
     metric_fns = {}
+    if is_root:
+        print(f"  [Metrics] requested_metrics from settings: {settings.requested_metrics}")
+        print(f"  [Metrics] AVAILABLE_METRICS keys: {list(AVAILABLE_METRICS.keys())}")
     for metric in settings.requested_metrics:
         if metric in AVAILABLE_METRICS:
             metric_fns[metric] = AVAILABLE_METRICS[metric]
@@ -671,7 +784,9 @@ def main(argv=None):
             if is_root:
                 print(f"Warning: Unknown metric '{metric}' requested, ignoring.")
 
-    trace_print(f"11: Selected metrics: {list(metric_fns.keys())}")
+    if is_root:
+        print(f"  [Metrics] Final metric_fns: {list(metric_fns.keys())}")
+    trace_print(f"11: Selected metrics: {list(metric_fns.keys())}", detail=True)
     
     # Precompile Euler error calculation if it's requested
     if "euler_error" in metric_fns and is_root:
@@ -685,35 +800,6 @@ def main(argv=None):
         else:
             print("  Warning: Euler error precompilation failed, will compile on first use")
     
-    trace_print("12: Creating CircuitRunner")
-    #  set-up main runner ------------------------------------------------------
-    # Load param_paths from experiment set
-    param_paths = ExecutionSettings.get_param_paths(args.experiment_set)
-    if is_root:
-        print(f"Using experiment set: {args.experiment_set}")
-        print(f"  param_paths: {param_paths}")
-    
-    runner = CircuitRunner(
-        base_cfg=model_config,
-        param_paths=param_paths,
-        model_factory=lambda cfg: make_housing_model(args,cfg, args.periods, vf_ngrid, comm),
-        solver=make_housing_solver(args, args.mpi, comm, baseline_method=settings.baseline_method),
-        metric_fns=metric_fns,
-        output_root=output_root,
-        bundle_prefix=args.config_id,  # Legacy param name in CircuitRunner
-        save_by_default=save_by_default,
-        load_if_exists=True,
-    )
-    trace_print("13: CircuitRunner created")
-    
-    trace_print(f"14: Needs baseline loading: {settings.needs_baseline}")
-    
-    # NOTE: this has to be consistent with whatever the metric L2 actually wants to do!
-    # TODO: make this more flexible, so that we can do L2dev on any stage. AND HARdwire it
-    runner.stages_to_load = [args.stages_L2dev]
-    runner.stages_to_save = [args.stages_L2dev]
-    trace_print(f"15: Stages configured: load={runner.stages_to_load}, save={runner.stages_to_save}")
-
     # ====================================================================
     #  SWEEP MODE: Use mpi_map to distribute across MPI ranks
     # ====================================================================
@@ -750,6 +836,8 @@ def main(argv=None):
         sweep_periods = fixed_params.get("periods", args.periods)
         if "periods" in fixed_params:
             sweep_base_cfg["master"]["horizon"] = fixed_params["periods"]
+            # CRITICAL: Update args.periods so solver uses correct value
+            args.periods = sweep_periods
             if is_root:
                 print(f"  Using periods from sweep config: {sweep_periods}")
         
@@ -758,45 +846,13 @@ def main(argv=None):
         if "vfi_ngrid" in fixed_params and is_root:
             print(f"  Using vfi_ngrid from sweep config: {sweep_vfi_ngrid}")
         
-        # Baseline reference params (for comparison metrics) — reuse existing baseline bundles
-        sweep_ref_params = None
-        if settings.needs_baseline:
-            sweep_ref_params = settings.get_baseline_params().copy()
-            if "delta_pb" in fixed_params:
-                sweep_ref_params[-1] = fixed_params["delta_pb"]
-            if is_root:
-                print(f"  Sweep baseline ref_params: {sweep_ref_params}")
+        # Reference method for baseline comparison (used by fast method sweeps)
+        ref_method = sweep_config.get("ref_method", None)
+        ref_params_override = sweep_config.get("ref_params_override", {})
         
-        def make_sweep_model(cfg):
-            """Model factory that syncs H_points -> S_points and applies grid multiplier"""
-            # Get grid multiplier from settings (default to 1 if not set)
-            a_grid_mult = cfg["master"]["settings"].get("a_grid_multiplier", 1)
-            
-            # Get the method from config to check if it's VFI-based
-            method = cfg["master"]["methods"].get("upper_envelope", "")
-            
-            # Apply multiplier to a_points and a_nxt_points (w_points stays at base)
-            # BUT skip for VFI methods - they need all grids to match exactly
-            a_points = cfg["master"]["settings"]["a_points"]
-            if method in ["VFI_HDGRID", "VFI_HDGRID_GPU", "VFI", "VFI_POOL"]:
-                # VFI methods: all grid sizes must be identical
-                cfg["master"]["settings"]["a_points"] = a_points
-                cfg["master"]["settings"]["a_nxt_points"] = a_points
-                cfg["master"]["settings"]["w_points"] = a_points
-            else:
-                # EGM methods: apply multiplier to a_points/a_nxt_points, keep w_points at base
-                cfg["master"]["settings"]["a_points"] = a_points * a_grid_mult
-                cfg["master"]["settings"]["a_nxt_points"] = a_points * a_grid_mult
-                cfg["master"]["settings"]["w_points"] = a_points
-            
-            # Sync H_points -> S_points (both are in settings, not parameters)
-            H_points = cfg["master"]["settings"]["H_points"]
-            cfg["master"]["settings"]["S_points"] = H_points
-            
-            # NOTE: Pass comm=None so each MPI rank compiles its own model independently.
-            # In sweep mode with mpi_map, each rank works on different configs in parallel.
-            # Use sweep_periods and sweep_vfi_ngrid from fixed params (not args)
-            return make_housing_model(args, cfg, sweep_periods, sweep_vfi_ngrid, comm=None)
+        if is_root and ref_method:
+            print(f"  ref_method: {ref_method}")
+            print(f"  ref_params_override: {ref_params_override}")
         
         # NOTE: In sweep mode with mpi_map, each rank solves different configs independently.
         # Pass use_mpi=False and comm=None so each rank:
@@ -806,62 +862,134 @@ def main(argv=None):
         sweep_runner = CircuitRunner(
             base_cfg=sweep_base_cfg,
             param_paths=sweep_param_paths,
-            model_factory=make_sweep_model,
+            method_param_path=sweep_param_paths[0],  # Exclude method from hash
+            model_factory=lambda cfg: make_sweep_model(cfg, args, sweep_periods, sweep_vfi_ngrid),
             solver=make_housing_solver(args, use_mpi=False, comm=None, baseline_method=None),
             metric_fns=metric_fns,
             output_root=output_root,
-            save_by_default=save_by_default,
+            save_by_default=not skip_bundle_save,  # Skip if --skip-bundle-save flag is set
             load_if_exists=not args.fresh_fast,
         )
-        if settings.needs_baseline and sweep_ref_params is not None:
-            sweep_runner.ref_params = sweep_ref_params
         sweep_runner.stages_to_load = [args.stages_L2dev]
         sweep_runner.stages_to_save = [args.stages_L2dev]
+        
+        # Store ref_method for baseline comparison
+        # Read design_matrix.csv from VFI sweep to get correct bundle paths (avoids hash mismatch)
+        # Note: pd (pandas) is imported at module level, Path is already imported
+        if ref_method:
+            design_csv = output_root / "design_matrix.csv"
+            ref_bundle_by_H = {}  # Map H -> bundle path
+            ref_grid = ref_params_override.get("grid_sizes", 20000)  # Required grid size
+            
+            if is_root:
+                print(f"  [Setup] Looking for design_matrix.csv at: {design_csv}")
+                print(f"  [Setup] design_csv.exists(): {design_csv.exists()}")
+            
+            if design_csv.exists():
+                df = pd.read_csv(design_csv)
+                if is_root:
+                    print(f"  [Setup] CSV columns: {list(df.columns)}")
+                    print(f"  [Setup] CSV rows: {len(df)}")
+                    print(f"  [Setup] Methods in CSV: {df['master.methods.upper_envelope'].unique().tolist() if 'master.methods.upper_envelope' in df.columns else 'N/A'}")
+                
+                # Filter for ref_method AND ref_grid
+                mask = (df['master.methods.upper_envelope'] == ref_method)
+                if 'master.settings.a_points' in df.columns:
+                    mask = mask & (df['master.settings.a_points'] == ref_grid)
+                vfi_rows = df[mask]
+                
+                if is_root:
+                    print(f"  [Setup] Filtered rows: {len(vfi_rows)}")
+                
+                for _, row in vfi_rows.iterrows():
+                    H = int(row['master.settings.H_points'])
+                    # Use bundle_dir if available, otherwise construct from param_hash
+                    bundle_dir = row.get('bundle_dir', '')
+                    if bundle_dir:
+                        # bundle_dir may be relative (hash/method) - prepend bundles path
+                        bundle_path = Path(bundle_dir)
+                        if not bundle_path.is_absolute():
+                            bundle_path = output_root / "bundles" / bundle_dir
+                        ref_bundle_by_H[H] = bundle_path
+                    elif 'param_hash' in row:
+                        # Construct path from hash
+                        h = row['param_hash']
+                        ref_bundle_by_H[H] = output_root / "bundles" / h / ref_method
+            
+            sweep_runner.ref_bundle_by_H = ref_bundle_by_H
+            
+            if is_root:
+                print(f"  [Setup] Looking for {ref_method} with grid={ref_grid}")
+                print(f"  [Setup] Loaded {len(ref_bundle_by_H)} VFI baselines from design_matrix.csv")
+                for H, path in sorted(ref_bundle_by_H.items()):
+                    exists = path.exists() if path else False
+                    print(f"  [Setup] H={H}: {path}, exists={exists}")
+
+            
+
         
         trace_print(f"SWEEP: Running mpi_map with {len(design_matrix)} configurations")
         
         # Add plot generation metric if plots requested (runs locally on each rank)
         if args.plots or args.csv_export:
             plot_config = settings.get_plot_config()
+            sweep_methods = sweep_config["methods"]  # Capture for closure
             
-            def sweep_plot_metric(model, cfg, runner):
+            def sweep_plot_metric(model):
                 """Generate plots for each sweep config - runs locally on each MPI rank."""
                 try:
-                    # Get method from config
-                    method = cfg.get("master", {}).get("methods", {}).get("upper_envelope", "UNKNOWN")
+                    from pathlib import Path
+
+                    # Get params from model (stored by make_sweep_model for correct bundle hashing)
+                    if hasattr(model, '_sweep_params'):
+                        method = model._sweep_params['method']
+                        a_points = model._sweep_params['a_points']
+                        H_points = model._sweep_params['H_points']
+                    else:
+                        # Fallback to extracting from grid (may produce incorrect bundle paths)
+                        first_period = model.get_period(0)
+                        ownc_stage = first_period.get_stage("OWNC")
+                        a_points = ownc_stage.dcsn.grid.w.shape[0] if hasattr(ownc_stage.dcsn.grid, 'w') else 0
+                        H_points = len(ownc_stage.dcsn.grid.H_nxt) if hasattr(ownc_stage.dcsn.grid, 'H_nxt') else 0
+                        if len(sweep_methods) == 1:
+                            method = sweep_methods[0]
+                        else:
+                            method = ownc_stage.dcsn.model.get("upper_envelope", sweep_methods[0]) if hasattr(ownc_stage.dcsn, 'model') and isinstance(ownc_stage.dcsn.model, dict) else sweep_methods[0]
                     
-                    # Build param vector for hashing
-                    param_vec = runner._extract_param_vec(cfg, runner._cfg_param_paths)
-                    param_hash = runner._hash_param_vec(param_vec)
-                    bundle_path = runner._bundle_path(param_hash, method)
+                    # Get bundle path from runner (hash excludes method via method_param_path)
+                    params = np.array([method, a_points, H_points], dtype=object)
+                    bundle_path = sweep_runner._bundle_path(params)
                     
                     if bundle_path:
-                        bundle_images_dir = bundle_path / f"images_{timestamp_suffix}"
+                        bundle_images_dir = Path(bundle_path) / f"images_{timestamp_suffix}"
                     else:
-                        bundle_images_dir = Path(runner.output_root) / f"images_{timestamp_suffix}" / method
+                        # Fallback if _bundle_path returns None
+                        bundle_images_dir = output_root / "images" / f"{method}_{a_points}_{H_points}_{timestamp_suffix}"
                     bundle_images_dir.mkdir(parents=True, exist_ok=True)
                     
-                    # Handle CSV export
                     if args.csv_export:
                         print(f"  [Sweep] Exporting CSV for {method} to {bundle_images_dir}")
                         csv_generate_plots(model, method, bundle_images_dir,
                                          egm_bounds=plot_config['egm_bounds'],
                                          skip_egm_plots=args.skip_egm_plots)
                     
-                    # Handle matplotlib plots
                     if args.plots:
-                        plot_output_dir = bundle_images_dir / method
-                        plot_output_dir.mkdir(parents=True, exist_ok=True)
-                        print(f"  [Sweep] Generating plots for {method} to {plot_output_dir}")
-                        generate_plots(model, method, plot_output_dir,
+                        print(f"  [Sweep] Generating plots for {method} to {bundle_images_dir}")
+                        generate_plots(model, method, bundle_images_dir,
                                      egm_bounds=plot_config['egm_bounds'],
                                      skip_egm_plots=args.skip_egm_plots)
-                    
-                    return 1  # Success indicator
+
+                    # Aggressive cleanup after plotting to free memory for next config
+                    # Always do complete cleanup in sweep mode to prevent memory accumulation
+                    cleanup_model_complete(model)
+
+                    return 1
                 except Exception as err:
+                    import traceback
                     print(f"[warn] sweep plot-gen failed: {err}")
-                    return 0  # Failure indicator
-            
+                    traceback.print_exc()
+                    return 0
+
             # Add to metric functions (runs on each rank for its assigned configs)
             sweep_runner.metric_fns["_sweep_plots"] = sweep_plot_metric
         
@@ -889,16 +1017,22 @@ def main(argv=None):
         if is_root and results_df is not None:
             trace_print("SWEEP: Saving results")
             
+            # Note: avg_ownc_time_per_period is now computed directly in whisperer.py
+            # and recorded as a simple float (nested stage_timings is filtered by dynx)
+            
             # Save results DataFrame
             results_path = output_root / "sweep_results.csv"
             results_df.to_csv(results_path, index=False)
             print(f"\nSweep results saved to: {results_path}")
             
-            # Print summary table
+            # Print summary table (exclude verbose columns)
             print("\n" + "="*60)
             print("SWEEP RESULTS SUMMARY")
             print("="*60)
-            print(results_df.to_string())
+            # Exclude columns with large nested data (period_timings, stage_timings, _sweep_plots)
+            verbose_cols = ['period_timings', 'stage_timings', '_sweep_plots']
+            summary_cols = [c for c in results_df.columns if c not in verbose_cols]
+            print(results_df[summary_cols].to_string())
             print("="*60 + "\n")
             
             # Also save design matrix
@@ -914,6 +1048,32 @@ def main(argv=None):
     # ====================================================================
     #  STANDARD MODE: Sequential execution (original behavior)
     # ====================================================================
+    
+    # Set up main runner for standard mode
+    trace_print("12: Creating CircuitRunner", detail=True)
+    param_paths = ExecutionSettings.get_param_paths(args.experiment_set)
+    if is_root:
+        print(f"Using experiment set: {args.experiment_set}")
+        print(f"  param_paths: {param_paths}")
+    
+    runner = CircuitRunner(
+        base_cfg=model_config,
+        param_paths=param_paths,
+        model_factory=lambda cfg: make_housing_model(args, cfg, args.periods, vf_ngrid, comm),
+        solver=make_housing_solver(args, args.mpi, comm, baseline_method=settings.baseline_method),
+        metric_fns=metric_fns,
+        output_root=output_root,
+        bundle_prefix=args.config_id,
+        save_by_default=save_by_default,
+        load_if_exists=True,
+    )
+    trace_print("13: CircuitRunner created", detail=True)
+    
+    # Configure stages to load/save for L2 deviation calculation
+    runner.stages_to_load = [args.stages_L2dev]
+    runner.stages_to_save = [args.stages_L2dev]
+    trace_print(f"14: Stages configured: load={runner.stages_to_load}, save={runner.stages_to_save}", detail=True)
+    
     all_metrics = []
     all_param_vectors = []  # Collect all parameter vectors for design matrix
 
@@ -922,7 +1082,7 @@ def main(argv=None):
     # --------------------------------------------------------------------
     if settings.should_run_baseline:
         with MemoryMonitor(f"Baseline computation ({settings.baseline_method})", log_start=is_root, log_end=is_root):
-            trace_print("16: Starting baseline computation")
+            trace_print("16: Starting baseline computation", detail=True)
             runner.load_if_exists = not args.recompute_baseline
             if is_root:  # print from root only
                 print(f"\n» Baseline ({settings.baseline_method}):", "recompute" if args.recompute_baseline else "load/solve-if-missing")
@@ -947,13 +1107,13 @@ def main(argv=None):
                 if baseline_bundle_path:
                     print(f"  Bundle path: {baseline_bundle_path}")
             
-            trace_print("17: Running baseline solver")
+            trace_print("17: Running baseline solver", detail=True)
             ref_metrics, ref_model = runner.run(
                 ref_params,
                 return_model=is_root,
                 rank=solver_rank
             )
-            trace_print("18: Baseline solver complete")
+            trace_print("18: Baseline solver complete", detail=True)
             
             # Register baseline model in unified cache for reuse
             if is_root and ref_model is not None:
@@ -963,7 +1123,7 @@ def main(argv=None):
                     register_baseline_model(settings.baseline_method, ref_model, periods=[0, 1])
                     print(f"  Registered {settings.baseline_method} in unified cache for metric reuse")
                 except ImportError:
-                    trace_print("18.1: Unified model cache not available")
+                    trace_print("18.1: Unified model cache not available", detail=True)
             
             # Restore original metrics for fast methods
             runner.metric_fns = original_metrics
@@ -980,7 +1140,7 @@ def main(argv=None):
 
             # Generate plots and/or CSV exports immediately and delete model
             if is_root and (args.plots or args.csv_export) and ref_model is not None:
-                trace_print("19: Generating baseline plots")
+                trace_print("19: Generating baseline plots", detail=True)
                 
                 # Use organized directory structure for outputs
                 if baseline_bundle_path:
@@ -1035,9 +1195,10 @@ def main(argv=None):
                 except Exception as err:
                     print(f"[warn] plot-gen for {settings.baseline_method} failed: {err}")
                 finally:
+                    cleanup_model_complete(ref_model)
                     del ref_model
                     gc.collect()
-                    trace_print("20: Baseline plots complete, model deleted")
+                    trace_print("20: Baseline plots complete, model deleted", detail=True)
             
             # Trigger cleanup if memory usage is high
             mem_config = settings.get_memory_config()
@@ -1049,14 +1210,14 @@ def main(argv=None):
         ref_params = settings.get_baseline_params()
         if is_root:
             print(f"\n» Baseline ({settings.baseline_method}) will be loaded from existing bundles for comparison metrics")
-        trace_print("21: Baseline ref_params created for loading")
+        trace_print("21: Baseline ref_params created for loading", detail=True)
 
     # --------------------------------------------------------------------
     #  2) Solve test methods one by one, processing each immediately  
     # --------------------------------------------------------------------
     
     if settings.fast_methods_to_run:
-        trace_print(f"22: Starting fast methods: {settings.fast_methods_to_run}")
+        trace_print(f"22: Starting fast methods: {settings.fast_methods_to_run}", detail=True)
         runner.load_if_exists = not args.fresh_fast
         
         # Use the selected metrics for fast methods
@@ -1072,14 +1233,14 @@ def main(argv=None):
             # No baseline needed - don't set ref_params to avoid loading
             if is_root:
                 print(f"\n» Skipping baseline loading - only computing: {', '.join(metric_fns.keys())}")
-            trace_print("23: Skipping baseline loading")
+            trace_print("23: Skipping baseline loading", detail=True)
 
         if is_root:  # print from root only
             print(f"\n» Fast methods: {', '.join(settings.fast_methods_to_run)}")
             
         for i, method in enumerate(settings.fast_methods_to_run):
             with MemoryMonitor(f"Fast method computation ({method})", log_start=is_root, log_end=is_root):
-                trace_print(f"24.{i+1}: Starting {method}")
+                trace_print(f"24.{i+1}: Starting {method}", detail=True)
                 if is_root:
                     print(f"  Solving {method}...")
                 
@@ -1101,9 +1262,9 @@ def main(argv=None):
                     if method_bundle_path:
                         print(f"  Bundle path: {method_bundle_path}")
                 
-                trace_print(f"25.{i+1}: Running {method} solver")
+                trace_print(f"25.{i+1}: Running {method} solver", detail=True)
                 metrics, model = runner.run(params, return_model=is_root, rank=solver_rank)
-                trace_print(f"26.{i+1}: {method} solver complete")
+                trace_print(f"26.{i+1}: {method} solver complete", detail=True)
                 
                 metrics["master.methods.upper_envelope"] = method
                 metrics["param_hash"] = runner._hash_param_vec(params)
@@ -1116,7 +1277,7 @@ def main(argv=None):
                 
                 # Generate plots and/or CSV exports immediately and delete model
                 if is_root and (args.plots or args.csv_export) and model is not None:
-                    trace_print(f"27.{i+1}: Generating {method} plots")
+                    trace_print(f"27.{i+1}: Generating {method} plots", detail=True)
                     
                     # Use organized directory structure for outputs
                     if method_bundle_path:
@@ -1165,9 +1326,10 @@ def main(argv=None):
                     except Exception as err:
                         print(f"[warn] plot-gen for {method} failed: {err}")
                     finally:
+                        cleanup_model_complete(model)
                         del model
                         gc.collect()
-                        trace_print(f"28.{i+1}: {method} plots complete, model deleted")
+                        trace_print(f"28.{i+1}: {method} plots complete, model deleted", detail=True)
                 
                 # Trigger cleanup after each method to prevent memory accumulation
                 cleanup_if_needed(memory_config.get("cleanup_threshold_gb", 32))
@@ -1179,7 +1341,7 @@ def main(argv=None):
     if comm is not None:
         comm.Barrier()
 
-    trace_print("29: Creating final summary")
+    trace_print("29: Creating final summary", detail=True)
     # --------------------------------------------------------------------
     #  3) Create final summary table and save design matrix
     # --------------------------------------------------------------------
@@ -1254,13 +1416,13 @@ def main(argv=None):
         print(f"Final memory usage: {current_mem:.2f} GB")
         print(f"Available memory: {available_mem:.2f} GB")
         if args.low_memory:
-            print("Low memory mode: ENABLED (Q and lambda arrays cleared)")
+            print("Low memory mode: ENABLED (Q and lambda arrays cleared, period 0 preserved for plots)")
         print("="*60)
     
     if is_root:
         log_memory_usage("at end of solve_runner")
     
-    trace_print("30: Main function complete")
+    trace_print("30: Main function complete", detail=True)
 
 if __name__ == "__main__":
     main()

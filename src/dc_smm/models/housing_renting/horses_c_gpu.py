@@ -259,7 +259,7 @@ def solve_vfi_gpu(vlu_cntn, model):
     d_H_grid = cuda.to_device(H_grid)
     d_h_nxt_ind_array = cuda.to_device(h_nxt_ind_array)
     
-    verbose = True
+    verbose = False  # Set True for GPU debug output
     if verbose:
         print(f"[GPU DEBUG] Grid dimensions: n_W={n_W}, n_H={n_H}, n_Y={n_Y}")
         print(f"[GPU DEBUG] Total grid points: {n_W * n_H * n_Y:,}")

@@ -27,6 +27,7 @@ def F_t_cntn_to_dcsn(mover):
     r = model.param.r  # Interest rate
     
     # Get grids from model
+    # NOTE: TENU receives data from OWNH/RNTH which output on a_grid (asset decision grid)
     a_grid = model.num.state_space.dcsn.grids.a
     H_grid = model.num.state_space.dcsn.grids.H
     y_grid = model.num.state_space.dcsn.grids.y

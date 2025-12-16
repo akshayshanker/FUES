@@ -230,19 +230,23 @@ def solve_stage(stage, max_iter=None, tol=None, verbose=False, use_mpi=False, co
         # For consumption stages, cntn_data can be large (value functions)
         # We don't need it after the operator has consumed it
         del cntn_data
-        gc.collect()
+        # Skip gc.collect() here - let Python handle it naturally to avoid overhead
     
     # Extract UE time if available in the result (from EGM computation)
+    # ue_time_total is the TOTAL UE time for this stage (summed across all H,Y indices)
     ue_time = 0
     if isinstance(dcsn_data, Solution):
-        # Handle Solution object
-        if "ue_time_avg" in dcsn_data.timing:
-            ue_time = dcsn_data.timing["ue_time_avg"]
+        # Handle Solution object - prefer ue_time_total, fallback to ue_time_avg for backwards compatibility
+        if "ue_time_total" in dcsn_data.timing:
+            ue_time = dcsn_data.timing["ue_time_total"]
+        elif "ue_time_avg" in dcsn_data.timing:
+            ue_time = dcsn_data.timing["ue_time_avg"]  # Legacy fallback
         stage.dcsn.sol = dcsn_data
     else:
         # Legacy dict handling
         if isinstance(dcsn_data, dict) and "timing" in dcsn_data:
-            ue_time = dcsn_data["timing"].get("ue_time_avg", 0)
+            ue_time = dcsn_data["timing"].get("ue_time_total", 
+                      dcsn_data["timing"].get("ue_time_avg", 0))
         
         # Store the solution data (excluding timing info)
         solution_keys = [k for k in dcsn_data.keys() if k != "timing"]
@@ -367,7 +371,7 @@ def initialize_terminal_values(stage, verbose=False, use_mpi=False, comm=None):
     
 
 
-def run_time_iteration(model_circuit, n_periods=None, verbose=False,verbose_timings =False, recorder=None, free_memory=True, periods_to_keep=None):
+def run_time_iteration(model_circuit, n_periods=None, verbose=False,verbose_timings =False, recorder=None, free_memory=True, periods_to_keep=None, lazy_compile=False):
     """Run time iteration by solving all periods in a pre-created model circuit.
     
     This function systematically solves all five stages of the housing-rental model
@@ -393,11 +397,31 @@ def run_time_iteration(model_circuit, n_periods=None, verbose=False,verbose_timi
     periods_to_keep : list of int, optional
         List of period indices to keep all data for (e.g., [0, 1] for Euler error).
         If None, keeps data based on free_memory flag only.
+    lazy_compile : bool, optional
+        If True, compile each period's stages just before solving and clear
+        numerical grids after solving. This keeps memory constant across periods
+        instead of scaling with n_periods. Default False for backward compatibility.
         
     Returns
     -------
     list
         List of stage dictionaries for each period
+        
+    Notes
+    -----
+    **Timing Measurement:**
+    Period timing (`period_time`) measures ONLY the actual solving time:
+    - Starts AFTER lazy compilation (if enabled)
+    - Ends BEFORE memory cleanup / grid clearing
+    
+    This ensures fair timing comparisons across methods, as compilation and 
+    memory management overhead are excluded from reported solve times.
+    
+    **Lazy Compilation Memory Behavior:**
+    - Periods in `periods_to_keep` retain their numerical grids (needed for Euler error)
+    - Other periods have grids cleared after solving to save memory
+    - With 20 periods and `periods_to_keep=[0,1]`, memory usage is ~2-3 periods worth
+      instead of 20 periods worth
     """
     total_start_time = time.time()
     
@@ -430,11 +454,19 @@ def run_time_iteration(model_circuit, n_periods=None, verbose=False,verbose_timi
     # Track times for non-terminal periods
     total_ue_time = 0.0
     total_nonterminal_time = 0.0
+    nonterminal_period_count = 0
     
     # Mark terminal periods - set terminal flags for the final period's consumption stages
     final_period = model_circuit.get_period(n_periods - 1)
     #print(f"final_period: {final_period}")
     #print(f"final_period: {final_period}")
+    
+    # Lazy compile: compile final period first (required for terminal value initialization)
+    if lazy_compile:
+        if verbose and (not use_mpi or comm is None or comm.rank == 0):
+            print(f"  [Lazy compile] Compiling final period (period {n_periods}) for terminal initialization...")
+        _compile_period_stages(final_period)
+    
     # Get all stages from the final period
     final_tenu = final_period.get_stage("TENU")
     final_ownh = final_period.get_stage("OWNH")
@@ -470,14 +502,21 @@ def run_time_iteration(model_circuit, n_periods=None, verbose=False,verbose_timi
     
     # Solve backward from the last period to the first
     for period_idx in reversed(range(n_periods)):
-        period_start_time = time.time()
         period = model_circuit.get_period(period_idx)
         
         # Flag whether this is the terminal period (first one we solve)
         is_terminal_period = (period_idx == n_periods - 1)
 
-        #print(f"period_idx: {period_idx}")
-        #print(f"Is terminal: {is_terminal_period}")
+        # Lazy compilation: compile this period's stages just before solving
+        # This keeps memory constant (only 1 period's grids in memory at a time)
+        # NOTE: Compilation time is NOT included in period timing
+        if lazy_compile:
+            if verbose and (not use_mpi or comm is None or comm.rank == 0):
+                print(f"  [Lazy compile] Compiling period {period_idx+1} stages...")
+            _compile_period_stages(period)
+        
+        # Start timing AFTER compilation (we only want to time the actual solving)
+        period_start_time = time.time()
         
         if verbose and (not use_mpi or comm is None or comm.rank == 0):
             print(f"\nSolving period {period_idx+1} of {n_periods}")
@@ -527,6 +566,10 @@ def run_time_iteration(model_circuit, n_periods=None, verbose=False,verbose_timi
             rntc_stage.arvl.sol = None
             # Keep dcsn.sol for Euler error calculation (has policy functions)
             # Keep cntn.sol as it might be needed for next period
+        
+        # Force gc after consumption stage connections (largest memory consumers)
+        if free_memory:
+            gc.collect()
         
         # -------------------------------------------------------------------------------
         # 3. Solve housing choice stages (OWNH and RNTH)
@@ -602,11 +645,32 @@ def run_time_iteration(model_circuit, n_periods=None, verbose=False,verbose_timi
             
         all_stages_by_period.append(stages_dict)
         
+        # Record period timing BEFORE memory clearing
+        # NOTE: Period time excludes lazy compilation and grid clearing overhead
+        #       to ensure fair timing comparisons across methods
+        period_time = time.time() - period_start_time
+        period_data = {
+            "period": period_idx + 1,
+            "time": period_time,
+            "ue_time": period_ue_time,
+            "is_terminal": is_terminal_period
+        }
+        period_timings.append(period_data)
+        
+        # Track times for non-terminal periods only (exclude terminal period)
+        if not is_terminal_period:
+            total_ue_time += period_ue_time
+            total_nonterminal_time += period_time
+            nonterminal_period_count += 1
+        
+        # --- Memory cleanup (NOT included in period timing) ---
+        
         # Free all memory from this period if it's not in the keep list
         if free_memory and periods_to_keep is not None and period_idx not in periods_to_keep:
             if verbose and (not use_mpi or comm is None or comm.rank == 0):
                 print(f"  Freeing all memory from period {period_idx} (not in keep list: {periods_to_keep})")
             _free_period_memory(period)
+            gc.collect()  # Force immediate collection after freeing period
         
         # Even for periods we keep, clear Q and lambda arrays which are rarely needed
         elif free_memory and period_idx in periods_to_keep:
@@ -619,22 +683,19 @@ def run_time_iteration(model_circuit, n_periods=None, verbose=False,verbose_timi
                         stage.dcsn.sol.lambda_ = None
                 except:
                     pass
+            
+            # NOTE: Do NOT clear numerical grids for kept periods!
+            # Euler error calculation needs grids (stage.dcsn.grid.w, etc.)
+            # Only clear solutions arrays (Q, lambda) which are not needed for metrics
             gc.collect()
         
-        # Record period timing
-        period_time = time.time() - period_start_time
-        period_data = {
-            "period": period_idx + 1,
-            "time": period_time,
-            "ue_time": period_ue_time,
-            "is_terminal": is_terminal_period
-        }
-        period_timings.append(period_data)
-        
-        # Track times for non-terminal periods only
-        if period_idx < n_periods - 2:
-            total_ue_time += period_ue_time
-            total_nonterminal_time += period_time
+        # Lazy compile mode: clear grids for periods NOT in keep list
+        # (periods in keep_list need grids for Euler error calculation)
+        elif lazy_compile and (periods_to_keep is None or period_idx not in periods_to_keep):
+            if verbose and (not use_mpi or comm is None or comm.rank == 0):
+                print(f"  [Lazy compile] Clearing numerical grids from period {period_idx+1}")
+            _clear_period_numerics(period)
+            gc.collect()
     
     # Reverse the list to have periods in correct order (T-n to T-1)
     all_stages_by_period.reverse()
@@ -643,12 +704,42 @@ def run_time_iteration(model_circuit, n_periods=None, verbose=False,verbose_timi
     total_time = time.time() - total_start_time
     
     # Record metrics if a recorder was provided
+    # Compute per-period averages for non-terminal periods
+    avg_ue_time_per_period = total_ue_time / nonterminal_period_count if nonterminal_period_count > 0 else 0
+    avg_nonterminal_time_per_period = total_nonterminal_time / nonterminal_period_count if nonterminal_period_count > 0 else 0
+    
+    # Compute average of per-period UE percentages
+    # This is: mean( UE_time_period_i / time_period_i ) for non-terminal periods
+    # Different from overall ratio (total_ue / total_time)
+    per_period_ue_percents = []
+    for pt in period_timings:
+        if not pt.get("is_terminal", False) and pt.get("time", 0) > 0:
+            per_period_ue_percents.append((pt["ue_time"] / pt["time"]) * 100)
+    avg_ue_percent_per_period = sum(per_period_ue_percents) / len(per_period_ue_percents) if per_period_ue_percents else 0
+    
+    # Compute average OWNC stage time per period (for non-terminal periods)
+    # This is useful to see VFI scaling with grid size
+    ownc_times = [
+        st.get("total_time", 0.0)
+        for st in stage_timings
+        if isinstance(st, dict) and "OWNC" in st.get("stage_name", "") and not st.get("is_terminal", False)
+    ]
+    avg_ownc_time_per_period = sum(ownc_times) / len(ownc_times) if ownc_times else 0.0
+    
     if recorder is not None:
         recorder.add(
             total_solution_time=total_time,
             total_ue_time=total_ue_time,
             total_nonterminal_time=total_nonterminal_time,
+            avg_ue_time_per_period=avg_ue_time_per_period,
+            avg_nonterminal_time_per_period=avg_nonterminal_time_per_period,
+            nonterminal_period_count=nonterminal_period_count,
+            # Overall UE percentage: total_ue / total_nonterminal_time
             ue_time_percent=((total_ue_time / total_nonterminal_time) * 100) if total_nonterminal_time > 0 else 0,
+            # Average of per-period UE percentages: mean(UE_i / time_i)
+            avg_ue_percent_per_period=avg_ue_percent_per_period,
+            # Average OWNC stage time per period (shows VFI scaling with grid)
+            avg_ownc_time_per_period=avg_ownc_time_per_period,
             period_timings=period_timings,
             stage_timings=stage_timings
         )
@@ -657,11 +748,15 @@ def run_time_iteration(model_circuit, n_periods=None, verbose=False,verbose_timi
     if verbose_timings and (not use_mpi or comm is None or comm.rank == 0):
         print("\n----- Solution Time Summary -----")
         print(f"Total solution time: {total_time:.4f} seconds")
-        
-        # Calculate UE time as percentage of non-terminal time
-        if total_nonterminal_time > 0:
-            ue_percent = (total_ue_time / total_nonterminal_time) * 100
-            print(f"Upper envelope time: {total_ue_time:.4f}s ({ue_percent:.1f}% of non-terminal time)")
+        print(f"Non-terminal periods: {nonterminal_period_count}")
+
+        # Show per-period averages
+        if nonterminal_period_count > 0:
+            print(f"Avg time per period: {avg_nonterminal_time_per_period:.4f}s")
+            print(f"Avg UE time per period: {avg_ue_time_per_period * 1000:.2f}ms")
+            ue_percent = (total_ue_time / total_nonterminal_time) * 100 if total_nonterminal_time > 0 else 0
+            print(f"UE as % of solve time (overall): {ue_percent:.1f}%")
+            print(f"UE as % of solve time (avg per period): {avg_ue_percent_per_period:.1f}%")
         
         print("\nPeriod timings:")
         for timing in reversed(period_timings):
@@ -716,10 +811,15 @@ def _sync_perch_solutions(stage, use_mpi, comm):
     comm.Barrier()                    # keep ranks aligned
 
 
-def _free_period_memory(period):
+def _free_period_memory(period, clear_grids=True):
     """
     Completely free all solution data from a period's stages.
     Used for periods that are not needed for metrics.
+    
+    Args:
+        period: Period object to free memory from
+        clear_grids: If True, also clear numerical grids (saves significant memory 
+                     with many income states, but prevents re-solving this period)
     """
     for stage_name in ["TENU", "OWNH", "OWNC", "RNTH", "RNTC"]:
         try:
@@ -742,8 +842,105 @@ def _free_period_memory(period):
             # Also clear any cached operators
             if hasattr(stage, '_ops'):
                 stage._ops = None
+            
+            # Clear numerical grids if requested (saves significant memory)
+            # These are duplicated per period but are identical, so can be freed after solving
+            if clear_grids and hasattr(stage, 'model') and hasattr(stage.model, 'num'):
+                try:
+                    # Clear state space grids
+                    if hasattr(stage.model.num, 'state_space'):
+                        for perch_name in ['arvl', 'dcsn', 'cntn']:
+                            perch_space = getattr(stage.model.num.state_space, perch_name, None)
+                            if perch_space and hasattr(perch_space, 'grids'):
+                                # Set grids to empty to free memory
+                                for attr in dir(perch_space.grids):
+                                    if not attr.startswith('_'):
+                                        try:
+                                            setattr(perch_space.grids, attr, None)
+                                        except:
+                                            pass
+                    # Clear compiled functions cache
+                    if hasattr(stage.model.num, 'functions'):
+                        stage.model.num.functions = None
+                except:
+                    pass
         except:
             pass  # Stage might not exist
     
     # Force garbage collection
+    gc.collect()
+
+
+def _compile_period_stages(period, num_rep=None):
+    """
+    Compile numerical models for all stages in a single period.
+    
+    This enables lazy compilation - only compile grids when needed for solving,
+    rather than compiling all periods upfront.
+    
+    Parameters
+    ----------
+    period : Period
+        The period whose stages should be compiled
+    num_rep : callable, optional
+        Numerical model generator function. If None, uses stage.num_rep
+    """
+    from dynx.heptapodx.core.api import generate_numerical_model
+    
+    for stage_name in ["TENU", "OWNH", "OWNC", "RNTH", "RNTC"]:
+        try:
+            stage = period.get_stage(stage_name)
+            
+            # Skip if already compiled
+            if stage.status_flags.get("compiled", False):
+                continue
+            
+            # Set num_rep if not already set
+            if num_rep is not None:
+                stage.num_rep = num_rep
+            elif stage.num_rep is None:
+                stage.num_rep = generate_numerical_model
+            
+            # Build computational model (creates grids)
+            stage.build_computational_model()
+            stage.status_flags["compiled"] = True
+            
+        except Exception as e:
+            print(f"Warning: Failed to compile stage {stage_name}: {e}")
+
+
+def _clear_period_numerics(period):
+    """
+    Clear numerical grids and compiled functions from a period's stages.
+    
+    This frees the memory used by grids after solving a period,
+    enabling constant memory usage across periods.
+    
+    Parameters
+    ----------
+    period : Period
+        The period whose numerical data should be cleared
+    """
+    for stage_name in ["TENU", "OWNH", "OWNC", "RNTH", "RNTC"]:
+        try:
+            stage = period.get_stage(stage_name)
+            
+            if hasattr(stage, 'model') and stage.model is not None:
+                # Clear the numerical model entirely
+                if hasattr(stage.model, 'num'):
+                    stage.model.num = None
+                
+                # Also clear perch model numerics
+                for perch_name in ['arvl', 'dcsn', 'cntn']:
+                    perch = getattr(stage, perch_name, None)
+                    if perch and hasattr(perch, 'model') and perch.model is not None:
+                        if hasattr(perch.model, 'num'):
+                            perch.model.num = None
+            
+            # Mark as not compiled so it can be recompiled if needed
+            stage.status_flags["compiled"] = False
+            
+        except:
+            pass
+    
     gc.collect()

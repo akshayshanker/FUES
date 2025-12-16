@@ -8,6 +8,13 @@
 #
 # Usage: qsub run_sweep_vfi_gpu.pbs
 
+# Experiment identification
+config_id: "test_0.1"
+trial_id: "paper-sweep"  # Shared with sweep_noPB for baseline lookup
+output_dir: "/scratch/tp66/${USER}/FUES/solutions/housing_renting"  # Base output directory
+
+# No ref_method needed - this sweep IS the baseline
+
 # Parameter paths for bundle hashing (must match design matrix column order)
 param_paths:
   - master.methods.upper_envelope    # Method (excluded from hash via method_param_path)
@@ -23,7 +30,7 @@ sweep:
   # Single high-resolution grid size for benchmark baseline
   # Note: Use integers, not scientific notation (YAML treats 1E5 as string)
   grid_sizes:
-    - 200000
+    - 20000
   
   # Housing grid sizes (H_points = S_points)
   H_sizes:
@@ -35,5 +42,5 @@ sweep:
 fixed:
   delta_pb: 1
   periods: 20
-  vfi_ngrid: 50000  # VFI brute-force search points (use integer, not 1E6)
+  vfi_ngrid: 10000  # VFI brute-force search points (use integer, not 1E6)
 

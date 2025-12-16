@@ -2,7 +2,78 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.0dev2] - 2025-12-15 – Memory Optimizations and Lazy Compilation
+
+**Note: Memory performance improvements are ongoing. Current optimizations reduce overhead but peak memory usage during sweep runs may still be high.**
+
+### Memory Optimizations
+
+- [2025-12-15] **FUES array copy optimization** in `fues.py`:
+  - Added `_ensure_f64()` helper to avoid unnecessary array copies when inputs are already float64 and C-contiguous
+  - Before: `np.asarray()` always created copies; After: direct pass-through when dtype/layout matches
+  - Savings: ~18MB per FUES call for typical grid sizes (5 arrays × 4000 × 8 bytes × 7 × 16)
+
+- [2025-12-15] **DCEGM memory fixes** in `dcegm.py`:
+  - Changed `np.zeros_like() + np.nan` to `np.full(n, np.nan)` (creates 1 array instead of 2)
+  - Removed unused `LinearInterp` object creation that was never used
+  - Savings: ~130KB per DCEGM call + object overhead
+
+- [2025-12-15] **Housing solver meshgrid optimization** in `horses_h.py`:
+  - Moved `np.meshgrid` and `resources_liquid_3d` from inside operator (per-solve) to factory closure (once per model)
+  - Added `del a_mesh, y_mesh` to immediately free intermediate arrays
+  - Savings: Avoids repeated allocation of large 3D arrays per income state per period
+
+- [2025-12-15] **Lazy compilation in whisperer.py** (activated via `--low-memory`):
+  - New `_compile_period_stages(period)` compiles stages just before solving each period
+  - New `_clear_period_numerics(period)` clears numerical grids after solving (except kept periods)
+  - Memory footprint: O(1) periods instead of O(N_periods) for numerical grids
+  - Timing accuracy: Period times now exclude compilation and cleanup overhead (documented in docstring)
+
+- [2025-12-15] **Complete model cleanup** in `solve_runner.py`:
+  - New `cleanup_model_complete(model)` aggressively frees all solutions, models, operators, and period lists
+  - Called after each configuration in sweep mode to prevent memory accumulation across MPI ranks
+  - Ensures each new configuration starts with clean memory
+
+### New CLI Options
+
+- [2025-12-15] **`--skip-bundle-save` flag** (`cli.py`, `solve_runner.py`):
+  - Skips saving solution bundles to disk entirely
+  - Useful for timing runs where only metrics are needed
+  - Reduces I/O overhead and disk space usage
+  - Added to `run_sweep_noPB_test.sh` for faster sweep runs
+
+### Bug Fixes
+
+- [2025-12-15] **Euler error NaN fix**: Periods 0 and 1 (in `periods_to_keep`) no longer have their numerical grids cleared, preserving data needed for Euler error calculation
+
+### Technical Details
+
+- Lazy compilation is mutually exclusive with dynx grid sharing (documented in devspec)
+- All optimizations verified: arrays in FUES/DCEGM are read-only, so pass-through is safe
+- PBS scripts updated to use `--skip-bundle-save` and `--low-memory` flags
+
 ## [0.5.0dev1] - 2025-11-29 – Retirement Example Refactoring and Configuration
+
+- [2025-12-14 23:45 AEST] **Fixed VFI marginal utility calculation** in `horses_c.py`:
+  - Change: CPU VFI solvers (`_solve_vfi_numerical` and `_solve_vfi_block`) now use `uc = alpha/c` instead of `1/c` for marginal utility, matching the GPU version and Cobb-Douglas utility.
+  - Note: This only affects `lambda_dcsn` output, NOT the VFI policy optimization itself (VFI doesn't use λ - it directly maximizes the Bellman equation).
+  - Added `alpha` parameter to VFI kernel function signatures for consistency.
+
+- [2025-12-14 23:30 AEST] **VFI/EGM policy discrepancy was due to grid lower bounds**:
+  - Issue: VFI and EGM policies appeared different due to minimum grid values (`a_grid[0]`, `w_grid[0]`) being set too high.
+  - This caused the optimization bounds in VFI to be overly constrained at low wealth levels.
+  - Fix: Adjusted grid lower bounds to appropriate values.
+  - Note: NOT caused by `uc` formula since VFI optimization doesn't use marginal utility - it directly maximizes `u(c,H) + βδV(a',H',y')`.
+
+- [2025-12-14 22:30 AEST] **Fixed VFI JIT recompilation issue** in `horses_c.py`:
+  - Bug: `_solve_vfi_loop` was calling `build_njit_utility()` directly, creating a NEW Numba-compiled function on every call. This triggered ~1.8s JIT compilation overhead for every VFI stage solve, making timing appear constant regardless of grid size.
+  - Fix: Changed to use `get_u_func()` which uses `@lru_cache` to return the same cached function object for identical parameters.
+  - Result: After JIT warmup, VFI kernel execution now properly scales with grid size (~30ms for 1000 grid → ~60ms for 2000 grid).
+  - Note: The Numba cache is cleared in PBS scripts (`rm -rf $NUMBA_CACHE_DIR`). For production runs, consider keeping the cache to avoid first-call JIT overhead.
+
+- [2025-12-14 21:00 AEST] Added `avg_ownc_time_per_period` metric to sweep results:
+  - Computed in `whisperer.py` from stage_timings before they're excluded from CSV
+  - Added to timing tables in `generate_paper_tables.py` to show VFI computational scaling
 
 - [2025-12-04 14:00 AEST] Added PCHIP-style monotone gradient method (`piecewise_gradient_pchip`) in gradients.py - uses weighted harmonic mean to preserve MPC bounds (0, 1]
 - [2025-12-04 14:15 AEST] Added q_diff > 0 condition to jump detection in `_egm_preprocess_core` - only add constraint points where value function is increasing

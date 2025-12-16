@@ -451,16 +451,18 @@ def F_h_cntn_to_dcsn_owner(mover, use_mpi=False, comm=None):
     tau, r = params.phi, params.r
     
     use_gpu = model.methods.get("compute") == "GPU" and GPU_AVAILABLE
+    
+    # Pre-compute resources grid ONCE in factory (not every operator call)
+    # This avoids repeated meshgrid allocations during solving
+    n_a, n_H, n_y = len(a_grid), len(H_grid), len(shock_grid)
+    a_mesh, _, y_mesh = np.meshgrid(a_grid, H_grid, shock_grid, indexing='ij')
+    resources_liquid_3d = (1 + r) * a_mesh + y_mesh
+    del a_mesh, y_mesh  # Free intermediate arrays immediately
 
     def operator(perch_data):
         vlu_cntn, lambda_cntn, Q_cntn = perch_data.vlu, perch_data.lambda_, perch_data.Q
-        n_a, n_H, n_y = vlu_cntn.shape
-        
-        # This is inefficient, but necessary for meshgrid to work with non-vectorized y_val
-        y_grid_for_mesh = shock_grid
-        
-        a_mesh, H_mesh, y_mesh = np.meshgrid(a_grid, H_grid, y_grid_for_mesh, indexing='ij')
-        resources_liquid_3d = (1 + r) * a_mesh + y_mesh
+        # NOTE: vlu_cntn is from OWNC which outputs on w_grid, shape (n_w, n_H_nxt, n_y)
+        # Output should be on a_grid, shape (n_a, n_H, n_y)
 
         if use_gpu:
             # --- EFFICIENT GPU PATH ---
@@ -468,9 +470,12 @@ def F_h_cntn_to_dcsn_owner(mover, use_mpi=False, comm=None):
             d_H_grid, d_H_nxt_grid, d_w_grid = cuda.to_device(H_grid), cuda.to_device(H_nxt_grid), cuda.to_device(w_grid)
             d_Q_cntn, d_v_cntn, d_lam_cntn = cuda.to_device(Q_cntn), cuda.to_device(vlu_cntn), cuda.to_device(lambda_cntn)
             
-            d_Q_out, d_v_out, d_lam_out = (cuda.device_array_like(Q_cntn) for _ in range(3))
-            best_idx_template = np.empty((n_a, n_H, n_y), dtype=np.int32)
-            d_idx_out = cuda.device_array_like(best_idx_template)
+            # Output arrays must be on a_grid (decision grid), not w_grid (continuation grid)
+            output_shape = (n_a, n_H, n_y)
+            d_Q_out = cuda.device_array(output_shape, dtype=np.float64)
+            d_v_out = cuda.device_array(output_shape, dtype=np.float64)
+            d_lam_out = cuda.device_array(output_shape, dtype=np.float64)
+            d_idx_out = cuda.device_array(output_shape, dtype=np.int32)
             
             # Optimize thread configuration for GPU resource constraints
             if n_a * n_H * n_y < 1000:  # Small problem
