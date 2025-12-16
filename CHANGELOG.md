@@ -2,6 +2,35 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.0dev3] - 2025-12-16 – EGM Loop Memory and Compute Optimizations
+
+### Memory Optimizations
+
+- [2025-12-16] **Removed `policy_a` storage** in `horses_c.py`:
+  - Asset policy array (`policy_a`) was being stored but never used downstream by metrics or plotting
+  - Removed allocation, loop assignments, and return values from both EGM and VFI paths
+  - Savings: ~11MB per stage × 5 stages × 20 periods = **~1.1GB per model**
+
+- [2025-12-16] **Conditional `vlu_dcsn` allocation** in `horses_c.py`:
+  - When `delta == 1` (standard exponential discounting), `vlu_dcsn = Q_dcsn` mathematically
+  - Skip allocating separate `vlu_dcsn` array; return `Q_dcsn` directly for both
+  - Savings: ~11MB per stage for standard discounting models
+
+- [2025-12-16] **EGM grids return optimization** in `horses_c.py`:
+  - Changed `_solve_egm_loop` to return `None` instead of empty dictionaries when `store_egm_grids=False`
+  - Added explicit `del unrefined_grids, refined_grids` cleanup
+  - Downstream code checks `egm_grids is not None` before access
+
+### Compute Optimizations
+
+- [2025-12-16] **Skip expensive computations when `delta == 1`** in `horses_c.py`:
+  - `compute_gradient()` - expensive gradient calculation for c_prime
+  - `u_func()` call - utility function evaluation for vlu_dcsn transformation
+  - Simplified: `lambda_dcsn = uc_today`, `vlu_dcsn = Q_dcsn` (direct assignment)
+  - Savings: ~34,000 function calls skipped per model (343 iterations × 5 stages × 20 periods)
+
+---
+
 ## [0.5.0dev2] - 2025-12-15 – Memory Optimizations and Lazy Compilation
 
 **Note: Memory performance improvements are ongoing. Current optimizations reduce overhead but peak memory usage during sweep runs may still be high.**

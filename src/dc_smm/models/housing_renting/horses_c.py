@@ -28,11 +28,11 @@ _solve_egm_loop(vlu_cntn, lambda_cntn, model)
     Private helper to solve the consumption problem using the EGM algorithm.
 _solve_vfi_loop(vlu_cntn, model, use_mpi, comm)
     Private helper to solve the consumption problem using VFI (serial only).
-_solve_vfi_numerical(vlu_cntn, w_grid, a_grid, H_grid, beta, delta, m_bar, u_func, h_nxt_ind_array, thorn)
+_solve_vfi_numerical(vlu_cntn, w_grid, a_grid, H_grid, beta, delta, m_bar, u_func, h_nxt_ind_array, thorn, alpha)
     Numba-jitted kernel for VFI using Brent's method optimization.
-solve_vfi_grid_serial(vlu_cntn, w_grid, a_grid, H_grid, beta, delta, m_bar, u_func, h_nxt_ind_array, thorn, n_grid)
+solve_vfi_grid_serial(vlu_cntn, w_grid, a_grid, H_grid, beta, delta, m_bar, u_func, h_nxt_ind_array, thorn, alpha, n_grid)
     Serial VFI solver that uses a block kernel for a dense grid search.
-_solve_vfi_block(h_idx, y_idx, vlu_cntn, w_grid, a_grid, H_grid, beta, delta, m_bar, u_func, h_nxt_ind_array, thorn, n_grid)
+_solve_vfi_block(h_idx, y_idx, vlu_cntn, w_grid, a_grid, H_grid, beta, delta, m_bar, u_func, h_nxt_ind_array, thorn, alpha, n_grid)
     Numba-jitted kernel to solve VFI for a block of (h,y) pairs.
 """
 import os, time, numba, numpy as np
@@ -52,6 +52,55 @@ from dc_smm.uenvelope.upperenvelope import EGM_UE
 from dc_smm.fues.helpers import interp_as, interp_clean
 from quantecon.optimize.scalar_maximization import brent_max
 from dynx.stagecraft.solmaker import Solution
+
+
+@njit
+def sectioned_brent_max(func, a_low, a_high, args, n_sections=5, xtol=1e-10):
+    """
+    Sectioned Brent's method: divide interval into n_sections, run brent_max
+    on each section, and return the global maximum.
+    
+    This handles potential non-convexity by finding the best local maximum.
+    
+    Parameters
+    ----------
+    func : callable
+        Objective function to maximize
+    a_low : float
+        Lower bound of search interval
+    a_high : float
+        Upper bound of search interval  
+    args : tuple
+        Additional arguments to pass to func
+    n_sections : int
+        Number of sections to divide the interval into
+    xtol : float
+        Tolerance for Brent's method
+        
+    Returns
+    -------
+    best_x : float
+        Location of global maximum
+    best_val : float
+        Value at global maximum
+    """
+    best_x = a_low
+    best_val = -np.inf
+    
+    section_width = (a_high - a_low) / n_sections
+    
+    for i in range(n_sections):
+        sec_low = a_low + i * section_width
+        sec_high = a_low + (i + 1) * section_width
+        
+        # Run Brent's max on this section
+        x_opt, val_opt, _ = brent_max(func, sec_low, sec_high, args=args, xtol=xtol)
+        
+        if val_opt > best_val:
+            best_val = val_opt
+            best_x = x_opt
+    
+    return best_x, best_val
 
 # Conditional GPU import - only load if CUDA is available
 try:
@@ -133,103 +182,90 @@ def F_ownc_cntn_to_dcsn(mover, use_mpi=False, comm=None):
             if lambda_cntn is None:
                 raise ValueError("lambda_cntn is required for EGM method.")
 
+            # Check if we should store EGM grids (for plotting)
+            # Default to False to save memory - set store_egm_grids: true in settings to enable
+            # Also check skip_egm_plots - if True, don't store grids (saves significant memory)
+            skip_egm_plots = model.settings.get("skip_egm_plots", True)
+            _store_egm_grids = model.settings.get("store_egm_grids", not skip_egm_plots)
+            
             # Heavy lifting loop for EGM
-            policy, vlu_dcsn, lambda_dcsn, ue_time_avg, egm_grids, policy_a, Q_dcsn = (
-                _solve_egm_loop(vlu_cntn, lambda_cntn, model)
+            policy, vlu_dcsn, lambda_dcsn, ue_time_total, egm_grids, Q_dcsn = (
+                _solve_egm_loop(vlu_cntn, lambda_cntn, model, store_egm_grids=_store_egm_grids)
             )
             # Include UE timing in the result
+            # ue_time_total is the TOTAL UE time across all (H,Y) indices for this stage
             timing_info = {
-                "ue_time_avg": ue_time_avg,
+                "ue_time_total": ue_time_total,
                 "total_time": time.time() - start_time
             }
 
             # Create Solution object for successor perch
             sol = Solution()
             sol.policy["c"] = policy
-            sol.policy["a"] = policy_a
+            # Note: policy_a removed - not used downstream, saves memory
             sol.vlu = vlu_dcsn
             sol.lambda_ = lambda_dcsn
             sol.Q = Q_dcsn
             sol.timing = timing_info
 
-            # Attaching EGM grids to Solution
-            # TODO: SIMPLIFY THIS.
-            for key, arr in egm_grids["unrefined"]["e"].items():
-                sol.EGM.unrefined[f"e_{key}"] = arr
-            for key, arr in egm_grids["unrefined"]["Q"].items():
-                sol.EGM.unrefined[f"Q_{key}"] = arr
-            for key, arr in egm_grids["unrefined"]["c"].items():
-                sol.EGM.unrefined[f"c_{key}"] = arr
-            for key, arr in egm_grids["unrefined"]["a"].items():
-                sol.EGM.unrefined[f"a_{key}"] = arr
+            # Attach EGM grids to Solution only if we stored them
+            if _store_egm_grids and egm_grids is not None and egm_grids["unrefined"]["e"]:
+                # Convert tuple keys (i_y, i_h) to string format "i_y-i_h" for plotting compatibility
+                def _key_str(k):
+                    return f"{k[0]}-{k[1]}" if isinstance(k, tuple) else str(k)
+                
+                for key, arr in egm_grids["unrefined"]["e"].items():
+                    sol.EGM.unrefined[f"e_{_key_str(key)}"] = arr
+                for key, arr in egm_grids["unrefined"]["Q"].items():
+                    sol.EGM.unrefined[f"Q_{_key_str(key)}"] = arr
+                for key, arr in egm_grids["unrefined"]["c"].items():
+                    sol.EGM.unrefined[f"c_{_key_str(key)}"] = arr
+                for key, arr in egm_grids["unrefined"]["a"].items():
+                    sol.EGM.unrefined[f"a_{_key_str(key)}"] = arr
 
-            for key, arr in egm_grids["refined"]["e"].items():
-                sol.EGM.refined[f"e_{key}"] = arr
-            for key, arr in egm_grids["refined"]["Q"].items():
-                sol.EGM.refined[f"Q_{key}"] = arr
-            for key, arr in egm_grids["refined"]["c"].items():
-                sol.EGM.refined[f"c_{key}"] = arr
-            for key, arr in egm_grids["refined"]["a"].items():
-                sol.EGM.refined[f"a_{key}"] = arr
-            for key, arr in egm_grids["refined"]["lambda_"].items():
-                sol.EGM.refined[f"lambda_{key}"] = arr
+                for key, arr in egm_grids["refined"]["e"].items():
+                    sol.EGM.refined[f"e_{_key_str(key)}"] = arr
+                for key, arr in egm_grids["refined"]["Q"].items():
+                    sol.EGM.refined[f"Q_{_key_str(key)}"] = arr
+                for key, arr in egm_grids["refined"]["c"].items():
+                    sol.EGM.refined[f"c_{_key_str(key)}"] = arr
+                for key, arr in egm_grids["refined"]["a"].items():
+                    sol.EGM.refined[f"a_{_key_str(key)}"] = arr
+                for key, arr in egm_grids["refined"]["lambda_"].items():
+                    sol.EGM.refined[f"lambda_{_key_str(key)}"] = arr
+            
+            # Clear egm_grids to free memory immediately
+            del egm_grids
 
             return sol
 
         # VFI methods
         elif method.upper() == "VFI" or method.upper() == "VFI_HDGRID":
             # Heavy lifting loop for VFI
-            policy, vlu_dcsn, lambda_dcsn, ue_time_avg, egm_grids, policy_a, Q_dcsn = (
+            policy, vlu_dcsn, lambda_dcsn, ue_time_total, egm_grids, Q_dcsn = (
                 _solve_vfi_loop(vlu_cntn, model, use_mpi=use_mpi, comm=comm)
             )
 
             # Only root builds a full Solution object for VFI_HDGRID
             if comm is None or comm.rank == 0:
-                # No UE time for VFI
+                # No UE time for VFI (ue_time_total is 0)
                 timing_info = {
+                    "ue_time_total": ue_time_total,
                     "total_time": time.time() - start_time
                 }
 
                 # Create Solution object
                 sol = Solution()
                 sol.policy["c"] = policy
-                sol.policy["a"] = policy_a
+                # Note: policy_a removed - not used downstream, saves memory
                 sol.vlu = vlu_dcsn
                 sol.lambda_ = lambda_dcsn
                 sol.Q = Q_dcsn
                 sol.timing = timing_info
 
-                # Store empty EGM grids for VFI (if any)
-                # TODO: SIMPLIFY THIS.
-                if "e" in egm_grids["unrefined"]:
-                    for key, arr in egm_grids["unrefined"]["e"].items():
-                        sol.EGM.unrefined[f"e_{key}"] = arr
-                if "Q" in egm_grids["unrefined"]:
-                    for key, arr in egm_grids["unrefined"]["Q"].items():
-                        sol.EGM.unrefined[f"Q_{key}"] = arr
-                if "c" in egm_grids["unrefined"]:
-                    for key, arr in egm_grids["unrefined"]["c"].items():
-                        sol.EGM.unrefined[f"c_{key}"] = arr
-                if "a" in egm_grids["unrefined"]:
-                    for key, arr in egm_grids["unrefined"]["a"].items():
-                        sol.EGM.unrefined[f"a_{key}"] = arr
-
-                # Store refined grids for VFI (if any)
-                if "e" in egm_grids["refined"]:
-                    for key, arr in egm_grids["refined"]["e"].items():
-                        sol.EGM.refined[f"e_{key}"] = arr
-                if "Q" in egm_grids["refined"]:
-                    for key, arr in egm_grids["refined"]["Q"].items():
-                        sol.EGM.refined[f"Q_{key}"] = arr
-                if "c" in egm_grids["refined"]:
-                    for key, arr in egm_grids["refined"]["c"].items():
-                        sol.EGM.refined[f"c_{key}"] = arr
-                if "a" in egm_grids["refined"]:
-                    for key, arr in egm_grids["refined"]["a"].items():
-                        sol.EGM.refined[f"a_{key}"] = arr
-                if "lambda_" in egm_grids["refined"]:
-                    for key, arr in egm_grids["refined"]["lambda_"].items():
-                        sol.EGM.refined[f"lambda_{key}"] = arr
+                # VFI doesn't produce meaningful EGM grids, so skip storage
+                # Clear egm_grids to free memory immediately
+                del egm_grids
 
                 return sol
             
@@ -257,13 +293,14 @@ def F_ownc_cntn_to_dcsn_gpu(mover, use_mpi=False, comm=None):
         vlu_cntn = perch_data.vlu
         
         # This call offloads the heavy computation to the GPU
-        policy_c, policy_a, Q_dcsn, vlu_dcsn, lambda_dcsn = solve_vfi_gpu(
+        # Note: policy_a (index 1) ignored - not used downstream, saves memory
+        policy_c, _, Q_dcsn, vlu_dcsn, lambda_dcsn = solve_vfi_gpu(
             vlu_cntn, model
         )
 
         sol = Solution()
         sol.policy["c"] = policy_c
-        sol.policy["a"] = policy_a
+        # Note: policy_a removed - not used downstream
         sol.vlu = vlu_dcsn # Note: We use vlu_dcsn from the GPU run
         sol.lambda_ = lambda_dcsn
         sol.Q = Q_dcsn
@@ -290,8 +327,13 @@ def F_rntc_cntn_to_dcsn_gpu(mover, use_mpi=False, comm=None):
 
 
 # --- Private Solver Loop Helpers ---
-def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
-    """Solves the consumption problem using the EGM loop."""
+def _solve_egm_loop(vlu_cntn, lambda_cntn, model, store_egm_grids=False):
+    """Solves the consumption problem using the EGM loop.
+    
+    Args:
+        store_egm_grids: If False (default), skip storing EGM grids to save memory.
+                        Set to True only when EGM plots are needed.
+    """
 
     # ------------------------------------------------------------------
     # 1. Unpack everything we need from the model numerical object
@@ -391,16 +433,22 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
     n_y = vlu_cntn.shape[2]
 
     policy = np.empty((n_w, n_H, n_y))
-    policy_a = np.empty((n_w, n_H, n_y))
-    vlu_dcsn = np.empty((n_w, n_H, n_y))
+    # Note: policy_a removed - not used downstream, saves memory
     Q_dcsn = np.empty((n_w, n_H, n_y))
     lambda_dcsn = np.empty((n_w, n_H, n_y))
+    # Only allocate vlu_dcsn when delta < 1; when delta == 1, vlu_dcsn = Q_dcsn
+    if delta < 1:
+        vlu_dcsn = np.empty((n_w, n_H, n_y))
+    else:
+        vlu_dcsn = None  # Will use Q_dcsn directly
 
-    # Container for EGM grids
-    unrefined_grids = {k: {} for k in ('e', 'Q', 'c', 'a')}
-    refined_grids = {k: {} for k in ('e', 'Q', 'c', 'a', 'lambda_')}
-    egm_grids = {"unrefined": unrefined_grids,
-                 "refined":   refined_grids}
+    # Container for EGM grids - only create if we need to store them
+    if store_egm_grids:
+        unrefined_grids = {k: {} for k in ('e', 'Q', 'c', 'a')}
+        refined_grids = {k: {} for k in ('e', 'Q', 'c', 'a', 'lambda_')}
+    else:
+        unrefined_grids = None
+        refined_grids = None
 
     # array for indices of post-state housing (not services!)
     # for owners, it is the same as the housing index in the loop
@@ -411,6 +459,16 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
     # Track total UE time and count for averaging
     total_ue_time = 0.0
     ue_count = 0
+
+    # Pre-create partial_uc functions for each H index (avoids closure creation inside loop)
+    # These are used by EGM_UE to compute marginal utility
+    partial_uc_funcs = []
+    for i_h in range(n_H):
+        H_val_for_uc = H_nxt_grid[i_h] * thorn
+        # Capture H_val_for_uc by default argument to avoid late binding
+        def make_partial_uc(H_val=H_val_for_uc):
+            return lambda c_vals: compiled_funcs.uc_func(**{"c": c_vals, "H_nxt": H_val})
+        partial_uc_funcs.append(make_partial_uc())
 
     # ------------------------------------------------------------------
     #  4. Vectorised pre-computation of c_egm for ALL (w,h,y) points
@@ -475,12 +533,17 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
                 # Extract lambda for FOC checks (already scaled: beta*delta*lambda*R)
                 lambda_e = lam_sel[:, i_h, i_y] if add_jump_constraints and uc_func is not None else None
 
+                # DCEGM expects original EGM order (sorted by exogenous grid a')
+                # FUES expects sorted by endogenous grid (m = c + a')
+                should_sort = (ue_method != "DCEGM")
+                
                 m_egm_unique, vlu_q_egm_unique, c_egm_unique, a_nxt_grid_unique = (
                     egm_preprocess(
                         m_egm, q_egm, c_egm, a_nxt_grid, delta*beta,
                         utility_func, vlu_e, m_bar=m_bar, n_con=n_con,
                         n_con_nxt=n_con_nxt, c_max=c_max, h_nxt=H_val,
                         add_jump_constraints=add_jump_constraints,
+                        sort_output=should_sort,  # Don't sort for DCEGM
                         # Pass FOC checking parameters
                         lambda_next=lambda_e,  # Already scaled by beta*delta*Rfree
                         uc_func=uc_test,
@@ -506,20 +569,16 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
                 a_nxt_grid_unique = a_nxt_grid
 
             # Store unrefined grids (before upper envelope)
-            grid_key = f"{i_y}-{i_h}"
-            unrefined_grids['e'][grid_key] = m_egm_unique
-            unrefined_grids['Q'][grid_key] = vlu_q_egm_unique
-            unrefined_grids['c'][grid_key] = c_egm_unique
-            unrefined_grids['a'][grid_key] = a_nxt_grid_unique
+            # Use tuple key instead of string formatting (faster)
+            grid_key = (i_y, i_h)
+            if store_egm_grids:
+                unrefined_grids['e'][grid_key] = m_egm_unique
+                unrefined_grids['Q'][grid_key] = vlu_q_egm_unique
+                unrefined_grids['c'][grid_key] = c_egm_unique
+                unrefined_grids['a'][grid_key] = a_nxt_grid_unique
 
-            # The upper envelope wrapper calculates the marginal utility
-            # this can be removed.
-            # TODO: streamline muc here
-            def partial_uc(c_vals):
-                return compiled_funcs.uc_func(**{
-                    "c": c_vals,
-                    "H_nxt": H_nxt_grid[i_h]*thorn
-                })
+            # Use pre-created partial_uc function (avoids closure creation in loop)
+            partial_uc = partial_uc_funcs[i_h]
 
             # Get upper envelope solution and timing
             try:
@@ -574,7 +633,7 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
             else:
                 Q_dcsn[:, i_h, i_y] = q_refined
                 policy[:, i_h, i_y] = c_refined
-                policy_a[:, i_h, i_y] = a_refined
+                # Note: policy_a assignment removed - not used downstream
                 lambda_dcsn[:, i_h, i_y] = lambda_refined
 
             policy[policy < 0] = 1e-10
@@ -587,25 +646,24 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
             })
 
             if delta < 1:
+                # Present-biased case: need full calculation
                 c_prime = compute_gradient(
                     policy[:, i_h, i_y], w_grid, m_bar=m_bar,
                     method=gradient_method, eps=0, guard_distance=gradient_guard_distance,
                     smooth_segments=gradient_smooth_segments, 
                     smoothing_window=gradient_smoothing_window)
+                c_prime[c_prime > 1] = 1
+                # Shadow value with marginal utility (Harris and Laibson 2001)
+                lambda_dcsn[:, i_h, i_y] = (
+                    uc_today - (1-delta)*c_prime*uc_today) / delta
+                # Value function transformation
+                vlu_dcsn[:, i_h, i_y] = (Q_dcsn[:, i_h, i_y] - (1-delta) *
+                                         compiled_funcs.u_func(c=policy[:, i_h, i_y], H_nxt=H_val))/delta
             else:
-                c_prime = np.zeros_like(policy[:, i_h, i_y])
-
-            # Shadow value with marginal utility
-            # divide by beta because we apply discoutn factor in next period
-            # this matches eq in Harris and Laibson (2001)
-            #lambda_dcsn[:, i_h, i_y] = (c_prime*beta*delta + (1-c_prime)*beta)*uc_today/beta*delta
-            #lambda_dcsn[:,i_h,i_y] = 
-            c_prime[c_prime>1] = 1
-            lambda_dcsn[:, i_h, i_y] = (
-                uc_today - (1-delta)*c_prime*uc_today) / delta
-            
-            vlu_dcsn[:, i_h, i_y] = (Q_dcsn[:, i_h, i_y] - (1-delta) *
-                                     compiled_funcs.u_func(c=policy[:, i_h, i_y], H_nxt=H_val))/delta
+                # Standard exponential discounting (delta=1): simplified formulas
+                # vlu_dcsn = Q_dcsn (no separate array needed), lambda_dcsn = uc_today
+                lambda_dcsn[:, i_h, i_y] = uc_today
+                # No need to copy Q_dcsn to vlu_dcsn - they're identical when delta=1
 
             ue_time = refined.get("ue_time", 0.0)
 
@@ -614,38 +672,48 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model):
             # for consav, refined grids are just the interpolants (consav package returns)
             # cash-on-hand / endogenous grid
 
-            # Debug: Check if refined results are valid
-            if len(m_refined) == 0 or np.all(np.isnan(m_refined)):
-                print(f"[DEBUG] {ue_method}: Empty refined grids for grid key {grid_key}")
-                print(f"[DEBUG] {ue_method}: Input m_egm_unique shape: {m_egm_unique.shape}")
-                print(f"[DEBUG] {ue_method}: Input vlu_q_egm_unique shape: {vlu_q_egm_unique.shape}")
-                # Store empty grids as fallback
-                refined_grids['e'][grid_key] = np.array([])
-                refined_grids['Q'][grid_key] = np.array([])
-                refined_grids['c'][grid_key] = np.array([])
-                refined_grids['a'][grid_key] = np.array([])
-                refined_grids['lambda_'][grid_key] = np.array([])
-            else:
-                refined_grids['e'][grid_key] = m_refined
-                refined_grids['Q'][grid_key] = q_refined  # value function
-                refined_grids['c'][grid_key] = c_refined  # consumption policy
-                refined_grids['a'][grid_key] = a_refined  # asset policy
-                refined_grids['lambda_'][grid_key] = lambda_refined
+            # Store refined grids only if needed (saves significant memory)
+            if store_egm_grids:
+                # Debug: Check if refined results are valid
+                if len(m_refined) == 0 or np.all(np.isnan(m_refined)):
+                    print(f"[DEBUG] {ue_method}: Empty refined grids for grid key {grid_key}")
+                    print(f"[DEBUG] {ue_method}: Input m_egm_unique shape: {m_egm_unique.shape}")
+                    print(f"[DEBUG] {ue_method}: Input vlu_q_egm_unique shape: {vlu_q_egm_unique.shape}")
+                    # Store empty grids as fallback
+                    refined_grids['e'][grid_key] = np.array([])
+                    refined_grids['Q'][grid_key] = np.array([])
+                    refined_grids['c'][grid_key] = np.array([])
+                    refined_grids['a'][grid_key] = np.array([])
+                    refined_grids['lambda_'][grid_key] = np.array([])
+                else:
+                    refined_grids['e'][grid_key] = m_refined
+                    refined_grids['Q'][grid_key] = q_refined  # value function
+                    refined_grids['c'][grid_key] = c_refined  # consumption policy
+                    refined_grids['a'][grid_key] = a_refined  # asset policy
+                    refined_grids['lambda_'][grid_key] = lambda_refined
 
             # Track upper envelope time
             total_ue_time += ue_time
             ue_count += 1
 
-    # Calculate average UE time
-    avg_ue_time = total_ue_time / max(ue_count, 1)
+    # Return TOTAL UE time for this stage (sum across all H,Y indices)
+    # This allows proper period-level aggregation in whisperer
+    # Note: ue_count is the number of (H,Y) indices processed
 
-    # Include the grid data in the returned tuple
-    egm_grids = {
-        'unrefined': unrefined_grids,
-        'refined': refined_grids
-    }
+    # Include the grid data in the returned tuple (None if not storing)
+    if store_egm_grids:
+        egm_grids = {
+            'unrefined': unrefined_grids,
+            'refined': refined_grids
+        }
+    else:
+        # Return None to save memory - downstream code should check for None
+        egm_grids = None
+        # Explicitly delete the None references (no-op but documents intent)
+        del unrefined_grids, refined_grids
 
-    return policy, vlu_dcsn, lambda_dcsn, avg_ue_time, egm_grids, policy_a, Q_dcsn
+    # When delta == 1, vlu_dcsn is None - return Q_dcsn in its place (they're identical)
+    return policy, vlu_dcsn if vlu_dcsn is not None else Q_dcsn, lambda_dcsn, total_ue_time, egm_grids, Q_dcsn
 
 
 def _solve_vfi_loop(vlu_cntn, model, use_mpi=False, comm=None):
@@ -658,6 +726,9 @@ def _solve_vfi_loop(vlu_cntn, model, use_mpi=False, comm=None):
     w_grid = model.num.state_space.dcsn.grids.w.astype(np.float64)
     a_grid = model.num.state_space.cntn.grids.a_nxt.astype(np.float64)
     H_grid = model.num.state_space.cntn.grids.H_nxt.astype(np.float64)
+    
+    # Debug: print actual grid sizes and vlu_cntn shape (determines loop count)
+    print(f"[VFI DEBUG] {model.stage_name}: w_grid={w_grid.size}, a_grid={a_grid.size}, H_grid={H_grid.size}, vlu_cntn.shape={vlu_cntn.shape}")
     if "RNT" in model.stage_name:
         thorn = model.param.thorn
     else:
@@ -666,6 +737,7 @@ def _solve_vfi_loop(vlu_cntn, model, use_mpi=False, comm=None):
     # --- parameters ---------------------------------------------
     beta = float(model.param.beta)
     delta = float(model.param.delta_pb)
+    alpha = float(model.param.alpha)  # For marginal utility calculation
     m_bar = float(model.settings_dict["m_bar"])
     N_arg_grid_vfi = model.settings_dict["N_arg_grid_vfi"]
 
@@ -679,25 +751,34 @@ def _solve_vfi_loop(vlu_cntn, model, use_mpi=False, comm=None):
         "iota": model.param.iota,
         # add any extra constants referenced in expr_str
     }
-    utility_func = build_njit_utility(expr_str, param_vals)
+    # Use cached version to avoid JIT recompilation on every call
+    utility_func = get_u_func(expr_str, param_vals)
     g_ve_h_ind = model.num.functions.g_ve_h_ind
     h_nxt_ind_array = g_ve_h_ind(H_ind=np.arange(H_grid.size))
 
     # --- run kernel ---------------------------------------------
+    import time as _time
+    _kernel_start = _time.time()
+    
     if model.methods["solution"] == "VFI":
         # Serial execution only
-        policy_c, policy_a, Q_dcsn, vlu_dcsn, lambda_dcsn = _solve_vfi_numerical(
+        # Note: policy_a (index 1) discarded - not used downstream
+        policy_c, _, Q_dcsn, vlu_dcsn, lambda_dcsn = _solve_vfi_numerical(
             vlu_cntn, w_grid, a_grid, H_grid,
             beta, delta, m_bar,
-            utility_func, h_nxt_ind_array, thorn
+            utility_func, h_nxt_ind_array, thorn, alpha
         )
     elif model.methods["solution"] == "VFI_HDGRID":
         # Serial VFI_HDGRID
-        policy_c, policy_a, Q_dcsn, vlu_dcsn, lambda_dcsn = solve_vfi_grid_serial(
+        # Note: policy_a (index 1) discarded - not used downstream
+        policy_c, _, Q_dcsn, vlu_dcsn, lambda_dcsn = solve_vfi_grid_serial(
             vlu_cntn, w_grid, a_grid, H_grid,
             beta, delta, m_bar,
-            utility_func, h_nxt_ind_array, thorn, n_grid=N_arg_grid_vfi
+            utility_func, h_nxt_ind_array, thorn, alpha, n_grid=N_arg_grid_vfi
         )
+    
+    _kernel_time = _time.time() - _kernel_start
+    print(f"[VFI TIMING] {model.stage_name}: kernel={_kernel_time:.4f}s, n_W={w_grid.size}, n_H={H_grid.size}")
 
     # Memory cleanup
     del vlu_cntn
@@ -717,14 +798,14 @@ def _solve_vfi_loop(vlu_cntn, model, use_mpi=False, comm=None):
             lambda_dcsn,          # lambda_dcsn
             avg_ue_time,
             egm_grids,
-            policy_a,             # asset policy, matches EGM output
             Q_dcsn)               # Q_dcsn (decision objective)
+            # Note: policy_a removed - not used downstream
 
 
 @njit
 def _solve_vfi_numerical(vlu_cntn, w_grid, a_grid, H_grid,
                      beta, delta, m_bar,
-                     u_func, h_nxt_ind_array, thorn):
+                     u_func, h_nxt_ind_array, thorn, alpha):
     """
     Fully-compiled Laibson VFI.
     Returns:
@@ -752,7 +833,7 @@ def _solve_vfi_numerical(vlu_cntn, w_grid, a_grid, H_grid,
             for iw in range(n_W):
                 w_val = w_grid[iw]
                 a_low = a_grid[0]
-                a_high = min(w_val - 1e-12, a_grid[-1]+30) #TODO: HARDWIRE THIS
+                a_high = min(w_val - 1e-03, a_grid[-1]+30) #TODO: HARDWIRE THIS
 
                 # Handle corner case: wealth too low to allow savings above a_low
                 if a_high <= a_low:
@@ -762,12 +843,14 @@ def _solve_vfi_numerical(vlu_cntn, w_grid, a_grid, H_grid,
                     Q_star = bellman_obj(a_star, w_val, H_val, beta, delta,
                                          a_grid, V_slice, u_func)
                 else:
-                    a_star, Q_star, _ = brent_max(
+                    # Use sectioned Brent's max to handle potential non-convexity
+                    a_star, Q_star = sectioned_brent_max(
                         bellman_obj,
                         a_low, a_high,
                         args=(w_val, H_val, beta, delta,
                               a_grid, V_slice, u_func),
-                        xtol=1e-12
+                        n_sections=10,
+                        xtol=1e-10
                     )
                     c_star = w_val - a_star
 
@@ -785,20 +868,18 @@ def _solve_vfi_numerical(vlu_cntn, w_grid, a_grid, H_grid,
 
             for iw in range(n_W):
                 c_now = policy_c[iw, h, y]
-                uc_now = 1/c_now
+                uc_now = alpha / c_now  # Fixed: was 1/c_now, should be alpha/c for Cobb-Douglas utility
                 vlu_dcsn[iw, h, y] = (Q_dcsn[iw, h, y]
                                     - (1.0 - delta)*u_func(c_now, H_val)) / delta
                 lambda_dcsn[iw, h, y] = (uc_now -
                                          (1.0 - delta)*c_prime[iw]*uc_now) / delta
-
-                # print(V_cntn[iw, h, y][np.isinf(V_cntn[iw, h, y])])
 
     return policy_c, policy_a, Q_dcsn, vlu_dcsn, lambda_dcsn
 
 
 def solve_vfi_grid_serial(vlu_cntn, w_grid, a_grid, H_grid,
                           beta, delta, m_bar, u_func, h_nxt_ind_array, 
-                          thorn, n_grid=2000):
+                          thorn, alpha, n_grid=2000):
     """
     Serial VFI using block kernel.
     """
@@ -812,7 +893,7 @@ def solve_vfi_grid_serial(vlu_cntn, w_grid, a_grid, H_grid,
     # Call block kernel
     policy_c_block, policy_a_block, Q_block, V_block, lambda_block = _solve_vfi_block(
         h_idx, y_idx, vlu_cntn, w_grid, a_grid, H_grid,
-        beta, delta, m_bar, u_func, h_nxt_ind_array, thorn, n_grid
+        beta, delta, m_bar, u_func, h_nxt_ind_array, thorn, alpha, n_grid
     )
     
     # Reshape to (n_W, n_H, n_Y) format
@@ -837,7 +918,7 @@ def solve_vfi_grid_serial(vlu_cntn, w_grid, a_grid, H_grid,
 @njit
 def _solve_vfi_block(h_idx, y_idx, vlu_cntn, w_grid, a_grid, H_grid,
                      beta, delta, m_bar, u_func, h_nxt_ind_array,
-                     thorn, n_grid):
+                     thorn, alpha, n_grid):
     """
     Solve VFI for a block of (h,y) pairs.
     
@@ -863,6 +944,8 @@ def _solve_vfi_block(h_idx, y_idx, vlu_cntn, w_grid, a_grid, H_grid,
         Housing index mapping
     thorn : float
         Rental efficiency
+    alpha : float
+        Consumption share in Cobb-Douglas utility (for marginal utility)
     n_grid : int
         Grid density
         
@@ -932,7 +1015,7 @@ def _solve_vfi_block(h_idx, y_idx, vlu_cntn, w_grid, a_grid, H_grid,
         
         for iw in range(n_W):
             c_now = policy_c[b, iw]
-            uc_now = 1.0 / c_now
+            uc_now = alpha / c_now  # Fixed: was 1/c_now, should be alpha/c for Cobb-Douglas utility
             vlu_dcsn[b, iw] = (Q_dcsn[b, iw] - (1 - delta) * u_func(c_now, H_val)) / delta
             lambda_dcsn[b, iw] = (uc_now - (1 - delta) * c_prime[iw] * uc_now) / delta
     
