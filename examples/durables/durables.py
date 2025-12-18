@@ -737,7 +737,7 @@ def Operator_Factory(cp):
 
         return endog_grid_unrefined, vf_unrefined, c_unrefined
 
-    @njit(cache=True)
+    @njit
     def _refineKeeper(endog_grid_unrefined,
                       vf_unrefined, c_unrefined, V_prime, t, m_bar=1.1):
         """
@@ -847,7 +847,7 @@ def Operator_Factory(cp):
         return new_a_prime_refined, new_c_refined, new_v_refined,\
             e_grid_clean, vf_clean, c_clean, a_prime_clean
 
-    @njit(cache=True)
+    @njit
     def _adjEGM(Ud_prime_a, Ud_prime_h, V, t):
         # Cache dimensions
         n_z = len(z_vals)
@@ -892,7 +892,7 @@ def Operator_Factory(cp):
 
         return endog_grid_unrefined, vf_unrefined, a_prime_unrefined, h_prime_unrefined
 
-    @njit(cache=True)
+    @njit
     def refine_adj(endog_grid_unrefined,
                    vf_unrefined,
                    a_prime_unrefined,
