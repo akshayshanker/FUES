@@ -792,19 +792,34 @@ def Operator_Factory(cp):
                     _FUES_EPS_D, _FUES_EPS_SEP, _FUES_EPS_FWD, _FUES_PAR_GUARD
                 )
 
-                # Apply mask to get filtered arrays
-                e_grid_clean = e_sorted[keep]
-                vf_clean = v_sorted[keep]
-                c_clean = c_sorted[keep]
-                a_prime_clean = a_sorted[keep]
+                # Pre-allocate and copy directly (faster than concatenate)
+                n_kept = np.sum(keep)
+                n_total = n_kept + n_inter
+                e_grid_clean = np.empty(n_total)
+                vf_clean = np.empty(n_total)
+                c_clean = np.empty(n_total)
+                a_prime_clean = np.empty(n_total)
 
-                # Merge intersections if any
+                # Copy kept points
+                idx = 0
+                for i in range(len(keep)):
+                    if keep[i]:
+                        e_grid_clean[idx] = e_sorted[i]
+                        vf_clean[idx] = v_sorted[i]
+                        c_clean[idx] = c_sorted[i]
+                        a_prime_clean[idx] = a_sorted[i]
+                        idx += 1
+
+                # Copy intersections directly
+                for i in range(n_inter):
+                    e_grid_clean[idx] = intersections[i, 0]
+                    vf_clean[idx] = intersections[i, 1]
+                    c_clean[idx] = intersections[i, 2]
+                    a_prime_clean[idx] = intersections[i, 3]
+                    idx += 1
+
+                # Sort if we have intersections
                 if n_inter > 0:
-                    e_grid_clean = np.concatenate((e_grid_clean, intersections[:n_inter, 0]))
-                    vf_clean = np.concatenate((vf_clean, intersections[:n_inter, 1]))
-                    c_clean = np.concatenate((c_clean, intersections[:n_inter, 2]))
-                    a_prime_clean = np.concatenate((a_prime_clean, intersections[:n_inter, 3]))
-                    # Re-sort after merging
                     sortindex = np.argsort(e_grid_clean)
                     e_grid_clean = e_grid_clean[sortindex]
                     vf_clean = vf_clean[sortindex]
@@ -965,26 +980,41 @@ def Operator_Factory(cp):
                 _FUES_EPS_D, _FUES_EPS_SEP, _FUES_EPS_FWD, _FUES_PAR_GUARD
             )
 
-            # Apply mask to get filtered arrays
-            e_grid_clean = e_sorted[keep]
-            vf_clean = v_sorted[keep]
-            a_prime_clean = a_sorted[keep]
-            hprime_clean = h_sorted[keep]
+            # Pre-allocate and copy directly (faster than concatenate)
+            n_kept = np.sum(keep)
+            n_total = n_kept + n_inter
+            e_grid_clean = np.empty(n_total)
+            vf_clean = np.empty(n_total)
+            a_prime_clean = np.empty(n_total)
+            hprime_clean = np.empty(n_total)
 
-            # Merge intersections if any
+            # Copy kept points
+            idx = 0
+            for i in range(len(keep)):
+                if keep[i]:
+                    e_grid_clean[idx] = e_sorted[i]
+                    vf_clean[idx] = v_sorted[i]
+                    a_prime_clean[idx] = a_sorted[i]
+                    hprime_clean[idx] = h_sorted[i]
+                    idx += 1
+
+            # Copy intersections directly
+            for i in range(n_inter):
+                e_grid_clean[idx] = intersections[i, 0]
+                vf_clean[idx] = intersections[i, 1]
+                a_prime_clean[idx] = intersections[i, 2]
+                hprime_clean[idx] = intersections[i, 3]
+                idx += 1
+
+            # Sort if we have intersections
             if n_inter > 0:
-                e_grid_clean = np.concatenate((e_grid_clean, intersections[:n_inter, 0]))
-                vf_clean = np.concatenate((vf_clean, intersections[:n_inter, 1]))
-                a_prime_clean = np.concatenate((a_prime_clean, intersections[:n_inter, 2]))
-                hprime_clean = np.concatenate((hprime_clean, intersections[:n_inter, 3]))
-                # Re-sort after merging
                 sortindex = np.argsort(e_grid_clean)
                 e_grid_clean = e_grid_clean[sortindex]
                 vf_clean = vf_clean[sortindex]
                 a_prime_clean = a_prime_clean[sortindex]
                 hprime_clean = hprime_clean[sortindex]
 
-            # Recompute c_clean from sorted values
+            # Recompute c_clean from values
             c_clean = e_grid_clean - hprime_clean * tau_adj - a_prime_clean
             
             # Interpolate to output grid
