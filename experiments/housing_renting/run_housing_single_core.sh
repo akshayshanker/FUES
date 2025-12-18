@@ -31,17 +31,20 @@ fi
 source "$SCRIPT_DIR/configs/pbs_run_presets.sh"
 
 # --- Define the Sequence of Configurations to Run ---
-CONFIG_TO_RUN=("STD_RES_SETTINGS")
+CONFIG_TO_RUN=("STD_RES_SETTINGS_3")
 
 
 # --- Environment Setup ---
 module purge
 module load python3/3.12.1
-export VENV_ROOT=/scratch/tp66/$USER/venvs
-source "$VENV_ROOT/fues02-py3121/bin/activate"
+module load openmpi/4.1.5  # Required for mpi4py even in single-core mode
+# Use public venv
+VENV_PUBLIC="${VENV_PUBLIC:-/scratch/tp66/$USER/venvs/fues_public}"
+source "$VENV_PUBLIC/bin/activate"
 
 export FUES_HOME="$REPO_ROOT"
-export PYTHONPATH="$FUES_HOME${PYTHONPATH:+:$PYTHONPATH}"
+# Add both repo root (for examples.*) and src/ (for dc_smm.*) to PYTHONPATH
+export PYTHONPATH="$FUES_HOME:$FUES_HOME/src${PYTHONPATH:+:$PYTHONPATH}"
 cd "$FUES_HOME"
 
 # --- Single Core Configuration ---
@@ -49,8 +52,9 @@ cd "$FUES_HOME"
 export NUMBA_CACHE_DIR=/scratch/tp66/$USER/numba_cache
 
 # Always clear Numba cache to ensure fresh compilation with latest code
+# Use || true to avoid failure if another job is using the cache
 echo "Clearing Numba cache at $NUMBA_CACHE_DIR..."
-rm -rf "$NUMBA_CACHE_DIR"
+rm -rf "$NUMBA_CACHE_DIR" 2>/dev/null || true
 mkdir -p "$NUMBA_CACHE_DIR"
 export NUMBA_NUM_THREADS=1
 
@@ -103,17 +107,13 @@ for CONFIG_NAME in "${CONFIG_TO_RUN[@]}"; do
     echo "Starting single-core run for ${CONFIG_NAME} at $(date)"
     echo "Output will be saved to: $OUTPUT_DIR"
     echo "Logs will be saved to: $LOG_DIR"
-    echo "NOTE: Baseline will be loaded from existing bundles, not recomputed"
-    echo "NOTE: euler_error metric doesn't require baseline comparison"
-    echo "NOTE: EGM plots are disabled for faster execution (--skip-egm-plots)"
-
-    # Optional: Set to empty string to enable EGM plots (slower but more detailed)
-    # EGM_PLOTS_FLAG="--skip-egm-plots"  # Comment this line to enable EGM plots
-    EGM_PLOTS_FLAG="--skip-egm-plots"
+    echo "NOTE: Baseline (VFI_HDGRID_GPU) will be loaded from existing bundles via --include-baseline"
+    echo "NOTE: euler_error metric doesn't require baseline comparison (runs independently)"
+    echo "NOTE: EGM plots ENABLED via --plots and --trace flags"
 
     python3 -m examples.housing_renting.solve_runner \
       --periods "${CONFIG_REF[periods]}" \
-      --ue-method "FUES,DCEGM,CONSAV,VFI,VFI_HDGRID_GPU" \
+      --ue-method "FUES, DCEGM,CONSAV" \
       --output-root "$OUTPUT_DIR" \
       --config-id "${VERSION_TAG}" \
       --RUN-ID "${VERSION_TAG}_${TIMESTAMP}" \
@@ -126,7 +126,6 @@ for CONFIG_NAME in "${CONFIG_TO_RUN[@]}"; do
       --fresh-fast \
       --csv-export \
       --plots \
-      $EGM_PLOTS_FLAG \
       --trace \
       2> >(tee "${LOG_DIR}/run_${TIMESTAMP}.err") \
       1> >(tee "${LOG_DIR}/run_${TIMESTAMP}.log")

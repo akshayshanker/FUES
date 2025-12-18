@@ -73,7 +73,7 @@ export CUDA_LAUNCH_BLOCKING=0
 # Numba configuration for A100
 export NUMBA_CACHE_DIR=/scratch/tp66/$USER/numba_cache
 echo "Clearing Numba cache at $NUMBA_CACHE_DIR..."
-rm -rf "$NUMBA_CACHE_DIR"
+rm -rf "$NUMBA_CACHE_DIR" 2>/dev/null || true
 mkdir -p "$NUMBA_CACHE_DIR"
 export NUMBA_NUM_THREADS=16
 export NUMBA_CUDA_MAX_THREADS=1024

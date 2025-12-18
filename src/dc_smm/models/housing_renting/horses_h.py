@@ -257,18 +257,25 @@ def F_shocks_dcsn_to_arvl(mover):
 @njit(cache=True)
 def housing_choice_solver_owner_cpu(resources_liquid_3d, H_grid, H_nxt_grid,
                                     w_grid, Q_cntn, v_cntn, lambda_cntn,
-                                    tau, min_wealth):
+                                    tau, min_wealth, delta=1.0):
     """Fully-compiled housing-choice kernel for the CPU (owner version).
     
     Optimized for single-core: deferred interpolation (only interpolate 
     lambda/v when Q improves) and pre-computed transition costs.
+    
+    When delta=1 (standard discounting), vlu_dcsn = Q_dcsn, so we skip
+    the separate v interpolation to save compute.
     """
     n_a, n_h, n_y = resources_liquid_3d.shape
     n_h_next = H_nxt_grid.size
 
     best_Q = np.full((n_a, n_h, n_y), -np.inf)
     best_lambda = np.zeros((n_a, n_h, n_y))
-    best_v = np.zeros((n_a, n_h, n_y))
+    # Only allocate best_v if delta < 1 (present-biased)
+    if delta < 1.0:
+        best_v = np.zeros((n_a, n_h, n_y))
+    else:
+        best_v = best_Q  # Will be same as Q when delta=1
     best_idx = np.zeros((n_a, n_h, n_y), dtype=np.int32)
 
     # Pre-compute transition costs for all (ih, ih_next) pairs
@@ -305,26 +312,37 @@ def housing_choice_solver_owner_cpu(resources_liquid_3d, H_grid, H_nxt_grid,
                     w_dcsn_best = res_now + net_housing[ih, ih_next_best] - trans_costs[ih, ih_next_best]
                     best_Q[ia, ih, i_y] = best_q_here
                     best_lambda[ia, ih, i_y] = _interp_scalar_cpu(w_grid, lambda_cntn[:, ih_next_best, i_y], w_dcsn_best)
-                    best_v[ia, ih, i_y] = _interp_scalar_cpu(w_grid, v_cntn[:, ih_next_best, i_y], w_dcsn_best)
+                    # Only interpolate v separately when delta < 1 (present-biased)
+                    # When delta = 1, vlu = Q, so best_v already points to best_Q
+                    if delta < 1.0:
+                        best_v[ia, ih, i_y] = _interp_scalar_cpu(w_grid, v_cntn[:, ih_next_best, i_y], w_dcsn_best)
                     best_idx[ia, ih, i_y] = best_i_next
 
     return best_Q, best_v, best_lambda, best_idx
 
 @njit(cache=True)
 def housing_choice_solver_renter_cpu(w_grid, S_grid, y_grid, w_rent_grid, 
-                                     q_cntn, vlu_cntn, lambda_cntn, Pr, shock_grid):
+                                     q_cntn, vlu_cntn, lambda_cntn, Pr, shock_grid,
+                                     delta=1.0):
     """Jitted function to solve the renter housing choice problem on the CPU.
     
     Optimized for single-core: deferred interpolation (only interpolate 
     lambda/v after finding the best service flow choice).
+    
+    When delta=1 (standard discounting), vlu_dcsn = Q_dcsn, so we skip
+    the separate v interpolation to save compute.
     """
     n_w, n_y = len(w_grid), len(y_grid)
     n_S = len(S_grid)
     
-    vlu_dcsn = np.zeros((n_w, n_y))
     q_dcsn = np.zeros((n_w, n_y))
     lambda_dcsn = np.zeros((n_w, n_y))
     S_policy = np.zeros((n_w, n_y), dtype=np.int32)
+    # Only allocate vlu_dcsn if delta < 1 (present-biased)
+    if delta < 1.0:
+        vlu_dcsn = np.zeros((n_w, n_y))
+    else:
+        vlu_dcsn = q_dcsn  # Will be same as Q when delta=1
     
     # Pre-compute rental costs
     rental_costs = Pr * S_grid
@@ -352,7 +370,10 @@ def housing_choice_solver_renter_cpu(w_grid, S_grid, y_grid, w_rent_grid,
                 w_cntn_best = w_dcsn_val - rental_costs[best_S_idx] + y_val
                 q_dcsn[i_w, i_y] = best_q
                 lambda_dcsn[i_w, i_y] = _interp_scalar_cpu(w_rent_grid, lambda_cntn[:, best_S_idx, i_y], w_cntn_best)
-                vlu_dcsn[i_w, i_y] = _interp_scalar_cpu(w_rent_grid, vlu_cntn[:, best_S_idx, i_y], w_cntn_best)
+                # Only interpolate v separately when delta < 1 (present-biased)
+                # When delta = 1, vlu = Q, so vlu_dcsn already points to q_dcsn
+                if delta < 1.0:
+                    vlu_dcsn[i_w, i_y] = _interp_scalar_cpu(w_rent_grid, vlu_cntn[:, best_S_idx, i_y], w_cntn_best)
                 S_policy[i_w, i_y] = best_S_idx
     
     return q_dcsn, vlu_dcsn, lambda_dcsn, S_policy
@@ -449,6 +470,7 @@ def F_h_cntn_to_dcsn_owner(mover, use_mpi=False, comm=None):
     w_grid, H_nxt_grid = model.num.state_space.cntn.grids.w_own, model.num.state_space.cntn.grids.H_nxt
     params = model.param
     tau, r = params.phi, params.r
+    delta = params.delta_pb  # For vlu_dcsn optimization: when delta=1, vlu=Q
     
     use_gpu = model.methods.get("compute") == "GPU" and GPU_AVAILABLE
     
@@ -500,7 +522,7 @@ def F_h_cntn_to_dcsn_owner(mover, use_mpi=False, comm=None):
             # --- EFFICIENT CPU PATH ---
             Q_dcsn, vlu_dcsn, lambda_dcsn, H_policy = housing_choice_solver_owner_cpu(
                 resources_liquid_3d, H_grid, H_nxt_grid, w_grid,
-                Q_cntn, vlu_cntn, lambda_cntn, tau, w_grid[0])
+                Q_cntn, vlu_cntn, lambda_cntn, tau, w_grid[0], delta)
             
         sol = Solution()
         sol.Q, sol.vlu, sol.lambda_ = Q_dcsn, vlu_dcsn, lambda_dcsn
@@ -519,6 +541,7 @@ def F_h_cntn_to_dcsn_renter(mover, use_mpi=False, comm=None):
     S_grid = model.num.state_space.cntn.grids.S
     
     Pr = model.param.Pr
+    delta = model.param.delta_pb  # For vlu_dcsn optimization: when delta=1, vlu=Q
     use_gpu = model.methods.get("compute") == "GPU" and GPU_AVAILABLE
 
     def operator(perch_data):
@@ -558,7 +581,7 @@ def F_h_cntn_to_dcsn_renter(mover, use_mpi=False, comm=None):
             # --- CPU Path ---
             Q_dcsn, vlu_dcsn, lambda_dcsn, S_policy = housing_choice_solver_renter_cpu(
                 w_grid, S_grid, y_grid, w_rent_grid, 
-                Q_cntn, vlu_cntn, lambda_cntn, Pr, shock_grid)
+                Q_cntn, vlu_cntn, lambda_cntn, Pr, shock_grid, delta)
         
         sol = Solution()
         sol.Q, sol.vlu, sol.lambda_ = Q_dcsn, vlu_dcsn, lambda_dcsn

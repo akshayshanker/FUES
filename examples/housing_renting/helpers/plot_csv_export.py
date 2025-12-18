@@ -79,9 +79,14 @@ def csv_generate_plots(model, method, image_dir, plot_period=0, bounds=None,
     else:
         H_indices = [0, 1, 2]  # Default if grid not available
     
-    # Default y_idx_list
+    # Default y_idx_list - use all income states if None
     if y_idx_list is None:
-        y_idx_list = [0]
+        # Try to get number of income states from solution shape
+        if hasattr(sol, 'policy') and hasattr(sol.policy, 'c') and sol.policy.c is not None:
+            n_y = sol.policy.c.shape[2] if len(sol.policy.c.shape) >= 3 else 1
+            y_idx_list = list(range(n_y))
+        else:
+            y_idx_list = [0]  # Fallback to first state only
     
     # Extract EGM data if available (skip if skip_egm_plots is True)
     if not skip_egm_plots:

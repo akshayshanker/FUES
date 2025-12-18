@@ -11,7 +11,7 @@ from numba.typed import Dict
 import time
 import dill as pickle
 from sklearn.utils.extmath import cartesian
-from numba import njit, prange
+from numba import njit, prange, types
 from interpolation.splines import UCGrid, CGrid, nodes, eval_linear
 from interpolation.splines import extrap_options as xto
 from interpolation import interp
@@ -24,9 +24,8 @@ import os, sys
 cwd = os.getcwd()
 sys.path.append('..')
 os.chdir(cwd)
-from dc_smm.fues.fues_v0dev import FUES as fues_alg, uniqueEG
+from dc_smm.fues.fues_v0dev import FUES, uniqueEG
 from dc_smm.fues.rfc_simple import rfc
-from dc_smm.fues.dcegm import dcegm
 from dc_smm.fues.helpers.math_funcs import interp_as, rootsearch, correct_jumps1d
 
 class ConsumerProblem:
@@ -220,6 +219,8 @@ def Operator_Factory(cp):
     du_c_inv = cp.du_c_inv
     du_h = cp.du_h
     EGM_N = cp.EGM_N
+    gamma_c = cp.gamma_c
+    alpha = cp.alpha
     z_idx = np.arange(len(z_vals))
 
     shape = (len(z_vals), len(asset_grid_A), len(asset_grid_H))
@@ -677,7 +678,7 @@ def Operator_Factory(cp):
                 egm_a0, c0 = root_A_liq_euler_inv(b, h_prime, z,
                                                     Ud_prime_a[index_z, :], t)
                 c_at_a_zero_max = c0
-                C_array = np.linspace(1e-60, max(1e-50,c0-1e-50), len(asset_grid_A))
+                C_array = np.linspace(1e-08, max(1e-08,c0-1e-10), len(asset_grid_A))
                 #print(C_array)
                 point = np.array([b, h_prime])
                 v_prime = beta * eval_linear(UGgrid_all,
@@ -716,114 +717,87 @@ def Operator_Factory(cp):
 
         return endog_grid_unrefined, vf_unrefined, c_unrefined
 
-    #@njit
+    @njit(cache=True)
     def _refineKeeper(endog_grid_unrefined,
-                      vf_unrefined, c_unrefined, V_prime, t, method ='FUES', m_bar = 1.4):
+                      vf_unrefined, c_unrefined, V_prime, t, m_bar=1.1):
         """
-        Refine EGM grid for non-adjusters with FUES
-
-        Parameters
-        ----------
-        endog_grid_unrefined: 3D array
-                                t+1 marginal discounted expected marginal shadow
-                                value of liq. asssets
-        vf_unrefined: 3D array
-                                t+1 marginal discounted expected marginal shadow
-                                value of liq. asssets
-        c_unrefined: 3D array
-                t+1 Value function undiscounted
-
-        V_prime: int
-                time
-        t
-
-        Returns
-        -------
-
-
+        Refine EGM grid for non-adjusters using FUES (JIT-compiled)
         """
-
-        # empty refined grids conditioned of time t+1 housing
-        new_a_prime_refined = np.ones(shape)
-        new_c_refined = np.ones(shape)
-        new_v_refined = np.ones(shape)
+        # Cache dimensions
+        n_z = len(z_vals)
+        n_h = len(asset_grid_H)
+        n_a = len(asset_grid_A)
+        
+        # empty refined grids conditioned on time t housing
+        new_a_prime_refined = np.ones((n_z, n_a, n_h))
+        new_c_refined = np.ones((n_z, n_a, n_h))
+        new_v_refined = np.ones((n_z, n_a, n_h))
+        
+        # For returning last processed values
+        e_grid_clean = np.empty(1)
+        vf_clean = np.empty(1)
+        c_clean = np.empty(1)
+        a_prime_clean = np.empty(1)
 
         # keep today's housing fixed
-        for index_h_today in range(len(asset_grid_H)):
-            for index_z in range(len(z_vals)):
+        for index_h_today in range(n_h):
+            for index_z in range(n_z):
                 
                 vf_unrefined_points = vf_unrefined[index_z, :, index_h_today]
-                endog_grid_unrefined_points\
-                    = endog_grid_unrefined[index_z, :, index_h_today]
+                endog_grid_unrefined_points = endog_grid_unrefined[index_z, :, index_h_today]
                 c_unrefined_points = c_unrefined[index_z, :, index_h_today]
                 
-                #print(endog_grid_unrefined_points)
+                # Remove duplicates by taking max value
                 uniqueIds = uniqueEG(endog_grid_unrefined_points, vf_unrefined_points)
                 endog_grid_unrefined_points = endog_grid_unrefined_points[uniqueIds]
                 vf_unrefined_points = vf_unrefined_points[uniqueIds]
                 c_unrefined_points = c_unrefined_points[uniqueIds]
                 asset_grid_AC_unique = asset_grid_AC[uniqueIds]
                 
-                if method == 'FUES':
-                
-                    e_grid_clean, vf_clean, a_prime_clean, c_clean, dela = \
-                        FUES(endog_grid_unrefined_points, vf_unrefined_points,\
-                                asset_grid_AC_unique,c_unrefined_points, vf_unrefined_points,\
-                                m_bar=m_bar, LB=2, endog_mbar=False
-                                )
-                    
-                if method == 'RFC':
-
-                    v_raw = np.array([vf_unrefined_points]).T
-                    sigma_raw= np.column_stack((c_unrefined_points,asset_grid_AC_unique))
-                    gr_raw = np.array([du_c(c_unrefined_points)]).T
-                    M_raw = np.array([endog_grid_unrefined_points]).T
-                    grid = np.array([asset_grid_A]).T
-                    gr_raw = np.array([du_c(c_unrefined_points)]).T
-
-                    sub_points, tngv, closest_indices = rfc(M_raw,gr_raw,v_raw,sigma_raw, J_bar = m_bar, radius = 0.5, k =20)
-                    
-            
-                    mask = np.ones(M_raw.shape[0] ,dtype=bool)
-                    mask[sub_points] = False
-                    e_grid_clean = M_raw[mask][:,0]
-                    vf_clean = v_raw[mask][:,0]
-                    c_clean = sigma_raw[mask,0]
-                    a_prime_clean = sigma_raw[mask,1]
-                
-                if method == 'DCEGM':
-                    a_prime_clean, e_grid_clean, c_clean,vf_clean, dela = \
-                        dcegm(c_unrefined_points, c_unrefined_points, vf_unrefined_points,\
-                                asset_grid_AC_unique,endog_grid_unrefined_points
-                            )
-
+                # Call JIT-compiled FUES directly from fues_v0dev
+                e_grid_clean, vf_clean, c_clean, a_prime_clean, _ = FUES(
+                    endog_grid_unrefined_points,
+                    vf_unrefined_points,
+                    c_unrefined_points,
+                    asset_grid_AC_unique,
+                    asset_grid_AC_unique,  # del_a (not used)
+                    m_bar=m_bar,
+                    LB=10
+                )
+                # Sort by endogenous grid
                 sortindex = np.argsort(e_grid_clean)    
                 e_grid_clean = e_grid_clean[sortindex]
                 vf_clean = vf_clean[sortindex]
                 c_clean = c_clean[sortindex]
                 a_prime_clean = a_prime_clean[sortindex]
-
-
-                new_a_prime_refined[index_z, :, index_h_today]\
-                    = interp_as(e_grid_clean, a_prime_clean, asset_grid_A)
-                new_c_refined[index_z, :, index_h_today]\
-                    = interp_as(e_grid_clean, c_clean, asset_grid_A)
-                new_v_refined[index_z, :, index_h_today]\
-                    = interp_as(e_grid_clean, vf_clean, asset_grid_A)
-
-                new_a_prime_refined[index_z, :, index_h_today][np.where(
-                    new_a_prime_refined[index_z, :, index_h_today] < b)] = b
                 
-                # remove jumps
+                # Interpolate to output grid
+                new_a_prime_refined[index_z, :, index_h_today] = interp_as(
+                    e_grid_clean, a_prime_clean, asset_grid_A)
+                new_c_refined[index_z, :, index_h_today] = interp_as(
+                    e_grid_clean, c_clean, asset_grid_A)
+                new_v_refined[index_z, :, index_h_today] = interp_as(
+                    e_grid_clean, vf_clean, asset_grid_A)
 
-                policy_value_funcs = Dict()
-                policy_value_funcs['v'] = new_v_refined[index_z, :, index_h_today]
-                policy_value_funcs['a'] = new_a_prime_refined[index_z, :, index_h_today]
+                # Enforce borrowing constraint
+                for i in range(n_a):
+                    if new_a_prime_refined[index_z, i, index_h_today] < b:
+                        new_a_prime_refined[index_z, i, index_h_today] = b
+                
+                # remove jumps - create typed dict with explicit types
+                policy_value_funcs = Dict.empty(
+                    key_type=types.unicode_type,
+                    value_type=types.float64[:]
+                )
+                policy_value_funcs['v'] = new_v_refined[index_z, :, index_h_today].copy()
+                policy_value_funcs['a'] = new_a_prime_refined[index_z, :, index_h_today].copy()
 
-                sharp_c, corrected_policy_value_funcs = correct_jumps1d(new_c_refined[index_z, :, index_h_today],\
-                                                            asset_grid_A,
-                                                            m_bar,
-                                                            policy_value_funcs)
+                sharp_c, corrected_policy_value_funcs = correct_jumps1d(
+                    new_c_refined[index_z, :, index_h_today],
+                    asset_grid_A,
+                    m_bar,
+                    policy_value_funcs
+                )
                 
                 new_a_prime_refined[index_z, :, index_h_today] = corrected_policy_value_funcs['a']
                 new_c_refined[index_z, :, index_h_today] = sharp_c
@@ -833,78 +807,95 @@ def Operator_Factory(cp):
         return new_a_prime_refined, new_c_refined, new_v_refined,\
             e_grid_clean, vf_clean, c_clean, a_prime_clean
 
-    @njit
+    @njit(cache=True)
     def _adjEGM(Ud_prime_a, Ud_prime_h, V, t):
+        # Cache dimensions
+        n_z = len(z_vals)
+        n_he = len(asset_grid_HE)
+        n_egm = EGM_N
+        tau_adj = 1.0 + tau  # Pre-compute
+        
+        # Use zeros - need 0 for invalid points
+        endog_grid_unrefined = np.zeros((n_z, n_he, n_egm))
+        vf_unrefined = np.zeros((n_z, n_he, n_egm))
+        a_prime_unrefined = np.zeros((n_z, n_he, n_egm))
+        h_prime_unrefined = np.zeros((n_z, n_he, n_egm))
+        
+        # Pre-allocate point array outside loop
+        point = np.empty(2)
 
-        endog_grid_unrefined = np.zeros(
-            (len(z_vals), len(asset_grid_HE), EGM_N))
-        vf_unrefined = np.zeros((len(z_vals), len(asset_grid_HE), EGM_N))
-        a_prime_unrefined = np.zeros((len(z_vals), len(asset_grid_HE), EGM_N))
-        h_prime_unrefined = np.zeros((len(z_vals), len(asset_grid_HE), EGM_N))
-
-        for index_h_prime in range(len(asset_grid_HE)):
-            for index_z in range(len(z_vals)):
-
-                h_prime = asset_grid_HE[index_h_prime]
-                a_primes, e_grid_points = root_H_UPRIME_func(h_prime,
-                                                             z_vals[index_z],
-                                                             Ud_prime_a[index_z, :],
-                                                             Ud_prime_h[index_z, :], t)
+        for index_h_prime in range(n_he):
+            h_prime = asset_grid_HE[index_h_prime]
+            h_adj = h_prime * tau_adj  # Pre-compute for inner loop
+            
+            for index_z in range(n_z):
+                z = z_vals[index_z]
+                Ud_a_z = Ud_prime_a[index_z]
+                Ud_h_z = Ud_prime_h[index_z]
+                V_z = V[index_z]
                 
-                endog_grid_unrefined[index_z, index_h_prime, :] = e_grid_points
-                a_prime_unrefined[index_z, index_h_prime, :] = a_primes
+                a_primes, e_grid_points = root_H_UPRIME_func(h_prime, z,
+                                                             Ud_a_z, Ud_h_z, t)
+                
+                endog_grid_unrefined[index_z, index_h_prime] = e_grid_points
+                a_prime_unrefined[index_z, index_h_prime] = a_primes
 
                 for i in range(len(a_primes)):
-                    if a_primes[i] > 0:
-
-                        point = np.array([a_primes[i], h_prime])
-                        c_val = e_grid_points[i] - \
-                            h_prime * (1 + tau) - a_primes[i]
-                        v_prime = beta * eval_linear(UGgrid_all, V[index_z, :],
-                                                     point, xto.NEAREST)
-
-                        vf_unrefined[index_z, index_h_prime, i] = u(
-                            c_val, h_prime, chi) + v_prime
+                    a_p = a_primes[i]
+                    if a_p > 0.0:
+                        point[0] = a_p
+                        point[1] = h_prime
+                        c_val = e_grid_points[i] - h_adj - a_p
+                        v_prime = beta * eval_linear(UGgrid_all, V_z, point, xto.NEAREST)
+                        vf_unrefined[index_z, index_h_prime, i] = u(c_val, h_prime, chi) + v_prime
                         h_prime_unrefined[index_z, index_h_prime, i] = h_prime
 
-                    else:
-                        pass
+        return endog_grid_unrefined, vf_unrefined, a_prime_unrefined, h_prime_unrefined
 
-        return endog_grid_unrefined, vf_unrefined, \
-            a_prime_unrefined, h_prime_unrefined
-
-    #@njit
+    @njit(cache=True)
     def refine_adj(endog_grid_unrefined,
                    vf_unrefined,
                    a_prime_unrefined,
-                   h_prime_unrefined, method= 'FUES', m_bar = 1.4):
+                   h_prime_unrefined, m_bar=1.4):
+        """
+        Refine adjuster EGM grids using FUES (JIT-compiled).
+        Input arrays are 3D: (n_z, n_he, n_egm) - ravel 2nd/3rd dims.
+        Returns function on *wealth*.
+        """
+        n_z = len(z_vals)
+        n_we = len(asset_grid_WE)
+        tau_adj = 1.0 + tau  # Pre-compute
+        grid_we = asset_grid_WE  # Local ref avoids closure lookup
+        
+        # Use empty instead of ones - values overwritten
+        new_a_prime_refined = np.empty((n_z, n_we))
+        new_h_prime_refined = np.empty((n_z, n_we))
+        new_v_refined = np.empty((n_z, n_we))
+        new_c_refined = np.empty((n_z, n_we))
+        
+        # Placeholders for return values
+        e_grid_clean = np.empty(1)
+        vf_clean = np.empty(1)
+        hprime_clean = np.empty(1)
+        a_prime_clean = np.empty(1)
+        vf_unrefined_out = np.empty(1)
+        hprime_unrefined_out = np.empty(1)
+        aprime_unrefined_out = np.empty(1)
+        egrid_unref_out = np.empty(1)
 
-        # unrefined grids conditioned of time t+1 housing
-        # returns function on *wealth*
-
-        new_a_prime_refined = np.ones((len(z_vals), len(asset_grid_WE)))
-        new_h_prime_refined = np.ones((len(z_vals), len(asset_grid_WE)))
-        new_v_refined = np.ones((len(z_vals), len(asset_grid_WE)))
-        new_c_refined = np.ones((len(z_vals), len(asset_grid_WE)))
-
-
-        for index_z in range(len(z_vals)):
-            a_prime_unrefined_ur = np.ravel(a_prime_unrefined[index_z, :])
-
-            vf_unrefined_points = np.ravel(vf_unrefined[index_z, :])[
-                np.where(a_prime_unrefined_ur > 0)]
-            hprime_unrefined_points = np.ravel(h_prime_unrefined[index_z, :])[
-                np.where(a_prime_unrefined_ur > 0)]
-            aprime_unrefined_points = np.ravel(a_prime_unrefined[index_z, :])[
-                np.where(a_prime_unrefined_ur > 0)]
-            egrid_unref_points = np.ravel(endog_grid_unrefined[index_z, :])[
-                np.where(a_prime_unrefined_ur > 0)]
+        for index_z in range(n_z):
+            # Ravel the 2D slice (n_he x n_egm) -> 1D for this z
+            a_prime_unrefined_ur = a_prime_unrefined[index_z].ravel()
             
-
-            c_unrefined_points = egrid_unref_points - hprime_unrefined_points * (1 + tau) - aprime_unrefined_points
+            # Boolean mask for valid points
+            mask = a_prime_unrefined_ur > 0.0
             
-            gr_h  = du_c(c_unrefined_points) 
+            vf_unrefined_points = vf_unrefined[index_z].ravel()[mask]
+            hprime_unrefined_points = h_prime_unrefined[index_z].ravel()[mask]
+            aprime_unrefined_points = a_prime_unrefined_ur[mask]
+            egrid_unref_points = endog_grid_unrefined[index_z].ravel()[mask]
 
+            c_unrefined_points = egrid_unref_points - hprime_unrefined_points * tau_adj - aprime_unrefined_points
             
             # Remove duplicates of EGM points by taking the max 
             uniqueIds = uniqueEG(egrid_unref_points, vf_unrefined_points)
@@ -913,64 +904,45 @@ def Operator_Factory(cp):
             vf_unrefined_points = vf_unrefined_points[uniqueIds]
             c_unrefined_points = c_unrefined_points[uniqueIds]
             aprime_unrefined_points = aprime_unrefined_points[uniqueIds]
+            hprime_unrefined_points = hprime_unrefined_points[uniqueIds]
 
-            if method == 'FUES':
-                e_grid_clean, vf_clean, a_prime_clean,hprime_clean, c_clean = \
-                    FUES(egrid_unref_points, vf_unrefined_points,\
-                            aprime_unrefined_points, hprime_unrefined_points,c_unrefined_points,\
-                            m_bar=m_bar, LB=2, endog_mbar=False
-                            )
-            
-            if method == 'RFC':
-
-                # evaluate using RFC interpolation
-                v_raw = np.array([vf_unrefined_points]).T
-                sigma_raw= np.column_stack((hprime_unrefined_points,aprime_unrefined_points, c_unrefined_points))
-                gr_raw = np.array([gr_h]).T
-                M_raw = np.array([egrid_unref_points]).T
-                grid = np.array([asset_grid_WE]).T
-
-                sub_points, tngv, closest_indices = rfc(M_raw,gr_raw,v_raw,sigma_raw, J_bar = m_bar, radius = 0.05, k =50)
-
-                mask = np.ones(M_raw.shape[0] ,dtype=bool)
-                mask[sub_points] = False
-                e_grid_clean = M_raw[mask][:,0]
-                vf_clean = v_raw[mask][:,0]
-                hprime_clean = sigma_raw[mask,0]
-                a_prime_clean = sigma_raw[mask,1]
-                c_clean = sigma_raw[mask,2]
-
+            # Call JIT-compiled FUES directly
+            e_grid_clean, vf_clean, a_prime_clean, hprime_clean, c_clean = \
+                FUES(egrid_unref_points, vf_unrefined_points,
+                     aprime_unrefined_points, hprime_unrefined_points, c_unrefined_points,
+                     m_bar=m_bar, LB=5, endog_mbar=False)
     
+            # Sort once, apply to all
             sortindex = np.argsort(e_grid_clean)
             e_grid_clean = e_grid_clean[sortindex]
             vf_clean = vf_clean[sortindex]
             hprime_clean = hprime_clean[sortindex]
             a_prime_clean = a_prime_clean[sortindex]
-            c_clean = c_clean[sortindex]
-
-            sigma_intersect = None
-            M_intersect = None
-            c_clean = e_grid_clean - hprime_clean * (1 + tau) - a_prime_clean
             
-            new_a_prime_refined[index_z, :]\
-                = interp_as(e_grid_clean, a_prime_clean, asset_grid_WE)
-            new_h_prime_refined[index_z, :]\
-                = interp_as(e_grid_clean, hprime_clean, asset_grid_WE)
-            new_v_refined[index_z, :]\
-                = interp_as(e_grid_clean, vf_clean, asset_grid_WE)
-            new_c_refined[index_z, :]\
-                = interp_as(e_grid_clean, c_clean, asset_grid_WE)
+            # Recompute c_clean from sorted values
+            c_clean = e_grid_clean - hprime_clean * tau_adj - a_prime_clean
+            
+            # Interpolate to output grid
+            new_a_prime_refined[index_z] = interp_as(e_grid_clean, a_prime_clean, grid_we)
+            new_h_prime_refined[index_z] = interp_as(e_grid_clean, hprime_clean, grid_we)
+            new_v_refined[index_z] = interp_as(e_grid_clean, vf_clean, grid_we)
+            new_c_refined[index_z] = interp_as(e_grid_clean, c_clean, grid_we)
+            
+            # Store for return (last z only)
+            vf_unrefined_out = vf_unrefined_points
+            hprime_unrefined_out = hprime_unrefined_points
+            aprime_unrefined_out = aprime_unrefined_points
+            egrid_unref_out = egrid_unref_points
 
-        return new_a_prime_refined, new_c_refined, new_h_prime_refined, new_v_refined,\
-            e_grid_clean, vf_clean, hprime_clean, a_prime_clean,\
-            vf_unrefined_points, hprime_unrefined_points,\
-            aprime_unrefined_points,\
-            egrid_unref_points,sigma_intersect, M_intersect
+        return (new_a_prime_refined, new_c_refined, new_h_prime_refined, new_v_refined,
+                e_grid_clean, vf_clean, hprime_clean, a_prime_clean,
+                vf_unrefined_out, hprime_unrefined_out,
+                aprime_unrefined_out, egrid_unref_out)
     
     #@njit
     def iterEGM(t, V_prime,
                          ELambdaAnxt,
-                         ELambdaHnxt, method = 'FUES', m_bar = 1.4):
+                         ELambdaHnxt, m_bar=1.4):
         
         """"
 
@@ -1006,18 +978,18 @@ def Operator_Factory(cp):
             = _refineKeeper(endog_grid_unrefined_noadj,
                             vf_unrefined_noadj,
                             c_unrefined_noadj,
-                            V_prime, t,  method = method, m_bar = m_bar)
+                            V_prime, t, m_bar=m_bar)
 
         endog_grid_unrefined_adj, vf_unrefined_adj, a_prime_unrefined_adj,\
             h_prime_unrefined_adj\
             = _adjEGM(ELambdaAnxt, ELambdaHnxt, V_prime, t)
 
-        Aadj, Cadj, Hadj, Vadj,\
-            e_grid_clean, vf_clean, hprime_clean, a_prime_clean,\
-            vf_unrefined_adj_1, h_prime_unrefined_adj_1, a_prime_unrefined_adj_1,\
-            endog_grid_unrefined_adj_1, sigma_intersect, M_intersect\
-            = refine_adj(endog_grid_unrefined_adj, vf_unrefined_adj,
-                         a_prime_unrefined_adj, h_prime_unrefined_adj, method = method, m_bar = m_bar)
+        (Aadj, Cadj, Hadj, Vadj,
+         e_grid_clean, vf_clean, hprime_clean, a_prime_clean,
+         vf_unrefined_adj_1, h_prime_unrefined_adj_1, a_prime_unrefined_adj_1,
+         endog_grid_unrefined_adj_1) = refine_adj(
+            endog_grid_unrefined_adj, vf_unrefined_adj,
+            a_prime_unrefined_adj, h_prime_unrefined_adj, m_bar=m_bar)
         
         AdjGrids = {}
         AdjGrids["endog_grid_unrefined_adj"] = endog_grid_unrefined_adj_1
@@ -1028,8 +1000,8 @@ def Operator_Factory(cp):
         AdjGrids["vf_clean"] = vf_clean
         AdjGrids["hprime_clean"] = hprime_clean
         AdjGrids["a_prime_clean"] = a_prime_clean
-        AdjGrids['sigma_intersect'] = sigma_intersect
-        AdjGrids['M_intersect'] = M_intersect
+        AdjGrids["sigma_intersect"] = None  # Not computed in FUES-only mode
+        AdjGrids["M_intersect"] = None  # Not computed in FUES-only mode
         AdjPol = {}
         AdjPol["A"] = Aadj
         AdjPol["H"] = Hadj
@@ -1198,11 +1170,11 @@ def Operator_Factory(cp):
         endog_grid_unrefined_noadj, vf_unrefined_noadj, c_unrefined_noadj\
             = _keeperEGM(LambdaAnxt, EVnxt, t)
 
-        Akeeper, Ckeeper, Vkeeper,_, _,_,_,\
-            = _refineKeeper(endog_grid_unrefined_noadj,
-                            vf_unrefined_noadj,
-                            c_unrefined_noadj,
-                            EVnxt, t, method = 'DCEGM')
+        Akeeper, Ckeeper, Vkeeper, _, _, _, _ = _refineKeeper(
+            endog_grid_unrefined_noadj,
+            vf_unrefined_noadj,
+            c_unrefined_noadj,
+            EVnxt, t, m_bar=cp.m_bar)
         
         # VFI part for each level of liquidf wealth after wages are realised
         # and housing has been liquidated 

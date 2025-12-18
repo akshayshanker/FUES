@@ -12,10 +12,13 @@ import yaml
 from pathlib import Path
 import sys
 
-# Add FUES to path
-sys.path.append(str(Path(__file__).parent.parent.parent))
+# Add FUES repo root to path (4 levels up from config_HR/generate_income_process.py)
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
+SRC_DIR = REPO_ROOT / "src"
+sys.path.insert(0, str(REPO_ROOT))
+sys.path.insert(0, str(SRC_DIR))
 
-from src.dc_smm.shocks import create_income_shock_decomposition
+from dc_smm.shocks import create_income_shock_decomposition
 
 
 def generate_fella_income_process():

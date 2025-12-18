@@ -1,0 +1,74 @@
+#!/bin/bash
+#PBS -N durables-mpi
+#PBS -P tp66
+#PBS -q expresssr
+#PBS -l ncpus=2,mem=10GB,walltime=01:00:00
+#PBS -l storage=scratch/tp66
+#PBS -l wd
+#PBS -j oe
+#PBS -r y
+#PBS -o logs/
+
+# ======================================================================
+#  Durables Model - 2 methods in parallel (NEGM, FUES)
+# ======================================================================
+
+set -euo pipefail
+
+# --- Path Setup (handle PBS vs local) ---
+if [[ -n "${PBS_O_WORKDIR:-}" ]]; then
+    SCRIPT_DIR="$PBS_O_WORKDIR"
+    REPO_ROOT="$(cd "$PBS_O_WORKDIR/../.." && pwd)"
+else
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+fi
+
+# --- Environment Setup ---
+module purge
+module load python3/3.12.1
+module load openmpi/4.1.5
+
+# Use public venv
+VENV_PUBLIC="${VENV_PUBLIC:-/scratch/tp66/$USER/venvs/fues_public}"
+source "$VENV_PUBLIC/bin/activate"
+
+export FUES_HOME="$REPO_ROOT"
+export PYTHONPATH="$FUES_HOME/src:$FUES_HOME${PYTHONPATH:+:$PYTHONPATH}"
+
+# --- MPI Configuration ---
+export OMP_NUM_THREADS=1
+export NUMBA_NUM_THREADS=1
+export NUMBA_CACHE_DIR=/scratch/tp66/$USER/numba_cache
+mkdir -p "$NUMBA_CACHE_DIR"
+
+# Suppress OpenMPI warnings
+export OMPI_MCA_coll_hcoll_enable=0
+export OMPI_MCA_coll=^hcoll
+export PMIX_MCA_gds=hash
+
+# --- Print job info ---
+echo "========================================================"
+echo "PBS Job: Durables Model"
+echo "========================================================"
+echo "Job ID:      ${PBS_JOBID:-local}"
+echo "Node:        $(hostname)"
+echo "CPUs:        ${PBS_NCPUS:-2}"
+echo "Python:      $(which python3)"
+echo "========================================================"
+
+cd "$REPO_ROOT/examples/durables"
+
+# Create results directories in repo root (following project structure)
+mkdir -p "$REPO_ROOT/results/durables"
+mkdir -p "$REPO_ROOT/results/durables/plots"
+
+# Create scratch directory for large pickle files
+mkdir -p "/scratch/tp66/$USER/FUES/durables"
+
+# Run with MPI (2 cores for 2 methods: NEGM, FUES)
+mpirun -np 2 python3 durables_plot.py
+
+echo ""
+echo "Job completed at $(date)"
+

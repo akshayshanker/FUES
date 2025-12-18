@@ -39,7 +39,8 @@ def format_metrics_table(results_df):
         total_time = row.get("total_solution_time", 0.0)
         non_terminal_time = row.get("total_nonterminal_time", 0.0)
         ue_time = row.get("total_ue_time", 0.0)
-        ue_percent = row.get("ue_time_percent", 0.0)
+        # Use avg per-period UE%, falling back to overall % for backwards compatibility
+        ue_percent = row.get("avg_ue_percent_per_period", row.get("ue_time_percent", 0.0))
         euler_error = row.get("euler_error", 0.0)
         VFI_L2_error = row.get("dev_c_L2",0.0)
         log10_mean_error = row.get("dev_c_log10_mean", 0.0)
@@ -68,7 +69,7 @@ def format_metrics_table(results_df):
         "Total Time",
         "Non-Terminal Time",
         "UE Time", 
-        "UE/Non-Terminal",
+        "UE % (avg/period)",
         "Euler Error",
         "VFI L2 Error",
         "Log10 Mean Error",

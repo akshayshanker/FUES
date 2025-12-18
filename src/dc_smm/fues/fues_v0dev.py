@@ -32,7 +32,7 @@ import copy
 
 @njit
 def uniqueEG(egrid, vf):
-    egrid_rounded = np.round_(egrid, 10)
+    egrid_rounded = np.round(egrid, 10)
     unique_values = np.unique(egrid_rounded)
     max_vf_indices = np.full_like(egrid, -1)  # Initialize with -1
 

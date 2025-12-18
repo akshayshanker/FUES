@@ -30,6 +30,22 @@ from examples.durables.durables import ConsumerProblem, Operator_Factory
 from examples.durables.plot import plot_pols, plot_grids
 from dc_smm.fues.helpers.math_funcs import f, interp_as
 
+
+def _get_avg_time(res) -> float:
+    """Robustly extract avg_time from solver result dicts.
+
+    Some solvers store timing at top-level (e.g. results['avg_time']),
+    while others store it under results[0]['avg_time'] (EGM/NEGM here).
+    """
+    if res is None:
+        return float("nan")
+    if isinstance(res, dict):
+        if "avg_time" in res:
+            return res["avg_time"]
+        if 0 in res and isinstance(res[0], dict) and "avg_time" in res[0]:
+            return res[0]["avg_time"]
+    return float("nan")
+
 def euler_housing(results, cp):
     """
     Compute Euler errors for the housing model.
@@ -122,7 +138,7 @@ def euler_housing(results, cp):
                         euler_raw2 / c) + 1e-16)
     return euler
 
-def timing(solver, cp, rep=4, do_print=False, method='DCEGM'):
+def timing(solver, cp, rep=4, do_print=False):
     """
     Run the solver and track the best time, average Euler error, 
     and number of iterations to convergence.
@@ -152,7 +168,7 @@ def timing(solver, cp, rep=4, do_print=False, method='DCEGM'):
     iter_best = None
 
     for i in range(rep):
-        solution = solver(cp, method=method)
+        solution = solver(cp)
         euler = euler_housing(solution, cp)
         tot_time = solution[0]['avg_time']
         iterations = solution[0].get('iterations', None)  # Get iteration count
@@ -205,8 +221,8 @@ def solveVFI(cp, verbose=False):
     # Start Bellman iteration
     t = cp.T
     results = {}
-    results[0] = {}
     times = []
+    error = None  # Initialize error
 
     while t >= cp.t0:
         results[t] = {}
@@ -227,22 +243,23 @@ def solveVFI(cp, verbose=False):
         # Condition the value function
         EVnxt, _, _ = condition_V(Vcurr, Vcurr, Vcurr)
 
-        if verbose:
-            print(f"Bellman iteration no. {t}, time is {time.time() - start}")
-            if t< cp.T: print(f"Error at age {t} is {error}")
-
+        # Compute error BEFORE printing (only for non-terminal periods)
         if t < cp.T:
             times.append(time.time() - start)
-
             error = np.max(np.abs(Vcurr - results[t + 1]["VF"]))
+
+        if verbose:
+            print(f"Bellman iteration no. {t}, time is {time.time() - start}")
+            if t < cp.T and error is not None:
+                print(f"Error at age {t} is {error}")
 
         t = t - 1
 
-    results[0]['avg_time'] = np.mean(times)
+    results['avg_time'] = np.mean(times) if times else 0.0
 
     return results
 
-def solveEGM(cp, LS=True, verbose=True, method = 'FUES'):
+def solveEGM(cp, LS=True, verbose=True):
     _, iterEGM, condition_V, _ = Operator_Factory(cp)
 
     # Initial values
@@ -259,9 +276,8 @@ def solveEGM(cp, LS=True, verbose=True, method = 'FUES'):
         start = time.time()
 
         (Vcurr, Hnxt, Cnxt, Dnxt, LambdaAcurr, LambdaHcurr, AdjPol,
-         KeeperPol, EGMGrids) = iterEGM(t, EVnxt, ELambdaAnxt,\
-                                           ELambdaHnxt, method = method, m_bar = cp.m_bar,
-         )
+         KeeperPol, EGMGrids) = iterEGM(t, EVnxt, ELambdaAnxt,
+                                        ELambdaHnxt, m_bar=cp.m_bar)
                     
         EVnxt, ELambdaAnxt, ELambdaHnxt = condition_V(
                                             Vcurr, LambdaAcurr, LambdaHcurr
@@ -298,7 +314,7 @@ def solveEGM(cp, LS=True, verbose=True, method = 'FUES'):
 
     return results
 
-def solveNEGM(cp, LS=True, verbose=True, method = 'DCEGM'):
+def solveNEGM(cp, LS=True, verbose=True):
     iterVFI, iterEGM, condition_V, iterNEGM = Operator_Factory(cp)
 
     # Initial values
@@ -352,9 +368,9 @@ def solveNEGM(cp, LS=True, verbose=True, method = 'DCEGM'):
 
     return results
 
-def compare_grids_and_tau(cp_settings, tau_values, grid_sizes, max_iter=200, tol=1e-03, rep=1, methods=['DCEGM', 'FUES', 'RFC']):
+def compare_grids_and_tau(cp_settings, tau_values, grid_sizes, max_iter=200, tol=1e-03, rep=1, methods=['DCEGM', 'FUES']):
     """
-    Compare the performance of FUES, NEGM, and RFC over different grid sizes and tau values using MPI.
+    Compare the performance of FUES and NEGM over different grid sizes and tau values using MPI.
 
     Parameters
     ----------
@@ -371,7 +387,7 @@ def compare_grids_and_tau(cp_settings, tau_values, grid_sizes, max_iter=200, tol
     rep : int, optional
         Number of repetitions to average results over, default is 4.
     methods : list
-        Methods to compare, default is ['DCEGM', 'FUES', 'RFC'].
+        Methods to compare, default is ['DCEGM', 'FUES'].
 
     Returns
     -------
@@ -444,9 +460,9 @@ def compare_grids_and_tau(cp_settings, tau_values, grid_sizes, max_iter=200, tol
 
         for _ in range(rep):  # Run each method `rep` times
             if method == 'DCEGM':
-                solution = solveNEGM(cp, method=method,verbose=False)
+                solution = solveNEGM(cp, verbose=False)
             else:
-                solution = solveEGM(cp, method=method, verbose 		=False)
+                solution = solveEGM(cp, verbose=False)
 
             euler = euler_housing(solution, cp)
             runtime = solution[0]['avg_time']
@@ -478,7 +494,7 @@ def compare_grids_and_tau(cp_settings, tau_values, grid_sizes, max_iter=200, tol
         combined_results = [item for sublist in all_results for item in sublist]
 
         # save and pkl results to file
-        with open('../results/durable_timings.pkl', 'wb') as file:
+        with open('../../results/durables/durable_timings.pkl', 'wb') as file:
             pickle.dump(combined_results, file)
         
         latex_table = create_latex_table(combined_results)
@@ -567,7 +583,7 @@ if __name__ == "__main__":
 
     run_tets = False
     # Read settings
-    with open("../settings/settings.yml", "r") as stream:
+    with open("settings.yml", "r") as stream:
         settings = yaml.safe_load(stream) 
 
     # 1. Error and timing comparisons across grid sizes and tau values
@@ -582,60 +598,87 @@ if __name__ == "__main__":
         results, latex_table = compare_grids_and_tau(cp_settings, tau_values, grid_sizes_A)
 
     # load saved performance table results 
-    #results = pickle.load(open("../results/durable_timings.pkl", "rb"))
+    #results = pickle.load(open("../../results/durables/durable_timings.pkl", "rb"))
     #latex_table = create_latex_table(results)
 
     #if MPI.COMM_WORLD.Get_rank() == 0:
     #    print(latex_table)
-    #    with open("../results/durables_table.tex", "w") as f:
+    #    with open("../../results/durables/durables_table.tex", "w") as f:
     #        f.write(latex_table)
 
-    # 2. Solve the baseline model in single process interface for plotting and single table 
+    # 2. Solve the baseline model with MPI parallelization across methods
+    
+    # All ranks need to participate in MPI operations
+    comm = MPI.COMM_WORLD
+    rank = comm.Get_rank()
+    size = comm.Get_size()
+    
+    # All ranks create the consumer problem
+    cp = ConsumerProblem(cp_settings,
+                     r=0.01,
+                     sigma=.001,
+                     r_H=0,
+                     beta=.93,
+                     alpha=0.03,
+                     delta=0,
+                     Pi=((0.5, 0.5), (0.5, 0.5)),
+                     z_vals=(.1, 1),
+                     b=1e-10,
+                     grid_max_A=20.0,
+                     grid_max_WE=70,
+                     grid_size_W=1000,
+                     grid_max_H=50.0,
+                     grid_size=1000,
+                     grid_size_H=300,
+                     gamma_c=3,
+                     chi=0,
+                     tau=0.18,
+                     K=1.3,
+                     tol_bel=1e-09,
+                     m_bar=1.4,
+                     theta=np.exp(0.3), stat=False, t0=55)
+            
+    # 0. Solve with Bellman (VFI option)
+    #iterVFI, iterEGM, condition_V, NEGM = Operator_Factory(cp)
+    #pickle.dump(bell_results, open("bell_results_300.p", "wb"))
+    #bell_results = pickle.load(open("bell_results_300.p", "rb"))
 
-    if MPI.COMM_WORLD.Get_rank() == 0:
-
-        
-        cp = ConsumerProblem(cp_settings,
-						 r=0.01,
-						 sigma=.001,
-						 r_H=0,
-						 beta=.93,
-						 alpha=0.03,
-						 delta=0,
-						 Pi=((0.5, 0.5), (0.5, 0.5)),
-						 z_vals=(.1, 1),
-						 b=1e-10,
-						 grid_max_A=20.0,
-						 grid_max_WE=70,
-						 grid_size_W=10000,
-						 grid_max_H=50.0,
-						 grid_size=600,
-						 grid_size_H=600,
-						 gamma_c=3,
-						 chi=0,
-						 tau=0.18,
-						 K=1.3,
-						 tol_bel=1e-09,
-						 m_bar=1.4,
-						 theta=np.exp(0.3), stat= False, t0 = 55)
-                
-        # 0. Solve with Bellman (VFI option)
-        #iterVFI, iterEGM, condition_V, NEGM = Operator_Factory(cp)
-        #pickle.dump(bell_results, open("bell_results_300.p", "wb"))
-        #bell_results = pickle.load(open("bell_results_300.p", "rb"))
-
-        # 1. Solve using NEGM, EGM and RFC. 
-        
-        NEGMRes = timing(solveNEGM, cp, rep =1, method = 'DCEGM')
-        EGMRes_fues = timing(solveEGM, cp, rep =1, method = 'FUES')
-        EGMRes_rfc = timing(solveEGM, cp, rep =1, method = 'RFC')
-
-        NEGMRes['label'] = 'NEGM'
-        EGMRes_fues['label'] = 'FUES'
-        EGMRes_rfc['label'] = 'EGM_RFC'
-        
-        #EGMRes_fues  = pickle.load(open("EGMRes_fues.p", "rb"))
-        #NEGMRes = pickle.load(open("NEGMRes.p", "rb"))
+    # 1. Solve using NEGM and EGM/FUES (parallel across MPI ranks)
+    
+    # Define method assignments for parallel execution
+    methods = [
+        ('NEGM', solveNEGM),
+        ('FUES', solveEGM)
+    ]
+    
+    # Each rank solves its assigned method and saves to file
+    # (MPI gather fails for large arrays, so use file-based approach)
+    # Use scratch for large pickle files, home for plots/tables
+    scratch_dir = os.path.expandvars("/scratch/tp66/$USER/FUES/durables")
+    results_dir = "../../results/durables"
+    os.makedirs(scratch_dir, exist_ok=True)
+    os.makedirs(results_dir, exist_ok=True)
+    
+    for i, (label, solver) in enumerate(methods):
+        if i % size == rank:
+            print(f"[Rank {rank}] Solving {label}...")
+            result = timing(solver, cp, rep=1)
+            result['label'] = label
+            # Save result to scratch (large files)
+            result_file = os.path.join(scratch_dir, f"{label}_result.pkl")
+            with open(result_file, 'wb') as f:
+                pickle.dump(result, f)
+            print(f"[Rank {rank}] Saved {label} to {result_file}")
+    
+    # Barrier - wait for all ranks to finish solving
+    comm.Barrier()
+    
+    # Rank 0 loads all results and does plotting
+    if rank == 0:
+        print("[Rank 0] Loading results from all methods...")
+        NEGMRes = pickle.load(open(os.path.join(scratch_dir, "NEGM_result.pkl"), 'rb'))
+        EGMRes_fues = pickle.load(open(os.path.join(scratch_dir, "FUES_result.pkl"), 'rb'))
+        EGMRes_rfc = pickle.load(open(os.path.join(scratch_dir, "RFC_result.pkl"), 'rb'))
 
         # 2a. Policy function plots
         plot_pols(cp,EGMRes_fues, NEGMRes, 59, [100,150,200])
@@ -646,7 +689,7 @@ if __name__ == "__main__":
         # save results option 
         #pickle.dump(EGMRes_fues, open("EGMRes_fues.p", "wb"))
         #pickle.dump(NEGMRes, open("NEGMRes.p", "wb"))
-            
+        
         # 3. Euler errors
         eulerNEGM = euler_housing(NEGMRes, cp)
         eulerEGM = euler_housing(EGMRes_fues, cp)
@@ -656,9 +699,12 @@ if __name__ == "__main__":
         print("RFCEGM Euler error is {}".format(np.nanmean(eulerRFCEGM)))
 
         # 4. Tabulate timing and errors with latex table 
-        print("NEGM Time is {}".format(NEGMRes['avg_time']))
-        print("EGM Time is {}".format(EGMRes_fues['avg_time']))
-        print("RFCEGM Time is {}".format(EGMRes_rfc['avg_time']))
+        negm_time = _get_avg_time(NEGMRes)
+        egm_time = _get_avg_time(EGMRes_fues)
+        rfc_time = _get_avg_time(EGMRes_rfc)
+        print(f"NEGM Time is {negm_time}")
+        print(f"EGM Time is {egm_time}")
+        print(f"RFCEGM Time is {rfc_time}")
 
         lines = []
         txt = '| All (average)'
@@ -686,12 +732,12 @@ if __name__ == "__main__":
         lines.append(txt)
 
         txt = '| Avg. time per iteration (sec.)'
-        txt += f' | {EGMRes_fues["avg_time"]:.2f}'
-        txt += f' | {NEGMRes["avg_time"]:.2f}'
+        txt += f' | {egm_time:.2f}'
+        txt += f' | {negm_time:.2f}'
         txt += ' |\n'
 
         lines.append(txt)
         lines.insert(0, '| Method | EGM | NEGM |\n')
 
-        with open("../results/durables_single_result.tex", "w") as f:
+        with open("../../results/durables/durables_single_result.tex", "w") as f:
             f.writelines(lines)

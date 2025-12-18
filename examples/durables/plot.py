@@ -186,9 +186,9 @@ def plot_pols(cp, Results1, Results2, plot_t, index):
 			fig_pol.tight_layout()
 			fig_val.tight_layout()
 
-		fig_pol.savefig('../results/plots/durables/policy_adj_housing_to_{}.png'.format(plot_t))
-		fig_val.savefig('../results/plots/durables/value_housing_to_{}.png'.format(plot_t))
-		fig_pol_a.savefig('../results/plots/durables/policy_adj_assets_to_{}.png'.format(plot_t))
+		fig_pol.savefig('../../results/durables/plots/policy_adj_housing_to_{}.png'.format(plot_t))
+		fig_val.savefig('../../results/durables/plots/value_housing_to_{}.png'.format(plot_t))
+		fig_pol_a.savefig('../../results/durables/plots/policy_adj_assets_to_{}.png'.format(plot_t))
 
 		pl.close()
 
@@ -266,7 +266,7 @@ def plot_grids(adj_ur_grids,cp, term_t = 58):
 		ax[1, 1].plot(e_grid_clean, hprime_clean, color=colors[0],
 					  linewidth=0.75)
 
-		fig.savefig('../results/plots/durables/scan_test_{}.png'.format(plot_t))
+		fig.savefig('../../results/durables/plots/scan_test_{}.png'.format(plot_t))
 
 		# FUES-EGM Plots for paper
 
@@ -384,7 +384,7 @@ def plot_grids(adj_ur_grids,cp, term_t = 58):
 		fig.tight_layout()
 		ax[1].legend(frameon=False, prop={'size': 10})
 		fig.savefig(
-			'../results/plots/durables/hous_vf_aprime_all_small_{}.png'.format(plot_t))
+			'../../results/durables/plots/hous_vf_aprime_all_small_{}.png'.format(plot_t))
 
 		# Plot all EGM points
 		pl.close()
@@ -471,4 +471,4 @@ def plot_grids(adj_ur_grids,cp, term_t = 58):
 		fig.tight_layout()
 		ax[1].legend(frameon=False, prop={'size': 10})
 		"""
-		fig.savefig('../results/plots/durables/hous_vf_aprime_all_big_{}.png'.format(plot_t))
+		fig.savefig('../../results/durables/plots/hous_vf_aprime_all_big_{}.png'.format(plot_t))

@@ -16,7 +16,8 @@ stage:
   #################
   parameters:
     r: ["r"]                  # Interest rate from master
-    Pr: ["Pr"]              # Rental price per unit of housing service from master
+    Pr: ["Pr"]                # Rental price per unit of housing service from master
+    delta_pb: ["delta_pb"]    # Present-bias weight from master
     
   settings:
     tol: ["tol"]                # Convergence tolerance from master

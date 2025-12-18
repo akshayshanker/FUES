@@ -29,6 +29,27 @@ from dc_smm.models.housing_renting.horses_t import F_t_cntn_to_dcsn
 from dynx.stagecraft.solmaker import Solution
 # MPI utilities are now handled by circuit_runner
 
+
+def _drop_grid_references(obj) -> None:
+    """
+    Best-effort: drop references to (potentially large) grid arrays.
+
+    DynX grids often live on `perch.grid` objects (not only under `model.num`),
+    so clearing `model.num` alone may not reduce memory when many periods exist.
+    """
+    if obj is None:
+        return
+    try:
+        # Some implementations store a rich grid object; others store arrays directly.
+        # Setting to None is safest and releases references immediately.
+        if hasattr(obj, "grid"):
+            try:
+                obj.grid = None
+            except Exception:
+                pass
+    except Exception:
+        pass
+
 def build_operators(stage, use_mpi=False, comm=None):
     """Build operator mappings for a given stage.
     
@@ -324,8 +345,9 @@ def initialize_terminal_values(stage, verbose=False, use_mpi=False, comm=None):
                     vlu_cntn[i_a, i_h, i_y] = u_func(c=a_val, H_nxt=h_val)
                     lambda_cntn[i_a, i_h, i_y] = uc_func(c=a_val, H_nxt=h_val)
         
-        # Terminal: Q = v because V_e = 0
-        Q_cntn = vlu_cntn.copy()
+        # Terminal: Q = v because V_e = 0.
+        # Avoid an extra full-size copy (saves memory at terminal initialization).
+        Q_cntn = vlu_cntn
         
         # Attach to continuation perch as Solution object
         sol = Solution()
@@ -359,8 +381,9 @@ def initialize_terminal_values(stage, verbose=False, use_mpi=False, comm=None):
                     vlu_cntn[i_a, i_s, i_y] = u_func(c=a_val, S=s_val)
                     lambda_cntn[i_a, i_s, i_y] = uc_func(c=a_val, S=s_val)
         
-        # Terminal: Q = v because V_e = 0
-        Q_cntn = vlu_cntn.copy()
+        # Terminal: Q = v because V_e = 0.
+        # Avoid an extra full-size copy (saves memory at terminal initialization).
+        Q_cntn = vlu_cntn
         
         # Attach to continuation perch as Solution object
         sol = Solution()
@@ -540,11 +563,23 @@ def run_time_iteration(model_circuit, n_periods=None, verbose=False,verbose_timi
         _sync_perch_solutions(ownc_stage, use_mpi, comm)
         stage_timings.append(ownc_timing)
         period_ue_time += ownc_timing.get("ue_time", 0)
+        # Drop large continuation objects once consumed (policies live in dcsn.sol).
+        if free_memory:
+            try:
+                ownc_stage.cntn.sol = None
+            except Exception:
+                pass
         
         rntc_stage, rntc_timing = solve_stage(rntc_stage, verbose=verbose, use_mpi=use_mpi, comm=comm)
         _sync_perch_solutions(rntc_stage, use_mpi, comm)
         stage_timings.append(rntc_timing)
         period_ue_time += rntc_timing.get("ue_time", 0)
+        # Drop large continuation objects once consumed (policies live in dcsn.sol).
+        if free_memory:
+            try:
+                rntc_stage.cntn.sol = None
+            except Exception:
+                pass
         
         # -------------------------------------------------------------------------------
         # 2. Connect consumption stages to housing stages
@@ -609,6 +644,11 @@ def run_time_iteration(model_circuit, n_periods=None, verbose=False,verbose_timi
         # 5. Solve the tenure choice stage (TENU)
         # -------------------------------------------------------------------------------
         tenu_stage, tenu_timing = solve_stage(tenu_stage, verbose=verbose, use_mpi=use_mpi, comm=comm)
+
+        # Record period timing BEFORE memory clearing
+        # NOTE: Period time excludes lazy compilation and grid clearing overhead
+        #       to ensure fair timing comparisons across methods
+        period_time = time.time() - period_start_time
         _sync_perch_solutions(tenu_stage, use_mpi, comm)
         stage_timings.append(tenu_timing)
         period_ue_time += tenu_timing.get("ue_time", 0)
@@ -645,10 +685,7 @@ def run_time_iteration(model_circuit, n_periods=None, verbose=False,verbose_timi
             
         all_stages_by_period.append(stages_dict)
         
-        # Record period timing BEFORE memory clearing
-        # NOTE: Period time excludes lazy compilation and grid clearing overhead
-        #       to ensure fair timing comparisons across methods
-        period_time = time.time() - period_start_time
+        
         period_data = {
             "period": period_idx + 1,
             "time": period_time,
@@ -838,6 +875,9 @@ def _free_period_memory(period, clear_grids=True):
                     if hasattr(perch.sol, 'policy'):
                         perch.sol.policy = {}
                     perch.sol = None
+                # Drop grid refs (often the dominant per-period memory in DynX)
+                if clear_grids:
+                    _drop_grid_references(perch)
             
             # Also clear any cached operators
             if hasattr(stage, '_ops'):
@@ -936,6 +976,9 @@ def _clear_period_numerics(period):
                     if perch and hasattr(perch, 'model') and perch.model is not None:
                         if hasattr(perch.model, 'num'):
                             perch.model.num = None
+                    # CRITICAL: DynX grids are often stored on `perch.grid` and can be large.
+                    # If we don't drop these, memory can still scale ~linearly with periods.
+                    _drop_grid_references(perch)
             
             # Mark as not compiled so it can be recompiled if needed
             stage.status_flags["compiled"] = False

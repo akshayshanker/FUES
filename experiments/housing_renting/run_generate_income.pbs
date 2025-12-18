@@ -1,0 +1,74 @@
+#!/bin/bash
+#PBS -N gen-income
+#PBS -P tp66
+#PBS -q expresssr
+#PBS -l ncpus=1,mem=4GB,walltime=00:10:00
+#PBS -l storage=scratch/tp66
+#PBS -l wd
+#PBS -j oe
+#PBS -o logs/
+
+# ======================================================================
+#  Generate Income Process - Quick utility job
+#  Runs generate_income_process.py with proper venv
+# ======================================================================
+
+set -euo pipefail
+
+# --- Path Setup ---
+if [[ -n "${PBS_O_WORKDIR:-}" ]]; then
+    SCRIPT_DIR="$PBS_O_WORKDIR"
+    REPO_ROOT="$(cd "$PBS_O_WORKDIR/../.." && pwd)"
+else
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+fi
+
+# --- Environment Setup ---
+module purge
+module load python3/3.12.1
+
+# Use public venv
+VENV_PUBLIC="${VENV_PUBLIC:-/scratch/tp66/$USER/venvs/fues_public}"
+source "$VENV_PUBLIC/bin/activate"
+
+export FUES_HOME="$REPO_ROOT"
+export PYTHONPATH="$FUES_HOME:$FUES_HOME/src${PYTHONPATH:+:$PYTHONPATH}"
+cd "$FUES_HOME"
+
+# --- Pre-run checks ---
+echo "Checking environment..."
+echo "Python: $(which python3)"
+python3 -c "import quantecon; print('Quantecon version:', quantecon.__version__)" || {
+    echo "ERROR: Failed to import quantecon" >&2
+    exit 1
+}
+
+# --- Run Income Process Generator ---
+echo "========================================================"
+echo "Generating Fella (2014) Income Process"
+echo "========================================================"
+
+cd "$FUES_HOME/examples/housing_renting/config_HR"
+python3 generate_income_process.py
+
+echo "========================================================"
+echo "Income process generation complete"
+echo "========================================================"
+
+exit 0
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

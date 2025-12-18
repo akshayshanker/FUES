@@ -253,17 +253,52 @@ def bellman_obj(a_nxt, w_val, H_val, beta, delta,
 # and piecewise_gradient_robust are now imported from gradients.py at the top of this file
 # for backward compatibility
 
+@njit(cache=True)
+def _uniqueEG_core(grid: np.ndarray, values: np.ndarray, tol: float) -> np.ndarray:
+    """Numba-compiled core for uniqueEG.
+    
+    Uses argsort on grid, then manually finds groups and keeps highest value.
+    """
+    n = len(grid)
+    if n == 0:
+        return np.zeros(0, dtype=np.bool_)
+    
+    # Sort by grid ascending
+    order = np.argsort(grid)
+    
+    # For each group of close grid points, keep the one with highest value
+    mask = np.zeros(n, dtype=np.bool_)
+    
+    # Track best index in current group
+    group_start = 0
+    best_idx = order[0]
+    best_val = values[order[0]]
+    
+    for i in range(1, n):
+        idx = order[i]
+        if grid[idx] - grid[order[group_start]] > tol:
+            # New group - mark best from previous group
+            mask[best_idx] = True
+            group_start = i
+            best_idx = idx
+            best_val = values[idx]
+        else:
+            # Same group - check if this has higher value
+            if values[idx] > best_val:
+                best_idx = idx
+                best_val = values[idx]
+    
+    # Don't forget the last group
+    mask[best_idx] = True
+    
+    return mask
+
+
 def uniqueEG(grid: np.ndarray, values: np.ndarray, tol: float = 1e-10) -> np.ndarray:
     """Return a Boolean mask that keeps the *highest-value* entry for each
     duplicate or near-duplicate grid point.
 
-    The original loop searched duplicates with Python `for` – this vectorised
-    rewrite is ~30× faster for O(10³) points:
-
-    1.  `np.lexsort((-values, grid))`  sorts by *grid* ascending and *values*
-        descending (via the minus sign).
-    2.  Find groups of points that are within tolerance of each other.
-    3.  Keep only the highest value point from each group.
+    Uses compiled core for performance.
     
     Parameters
     ----------
@@ -274,24 +309,7 @@ def uniqueEG(grid: np.ndarray, values: np.ndarray, tol: float = 1e-10) -> np.nda
     tol : float, optional
         Tolerance for considering points as duplicates (default: 1e-10)
     """
-
-    # 1. indices that would sort by grid ↑, value ↓
-    order = np.lexsort((-values, grid))
-    sorted_grid = grid[order]
-    
-    # 2. Find where grid points differ by more than tolerance
-    # This identifies boundaries between groups of close points
-    diff = np.diff(sorted_grid)
-    boundaries = np.concatenate(([True], diff > tol))
-    
-    # 3. For each group, we want the first element (highest value due to sort)
-    # Build mask for sorted array
-    sorted_mask = boundaries
-    
-    # 4. build mask in original order
-    mask = np.zeros_like(grid, dtype=bool)
-    mask[order[sorted_mask]] = True
-    return mask
+    return _uniqueEG_core(grid, values, tol)
 
 
 @njit
@@ -677,7 +695,8 @@ def _egm_preprocess_core(e_old, vf_old, c_old, a_old,
                          grad_c_threshold=1.04,  # Threshold for grad_c jump detection
                          c_star_lb_pct=0.10,  # Lower bound = c_star * (1 - lb_pct), e.g., 0.10 = 10%
                          c_star_ub_pct=0.10,  # Upper bound = c_star * (1 + ub_pct), e.g., 0.10 = 10%
-                         use_mean_spacing=True):  # Use mean e_diff for point spacing at jumps
+                         use_mean_spacing=True,  # Use mean e_diff for point spacing at jumps
+                         sort_output=True):    # Sort output by endogenous grid (True for FUES, False for DCEGM)
     """
     Returns new (e,vf,c,a) with:
         • n_con borrowing-constraint points, plus
@@ -850,7 +869,7 @@ def _egm_preprocess_core(e_old, vf_old, c_old, a_old,
     min_c = np.min(e_old)
     # Use safer lower bound for numerical stability with float64
     c_con = np.linspace(1e-10, min_c, n_con)  # Changed from 1e-100 to 1e-10
-    e_con = c_con  # m = c at the constraint
+    e_con = c_con + a_old[0] # m = c at the constraint
     vf_con = u_func(c_con, h_nxt) + beta * vf_next[0]
     # More efficient: use np.full instead of empty + fill
     a_con = np.full(n_con, a_old[0], dtype=c_con.dtype)  # Borrowing limit
@@ -995,13 +1014,16 @@ def _egm_preprocess_core(e_old, vf_old, c_old, a_old,
     c_new = c_new[:actual_size]
     a_new = a_new[:actual_size]
 
-    # Always sort - EGM output (m = c + a') is NOT guaranteed to be sorted
-    # because c comes from inverse Euler and can vary non-monotonically
-    sort_idx = np.argsort(e_new)
-    e_new = e_new[sort_idx]
-    vf_new = vf_new[sort_idx]
-    c_new = c_new[sort_idx]
-    a_new = a_new[sort_idx]
+    # Sort output arrays only for FUES (by endogenous grid m)
+    # For DCEGM (sort_output=False): keep original order with constraint points prepended
+    # The prepended constraint points have a_nxt = a_old[0] (minimum), and
+    # original EGM points are already in exogenous grid order (increasing a_nxt)
+    if sort_output:
+        sort_idx = np.argsort(e_new)
+        e_new = e_new[sort_idx]
+        vf_new = vf_new[sort_idx]
+        c_new = c_new[sort_idx]
+        a_new = a_new[sort_idx]
 
     return e_new, vf_new, c_new, a_new
 
@@ -1014,6 +1036,7 @@ def egm_preprocess(egrid, vf, c, a,
                    h_nxt=None,
                    add_jump_constraints=True,  # New parameter
                    jump_extend="both",  # NEW: Which segments to extend at jumps
+                   sort_output=True,    # Sort output by endogenous grid (True for FUES, False for DCEGM)
                    **kwargs):
     """
     Wrapper that preprocesses EGM solution by:
@@ -1102,7 +1125,8 @@ def egm_preprocess(egrid, vf, c, a,
         grad_c_threshold=kwargs.get('grad_c_threshold', 1.04),  # Pass through grad_c threshold
         c_star_lb_pct=kwargs.get('c_star_lb_pct', 0.10),  # Pass through c_star lb percentage
         c_star_ub_pct=kwargs.get('c_star_ub_pct', 0.10),  # Pass through c_star ub percentage
-        use_mean_spacing=kwargs.get('use_mean_spacing', True))  # Use mean e_diff for point spacing
+        use_mean_spacing=kwargs.get('use_mean_spacing', True),  # Use mean e_diff for point spacing
+        sort_output=sort_output)  # Sort by endogenous grid (True for FUES, False for DCEGM)
 
     # Remove duplicates based on endogenous grid and value function
     # Use a tolerance appropriate for float64 precision and the scale of the problem

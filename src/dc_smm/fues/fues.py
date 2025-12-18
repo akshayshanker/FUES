@@ -25,6 +25,61 @@ JUMP_YES = 1
 JUMP_NO = 0
 
 
+def get_fues_defaults():
+    """
+    Return default FUES parameters as a dict for use with FUES_jit_core.
+    
+    Returns
+    -------
+    dict
+        Dictionary with keys matching FUES_jit_core scalar parameters:
+        - m_bar, LB (core params)
+        - endog_mbar, include_intersections, no_double_jumps, single_intersection,
+          disable_jump_checks, left_turn_no_jump_strict, use_post_state_jump_test,
+          detect_decreasing_policy, post_clean (flags as int: 0 or 1)
+        - padding_mbar, jump_check_tol, eps_d, eps_sep, eps_fwd_back, parallel_guard
+          (float tolerances)
+    
+    Example
+    -------
+    >>> defaults = get_fues_defaults()
+    >>> keep, inter, n_inter, final_mask, n_final = FUES_jit_core(
+    ...     e, v, p1, p2, d,
+    ...     defaults['m_bar'], defaults['LB'],
+    ...     defaults['endog_mbar'], defaults['include_intersections'],
+    ...     defaults['no_double_jumps'], defaults['single_intersection'],
+    ...     defaults['disable_jump_checks'], defaults['left_turn_no_jump_strict'],
+    ...     defaults['use_post_state_jump_test'], defaults['detect_decreasing_policy'],
+    ...     defaults['post_clean'],
+    ...     defaults['padding_mbar'], defaults['jump_check_tol'],
+    ...     defaults['eps_d'], defaults['eps_sep'], defaults['eps_fwd_back'],
+    ...     defaults['parallel_guard']
+    ... )
+    """
+    return {
+        # Core parameters
+        'm_bar': 1.0,
+        'LB': 4,
+        # Flags (int: 0=False, 1=True)
+        'endog_mbar': 0,
+        'include_intersections': 1,
+        'no_double_jumps': 1,
+        'single_intersection': 0,
+        'disable_jump_checks': 0,
+        'left_turn_no_jump_strict': 0,
+        'use_post_state_jump_test': 0,
+        'detect_decreasing_policy': 0,
+        'post_clean': 1,
+        # Float tolerances
+        'padding_mbar': 0.0,
+        'jump_check_tol': 0.0,
+        'eps_d': EPS_D,
+        'eps_sep': EPS_SEP,
+        'eps_fwd_back': EPS_fwd_back,
+        'parallel_guard': PARALLEL_GUARD,
+    }
+
+
 @njit(inline="always")
 def check_same_seg(e_grid, kappa_hat, idx1, idx2, m_bar, eps_d=EPS_D, eps_fwd_back=EPS_fwd_back):
     """Check if two points are on the same segment (no jump in policy between them)."""
@@ -296,6 +351,10 @@ def _postclean_double_jump_mask_single(e_grid, a_prime, m_bar, skip_mask, eps_d=
     """
     N = e_grid.size
     keep = np.ones(N, dtype=np.bool_)
+    # Guard tiny inputs: for N<=1, the scan indices (j=1,k=0) are invalid.
+    # Return trivially with all points kept and no intersections.
+    if N <= 1:
+        return e_grid, keep, np.empty((0, 5), dtype=np.float64)
     if N <= 2:
         return keep
 
@@ -390,6 +449,224 @@ def _postclean_double_jump_mask(e_grid, a_prime, m_bar, skip_mask, eps_d=EPS_D, 
     return current_mask
 
 
+# =============================================================================
+# FUES_jit_core: Fully JIT-compiled entry point for EGM integration
+# =============================================================================
+
+@njit(cache=True)
+def FUES_jit_core(
+    e_grid,        # float64[N], sorted strictly increasing, C-contiguous
+    vlu,           # float64[N], value function
+    policy_1,      # float64[N], primary policy (e.g. consumption)
+    policy_2,      # float64[N], secondary policy (e.g. a')
+    del_a,         # float64[N], policy gradient for endogenous m_bar
+    m_bar,         # float64, jump threshold
+    LB,            # int64, lookback buffer size
+    # Boolean flags (use int64 for numba compatibility: 0=False, 1=True)
+    endog_mbar,           # use endogenous m_bar
+    include_intersections,# create intersection points
+    no_double_jumps,      # filter consecutive jumps
+    single_intersection,  # create single vs double intersections
+    disable_jump_checks,  # disable jump validity checks
+    left_turn_no_jump_strict,   # strict left-turn handling
+    use_post_state_jump_test,   # use post-state gradient for jump test
+    detect_decreasing_policy,   # treat decreasing policy as jump
+    post_clean,           # apply post-clean pass
+    # Scalar parameters
+    padding_mbar,         # float64, padding for endogenous m_bar
+    jump_check_tol,       # float64, tolerance for jump check
+    eps_d,                # float64, minimum grid separation
+    eps_sep,              # float64, separation for intersections
+    eps_fwd_back,         # float64, forward/backward proximity threshold
+    parallel_guard,       # float64, parallel line guard
+):
+    """
+    Fully JIT-compiled FUES core for direct EGM integration.
+    
+    PRECONDITIONS (caller must ensure):
+    - e_grid is sorted strictly increasing
+    - All arrays are float64, C-contiguous, 1D, same length N
+    - All scalar flags are int64 (0 or 1)
+    
+    Parameters
+    ----------
+    e_grid : float64[N]
+        Endogenous grid, MUST be sorted strictly increasing
+    vlu : float64[N]
+        Value function at each grid point
+    policy_1 : float64[N]
+        Primary policy (e.g., consumption)
+    policy_2 : float64[N]
+        Secondary policy (e.g., a')
+    del_a : float64[N]
+        Policy gradient for endogenous m_bar calculation
+    m_bar : float64
+        Jump threshold
+    LB : int64
+        Lookback buffer size (typically 4-10)
+    endog_mbar : int64
+        1 to use endogenous m_bar, 0 otherwise
+    include_intersections : int64
+        1 to create intersection points, 0 otherwise
+    no_double_jumps : int64
+        1 to filter consecutive jumps, 0 otherwise
+    single_intersection : int64
+        1 for single intersection per jump, 0 for double
+    disable_jump_checks : int64
+        1 to disable jump validity checks
+    left_turn_no_jump_strict : int64
+        1 for strict left-turn handling
+    use_post_state_jump_test : int64
+        1 to use post-state gradient in jump test
+    detect_decreasing_policy : int64
+        1 to treat decreasing policy as jump
+    post_clean : int64
+        1 to apply post-clean pass for double jumps
+    padding_mbar : float64
+        Padding for endogenous m_bar
+    jump_check_tol : float64
+        Tolerance for value gradient check in forward scan
+    eps_d : float64
+        Minimum separation between grid points
+    eps_sep : float64
+        Minimum separation for intersection creation
+    eps_fwd_back : float64
+        Proximity threshold for forward/backward scans
+    parallel_guard : float64
+        Guard against near-parallel segments
+    
+    Returns
+    -------
+    keep : bool[N]
+        Boolean mask, True for points to keep
+    intersections : float64[max_inter, 5]
+        Intersection points: (e, v, p1, p2, d) per row
+        Only first n_inter rows are valid
+    n_inter : int64
+        Number of valid intersection rows
+    final_mask : bool[N + max_inter]
+        Final mask after post-clean (if post_clean=1)
+        Size is N + max_inter to accommodate merged arrays
+        Only meaningful if post_clean=1 and include_intersections=1
+    n_final : int64
+        Number of True values in final_mask (total kept points)
+    """
+    N = e_grid.size
+    
+    # Convert int flags to bool for _scan
+    endog_mbar_b = endog_mbar != 0
+    include_inter_b = include_intersections != 0
+    no_double_b = no_double_jumps != 0
+    single_inter_b = single_intersection != 0
+    disable_checks_b = disable_jump_checks != 0
+    left_strict_b = left_turn_no_jump_strict != 0
+    post_state_b = use_post_state_jump_test != 0
+    detect_dec_b = detect_decreasing_policy != 0
+    post_clean_b = post_clean != 0
+    
+    # Call core scan
+    e_out, keep_scan, intersections = _scan(
+        e_grid, vlu, policy_1, policy_2, del_a,
+        m_bar, LB, endog_mbar_b, padding_mbar,
+        include_inter_b, no_double_b, single_inter_b,
+        disable_checks_b, left_strict_b, post_state_b,
+        detect_dec_b, jump_check_tol,
+        eps_d, eps_sep, eps_fwd_back, parallel_guard
+    )
+    
+    n_inter = intersections.shape[0]
+    
+    # Compute final mask if post-clean requested
+    if post_clean_b and include_inter_b and n_inter > 0:
+        # Count kept points
+        n_kept = 0
+        for i in range(N):
+            if keep_scan[i]:
+                n_kept += 1
+        
+        n_total = n_kept + n_inter
+        
+        # Merge kept points and intersections
+        all_e = np.empty(n_total, dtype=np.float64)
+        all_p1 = np.empty(n_total, dtype=np.float64)
+        is_inter = np.zeros(n_total, dtype=np.bool_)
+        
+        # Copy kept points
+        idx = 0
+        for i in range(N):
+            if keep_scan[i]:
+                all_e[idx] = e_grid[i]
+                all_p1[idx] = policy_1[i]
+                idx += 1
+        
+        # Copy intersections
+        for i in range(n_inter):
+            all_e[idx] = intersections[i, 0]
+            all_p1[idx] = intersections[i, 2]
+            is_inter[idx] = True
+            idx += 1
+        
+        # Sort by e
+        sort_idx = np.argsort(all_e)
+        all_e_sorted = all_e[sort_idx]
+        all_p1_sorted = all_p1[sort_idx]
+        is_inter_sorted = is_inter[sort_idx]
+        
+        # Apply post-clean
+        post_mask = _postclean_double_jump_mask(
+            all_e_sorted, all_p1_sorted, m_bar, is_inter_sorted, eps_d, 1
+        )
+        
+        # Count final kept
+        n_final = 0
+        for i in range(n_total):
+            if post_mask[i]:
+                n_final += 1
+        
+        # Create padded final mask (size N + max_inter for fixed output)
+        max_inter = 0 if N <= 1 else (2 * (N - 1))
+        final_mask = np.zeros(N + max_inter, dtype=np.bool_)
+        for i in range(n_total):
+            final_mask[i] = post_mask[i]
+        
+        return keep_scan, intersections, n_inter, final_mask, n_final
+    
+    elif post_clean_b and not include_inter_b:
+        # Post-clean without intersections
+        is_inter = np.zeros(N, dtype=np.bool_)
+        post_mask = _postclean_double_jump_mask(
+            e_grid, policy_1, m_bar, is_inter, eps_d, 1
+        )
+        
+        # Combine keep_scan and post_mask
+        n_final = 0
+        for i in range(N):
+            if keep_scan[i] and post_mask[i]:
+                n_final += 1
+        
+        # Create final mask (size N + max_inter for consistent output)
+        max_inter = 0 if N <= 1 else (2 * (N - 1))
+        final_mask = np.zeros(N + max_inter, dtype=np.bool_)
+        for i in range(N):
+            final_mask[i] = keep_scan[i] and post_mask[i]
+        
+        return keep_scan, intersections, n_inter, final_mask, n_final
+    
+    else:
+        # No post-clean
+        n_final = 0
+        for i in range(N):
+            if keep_scan[i]:
+                n_final += 1
+        
+        max_inter = 0 if N <= 1 else (2 * (N - 1))
+        final_mask = np.zeros(N + max_inter, dtype=np.bool_)
+        for i in range(N):
+            final_mask[i] = keep_scan[i]
+        
+        return keep_scan, intersections, n_inter, final_mask, n_final
+
+
 def FUES(
     e_grid, vlu, policy_1, policy_2, del_a,
     b=1e-10, m_bar=1.0, LB=4, endog_mbar=False, padding_mbar=0.0,
@@ -402,7 +679,7 @@ def FUES(
     use_post_state_jump_test=False,
     detect_decreasing_policy=False,
     post_clean_double_jumps=True,
-    post_clean_passes=2,
+    post_clean_passes=1,
     jump_check_tol=0.0,
     eps_d=None, eps_sep=None, eps_fwd_back=None, parallel_guard=None,
 ):

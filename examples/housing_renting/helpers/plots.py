@@ -129,8 +129,9 @@ def generate_plots(model, method, image_dir, plot_period=0, bounds=None,
             H_indices = [0, 1, 2]  # Default indices if grid not available
 
         # Default to first income state if not specified
+        # Note: For large income grids (16+ states), consider passing explicit list to avoid too many plots
         if y_idx_list is None:
-            y_idx_list = [0]
+            y_idx_list = [0]  # Default to first state only for EGM plots (can be slow with many states)
 
         # Plot EGM grid for selected housing and income values
         for y_idx in y_idx_list:
@@ -153,6 +154,9 @@ def plot_dcsn_policy(first_period, image_dir, bounds=None, sol_override=None):
     """Plot policy functions for the renting model, matching fella plot style."""
     
     # Imports are at module level
+    
+    # Ensure output directory exists (handles race conditions in MPI)
+    os.makedirs(image_dir, exist_ok=True)
 
     if bounds is None:
         bounds = {}
@@ -393,6 +397,9 @@ def plot_egm_grids(period, H_idx, y_idx, method, image_dir, bounds=None, sol_ove
         If provided, use this solution instead of the one from the period
     """
     # Imports are at module level
+    
+    # Ensure output directory exists (handles race conditions in MPI)
+    os.makedirs(image_dir, exist_ok=True)
     
     if bounds is None:
         bounds = {}

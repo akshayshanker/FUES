@@ -85,6 +85,14 @@ def available() -> list[str]:
 #  Common post-processing helpers
 # ---------------------------------------------------------------------
 
+# Module-level engine cache to avoid repeated lookups
+_ENGINE_CACHE: Dict[str, Any] = {}
+
+
+def clear_engine_cache():
+    """Clear the engine cache. Call at end of stage to free memory."""
+    _ENGINE_CACHE.clear()
+
 
 def EGM_UE(
     x_dcsn_hat: np.ndarray,
@@ -122,20 +130,20 @@ def EGM_UE(
     if X_dcsn is None:
         raise ValueError("X_dcsn must be provided for interpolation")
 
-    # -------- raw (always reported) -----------------------------------
-    raw = {"x_dcsn_hat": x_dcsn_hat, "qf_hat": qf_hat, "kappa_hat": kappa_hat, "X_cntn": X_cntn}
-
-    # -------- select engine ------------------------------------------
-    engine = get_engine(ue_method)
+    # -------- select engine (cached) ----------------------------------
+    engine = _ENGINE_CACHE.get(ue_method)
     if engine is None:
-        raise ValueError(
-            f"Unknown UE method '{ue_method}'. Available: {', '.join(available())}"
-        )
+        engine = get_engine(ue_method)
+        if engine is None:
+            raise ValueError(
+                f"Unknown UE method '{ue_method}'. Available: {', '.join(available())}"
+            )
+        _ENGINE_CACHE[ue_method] = engine
 
     # -------- run -----------------------------------------------------
     t0 = time.time()
     
-    # Merge method-specific kwargs
+    # Build kwargs dict - start with defaults, override with ue_kwargs
     engine_kwargs = {
         "x_dcsn_hat": x_dcsn_hat,
         "qf_hat": qf_hat,
@@ -151,19 +159,22 @@ def EGM_UE(
         "rfc_n_iter": rfc_n_iter,
         "include_intersections": include_intersections,
     }
+    # Merge ue_kwargs (allows override of defaults like m_bar)
     if ue_kwargs:
         engine_kwargs.update(ue_kwargs)
-
+    
     refined = engine(**engine_kwargs)
 
     ue_time = time.time() - t0
+
+    # -------- raw dict (created lazily, minimal overhead) -------------
+    raw = {"x_dcsn_hat": x_dcsn_hat, "qf_hat": qf_hat, "kappa_hat": kappa_hat, "X_cntn": X_cntn}
 
     # -------- interpolation -----------------------------------------
     if interpolate:
         interpolated = fill_interpolated(refined, X_dcsn, uc_func_partial)
     else:
         interpolated = {}
-
 
     interpolated["ue_time"] = ue_time
     refined["ue_time"] = ue_time
@@ -263,14 +274,10 @@ def _dcegm_engine(
     if dcegm is None:
         raise ImportError("DCEGM algorithm not importable")
 
-    # Sort by X_cntn (next-period assets) to preserve original EGM iteration order
-    # DCEGM detects backward-bending segments in x_dcsn_hat (endogenous grid)
-    if not np.all(np.diff(X_cntn) >= 0):
-        idx = np.argsort(X_cntn)
-        x_dcsn_hat = x_dcsn_hat[idx]
-        qf_hat = qf_hat[idx]
-        kappa_hat = kappa_hat[idx]
-        X_cntn = X_cntn[idx]
+    # NOTE: Do NOT sort arrays before passing to DCEGM.
+    # DCEGM's calc_nondecreasing_segments expects the original EGM iteration order
+    # (sorted by exogenous grid a'). Pre-sorting by X_cntn or x_dcsn_hat breaks
+    # segment detection and creates spurious multiple segments.
 
     x_cntn_ref, x_dcsn_ref, kappa_ref, qf_ref, _ = dcegm(kappa_hat, kappa_hat, qf_hat, X_cntn, x_dcsn_hat)
 

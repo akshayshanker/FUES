@@ -196,19 +196,49 @@ def managed_model_load(runner, x, metric_name=None):
     """
     Context manager for safe model loading with automatic cleanup.
     
+    Uses dynx's reference loading infrastructure.
+    
     Args:
-        runner: CircuitRunner instance
+        runner: CircuitRunner instance  
         x: Parameter vector
-        metric_name: Optional name of the metric for selective loading
+        metric_name: Optional name for logging
     """
     model = None
+    has_bundle_map = hasattr(runner, 'ref_bundle_by_H') and runner.ref_bundle_by_H
+    print(f"  [managed_model_load] has_bundle_map={has_bundle_map}", flush=True)
     try:
-        # Use superset caching - the cache will load periods 0 and 1 with all required stages
-        # This ensures all metrics share the same cached model
-        if metric_name:
-            print(f"  [Cache] Requesting baseline for {metric_name} (using superset cache: periods 0-1)")
+        # Use direct bundle path from design_matrix.csv (bypasses hash mismatch issues)
+        if has_bundle_map:
+            H = x[2]  # H_points is at index 2
+            ref_path = runner.ref_bundle_by_H.get(H)
+            print("ref_path: ", ref_path)
+            path_exists = ref_path.exists() if ref_path else False
+            print(f"  [managed_model_load] H={H}, ref_path={ref_path}, exists={path_exists}", flush=True)
+            if ref_path and path_exists:
+                from dynx.stagecraft.io import load_circuit
+                print(f"  [managed_model_load] Calling load_circuit({ref_path})", flush=True)
+                try:
+                    model = load_circuit(ref_path)
+                    print(f"  [managed_model_load] load_circuit returned model={model is not None}", flush=True)
+                    if model is None:
+                        print(f"  [Baseline] load_circuit returned None for H={H}", flush=True)
+                except Exception as e:
+                    print(f"  [Baseline] load_circuit error for H={H}: {e}", flush=True)
+                    model = None
+            else:
+                print(f"  [managed_model_load] Skipping load - ref_path or path_exists is False", flush=True)
+        else:
+            # Fallback to hash-based lookup
+            print(f"  [managed_model_load] Fallback to hash-based lookup", flush=True)
+            if hasattr(runner, 'compute_ref_params') and runner.compute_ref_params is not None:
+                runner.ref_params = runner.compute_ref_params(x)
+            try:
+                model = get_cached_reference_model(runner, x, metric_requirements=None)
+                print(f"  [managed_model_load] get_cached_reference_model returned: model={model is not None}", flush=True)
+            except Exception as e:
+                print(f"  [managed_model_load] get_cached_reference_model error: {e}", flush=True)
+                model = None
         
-        model = get_cached_reference_model(runner, x, metric_requirements=None)
         yield model
     finally:
         if model is not None:
@@ -343,6 +373,22 @@ def make_policy_dev_metric(
                                 return np.nan
                             ax = diff_axes[0]
 
+                        # If grid metadata doesn't match policy arrays, try to reconstruct.
+                        #
+                        # This can happen when bundles were saved with *base* configs rather than
+                        # the per-run patched configs: the saved Solution arrays have the correct
+                        # length (e.g., 20000), but the reconstructed ModelCircuit grid still has
+                        # the default length from master.yml (e.g., 4000).
+                        #
+                        # Reconstruct as an evenly-spaced grid over stored min/max (master.yml uses
+                        # default_grid='linspace' for housing configs).
+                        if g_mod.size != pol.shape[ax] and g_mod.size > 1:
+                            print(f"  [dev metric] Reconstructing model grid: stored={g_mod.size}, needed={pol.shape[ax]}", flush=True)
+                            g_mod = np.linspace(g_mod.min(), g_mod.max(), pol.shape[ax])
+                        if g_ref.size != refp.shape[ax] and g_ref.size > 1:
+                            print(f"  [dev metric] Reconstructing baseline grid: stored={g_ref.size}, needed={refp.shape[ax]}", flush=True)
+                            g_ref = np.linspace(g_ref.min(), g_ref.max(), refp.shape[ax])
+
                         if g_mod.size != pol.shape[ax] or g_ref.size != refp.shape[ax]:
                             print("Grid lengths and array lengths inconsistent -- axes used is ", ax)
                             print("Model grid length: ", g_mod.size)
@@ -421,7 +467,11 @@ def dev_c_log10_mean(
     Returns:
         float: Mean log10 absolute error. Returns np.nan if extraction or comparison fails.
     """
+    # Debug: confirm function is being called
+    print(f"  [dev_c_log10_mean] ENTRY: _runner={_runner is not None}, _x={_x is not None}", flush=True)
+    
     if _runner is None or _x is None:
+        print(f"  [dev_c_log10_mean] Missing runner/x, returning NaN", flush=True)
         return np.nan
     
     # Initialize variables for cleanup
@@ -432,6 +482,8 @@ def dev_c_log10_mean(
     try:
         with managed_model_load(_runner, _x, metric_name="dev_c_log10_mean") as ref_model:
             if ref_model is None:
+                H = _x[2]
+                print(f"  [dev_c_log10_mean] H={H}: ref_model is None, returning NaN", flush=True)
                 return np.nan
             
             # Extract consumption policies
@@ -456,19 +508,48 @@ def dev_c_log10_mean(
                 print("Policy not extracted from model or baseline for log10 metric")
                 return np.nan
             
+            # Reconstruct grids if they don't match policy array sizes
+            # This happens when loading from bundles - model grid uses master.yml default
+            # but Solution arrays have actual sweep grid size
+            # Assume wealth is axis 0 for policy arrays
+            if g_mod.size != pol.shape[0] and g_mod.size > 1:
+                print(f"  [dev_c_log10_mean] Reconstructing g_mod (pre-interp): stored={g_mod.size}, needed={pol.shape[0]}", flush=True)
+                g_mod = np.linspace(g_mod.min(), g_mod.max(), pol.shape[0])
+            
+            if g_ref.size != refp.shape[0] and g_ref.size > 1:
+                print(f"  [dev_c_log10_mean] Reconstructing g_ref (pre-interp): stored={g_ref.size}, needed={refp.shape[0]}", flush=True)
+                g_ref = np.linspace(g_ref.min(), g_ref.max(), refp.shape[0])
+            
             # Handle interpolation if shapes don't match
+            print(f"  [dev_c_log10_mean] pol.shape={pol.shape}, refp.shape={refp.shape}", flush=True)
             if pol.shape != refp.shape:
                 if len(pol.shape) != len(refp.shape):
+                    print(f"  [dev_c_log10_mean] Shape ndim mismatch: {len(pol.shape)} vs {len(refp.shape)}, returning NaN", flush=True)
                     return np.nan
                 
                 # Determine interpolation axis
                 diff_axes = [i for i, (a, b) in enumerate(zip(pol.shape, refp.shape)) if a != b]
                 if len(diff_axes) != 1:
+                    print(f"  [dev_c_log10_mean] Multiple diff axes: {diff_axes}, returning NaN", flush=True)
                     return np.nan
                 ax = diff_axes[0]
                 
-                if g_mod.size != pol.shape[ax] or g_ref.size != refp.shape[ax]:
+                # If g_mod doesn't match pol, reconstruct grid from pol shape
+                # This happens when loading from bundle - model grid uses master.yml default
+                # but Solution arrays have actual sweep grid size
+                if g_mod.size != pol.shape[ax] and g_mod.size > 1:
+                    print(f"  [dev_c_log10_mean] Reconstructing g_mod: stored={g_mod.size}, needed={pol.shape[ax]}", flush=True)
+                    g_mod = np.linspace(g_mod.min(), g_mod.max(), pol.shape[ax])
+                
+                if g_mod.size != pol.shape[ax]:
+                    print(f"  [dev_c_log10_mean] g_mod size mismatch after reconstruction: {g_mod.size} vs pol[{ax}]={pol.shape[ax]}, returning NaN", flush=True)
                     return np.nan
+                
+                # If g_ref doesn't match refp, construct grid from refp shape
+                # This happens when baseline uses HD grid but grid metadata is standard
+                if g_ref.size != refp.shape[ax] and g_ref.size > 1:
+                    print(f"  [dev_c_log10_mean] Reconstructing g_ref: stored={g_ref.size}, needed={refp.shape[ax]}", flush=True)
+                    g_ref = np.linspace(g_ref.min(), g_ref.max(), refp.shape[ax])
                 
                 # Interpolate baseline to fast method's grid
                 ref_swapped = np.moveaxis(refp, ax, -1)
@@ -483,11 +564,26 @@ def dev_c_log10_mean(
             # Compute log10 absolute error
             diff = np.abs(refp - pol)
             
+            # TODO: Make w_max_filter a proper config setting and/or fix VFI grid extrapolation
+            # Hardwired filter: only include wealth values < 35 to avoid extrapolation issues
+            # at the boundary where VFI grid ends
+            W_MAX_FILTER = 35.0
+            
+            # Create mask for wealth < W_MAX_FILTER (axis 0 is wealth dimension)
+            # g_mod is the wealth grid after any reconstruction
+            w_mask = g_mod < W_MAX_FILTER
+            n_valid = np.sum(w_mask)
+            print(f"  [dev_c_log10_mean] Filtering to w < {W_MAX_FILTER}: {n_valid}/{len(g_mod)} grid points", flush=True)
+            
+            # Apply mask along wealth axis (axis 0)
+            # pol/refp shape is typically (n_w, n_h, n_y) - wealth is first axis
+            diff_filtered = diff[w_mask, ...]
+            
             # Add small epsilon to avoid log10(0) issues
             # This ensures the metric rewards good methods (small differences)
             # rather than penalizing them by filtering out small values
             epsilon = 1e-16
-            diff_safe = diff + epsilon
+            diff_safe = diff_filtered + epsilon
             
             # Compute mean of log10 absolute errors
             # Use nanmean to handle any potential NaN values robustly
@@ -499,14 +595,20 @@ def dev_c_log10_mean(
             else:
                 result = float(np.nanmean(log_errors))
             
+            # Debug: show result
+            H = _x[2]
+            print(f"  [dev_c_log10_mean] H={H}: result={result:.6f}, pol_shape={pol.shape}, refp_shape={refp.shape}", flush=True)
+            
             # Clean up
-            del diff, pol, refp, g_mod, g_ref, diff_safe, log_errors
+            del diff, diff_filtered, pol, refp, g_mod, g_ref, diff_safe, log_errors
             gc.collect()
             
             return result
             
     except Exception as e:
-        print(f"Error in log10 mean metric computation: {e}")
+        import traceback
+        print(f"  [dev_c_log10_mean] EXCEPTION: {e}", flush=True)
+        traceback.print_exc()
         gc.collect()
         return np.nan
 

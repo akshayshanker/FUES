@@ -409,6 +409,12 @@ def make_housing_model(args, cfg_container: dict, periods: int, vf_ngrid: int, c
         stage_configs=cfg["stages"],
         connections_config=cfg["connections"],
     )
+    # Optional: log memory right after circuit skeleton creation
+    if getattr(args, "trace", False):
+        try:
+            log_memory_usage("after initialize_model_Circuit (skeleton)", verbose=True)
+        except Exception:
+            pass
 
     # 3. numerically compile every Stage (grid creation, etc.)
     # Skip if lazy_compile is enabled - compilation will happen per-period in run_time_iteration
@@ -423,6 +429,29 @@ def make_housing_model(args, cfg_container: dict, periods: int, vf_ngrid: int, c
             for stage_name, stage in period.stages.items():
                 if stage.num_rep is None:
                     stage.num_rep = generate_numerical_model
+                # IMPORTANT:
+                # DynX may allocate per-period grids during circuit initialization.
+                # In low-memory + lazy-compile mode we want the *period* to remain a light
+                # skeleton until `_compile_period_stages()` runs, otherwise memory can
+                # still scale with `T` even when we "compile lazily".
+                try:
+                    for perch_name in ("arvl", "dcsn", "cntn"):
+                        perch = getattr(stage, perch_name, None)
+                        if perch is not None:
+                            if hasattr(perch, "grid"):
+                                perch.grid = None
+                    # Do NOT clear `stage.model.num` here.
+                    # DynX stage compilation can expect parts of the model scaffold
+                    # to exist when `build_computational_model()` runs; clearing it at
+                    # factory time can trigger KeyErrors like "'functions' not found".
+                    stage.status_flags["compiled"] = False
+                except Exception:
+                    pass
+        if getattr(args, "trace", False):
+            try:
+                log_memory_usage("after lazy-init grid stripping", verbose=True)
+            except Exception:
+                pass
     else:
         try:
             # Always compile when comm=None (sweep mode), otherwise only rank 0
@@ -992,6 +1021,21 @@ def main(argv=None):
 
             # Add to metric functions (runs on each rank for its assigned configs)
             sweep_runner.metric_fns["_sweep_plots"] = sweep_plot_metric
+
+        # Always add an explicit cleanup metric in sweep mode.
+        # Rationale: even if per-period memory is freed inside `run_time_iteration`,
+        # DynX/runner internals may still retain references across configurations
+        # (e.g., caches). Making the model object "small" prevents memory growth
+        # over long sweeps (especially when periods is large).
+        def sweep_cleanup_metric(model):
+            try:
+                cleanup_model_complete(model)
+                return 1
+            except Exception:
+                return 0
+
+        # Insert last so it runs after all other metrics.
+        sweep_runner.metric_fns["_sweep_cleanup"] = sweep_cleanup_metric
         
         # Run sweep using mpi_map
         # Note: mpi_map returns None on non-root ranks when MPI is enabled

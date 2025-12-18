@@ -3,8 +3,8 @@
 # Smaller grid for quick testing of sweep mode
 
 # Experiment identification
-config_id: "paper-v1-test"
-trial_id: "sweep-noPB-small"
+config_id: "test_0.3"
+trial_id: "paper-sweep-10-small"  # Must match sweep_VFI_GPU.yml so baselines can be found
 output_dir: "/scratch/tp66/${USER}/FUES/solutions/housing_renting"  # Base output directory
 
 # Reference method for baseline comparison
@@ -31,9 +31,9 @@ sweep:
   
   # Fewer H sizes for testing
   H_sizes:
+    - 3
+    - 5
     - 7
-    - 10
-    - 15
 
 # Fixed parameters
 fixed:
@@ -42,4 +42,9 @@ fixed:
 
 # Override params when constructing ref_params for baseline comparison
 ref_params_override:
-  grid_sizes: 200000  # Compare to high-res VFI baseline
+  grid_sizes: 20000  # Compare to high-res VFI baseline
+
+# Metrics to compute (comparison metrics require baseline)
+metrics:
+  - euler_error
+

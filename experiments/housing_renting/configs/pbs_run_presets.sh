@@ -20,6 +20,14 @@ STD_RES_SETTINGS[grid_points]=2000
 STD_RES_SETTINGS[version_suffix]="test_0.1"
 STD_RES_SETTINGS[delta_pb]=1
 
+declare -A STD_RES_SETTINGS_3
+STD_RES_SETTINGS_3[periods]=5
+STD_RES_SETTINGS_3[vfi_ngrid]=2000
+STD_RES_SETTINGS_3[hd_points]=2000
+STD_RES_SETTINGS_3[grid_points]=2000
+STD_RES_SETTINGS_3[version_suffix]="test_0.3"
+STD_RES_SETTINGS_3[delta_pb]=1
+
 
 declare -A STD_RES_SETTINGS_PB
 STD_RES_SETTINGS_PB[periods]=5
@@ -40,10 +48,10 @@ HIGH_RES_SETTINGS_A[version_suffix]="test_0.1"
 HIGH_RES_SETTINGS_A[delta_pb]=1
 
 declare -A HIGH_RES_SETTINGS_A_PB
-HIGH_RES_SETTINGS_A_PB[periods]=5
+HIGH_RES_SETTINGS_A_PB[periods]=20
 HIGH_RES_SETTINGS_A_PB[vfi_ngrid]=1E4
 HIGH_RES_SETTINGS_A_PB[hd_points]=2000
-HIGH_RES_SETTINGS_A_PB[grid_points]=2000
+HIGH_RES_SETTINGS_A_PB[grid_points]=10000
 HIGH_RES_SETTINGS_A_PB[version_suffix]="test_0.1"
 HIGH_RES_SETTINGS_A_PB[delta_pb]=0.6
 
@@ -72,7 +80,7 @@ HIGH_RES_SETTINGS_B1[version_suffix]="test_0.1"
 HIGH_RES_SETTINGS_B1[delta_pb]=1
 
 declare -A HIGH_RES_SETTINGS_C
-HIGH_RES_SETTINGS_C[periods]=5
+HIGH_RES_SETTINGS_C[periods]=20
 HIGH_RES_SETTINGS_C[vfi_ngrid]=1E6
 HIGH_RES_SETTINGS_C[hd_points]=3E5
 HIGH_RES_SETTINGS_C[grid_points]=2000

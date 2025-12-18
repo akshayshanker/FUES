@@ -79,7 +79,7 @@ class ExecutionSettings:
             config = load_experiment_set(experiment_set)
             return config.get("param_paths", cls.DEFAULT_PARAM_PATHS)
         except FileNotFoundError:
-            print(f"Warning: Experiment set '{experiment_set}' not found, using defaults")
+            print(f"Warning: Experiment set '{experiment_set}' not found, using defaults from single run config set-up")
             return cls.DEFAULT_PARAM_PATHS
     
     @classmethod
@@ -102,6 +102,7 @@ class ExecutionSettings:
             - 'ref_method': baseline method for comparison (e.g., 'VFI_HDGRID_GPU')
             - 'ref_params_override': overrides when building ref_params (e.g., {'grid_sizes': 200000})
             - 'config_id', 'trial_id': experiment identification
+            - 'metrics': list of metrics to compute (e.g., ['euler_error', 'dev_c_L2'])
         """
         config = load_experiment_set(experiment_set)
         sweep = config.get("sweep", {})
@@ -118,6 +119,8 @@ class ExecutionSettings:
             # Experiment identification
             "config_id": config.get("config_id", None),
             "trial_id": config.get("trial_id", None),
+            # Metrics to compute
+            "metrics": config.get("metrics", None),
         }
     
     @classmethod 
@@ -143,12 +146,16 @@ class ExecutionSettings:
         H_sizes = sweep_config["H_sizes"]
         param_paths = sweep_config["param_paths"]
         
-        # Build all combinations
+        # Build all combinations, grouped by H_points for optimal baseline cache reuse
+        # The baseline hash depends on H_points (not method or grid_size due to ref_params_override)
+        # Grouping by H ensures mpi_map assigns configs with same baseline to same rank
         rows = []
-        for method, grid, H in product(methods, grid_sizes, H_sizes):
-            # Row order must match param_paths order:
-            # [method, a_points, H_points]
-            rows.append([method, grid, H])
+        for H in H_sizes:
+            for grid in grid_sizes:
+                for method in methods:
+                    # Row order must match param_paths order:
+                    # [method, a_points, H_points]
+                    rows.append([method, grid, H])
         
         return np.array(rows, dtype=object), param_paths, sweep_config
     
@@ -246,16 +253,37 @@ class ExecutionSettings:
             self.baseline_points = self.std_points
             
     def setup_metrics(self):
-        """Configure metrics and comparison settings."""
+        """Configure metrics and comparison settings.
+        
+        Metrics can be specified via:
+        1. Command-line: --metrics "euler_error,dev_c_L2"
+        2. Experiment YAML: metrics: [euler_error, dev_c_L2]
+        
+        Command-line takes precedence over YAML if explicitly provided.
+        """
         # Parse comparison metrics that require baseline
         self.comparison_metrics = set(
             m.strip() for m in self.args.comparison_metrics.split(",") if m.strip()
         )
         
-        # Parse requested metrics
-        if self.args.metrics.lower() == "all":
-            self.requested_metrics = ["euler_error", "dev_c_L2", "plot_c_comparison", "plot_v_comparison"]
+        # Check for YAML-defined metrics (sweep mode)
+        yaml_metrics = None
+        if hasattr(self.args, 'experiment_set') and self.args.experiment_set:
+            sweep_config = self.get_sweep_config(self.args.experiment_set)
+            yaml_metrics = sweep_config.get("metrics")
+        
+        # Determine requested metrics (command-line overrides YAML)
+        # Default command-line value is "all", so check if user explicitly set something else
+        cmd_metrics = self.args.metrics.lower().strip()
+        
+        if cmd_metrics == "all":
+            # Use YAML metrics if available, otherwise default "all" set
+            if yaml_metrics:
+                self.requested_metrics = yaml_metrics
+            else:
+                self.requested_metrics = ["euler_error", "dev_c_L2", "plot_c_comparison", "plot_v_comparison"]
         else:
+            # Command-line explicitly specified - use those
             self.requested_metrics = [m.strip() for m in self.args.metrics.split(",")]
             
             # Handle special case: "plots" adds all plot metrics
@@ -378,7 +406,7 @@ class ExecutionSettings:
             'egm_bounds': egm_bounds,
             'asset_dims': asset_dims,
             'plots_of_interest': plots_of_interest,
-            'y_idx_list': (0, 1, 2)  # Default y indices for plots
+            'y_idx_list': None  # None = export all income states; or tuple like (0, 1, 2) for specific states
         }
     
     def get_memory_config(self):

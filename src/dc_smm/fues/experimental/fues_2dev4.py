@@ -39,7 +39,7 @@ EPS_fwd_back = 8e-1
 
 @njit
 def uniqueEG(egrid, vf):
-    egrid_rounded = np.round_(egrid, 10)
+    egrid_rounded = np.round(egrid, 10)
     unique_vals = np.unique(egrid_rounded)
     keep = np.full_like(egrid, False, dtype=np.bool_)
     for val in unique_vals:

@@ -25,6 +25,7 @@ def F_t_cntn_to_dcsn(mover):
     
     # Get parameters
     r = model.param.r  # Interest rate
+    delta = model.param.delta_pb  # For Q optimization: when delta=1, Q=vlu
     
     # Get grids from model
     # NOTE: TENU receives data from OWNH/RNTH which output on a_grid (asset decision grid)
@@ -69,12 +70,14 @@ def F_t_cntn_to_dcsn(mover):
         # Get values for the owner path (already on correct grid)
         vlu_own = own_data["vlu"]     # Shape: (n_a, n_H, n_y)
         lambda_own = own_data["lambda_"]  # Shape: (n_a, n_H, n_y)
-        Qlu_own = own_data["Q"]      # NEW
+        # Q only needed when delta < 1 (present-biased); when delta=1, Q=vlu
+        Qlu_own = own_data["Q"] if delta < 1 else vlu_own
         
         # Get rent path data
         vlu_rent_raw = rent_data["vlu"]       # Shape: (n_w, n_y)
         lambda_rent_raw = rent_data["lambda_"]  # Shape: (n_w, n_y)
-        Qlu_rent_raw = rent_data["Q"]   # NEW
+        # Q only needed when delta < 1 (present-biased); when delta=1, Q=vlu
+        Qlu_rent_raw = rent_data["Q"] if delta < 1 else vlu_rent_raw
         
         # Initialize result arrays
         vlu_dcsn = np.zeros((n_a, n_H, n_y))
@@ -92,10 +95,13 @@ def F_t_cntn_to_dcsn(mover):
                 w_cntn_rent_grid, lambda_rent_raw[:, i_y], 
                 bounds_error=False, fill_value="extrapolate"
             )
-            Qlu_rent_interp = interp1d(
-                w_cntn_rent_grid, Qlu_rent_raw[:, i_y],
-                bounds_error=False, fill_value="extrapolate"
-            )
+            # Only create Q interpolator when delta < 1 (present-biased)
+            # When delta=1, Q=vlu so we reuse vlu interpolation
+            if delta < 1:
+                Qlu_rent_interp = interp1d(
+                    w_cntn_rent_grid, Qlu_rent_raw[:, i_y],
+                    bounds_error=False, fill_value="extrapolate"
+                )
             
             # Vectorized interpolation for all (a, H) points at this income level
             # Reshape w_rent_mesh to 1D for interpolation
@@ -104,7 +110,11 @@ def F_t_cntn_to_dcsn(mover):
             # Apply interpolation
             vlu_rent_flat = vlu_rent_interp(w_rent_flat)
             lambda_rent_flat = lambda_rent_interp(w_rent_flat)
-            Qlu_rent_flat = Qlu_rent_interp(w_rent_flat)
+            # Only interpolate Q separately when delta < 1
+            if delta < 1:
+                Qlu_rent_flat = Qlu_rent_interp(w_rent_flat)
+            else:
+                Qlu_rent_flat = vlu_rent_flat  # Q=vlu when delta=1
             
             # Reshape back to (n_a, n_H)
             vlu_rent_2d = vlu_rent_flat.reshape(n_a, n_H)

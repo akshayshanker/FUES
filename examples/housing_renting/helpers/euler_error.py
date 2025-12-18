@@ -45,6 +45,9 @@ if CUDA_AVAILABLE and cuda is not None:
                     a_next = w_now - c0
                     if a_next <= 0.1: 
                         continue
+                    # TODO: Make W_MAX_FILTER configurable (hardwired to match CPU version)
+                    if w_now >= 35.0:
+                        continue
 
                     E_lam = 0.0
                     for jy, y_next in enumerate(z_vals):
@@ -226,9 +229,12 @@ def _calculate_euler_error_jit(
 
                 a_next = w_now - c0
 
-                if w_now< 0.1:
+                # TODO: Make W_MAX_FILTER a proper config setting and/or fix VFI grid extrapolation
+                # Hardwired filter: only include wealth values < 35 to avoid extrapolation issues
+                W_MAX_FILTER = 35.0
+                if w_now < 0.1:
                     continue
-                if w_now> 30:
+                if w_now >= W_MAX_FILTER:
                     continue
                 
                 #if a_next <= 0.5:
@@ -370,7 +376,9 @@ def calculate_euler_error_cpu(model, debug=True, sample_size=50000, random_sampl
                 continue
                 
             a_next = w_now - c0
-            if w_now <= 0.01 or w_now >= 30:
+            # TODO: Make W_MAX_FILTER a proper config setting (see also _calculate_euler_error_jit)
+            W_MAX_FILTER = 35.0
+            if w_now <= 0.01 or w_now >= W_MAX_FILTER:
                 continue
             
             E_lam = 0.0

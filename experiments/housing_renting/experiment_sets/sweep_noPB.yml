@@ -6,8 +6,8 @@
 # Each MPI rank solves one (method, grid_size, H_points) combination.
 
 # Experiment identification
-config_id: "test_0.1"
-trial_id: "paper-sweep"  # Shared with sweep_VFI_GPU for baseline lookup
+config_id: "test_0.3"
+trial_id: "paper-sweep-11"  # Shared with sweep_VFI_GPU for baseline lookup
 output_dir: "/scratch/tp66/${USER}/FUES/solutions/housing_renting"  # Base output directory
 
 # Reference method for baseline comparison
@@ -42,9 +42,9 @@ sweep:
   
   # Housing grid sizes (H_points = S_points)
   H_sizes:
+    - 5
     - 7
     - 10
-    - 15
 
 # Fixed parameters (not in sweep)
 fixed:
@@ -54,4 +54,10 @@ fixed:
 # Override specific params when constructing ref_params
 # (ref_params = sweep params with method=ref_method + these overrides)
 ref_params_override:
-  grid_sizes: 200000  # Compare fast methods to high-res VFI baseline
+  grid_sizes: 100000  # Compare fast methods to high-res VFI baseline
+
+# Metrics to compute (comparison metrics require baseline)
+metrics:
+  - euler_error
+  - dev_c_log10_mean
+

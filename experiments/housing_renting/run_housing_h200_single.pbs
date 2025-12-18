@@ -39,7 +39,7 @@ if [[ -n "${FUES_CONFIG:-}" ]]; then
     CONFIG_NAME="$FUES_CONFIG"
     echo "Using configuration from FUES_CONFIG: $CONFIG_NAME"
 else
-    CONFIG_NAME="HIGH_RES_SETTINGS_A_PB"
+    CONFIG_NAME="HIGH_RES_SETTINGS_C"
     echo "Using default configuration: $CONFIG_NAME"
 fi
 
@@ -71,7 +71,7 @@ export CUDA_MODULE_LOADING=EAGER
 # Numba configuration for H200 (Compute Capability 9.0)
 export NUMBA_CACHE_DIR=/scratch/tp66/$USER/numba_cache_h200
 echo "Clearing Numba cache at $NUMBA_CACHE_DIR..."
-rm -rf "$NUMBA_CACHE_DIR"
+rm -rf "$NUMBA_CACHE_DIR" 2>/dev/null || true
 mkdir -p "$NUMBA_CACHE_DIR"
 export NUMBA_NUM_THREADS=12
 export NUMBA_CUDA_MAX_THREADS=1024

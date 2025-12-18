@@ -242,6 +242,143 @@ def interp_clean(xp, yp, x, extrap=False):
     
     return evals
 
+
+@njit(cache=True)
+def interp_clean_single(xp, yp, x_query, extrap=True):
+    """
+    Interpolate a single x_query point - fully compiled version.
+    Used for batch operations where we need to interpolate at different
+    source arrays for each target point.
+    """
+    n = len(xp)
+    
+    if n == 0:
+        return 0.0
+    if n == 1:
+        return yp[0]
+    
+    # Handle left extrapolation
+    if x_query <= xp[0]:
+        if extrap and n >= 2:
+            dx = xp[1] - xp[0]
+            if abs(dx) > 1e-14:
+                slope = (yp[1] - yp[0]) / dx
+                return yp[0] + slope * (x_query - xp[0])
+        return yp[0]
+    
+    # Handle right extrapolation
+    if x_query >= xp[-1]:
+        if extrap and n >= 2:
+            dx = xp[-1] - xp[-2]
+            if abs(dx) > 1e-14:
+                slope = (yp[-1] - yp[-2]) / dx
+                return yp[-1] + slope * (x_query - xp[-1])
+        return yp[-1]
+    
+    # Binary search for interval
+    lo, hi = 0, n - 1
+    while hi - lo > 1:
+        mid = (lo + hi) // 2
+        if xp[mid] <= x_query:
+            lo = mid
+        else:
+            hi = mid
+    
+    # Linear interpolation
+    t = (x_query - xp[lo]) / (xp[hi] - xp[lo])
+    return yp[lo] + t * (yp[hi] - yp[lo])
+
+
+@njit(cache=True)
+def interp_to_grid_compiled(m_refined, q_refined, c_refined, w_grid, 
+                            Q_out, policy_out, i_h, i_y):
+    """
+    Interpolate refined EGM solution onto w_grid for a single (i_h, i_y) pair.
+    Writes directly to pre-allocated output arrays.
+    
+    This is the compiled inner loop - called from Python outer loop.
+    
+    Parameters
+    ----------
+    m_refined : 1D array
+        Refined endogenous grid
+    q_refined : 1D array
+        Refined Q values
+    c_refined : 1D array
+        Refined consumption values
+    w_grid : 1D array
+        Target wealth grid
+    Q_out : 3D array (n_W, n_H, n_Y)
+        Output array for Q values (modified in place)
+    policy_out : 3D array (n_W, n_H, n_Y)
+        Output array for policy (modified in place)
+    i_h : int
+        Housing index
+    i_y : int
+        Income index
+    """
+    n_W = len(w_grid)
+    n_m = len(m_refined)
+    
+    if n_m == 0:
+        return
+    if n_m == 1:
+        for iw in range(n_W):
+            Q_out[iw, i_h, i_y] = q_refined[0]
+            policy_out[iw, i_h, i_y] = c_refined[0]
+        return
+    
+    # Pre-compute slopes for extrapolation
+    dx_left = m_refined[1] - m_refined[0]
+    dx_right = m_refined[-1] - m_refined[-2]
+    
+    if abs(dx_left) > 1e-14:
+        slope_q_left = (q_refined[1] - q_refined[0]) / dx_left
+        slope_c_left = (c_refined[1] - c_refined[0]) / dx_left
+    else:
+        slope_q_left = 0.0
+        slope_c_left = 0.0
+        
+    if abs(dx_right) > 1e-14:
+        slope_q_right = (q_refined[-1] - q_refined[-2]) / dx_right
+        slope_c_right = (c_refined[-1] - c_refined[-2]) / dx_right
+    else:
+        slope_q_right = 0.0
+        slope_c_right = 0.0
+    
+    m_min = m_refined[0]
+    m_max = m_refined[-1]
+    
+    for iw in range(n_W):
+        w = w_grid[iw]
+        
+        # Left extrapolation
+        if w <= m_min:
+            Q_out[iw, i_h, i_y] = q_refined[0] + slope_q_left * (w - m_min)
+            policy_out[iw, i_h, i_y] = c_refined[0] + slope_c_left * (w - m_min)
+            continue
+        
+        # Right extrapolation
+        if w >= m_max:
+            Q_out[iw, i_h, i_y] = q_refined[-1] + slope_q_right * (w - m_max)
+            policy_out[iw, i_h, i_y] = c_refined[-1] + slope_c_right * (w - m_max)
+            continue
+        
+        # Binary search for interval
+        lo, hi = 0, n_m - 1
+        while hi - lo > 1:
+            mid = (lo + hi) // 2
+            if m_refined[mid] <= w:
+                lo = mid
+            else:
+                hi = mid
+        
+        # Linear interpolation
+        t = (w - m_refined[lo]) / (m_refined[hi] - m_refined[lo])
+        Q_out[iw, i_h, i_y] = q_refined[lo] + t * (q_refined[hi] - q_refined[lo])
+        policy_out[iw, i_h, i_y] = c_refined[lo] + t * (c_refined[hi] - c_refined[lo])
+
+
 @njit
 def correct_jumps1d(data, x, gradient_jump_threshold, policy_value_funcs):
     """

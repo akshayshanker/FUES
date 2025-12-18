@@ -2,7 +2,7 @@
 #PBS -N sweep-vfi-gpu
 #PBS -P tp66
 #PBS -q gpuhopper
-#PBS -l ncpus=36,mem=675GB,walltime=10:00:00
+#PBS -l ncpus=36,mem=1024GB,walltime=10:00:00
 #PBS -l ngpus=3
 #PBS -l storage=gdata/tp66+scratch/tp66
 #PBS -l wd
@@ -59,9 +59,9 @@ export CUDA_MODULE_LOADING=EAGER
 export OMP_NUM_THREADS=1
 export NUMBA_NUM_THREADS=12  # Each rank gets 12 CPUs
 
-# Numba cache - separate per rank to avoid conflicts
+# Numba cache - shared across runs to avoid recompilation
+# Only clear with: rm -rf /scratch/tp66/$USER/numba_cache_gpu_sweep
 export NUMBA_CACHE_DIR=/scratch/tp66/$USER/numba_cache_gpu_sweep
-rm -rf "$NUMBA_CACHE_DIR"
 mkdir -p "$NUMBA_CACHE_DIR"
 
 export NUMBA_CUDA_MAX_THREADS=1024
@@ -125,7 +125,10 @@ echo "Starting VFI_HDGRID_GPU sweep at $(date)"
 # Note: In sweep mode, method/periods/vfi_ngrid come from experiment set (sweep_VFI_GPU.yml)
 # --fresh-fast forces computation (--recompute-baseline only works in standard mode)
 # --baseline-method is VFI_HDGRID_GPU since we're computing baselines
-mpirun -np ${N_GPUS} "$GPU_WRAPPER" -m examples.housing_renting.solve_runner \
+# Force unbuffered Python output for real-time logging
+export PYTHONUNBUFFERED=1
+
+mpirun -np ${N_GPUS} "$GPU_WRAPPER" -u -m examples.housing_renting.solve_runner \
     --sweep \
     --experiment-set "${EXPERIMENT_SET}" \
     --config-id "${CONFIG_ID}" \
@@ -137,6 +140,7 @@ mpirun -np ${N_GPUS} "$GPU_WRAPPER" -m examples.housing_renting.solve_runner \
     --mpi \
     --gpu \
     --metrics "euler_error" \
+    --csv-export \
     --plots \
     --skip-egm-plots \
     --trace \
@@ -159,6 +163,35 @@ echo "========================================================"
 echo "VFI_HDGRID_GPU sweep completed at $(date)"
 echo "Results saved to: $OUTPUT_DIR"
 echo "========================================================"
+
+# Print results table to stdout (don't save to avoid overwriting non-GPU results)
+echo ""
+echo "========================================================"
+echo "VFI GPU Baseline Results Summary"
+echo "========================================================"
+
+if [ -f "$OUTPUT_DIR/sweep_results.csv" ]; then
+    # Print to temp dir only (not to results/housing_renting)
+    TEMP_TABLES=$(mktemp -d)
+    python3 "$REPO_ROOT/examples/housing_renting/helpers/generate_paper_tables.py" \
+        --results "$OUTPUT_DIR/sweep_results.csv" \
+        --output "$TEMP_TABLES" \
+        --experiment-set "${EXPERIMENT_SET}" \
+        2>&1
+    
+    # Display the markdown tables in stdout
+    echo ""
+    echo "=== Timing Results ==="
+    cat "$TEMP_TABLES/housing_timing.md" 2>/dev/null || echo "(no timing table generated)"
+    echo ""
+    echo "=== Accuracy Results ==="
+    cat "$TEMP_TABLES/housing_accuracy.md" 2>/dev/null || echo "(no accuracy table generated)"
+    
+    # Cleanup temp
+    rm -rf "$TEMP_TABLES"
+else
+    echo "WARNING: No sweep_results.csv found at $OUTPUT_DIR"
+fi
 
 exit 0
 

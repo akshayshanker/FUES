@@ -48,7 +48,7 @@ from dc_smm.models.housing_renting.gradients import (
     compute_gradient
 )
 from numba import njit
-from dc_smm.uenvelope.upperenvelope import EGM_UE
+from dc_smm.uenvelope.upperenvelope import EGM_UE, clear_engine_cache
 from dc_smm.fues.helpers import interp_as, interp_clean
 from quantecon.optimize.scalar_maximization import brent_max
 from dynx.stagecraft.solmaker import Solution
@@ -183,9 +183,12 @@ def F_ownc_cntn_to_dcsn(mover, use_mpi=False, comm=None):
                 raise ValueError("lambda_cntn is required for EGM method.")
 
             # Check if we should store EGM grids (for plotting)
-            # Default to False to save memory - set store_egm_grids: true in settings to enable
-            # Also check skip_egm_plots - if True, don't store grids (saves significant memory)
-            skip_egm_plots = model.settings.get("skip_egm_plots", True)
+            # solve_runner injects skip_egm_plots into settings_dict, check there first
+            # Default to False (store grids) if not specified
+            if hasattr(model, 'settings_dict') and 'skip_egm_plots' in model.settings_dict:
+                skip_egm_plots = model.settings_dict['skip_egm_plots']
+            else:
+                skip_egm_plots = model.settings.get("skip_egm_plots", False)
             _store_egm_grids = model.settings.get("store_egm_grids", not skip_egm_plots)
             
             # Heavy lifting loop for EGM
@@ -236,6 +239,9 @@ def F_ownc_cntn_to_dcsn(mover, use_mpi=False, comm=None):
             
             # Clear egm_grids to free memory immediately
             del egm_grids
+            
+            # Clear engine cache at end of stage
+            clear_engine_cache()
 
             return sol
 
@@ -266,10 +272,14 @@ def F_ownc_cntn_to_dcsn(mover, use_mpi=False, comm=None):
                 # VFI doesn't produce meaningful EGM grids, so skip storage
                 # Clear egm_grids to free memory immediately
                 del egm_grids
+                
+                # Clear engine cache at end of stage
+                clear_engine_cache()
 
                 return sol
             
             # Workers return feather-weight stub
+            clear_engine_cache()
             return Solution()        # empty, <1 kB
         else:
             raise ValueError(
@@ -502,6 +512,10 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model, store_egm_grids=False):
     c_egm_all = inv_mu(lam_sel, H_bcast)
     q_egm_all = compiled_funcs.u_func(
         c_egm_all, H_bcast) + delta*beta * vlu_sel
+    
+    # Pre-compute m_egm for all (w, H, y) points: m = c + a'
+    # a_nxt_grid is (n_w,), broadcast to (n_w, n_H, n_y)
+    m_egm_all = c_egm_all + a_nxt_grid[:, None, None]
 
     # ------------------------------------------------------------------
     # 5. Loop over all income and housing points to do the upper envelope
@@ -509,12 +523,11 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model, store_egm_grids=False):
     for i_y in range(n_y):
         for i_h in range(n_H):
 
-            # Slice the pre-computed λ, v and c cubes – no recomputation inside the loop
-            # lambda_e = lam_sel[:, i_h, i_y]
+            # Slice the pre-computed cubes – no recomputation inside the loop
             vlu_e = vlu_sel[:, i_h, i_y]
             c_egm = c_egm_all[:, i_h, i_y]
+            m_egm = m_egm_all[:, i_h, i_y]
             H_val = H_nxt_grid[i_h] * thorn
-            m_egm = c_egm + a_nxt_grid
             # u_params = {"c": c_egm, "H_nxt": H_val}
             # q_egm = compiled_funcs.u_func(**u_params) + delta*beta * vlu_e
 
@@ -523,19 +536,18 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model, store_egm_grids=False):
             q_nxt_raw = delta*beta * vlu_e
 
             # Pre-process the EGM solution
-            # Add constraint points for OBC
-            # Add nxt period binding solutions (if time inconsistency)
-            # Only applies to DCEGM, FUES, RFC.
-            if ue_method != "CONSAV":
+            # Add constraint points for OBC / time-inconsistency handling, etc.
+            # NOTE: When routing through CONSAV (ue_engine == "CONSAV"), we skip this
+            # preprocessing and pass raw EGM outputs directly to CONSAV's UE routine.
+            if ue_engine != "CONSAV":
                 # Only add jump constraints when delta_pb != 1 (time inconsistent)
                 add_jump_constraints = (delta != 1.0)
 
                 # Extract lambda for FOC checks (already scaled: beta*delta*lambda*R)
                 lambda_e = lam_sel[:, i_h, i_y] if add_jump_constraints and uc_func is not None else None
 
-                # DCEGM expects original EGM order (sorted by exogenous grid a')
-                # FUES expects sorted by endogenous grid (m = c + a')
-                should_sort = (ue_method != "DCEGM")
+                # FUES sorts internally; other methods can keep current order here.
+                should_sort = False
                 
                 m_egm_unique, vlu_q_egm_unique, c_egm_unique, a_nxt_grid_unique = (
                     egm_preprocess(
@@ -586,13 +598,13 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model, store_egm_grids=False):
                     m_egm_unique, vlu_q_egm_unique, q_nxt_raw, c_egm_unique,
                     a_nxt_grid_unique, w_grid, partial_uc,
                     u_func={"func": utility_func, "args": {"H_nxt": H_val}},
-                    ue_method=ue_method, m_bar=m_bar, lb=lb,
+                    ue_method=ue_engine, m_bar=m_bar, lb=lb,
                     rfc_radius=rfc_radius, rfc_n_iter=rfc_n_iter,
                     ue_kwargs=ue_kwargs
                 )
             except Exception as e:
-                print(f"[DEBUG] {ue_method}: EGM_UE failed for grid key {grid_key}: {e}")
-                print(f"[DEBUG] {ue_method}: Input shapes - m_egm: {m_egm_unique.shape}, vf: {vlu_q_egm_unique.shape}")
+                print(f"[DEBUG] {ue_method}->{ue_engine}: EGM_UE failed for grid key {grid_key}: {e}")
+                print(f"[DEBUG] {ue_method}->{ue_engine}: Input shapes - m_egm: {m_egm_unique.shape}, vf: {vlu_q_egm_unique.shape}")
                 # Create fallback empty refined results
                 refined = {
                     "x_dcsn_ref": np.array([]),
@@ -613,7 +625,7 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model, store_egm_grids=False):
 
             lambda_refined = refined["lambda_ref"]
 
-            if ue_method != "CONSAV":
+            if ue_engine != "CONSAV":
                 # Use cleaner interpolation for non-ConSav methods
                 Q_dcsn[:, i_h, i_y] = interp_clean(
                     m_refined, q_refined, w_grid, extrap=True)
@@ -638,15 +650,12 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model, store_egm_grids=False):
 
             policy[policy < 0] = 1e-10
 
-            # Calculate decision objective Q_dcsn and derivative of consumption
-            # for present-biased utility
-            uc_today = compiled_funcs.uc_func(**{
-                "c": policy[:, i_h, i_y],
-                "H_nxt": H_val
-            })
-
             if delta < 1:
                 # Present-biased case: need full calculation
+                uc_today = compiled_funcs.uc_func(**{
+                    "c": policy[:, i_h, i_y],
+                    "H_nxt": H_val
+                })
                 c_prime = compute_gradient(
                     policy[:, i_h, i_y], w_grid, m_bar=m_bar,
                     method=gradient_method, eps=0, guard_distance=gradient_guard_distance,
@@ -662,7 +671,10 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model, store_egm_grids=False):
             else:
                 # Standard exponential discounting (delta=1): simplified formulas
                 # vlu_dcsn = Q_dcsn (no separate array needed), lambda_dcsn = uc_today
-                lambda_dcsn[:, i_h, i_y] = uc_today
+                lambda_dcsn[:, i_h, i_y] = compiled_funcs.uc_func(**{
+                    "c": policy[:, i_h, i_y],
+                    "H_nxt": H_val
+                })
                 # No need to copy Q_dcsn to vlu_dcsn - they're identical when delta=1
 
             ue_time = refined.get("ue_time", 0.0)

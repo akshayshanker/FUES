@@ -47,7 +47,8 @@ pip install \
     jinja2 \
     mpi4py \
     consav \
-    EconModel
+    EconModel \
+    scikit-learn
 
 # CUDA 12 support - required for Numba CUDA on Gadi GPU nodes
 # Without numba-cuda, cuMemGetMemPool segfaults occur
