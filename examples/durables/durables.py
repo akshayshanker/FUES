@@ -739,25 +739,21 @@ def Operator_Factory(cp):
 
     @njit
     def _refineKeeper(endog_grid_unrefined,
-                      vf_unrefined, c_unrefined, V_prime, t, m_bar=1.1):
+                      vf_unrefined, c_unrefined, V_prime, t, m_bar=1.1, return_grids=0):
         """
-        Refine EGM grid for non-adjusters using FUES (JIT-compiled)
+        Refine EGM grid for non-adjusters using FUES (JIT-compiled).
+
+        If return_grids=1, also returns intermediate grids for plotting.
         """
         # Cache dimensions
         n_z = len(z_vals)
         n_h = len(asset_grid_H)
         n_a = len(asset_grid_A)
-        
+
         # empty refined grids conditioned on time t housing
         new_a_prime_refined = np.ones((n_z, n_a, n_h))
         new_c_refined = np.ones((n_z, n_a, n_h))
         new_v_refined = np.ones((n_z, n_a, n_h))
-        
-        # For returning last processed values
-        e_grid_clean = np.empty(1)
-        vf_clean = np.empty(1)
-        c_clean = np.empty(1)
-        a_prime_clean = np.empty(1)
 
         # keep today's housing fixed
         for index_h_today in range(n_h):
@@ -780,14 +776,14 @@ def Operator_Factory(cp):
                 v_sorted = vf_unrefined_points[sortidx]
                 c_sorted = c_unrefined_points[sortidx]
                 a_sorted = asset_grid_AC_unique[sortidx]
-
-                # Call FUES_jit_core with all parameters
+                
+                # Call FUES_jit_core with all parameters (post_clean=0 for keeper)
                 keep, intersections, n_inter, final_mask, n_final = FUES_jit_core(
                     e_sorted, v_sorted, c_sorted, a_sorted, a_sorted,  # e, v, p1, p2, del_a
                     m_bar, 10,  # m_bar, LB
                     _FUES_ENDOG_MBAR, _FUES_INCLUDE_INTER, _FUES_NO_DOUBLE,
                     _FUES_SINGLE_INTER, _FUES_DISABLE_CHECKS, _FUES_LEFT_STRICT,
-                    _FUES_POST_STATE, _FUES_DETECT_DEC, _FUES_POST_CLEAN,
+                    _FUES_POST_STATE, _FUES_DETECT_DEC, 0,  # post_clean=0
                     _FUES_PAD_MBAR, _FUES_JUMP_TOL,
                     _FUES_EPS_D, _FUES_EPS_SEP, _FUES_EPS_FWD, _FUES_PAR_GUARD
                 )
@@ -858,9 +854,12 @@ def Operator_Factory(cp):
                 new_c_refined[index_z, :, index_h_today] = sharp_c
                 new_v_refined[index_z, :, index_h_today] = corrected_policy_value_funcs['v']
 
-                
-        return new_a_prime_refined, new_c_refined, new_v_refined,\
-            e_grid_clean, vf_clean, c_clean, a_prime_clean
+        # Return dummy arrays when plotting not needed
+        if return_grids == 0:
+            dummy = np.empty(1)
+            return new_a_prime_refined, new_c_refined, new_v_refined, dummy, dummy, dummy, dummy
+        else:
+            return new_a_prime_refined, new_c_refined, new_v_refined, e_grid_clean, vf_clean, c_clean, a_prime_clean
 
     @njit
     def _adjEGM(Ud_prime_a, Ud_prime_h, V, t):
@@ -911,32 +910,25 @@ def Operator_Factory(cp):
     def refine_adj(endog_grid_unrefined,
                    vf_unrefined,
                    a_prime_unrefined,
-                   h_prime_unrefined, m_bar=1.4):
+                   h_prime_unrefined, m_bar=1.4, return_grids=0):
         """
         Refine adjuster EGM grids using FUES (JIT-compiled).
         Input arrays are 3D: (n_z, n_he, n_egm) - ravel 2nd/3rd dims.
         Returns function on *wealth*.
+
+        If return_grids=1, also returns intermediate grids for plotting.
         """
         n_z = len(z_vals)
         n_we = len(asset_grid_WE)
         tau_adj = 1.0 + tau  # Pre-compute
         grid_we = asset_grid_WE  # Local ref avoids closure lookup
-        
+
         # Use empty instead of ones - values overwritten
         new_a_prime_refined = np.empty((n_z, n_we))
         new_h_prime_refined = np.empty((n_z, n_we))
         new_v_refined = np.empty((n_z, n_we))
         new_c_refined = np.empty((n_z, n_we))
-        
-        # Placeholders for return values
-        e_grid_clean = np.empty(1)
-        vf_clean = np.empty(1)
-        hprime_clean = np.empty(1)
-        a_prime_clean = np.empty(1)
-        vf_unrefined_out = np.empty(1)
-        hprime_unrefined_out = np.empty(1)
-        aprime_unrefined_out = np.empty(1)
-        egrid_unref_out = np.empty(1)
+
 
         for index_z in range(n_z):
             # Ravel the 2D slice (n_he x n_egm) -> 1D for this z
@@ -1022,17 +1014,17 @@ def Operator_Factory(cp):
             new_h_prime_refined[index_z] = interp_as(e_grid_clean, hprime_clean, grid_we)
             new_v_refined[index_z] = interp_as(e_grid_clean, vf_clean, grid_we)
             new_c_refined[index_z] = interp_as(e_grid_clean, c_clean, grid_we)
-            
-            # Store for return (last z only)
-            vf_unrefined_out = vf_unrefined_points
-            hprime_unrefined_out = hprime_unrefined_points
-            aprime_unrefined_out = aprime_unrefined_points
-            egrid_unref_out = egrid_unref_points
 
-        return (new_a_prime_refined, new_c_refined, new_h_prime_refined, new_v_refined,
-                e_grid_clean, vf_clean, hprime_clean, a_prime_clean,
-                vf_unrefined_out, hprime_unrefined_out,
-                aprime_unrefined_out, egrid_unref_out)
+        # Return dummy arrays when plotting not needed (saves nothing on compute, but clearer API)
+        if return_grids == 0:
+            dummy = np.empty(1)
+            return (new_a_prime_refined, new_c_refined, new_h_prime_refined, new_v_refined,
+                    dummy, dummy, dummy, dummy, dummy, dummy, dummy, dummy)
+        else:
+            return (new_a_prime_refined, new_c_refined, new_h_prime_refined, new_v_refined,
+                    e_grid_clean, vf_clean, hprime_clean, a_prime_clean,
+                    vf_unrefined_points, hprime_unrefined_points,
+                    aprime_unrefined_points, egrid_unref_points)
     
     #@njit
     def iterEGM(t, V_prime,
