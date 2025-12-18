@@ -24,7 +24,27 @@ import os, sys
 cwd = os.getcwd()
 sys.path.append('..')
 os.chdir(cwd)
-from dc_smm.fues.fues_v0dev import FUES, uniqueEG  # Both are @njit compiled
+from dc_smm.fues import FUES_jit_core, get_fues_defaults  # JIT-compiled core
+from dc_smm.fues.fues_v0dev import uniqueEG  # Duplicate removal utility
+
+# Extract FUES defaults as module-level constants for numba compatibility
+_fd = get_fues_defaults()
+_FUES_ENDOG_MBAR = _fd['endog_mbar']
+_FUES_INCLUDE_INTER = _fd['include_intersections']
+_FUES_NO_DOUBLE = _fd['no_double_jumps']
+_FUES_SINGLE_INTER = _fd['single_intersection']
+_FUES_DISABLE_CHECKS = _fd['disable_jump_checks']
+_FUES_LEFT_STRICT = _fd['left_turn_no_jump_strict']
+_FUES_POST_STATE = _fd['use_post_state_jump_test']
+_FUES_DETECT_DEC = _fd['detect_decreasing_policy']
+_FUES_POST_CLEAN = _fd['post_clean']
+_FUES_PAD_MBAR = _fd['padding_mbar']
+_FUES_JUMP_TOL = _fd['jump_check_tol']
+_FUES_EPS_D = _fd['eps_d']
+_FUES_EPS_SEP = _fd['eps_sep']
+_FUES_EPS_FWD = _fd['eps_fwd_back']
+_FUES_PAR_GUARD = _fd['parallel_guard']
+del _fd
 from dc_smm.fues.rfc_simple import rfc
 from dc_smm.fues.helpers.math_funcs import interp_as, rootsearch, correct_jumps1d
 
@@ -754,22 +774,42 @@ def Operator_Factory(cp):
                 c_unrefined_points = c_unrefined_points[uniqueIds]
                 asset_grid_AC_unique = asset_grid_AC[uniqueIds]
                 
-                # Call JIT-compiled FUES directly from fues_v0dev
-                e_grid_clean, vf_clean, c_clean, a_prime_clean, _ = FUES(
-                    endog_grid_unrefined_points,
-                    vf_unrefined_points,
-                    c_unrefined_points,
-                    asset_grid_AC_unique,
-                    asset_grid_AC_unique,  # del_a (not used)
-                    m_bar=m_bar,
-                    LB=10
+                # Sort inputs by e_grid (required by FUES_jit_core)
+                sortidx = np.argsort(endog_grid_unrefined_points)
+                e_sorted = endog_grid_unrefined_points[sortidx]
+                v_sorted = vf_unrefined_points[sortidx]
+                c_sorted = c_unrefined_points[sortidx]
+                a_sorted = asset_grid_AC_unique[sortidx]
+
+                # Call FUES_jit_core with all parameters
+                keep, intersections, n_inter, final_mask, n_final = FUES_jit_core(
+                    e_sorted, v_sorted, c_sorted, a_sorted, a_sorted,  # e, v, p1, p2, del_a
+                    m_bar, 10,  # m_bar, LB
+                    _FUES_ENDOG_MBAR, _FUES_INCLUDE_INTER, _FUES_NO_DOUBLE,
+                    _FUES_SINGLE_INTER, _FUES_DISABLE_CHECKS, _FUES_LEFT_STRICT,
+                    _FUES_POST_STATE, _FUES_DETECT_DEC, _FUES_POST_CLEAN,
+                    _FUES_PAD_MBAR, _FUES_JUMP_TOL,
+                    _FUES_EPS_D, _FUES_EPS_SEP, _FUES_EPS_FWD, _FUES_PAR_GUARD
                 )
-                # Sort by endogenous grid
-                sortindex = np.argsort(e_grid_clean)    
-                e_grid_clean = e_grid_clean[sortindex]
-                vf_clean = vf_clean[sortindex]
-                c_clean = c_clean[sortindex]
-                a_prime_clean = a_prime_clean[sortindex]
+
+                # Apply mask to get filtered arrays
+                e_grid_clean = e_sorted[keep]
+                vf_clean = v_sorted[keep]
+                c_clean = c_sorted[keep]
+                a_prime_clean = a_sorted[keep]
+
+                # Merge intersections if any
+                if n_inter > 0:
+                    e_grid_clean = np.concatenate((e_grid_clean, intersections[:n_inter, 0]))
+                    vf_clean = np.concatenate((vf_clean, intersections[:n_inter, 1]))
+                    c_clean = np.concatenate((c_clean, intersections[:n_inter, 2]))
+                    a_prime_clean = np.concatenate((a_prime_clean, intersections[:n_inter, 3]))
+                    # Re-sort after merging
+                    sortindex = np.argsort(e_grid_clean)
+                    e_grid_clean = e_grid_clean[sortindex]
+                    vf_clean = vf_clean[sortindex]
+                    c_clean = c_clean[sortindex]
+                    a_prime_clean = a_prime_clean[sortindex]
                 
                 # Interpolate to output grid
                 new_a_prime_refined[index_z, :, index_h_today] = interp_as(
@@ -906,19 +946,44 @@ def Operator_Factory(cp):
             aprime_unrefined_points = aprime_unrefined_points[uniqueIds]
             hprime_unrefined_points = hprime_unrefined_points[uniqueIds]
 
-            # Call JIT-compiled FUES directly
-            e_grid_clean, vf_clean, a_prime_clean, hprime_clean, c_clean = \
-                FUES(egrid_unref_points, vf_unrefined_points,
-                     aprime_unrefined_points, hprime_unrefined_points, c_unrefined_points,
-                     m_bar=m_bar, LB=5, endog_mbar=False)
-    
-            # Sort once, apply to all
-            sortindex = np.argsort(e_grid_clean)
-            e_grid_clean = e_grid_clean[sortindex]
-            vf_clean = vf_clean[sortindex]
-            hprime_clean = hprime_clean[sortindex]
-            a_prime_clean = a_prime_clean[sortindex]
-            
+            # Sort inputs by e_grid (required by FUES_jit_core)
+            sortidx = np.argsort(egrid_unref_points)
+            e_sorted = egrid_unref_points[sortidx]
+            v_sorted = vf_unrefined_points[sortidx]
+            a_sorted = aprime_unrefined_points[sortidx]
+            h_sorted = hprime_unrefined_points[sortidx]
+            c_sorted = c_unrefined_points[sortidx]
+
+            # Call FUES_jit_core with all parameters
+            keep, intersections, n_inter, final_mask, n_final = FUES_jit_core(
+                e_sorted, v_sorted, a_sorted, h_sorted, c_sorted,  # e, v, p1, p2, del_a
+                m_bar, 5,  # m_bar, LB
+                0, _FUES_INCLUDE_INTER, _FUES_NO_DOUBLE,  # endog_mbar=False
+                _FUES_SINGLE_INTER, _FUES_DISABLE_CHECKS, _FUES_LEFT_STRICT,
+                _FUES_POST_STATE, _FUES_DETECT_DEC, _FUES_POST_CLEAN,
+                _FUES_PAD_MBAR, _FUES_JUMP_TOL,
+                _FUES_EPS_D, _FUES_EPS_SEP, _FUES_EPS_FWD, _FUES_PAR_GUARD
+            )
+
+            # Apply mask to get filtered arrays
+            e_grid_clean = e_sorted[keep]
+            vf_clean = v_sorted[keep]
+            a_prime_clean = a_sorted[keep]
+            hprime_clean = h_sorted[keep]
+
+            # Merge intersections if any
+            if n_inter > 0:
+                e_grid_clean = np.concatenate((e_grid_clean, intersections[:n_inter, 0]))
+                vf_clean = np.concatenate((vf_clean, intersections[:n_inter, 1]))
+                a_prime_clean = np.concatenate((a_prime_clean, intersections[:n_inter, 2]))
+                hprime_clean = np.concatenate((hprime_clean, intersections[:n_inter, 3]))
+                # Re-sort after merging
+                sortindex = np.argsort(e_grid_clean)
+                e_grid_clean = e_grid_clean[sortindex]
+                vf_clean = vf_clean[sortindex]
+                a_prime_clean = a_prime_clean[sortindex]
+                hprime_clean = hprime_clean[sortindex]
+
             # Recompute c_clean from sorted values
             c_clean = e_grid_clean - hprime_clean * tau_adj - a_prime_clean
             
