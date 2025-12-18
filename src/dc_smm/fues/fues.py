@@ -351,10 +351,7 @@ def _postclean_double_jump_mask_single(e_grid, a_prime, m_bar, skip_mask, eps_d=
     """
     N = e_grid.size
     keep = np.ones(N, dtype=np.bool_)
-    # Guard tiny inputs: for N<=1, the scan indices (j=1,k=0) are invalid.
-    # Return trivially with all points kept and no intersections.
-    if N <= 1:
-        return e_grid, keep, np.empty((0, 5), dtype=np.float64)
+    # Guard tiny inputs: for N<=1 or N<=2, return all points kept
     if N <= 2:
         return keep
 
