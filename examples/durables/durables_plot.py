@@ -635,7 +635,7 @@ if __name__ == "__main__":
                      tau=0.18,
                      K=1.3,
                      tol_bel=1e-09,
-                     m_bar=1.4,
+                     m_bar=1.014,
                      theta=np.exp(0.3), stat=False, t0=55)
             
     # 0. Solve with Bellman (VFI option)
@@ -678,7 +678,6 @@ if __name__ == "__main__":
         print("[Rank 0] Loading results from all methods...")
         NEGMRes = pickle.load(open(os.path.join(scratch_dir, "NEGM_result.pkl"), 'rb'))
         EGMRes_fues = pickle.load(open(os.path.join(scratch_dir, "FUES_result.pkl"), 'rb'))
-        EGMRes_rfc = pickle.load(open(os.path.join(scratch_dir, "RFC_result.pkl"), 'rb'))
 
         # 2a. Policy function plots
         plot_pols(cp,EGMRes_fues, NEGMRes, 59, [100,150,200])
@@ -693,18 +692,14 @@ if __name__ == "__main__":
         # 3. Euler errors
         eulerNEGM = euler_housing(NEGMRes, cp)
         eulerEGM = euler_housing(EGMRes_fues, cp)
-        eulerRFCEGM = euler_housing(EGMRes_rfc, cp)
         print("NEGM Euler error is {}".format(np.nanmean(eulerNEGM)))
         print("EGM Euler error is {}".format(np.nanmean(eulerEGM)))
-        print("RFCEGM Euler error is {}".format(np.nanmean(eulerRFCEGM)))
 
-        # 4. Tabulate timing and errors with latex table 
+        # 4. Tabulate timing and errors with latex table
         negm_time = _get_avg_time(NEGMRes)
         egm_time = _get_avg_time(EGMRes_fues)
-        rfc_time = _get_avg_time(EGMRes_rfc)
         print(f"NEGM Time is {negm_time}")
         print(f"EGM Time is {egm_time}")
-        print(f"RFCEGM Time is {rfc_time}")
 
         lines = []
         txt = '| All (average)'
