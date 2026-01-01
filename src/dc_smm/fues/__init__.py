@@ -6,6 +6,6 @@ from .dcegm import dcegm
 from .rfc_simple import rfc
 from .helpers import interp_as, upper_envelope   # re-export
 
-__all__ = ["FUES", "FUES_jit_core", "get_fues_defaults", 
+__all__ = ["FUES", "FUES_jit_core", "get_fues_defaults",
            "FUES_v0dev", "dcegm", "rfc",
            "interp_as", "upper_envelope"]

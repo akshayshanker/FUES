@@ -1,11 +1,31 @@
+import warnings
+import logging
+
+# Suppress font warnings before importing matplotlib
+warnings.filterwarnings('ignore', message='.*Font family.*not found.*')
+warnings.filterwarnings('ignore', message='.*findfont.*')
+warnings.filterwarnings('ignore', message='.*set_ticklabels.*')
+logging.getLogger('matplotlib.font_manager').setLevel(logging.ERROR)
+
+import matplotlib
+matplotlib.rcParams['mathtext.fontset'] = 'dejavusans'
+matplotlib.rcParams['font.family'] = 'DejaVu Sans'
+
 import seaborn as sns
 import matplotlib.pylab as pl
 from matplotlib.ticker import FormatStrFormatter
 import numpy as np
 import matplotlib.pyplot as pl
 from matplotlib.ticker import MaxNLocator, FormatStrFormatter
+import os
 
-def plot_pols(cp, Results1, Results2, plot_t, index):
+
+def get_output_dir():
+	"""Get output directory from environment or use default scratch path."""
+	return os.environ.get('FUES_OUTPUT_DIR', '/scratch/tp66/as3442/FUES/durables')
+
+
+def plot_pols(cp, Results1, Results2, plot_t, index, output_dir=None):
 
 		pl.close()
 		sns.set(
@@ -22,23 +42,25 @@ def plot_pols(cp, Results1, Results2, plot_t, index):
 		fig_pol_a, ax_pol_a = pl.subplots(1, 2, figsize=(8, 6))
 		fig_pol_c, ax_pol_c = pl.subplots(1, 2, figsize=(8, 6))
 
-		label_age = np.arange(plot_t-2, plot_t+1)
-		
+		# Only include periods that exist in the results
+		available_periods = [t for t in range(plot_t-2, plot_t+1) if t in Results1]
+		label_age = np.array(available_periods)
+
 
 		for i_z in [0]:
 			for col_ih, i_h, lbs in zip([0], index, labs):
 				col_ind = 0
-				for plot_t1 in range(plot_t-2, plot_t+1):
+				for plot_t1 in available_periods:
 					
 					pos_col = np.where(
-						np.abs(np.diff(Results1[plot_t1]["Hadj"][i_z, :])) > 0.01)[0] + 1
+						np.abs(np.diff(Results1[plot_t1]["Hadj"][i_z, :])) > 2)[0] + 1
 					g_1 = np.insert(
 						Results1[plot_t1]["Hadj"][i_z, :], pos_col, np.nan)
 					
 					x1 = np.insert(cp.asset_grid_WE, pos_col, np.nan)
 
 					pos_bell = np.where(
-						np.abs(np.diff(Results2[plot_t1]["Hadj"][i_z, :])) > 0.01)[0] + 1
+						np.abs(np.diff(Results2[plot_t1]["Hadj"][i_z, :])) > 2)[0] + 1
 					g_2 = np.insert(
 						Results2[plot_t1]["Hadj"][i_z, :], pos_bell, np.nan)
 					x2 = np.insert(cp.asset_grid_WE, pos_bell, np.nan)
@@ -66,8 +88,7 @@ def plot_pols(cp, Results1, Results2, plot_t, index):
 					ax_val[0].spines['right'].set_visible(False)
 					ax_val[0].spines['top'].set_visible(False)
 					ax_val[0].grid(True)
-					ax_pol[0].set_yticklabels(ax_pol[0].get_yticks(), size=9)
-					ax_pol[0].set_xticklabels(ax_pol[0].get_xticks(), size=9)
+					ax_pol[0].tick_params(labelsize=9)
 					#ax_pol[1].set_xlabel(r'Total wealth at time $t$', fontsize=11)
 					ax_pol[1].set_ylabel(r'Housing assets at time $t+1$', fontsize=11)
 					#ax_pol[0].set_xlabel(r'Total wealth', fontsize=11)
@@ -80,17 +101,14 @@ def plot_pols(cp, Results1, Results2, plot_t, index):
 					ax_pol[0].spines['bottom'].set_visible(False)
 					ax_pol[0].spines['right'].set_visible(False)
 					ax_pol[0].spines['top'].set_visible(False)
-					ax_pol[1].set_yticklabels(ax_pol[0].get_yticks(), size=9)
-					ax_pol[1].set_xticklabels(ax_pol[0].get_xticks(), size=9)
-					
+					ax_pol[1].tick_params(labelsize=9)
+
 					ax_pol[1].grid(True)
 					ax_pol[0].grid(True)
 					ax_pol[0].grid(True)
 
-					ax_pol[0].set_xlim(9.95, 50.1)
-					ax_pol[1].set_xlim(9.95, 50.1)
-					ax_pol[0].set_ylim(4.99, 35.05)
-					ax_pol[1].set_ylim(4.99, 35.05)
+					ax_pol[0].set_xlim(0, cp.asset_grid_WE[-1])
+					ax_pol[1].set_xlim(0, cp.asset_grid_WE[-1])
 
 					pos_col_a = np.where(
 						np.abs(np.diff(Results1[plot_t1]["Aadj"][i_z, :])) > 1)[0] + 1
@@ -111,8 +129,7 @@ def plot_pols(cp, Results1, Results2, plot_t, index):
 									label=lbs,
 									linewidth=0.75)
 
-					ax_pol_a[0].set_yticklabels(ax_pol[0].get_yticks(), size=9)
-					ax_pol_a[0].set_xticklabels(ax_pol[0].get_xticks(), size=9)
+					ax_pol_a[0].tick_params(labelsize=9)
 					ax_pol_a[0].yaxis.set_major_formatter(
 						FormatStrFormatter("%.1f"))
 					ax_pol_a[0].xaxis.set_major_formatter(
@@ -126,8 +143,7 @@ def plot_pols(cp, Results1, Results2, plot_t, index):
 					ax_pol_a[1].spines['top'].set_visible(False)
 					ax_pol_a[0].spines['right'].set_visible(False)
 					ax_pol_a[0].spines['top'].set_visible(False)
-					ax_pol_a[1].set_yticklabels(ax_pol[0].get_yticks(), size=9)
-					ax_pol_a[1].set_xticklabels(ax_pol[0].get_xticks(), size=9)
+					ax_pol_a[1].tick_params(labelsize=9)
 					ax_pol_a[1].yaxis.set_major_formatter(
 						FormatStrFormatter("%.0f"))
 					ax_pol_a[1].xaxis.set_major_formatter(
@@ -137,8 +153,7 @@ def plot_pols(cp, Results1, Results2, plot_t, index):
 					ax_pol_a[0].set_xlim(0, 50)
 					ax_pol_a[1].set_xlim(0, 50)
 
-					ax_val[0].set_yticklabels(ax_val[0].get_yticks(), size=9)
-					ax_val[0].set_xticklabels(ax_val[0].get_xticks(), size=9)
+					ax_val[0].tick_params(labelsize=9)
 					ax_val[0].yaxis.set_major_formatter(FormatStrFormatter("%.0f"))
 					ax_val[0].xaxis.set_major_formatter(FormatStrFormatter("%.0f"))
 					ax_val[1].set_xlabel(r'Time $t$ total resources', fontsize=11)
@@ -149,12 +164,11 @@ def plot_pols(cp, Results1, Results2, plot_t, index):
 					ax_val[1].spines['top'].set_visible(False)
 					ax_val[0].spines['right'].set_visible(False)
 					ax_val[0].spines['top'].set_visible(False)
-					ax_val[1].set_yticklabels(ax_val[0].get_yticks(), size=9)
-					ax_val[1].set_xticklabels(ax_val[0].get_xticks(), size=9)
+					ax_val[1].tick_params(labelsize=9)
 					#ax_val[1].yaxis.set_major_formatter(FormatStrFormatter("%.1f"))
 					#ax_val[1].xaxis.set_major_formatter(FormatStrFormatter("%.0f"))
 
-					ax_val[0].legend(frameon=False, prop={'size': 10})
+					ax_val[1].legend(frameon=False, prop={'size': 10})
 					ax_pol[0].legend(frameon=False, prop={'size': 10})
 					ax_pol[1].legend(frameon=False, prop={'size': 10})
 
@@ -172,10 +186,8 @@ def plot_pols(cp, Results1, Results2, plot_t, index):
 					col_ind += 1
 			
 
-			ax_pol[0].set_yticklabels(ax_pol[0].get_yticks(), size=9)
-			ax_pol[0].set_xticklabels(ax_pol[0].get_xticks(), size=9)
-			ax_pol[1].set_yticklabels(ax_pol[0].get_yticks(), size=9)
-			ax_pol[1].set_xticklabels(ax_pol[0].get_xticks(), size=9)
+			ax_pol[0].tick_params(labelsize=9)
+			ax_pol[1].tick_params(labelsize=9)
 			ax_pol[0].yaxis.set_major_formatter(FormatStrFormatter("%.0f"))
 			ax_pol[0].xaxis.set_major_formatter(FormatStrFormatter("%.0f"))
 			ax_pol[1].yaxis.set_major_formatter(FormatStrFormatter("%.0f"))
@@ -186,15 +198,21 @@ def plot_pols(cp, Results1, Results2, plot_t, index):
 			fig_pol.tight_layout()
 			fig_val.tight_layout()
 
-		fig_pol.savefig('../../results/durables/plots/policy_adj_housing_to_{}.png'.format(plot_t))
-		fig_val.savefig('../../results/durables/plots/value_housing_to_{}.png'.format(plot_t))
-		fig_pol_a.savefig('../../results/durables/plots/policy_adj_assets_to_{}.png'.format(plot_t))
+		# Save plots to scratch drive with age subfolder
+		if output_dir is None:
+			output_dir = get_output_dir()
+		age_dir = os.path.join(output_dir, 'plots', f'age_{plot_t}')
+		os.makedirs(age_dir, exist_ok=True)
+
+		fig_pol.savefig(os.path.join(age_dir, 'policy_adj_housing.png'))
+		fig_val.savefig(os.path.join(age_dir, 'value_housing.png'))
+		fig_pol_a.savefig(os.path.join(age_dir, 'policy_adj_assets.png'))
 
 		pl.close()
 
 
 
-def plot_grids(adj_ur_grids,cp, term_t = 58):
+def plot_grids(adj_ur_grids, cp, term_t=58, output_dir=None):
 
 	for j in list(range(term_t, cp.T)):
 
@@ -266,7 +284,12 @@ def plot_grids(adj_ur_grids,cp, term_t = 58):
 		ax[1, 1].plot(e_grid_clean, hprime_clean, color=colors[0],
 					  linewidth=0.75)
 
-		fig.savefig('../../results/durables/plots/scan_test_{}.png'.format(plot_t))
+		# Save to scratch drive with age subfolder
+		if output_dir is None:
+			output_dir = get_output_dir()
+		age_dir = os.path.join(output_dir, 'plots', f'age_{plot_t}')
+		os.makedirs(age_dir, exist_ok=True)
+		fig.savefig(os.path.join(age_dir, 'scan_test.png'))
 
 		# FUES-EGM Plots for paper
 
@@ -370,10 +393,8 @@ def plot_grids(adj_ur_grids,cp, term_t = 58):
 		
 		
 		# reformat labels for ticks
-		ax[0].set_yticklabels(ax[0].get_yticks(), size=9)
-		ax[0].set_xticklabels(ax[0].get_xticks(), size=9)
-		ax[1].set_yticklabels(ax[1].get_yticks(), size=9)
-		ax[1].set_xticklabels(ax[1].get_xticks(), size=9)
+		ax[0].tick_params(labelsize=9)
+		ax[1].tick_params(labelsize=9)
 
 		ax[0].yaxis.set_major_formatter(FormatStrFormatter("%.3f"))
 		ax[0].xaxis.set_major_formatter(FormatStrFormatter("%.0f"))
@@ -383,8 +404,13 @@ def plot_grids(adj_ur_grids,cp, term_t = 58):
 		fig.supxlabel(r'Total wealth at time $t$', fontsize=11)
 		fig.tight_layout()
 		ax[1].legend(frameon=False, prop={'size': 10})
-		fig.savefig(
-			'../../results/durables/plots/hous_vf_aprime_all_small_{}.png'.format(plot_t))
+
+		# Save to scratch drive with age subfolder
+		if output_dir is None:
+			output_dir = get_output_dir()
+		age_dir = os.path.join(output_dir, 'plots', f'age_{plot_t}')
+		os.makedirs(age_dir, exist_ok=True)
+		fig.savefig(os.path.join(age_dir, 'hous_vf_aprime_all_small.png'))
 
 		# Plot all EGM points
 		pl.close()

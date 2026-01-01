@@ -28,6 +28,7 @@ sys.path.append('..')
 os.chdir(cwd)
 from examples.durables.durables import ConsumerProblem, Operator_Factory
 from examples.durables.plot import plot_pols, plot_grids
+from examples.durables.simulate import euler_errors, compute_euler_stats, print_euler_stats
 from dc_smm.fues.helpers.math_funcs import f, interp_as
 
 
@@ -62,7 +63,7 @@ def euler_housing(results, cp):
     euler : np.array
         Euler errors across the state space.
     """
-    ug_grid_all = UCGrid((cp.b, cp.grid_max_A, cp.grid_size),
+    ug_grid_all = UCGrid((cp.b, cp.grid_max_A, cp.grid_size_A),
                          (cp.b, cp.grid_max_H, len(cp.asset_grid_H)))
 
     euler = np.zeros((cp.T, len(cp.z_vals), len(cp.asset_grid_A),
@@ -83,7 +84,7 @@ def euler_housing(results, cp):
         T = cp.T - 1
     else:
         t0 = cp.t0
-        T = cp.T
+        T = cp.T-1
 
     # Loop over grid
     for t in range(t0, T):
@@ -94,6 +95,8 @@ def euler_housing(results, cp):
                     a = a_grid[i_a]
                     z = cp.z_vals[i_z]
                     D_adj = results[t]['D'][i_z, i_a, i_h]
+
+                    D_adj = 1 # solve only adjuster error. 
 
                     if D_adj == 1:
                         wealth = R * a + R_H * h * (1 - delta) + y_func(t, z)
@@ -120,29 +123,63 @@ def euler_housing(results, cp):
                         continue
 
                     rhs = 0
+                    lambda_h_plus = 0
                     for i_eta in range(len(cp.z_vals)):
                         c_plus = eval_linear(ug_grid_all,
                                              results[t + 1]['C'][i_z],
                                              np.array([a_prime, hnxt]),
                                              xto.LINEAR)
-                        rhs += cp.Pi[i_z, i_eta] * cp.beta * cp.R * \
-                               cp.du_c(c_plus)
+                        ##a_plus = eval_linear(ug_grid_all,
+                        #                     results[t + 1]['A'][i_z],
+                        #                     np.array([a_prime, hnxt]),
+                       #                      xto.LINEAR)
+                        
+                        D_plus = eval_linear(ug_grid_all,
+                                             results[t + 1]['D'][i_z],
+                                             np.array([a_prime, hnxt]),
+                                             xto.LINEAR)
+                        D_plus = int(min(max(D_plus, 0), 1))
 
-                    lambda_h_plus = eval_linear(
-                        ug_grid_all, results[t + 1]['ELambdaHnxt'][i_z],
-                        np.array([a_prime, hnxt])
-                    )
+                        if D_plus == 1:
+
+                            #h_plus = eval_linear(ug_grid_all,
+                            #                     results[t + 1]['H'][i_eta],
+                            #                     np.array([a_prime, hnxt]),
+                            #                     xto.LINEAR)
+                            wealth_plus = R * a_prime + R_H * hnxt * (1 - delta) + y_func(t + 1, cp.z_vals[i_eta])
+                            c_plus_adj = interp_as(asset_grid_WE,
+                                                   results[t + 1]['Cadj'][i_z, :],
+                                                   np.array([wealth_plus]))[0]
+                            lambda_h_plus = lambda_h_plus + cp.Pi[i_z, i_eta] * cp.beta * (1 - cp.delta) * cp.du_c(c_plus_adj)
+                            
+                            
+                        else:
+                            wealth_plus = R * a_prime + y_func(t + 1, cp.z_vals[i_eta])
+                            a_plus = interp_as(a_grid,
+                                               results[t + 1]['Akeeper'][i_z, :, i_h],
+                                               np.array([wealth_plus]))[0]
+
+                            lambda_h_plus = lambda_h_plus + cp.Pi[i_z, i_eta] * cp.beta * (1 - cp.delta) * (eval_linear(ug_grid_all,
+                                                                         results[t + 2]['ELambdaHnxt'][i_eta],
+                                                                         np.array([a_plus, hnxt]),
+                                                                         xto.LINEAR)
+                                                            + cp.du_h(hnxt))
+                        
+                        
+                        rhs += cp.Pi[i_z, i_eta] * cp.beta * cp.R * \
+                            cp.du_c(c_plus)
+
                     lhs = (cp.du_h(hnxt) + lambda_h_plus) / (1 + cp.tau)
                     euler_raw2 = c - cp.du_c_inv(lhs)
                     euler[t, i_z, i_a, i_h] = np.log10(np.abs(
                         euler_raw2 / c) + 1e-16)
     return euler
 
-def timing(solver, cp, rep=4, do_print=False):
+def timing(solver, cp, rep=4, do_print=False, N_sim=None):
     """
-    Run the solver and track the best time, average Euler error, 
+    Run the solver and track the best time, average Euler error,
     and number of iterations to convergence.
-    
+
     Parameters
     ----------
     solver : callable
@@ -153,36 +190,58 @@ def timing(solver, cp, rep=4, do_print=False):
         Number of repetitions to average results over, default is 4.
     do_print : bool, optional
         Whether to print intermediate results, default is False.
-    method : str, optional
-        Method to compare, default is 'DCEGM'.
-    
+    N_sim : int, optional
+        Number of simulated individuals for Euler errors.
+        If None, uses cp.N_sim from settings.
+
     Returns
     -------
     dict
-        The solution with the best time, Euler error, and iteration count.
+        The solution with the best time, Euler errors, and iteration count.
     """
-    ug_grid_all = UCGrid((cp.b, cp.grid_max_A, cp.grid_size),
-                         (cp.b, cp.grid_max_H, len(cp.asset_grid_H)))
+    # Use cp.N_sim if N_sim not specified
+    if N_sim is None:
+        N_sim = getattr(cp, 'N_sim', 10000)
 
     time_best = np.inf
     iter_best = None
 
     for i in range(rep):
         solution = solver(cp)
-        euler = euler_housing(solution, cp)
+
+        # Compute Euler errors using simulation
+        euler, sim_data = euler_errors(solution, cp, N=N_sim, seed=42+i)
+        stats = compute_euler_stats(euler, discrete=sim_data['discrete'])
+
         tot_time = solution[0]['avg_time']
-        iterations = solution[0].get('iterations', None)  # Get iteration count
+        iterations = solution[0].get('iterations', None)
 
         if do_print:
-            print(f'{i}: {tot_time:.2f} secs, euler: {np.nanmean(euler):.3f}')
-            print(f'Iterations: {iterations}')
+            print(f'\n--- Run {i+1}/{rep} ---')
+            print(f'Time: {tot_time:.2f} secs, Iterations: {iterations}')
+            print(f'Euler errors (log10):')
+            print(f'  Combined:  mean={stats["combined"]["mean"]:.4f}, '
+                  f'median={stats["combined"]["median"]:.4f}')
+            print(f'  Adjuster:  mean={stats["adjuster"]["mean"]:.4f}, '
+                  f'median={stats["adjuster"]["median"]:.4f} '
+                  f'(n={stats["adjuster"]["n_obs"]})')
+            print(f'  Keeper:    mean={stats["keeper"]["mean"]:.4f}, '
+                  f'median={stats["keeper"]["median"]:.4f} '
+                  f'(n={stats["keeper"]["n_obs"]})')
+            print(f'  Adj. rate: {stats["pct_adjuster"]:.2f}%')
 
         if tot_time < time_best:
             time_best = tot_time
             model_best = solution
             iter_best = iterations
+            euler_best = euler
+            sim_data_best = sim_data
+            stats_best = stats
 
-    model_best['euler'] = euler
+    # Store results in the best model
+    model_best['euler'] = euler_best
+    model_best['euler_stats'] = stats_best
+    model_best['sim_data'] = sim_data_best
     model_best['iterations'] = iter_best
 
     return model_best
@@ -259,7 +318,7 @@ def solveVFI(cp, verbose=False):
 
     return results
 
-def solveEGM(cp, LS=True, verbose=True):
+def solveEGM(cp, LS=True, verbose=True, plot_age=58):
     _, iterEGM, condition_V, _ = Operator_Factory(cp)
 
     # Initial values
@@ -277,7 +336,7 @@ def solveEGM(cp, LS=True, verbose=True):
 
         (Vcurr, Hnxt, Cnxt, Dnxt, LambdaAcurr, LambdaHcurr, AdjPol,
          KeeperPol, EGMGrids) = iterEGM(t, EVnxt, ELambdaAnxt,
-                                        ELambdaHnxt, m_bar=cp.m_bar)
+                                        ELambdaHnxt, m_bar=cp.m_bar, plot_age=plot_age)
                     
         EVnxt, ELambdaAnxt, ELambdaHnxt = condition_V(
                                             Vcurr, LambdaAcurr, LambdaHcurr
@@ -368,7 +427,7 @@ def solveNEGM(cp, LS=True, verbose=True):
 
     return results
 
-def compare_grids_and_tau(cp_settings, tau_values, grid_sizes, max_iter=200, tol=1e-03, rep=1, methods=['DCEGM', 'FUES']):
+def compare_grids_and_tau(cp_settings, tau_values, grid_sizes, max_iter=200, tol=1e-03, rep=1, methods=['NEGM', 'FUES']):
     """
     Compare the performance of FUES and NEGM over different grid sizes and tau values using MPI.
 
@@ -437,9 +496,10 @@ def compare_grids_and_tau(cp_settings, tau_values, grid_sizes, max_iter=200, tol
                              grid_max_WE=cp_settings['grid_max_WE'],
                              grid_size_W=grid_size,
                              grid_max_H=cp_settings['grid_max_H'],
-                             grid_size=grid_size,
+                             grid_size_A=grid_size,
                              grid_size_H=grid_size,
                              gamma_c=cp_settings['gamma_c'],
+                             gamma_h=cp_settings['gamma_h'],
                              chi=cp_settings['chi'],
                              tau=tau,
                              K=cp_settings['K'],
@@ -454,35 +514,45 @@ def compare_grids_and_tau(cp_settings, tau_values, grid_sizes, max_iter=200, tol
 
         # Timing and Euler error calculations
         best_time = np.inf
-        best_euler_error = np.inf
         best_iterations = None
         total_runtime = 0
+        best_stats = None
+        best_npv = None
 
         for _ in range(rep):  # Run each method `rep` times
-            if method == 'DCEGM':
+            if method == 'NEGM':
                 solution = solveNEGM(cp, verbose=False)
             else:
                 solution = solveEGM(cp, verbose=False)
 
-            euler = euler_housing(solution, cp)
+            # Use simulation-based Euler errors with adjuster/keeper breakdown
+            euler, sim_data = euler_errors(solution, cp, N=cp.N_sim, seed=42)
+            stats = compute_euler_stats(euler, discrete=sim_data['discrete'])
+            npv = sim_data['npv_utility']
+
             runtime = solution[0]['avg_time']
             iterations = solution[0]['iterations']
             total_runtime += runtime
 
             if runtime < best_time:
                 best_time = runtime
-                best_euler = euler
                 best_iterations = iterations
+                best_stats = stats
+                best_npv = npv
 
         avg_time = total_runtime / rep
-        avg_euler_error = np.nanmean(best_euler)
 
         results_summary.append({
             'Tau': tau,
             'Grid_Size': grid_size,
             'Method': method,
             'Avg_Time': avg_time,
-            'Euler_Error': avg_euler_error,
+            'Euler_Combined': best_stats['combined']['mean'],
+            'Euler_Adjuster': best_stats['adjuster']['mean'],
+            'Euler_Keeper': best_stats['keeper']['mean'],
+            'NPV_Mean': np.mean(best_npv),
+            'NPV_Median': np.median(best_npv),
+            'Adj_Rate': best_stats['pct_adjuster'],
             'Iterations': best_iterations
         })
 
@@ -504,84 +574,105 @@ def compare_grids_and_tau(cp_settings, tau_values, grid_sizes, max_iter=200, tol
 
 def create_latex_table(results_summary):
     """
-    Generate a panel-style LaTeX table comparing timing and Euler errors 
-    for different grid sizes (A) and Tau values across the methods (FUES, DCEGM, RFC),
-    ensuring that each grid size A is listed only once and rows are not repeated.
-    
+    Generate a LaTeX table comparing timing, Euler errors (adjuster/keeper/combined),
+    and NPV utility for different grid sizes and tau values across FUES and DCEGM.
+
     Parameters
     ----------
     results_summary : list
         A list containing performance metrics for each grid size, tau, and method.
-    
+
     Returns
     -------
     latex_table : str
         A LaTeX-formatted table.
     """
-    table = "\\begin{table}[htbp]\n\\centering\n\\small\n"
-    table += (
-        "\\begin{tabular}{ccccc|ccc}\n\\toprule\n"
-        "\\multirow{2}{*}{\\textit{Grid Size A}} & "
-        "\\multirow{2}{*}{\\textit{Tau}} & "
-        "\\multicolumn{3}{c}{\\textbf{Timing (milliseconds)}} & "
-        "\\multicolumn{3}{c}{\\textbf{Euler error (Log10)}} \\\\\n"
-        "& & \\textbf{RFC} & \\textbf{FUES} & \\textbf{DCEGM} & "
-        "\\textbf{RFC} & \\textbf{FUES} & \\textbf{DCEGM} \\\\\n"
-        "\\midrule\n"
-    )
-
-    # Sort results by Grid_Size_A and Tau
+    # Sort results by Grid_Size and Tau
     results_summary = sorted(results_summary, key=lambda x: (x['Grid_Size'], x['Tau']))
 
-    
-    #print(len(results_summary))
-    current_grid_size_A = None
-    first_row = True
+    # Get unique grid sizes and tau values
+    grid_sizes = sorted(set(r['Grid_Size'] for r in results_summary))
+    tau_values = sorted(set(r['Tau'] for r in results_summary))
 
-    # Loop through sorted results and structure the table
-    for result in results_summary:
-        grid_size_A = result['Grid_Size']
-        tau = result['Tau']
+    # Helper to get result for specific combination
+    def get_result(grid_size, tau, method):
+        try:
+            return next(r for r in results_summary
+                       if r['Grid_Size'] == grid_size and r['Tau'] == tau and r['Method'] == method)
+        except StopIteration:
+            return None
 
-        # Start a new panel if the Grid_Size_A changes
-        if grid_size_A != current_grid_size_A:
-            if current_grid_size_A is not None:
-                table += "\\midrule\n"  # Add midline to separate grid size A blocks
-            current_grid_size_A = grid_size_A
-            # Add the new grid size A but do not repeat for each tau
-            table += f"\\multirow{{{len(set([r['Tau'] for r in results_summary if r['Grid_Size'] == grid_size_A]))}}}{{*}}{{{grid_size_A}}} "
+    # Build table
+    table = "\\begin{table}[htbp]\n\\centering\n\\footnotesize\n"
+    table += "\\begin{tabular}{cc|cc|cc|cc|cc|cc}\n\\toprule\n"
+    table += (
+        "& & \\multicolumn{2}{c|}{\\textbf{Time (s)}} & "
+        "\\multicolumn{2}{c|}{\\textbf{Euler Comb.}} & "
+        "\\multicolumn{2}{c|}{\\textbf{Euler Adj.}} & "
+        "\\multicolumn{2}{c|}{\\textbf{Euler Keep.}} & "
+        "\\multicolumn{2}{c}{\\textbf{NPV Utility}} \\\\\n"
+    )
+    table += (
+        "\\textit{Grid} & \\textit{$\\tau$} & "
+        "FUES & NEGM & FUES & NEGM & FUES & NEGM & FUES & NEGM & FUES & NEGM \\\\\n"
+    )
+    table += "\\midrule\n"
 
-        else:
-            table += " " * 13  # Indentation for subsequent tau rows for the same grid size
+    current_grid = None
+    for grid_size in grid_sizes:
+        taus_for_grid = [t for t in tau_values if get_result(grid_size, t, 'FUES') is not None]
+        n_taus = len(taus_for_grid)
 
-        # Retrieve timing and Euler error for each method
-        time_rfc = next(r for r in results_summary if r['Grid_Size'] == grid_size_A and r['Tau'] == tau and r['Method'] == 'RFC')['Avg_Time']
-        time_fues = next(r for r in results_summary if r['Grid_Size'] == grid_size_A and r['Tau'] == tau and r['Method'] == 'FUES')['Avg_Time']
-        time_dcegm = next(r for r in results_summary if r['Grid_Size'] == grid_size_A and r['Tau'] == tau and r['Method'] == 'DCEGM')['Avg_Time']
-        
-        euler_rfc = next(r for r in results_summary if r['Grid_Size'] == grid_size_A and r['Tau'] == tau and r['Method'] == 'RFC')['Euler_Error']
-        euler_fues = next(r for r in results_summary if r['Grid_Size'] == grid_size_A and r['Tau'] == tau and r['Method'] == 'FUES')['Euler_Error']
-        euler_dcegm = next(r for r in results_summary if r['Grid_Size'] == grid_size_A and r['Tau'] == tau and r['Method'] == 'DCEGM')['Euler_Error']
+        for i, tau in enumerate(taus_for_grid):
+            fues = get_result(grid_size, tau, 'FUES')
+            negm = get_result(grid_size, tau, 'NEGM')
 
-        # Add row for the current Tau value
-        table += (
-            f"& {tau} & {time_rfc:.3f} & {time_fues:.3f} & {time_dcegm:.3f} & "
-            f"{euler_rfc:.3f} & {euler_fues:.3f} & {euler_dcegm:.3f} \\\\\n"
-        )
+            if fues is None or negm is None:
+                continue
 
-    # Finish the table
+            # Grid size column (multirow for first tau only)
+            if i == 0:
+                if current_grid is not None:
+                    table += "\\midrule\n"
+                table += f"\\multirow{{{n_taus}}}{{*}}{{{grid_size}}} "
+                current_grid = grid_size
+            else:
+                table += " "
+
+            # Data row
+            table += (
+                f"& {tau} "
+                f"& {fues['Avg_Time']:.2f} & {negm['Avg_Time']:.2f} "
+                f"& {fues['Euler_Combined']:.2f} & {negm['Euler_Combined']:.2f} "
+                f"& {fues['Euler_Adjuster']:.2f} & {negm['Euler_Adjuster']:.2f} "
+                f"& {fues['Euler_Keeper']:.2f} & {negm['Euler_Keeper']:.2f} "
+                f"& {fues['NPV_Mean']:.3f} & {negm['NPV_Mean']:.3f} "
+                "\\\\\n"
+            )
+
     table += "\\bottomrule\n\\end{tabular}\n"
     table += (
-        "\\caption{\\small Speed and accuracy of FUES, DCEGM, and RFC across different grid sizes A and Tau values.}\n\\end{table}"
+        "\\caption{Comparison of FUES and NEGM across grid sizes and transaction costs ($\\tau$). "
+        "Euler errors are log$_{10}$ scale (more negative = better). "
+        "NPV is mean net present discounted utility.}\n"
+        "\\label{tab:durables_comparison}\n"
+        "\\end{table}\n"
     )
 
     return table
 
 if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--method', type=str, choices=['negm', 'egm', 'both'], default='both',
+                        help='Which method to run: negm, egm, or both (default)')
+    parser.add_argument('--plot-start', type=int, default=None,
+                        help='Start period for plotting (default: T-2). Will be clamped to valid range.')
+    parser.add_argument('--run-tests', action='store_true',
+                        help='Run grid/tau comparison tests (18 combinations, requires 18 MPI ranks)')
+    args = parser.parse_args()
 
-    
-
-    run_tets = False
+    run_tests = args.run_tests
     # Read settings
     with open("settings.yml", "r") as stream:
         settings = yaml.safe_load(stream) 
@@ -590,21 +681,18 @@ if __name__ == "__main__":
     # Tau values and grid sizes to compare
     cp_settings = settings['durables']
     
-    tau_values = [0.03, 0.07, 0.15]
-    grid_sizes_A = [250, 500, 1000]
+    tau_values = [0.05, 0.07, 0.15]
+    grid_sizes_A = [250, 500, 700]
 
     # Run comparison across grid sizes and tau values
-    if run_tets == True:
+    if run_tests:
         results, latex_table = compare_grids_and_tau(cp_settings, tau_values, grid_sizes_A)
-
-    # load saved performance table results 
-    #results = pickle.load(open("../../results/durables/durable_timings.pkl", "rb"))
-    #latex_table = create_latex_table(results)
-
-    #if MPI.COMM_WORLD.Get_rank() == 0:
-    #    print(latex_table)
-    #    with open("../../results/durables/durables_table.tex", "w") as f:
-    #        f.write(latex_table)
+        if MPI.COMM_WORLD.Get_rank() == 0 and latex_table:
+            print(latex_table)
+            with open("../../results/durables/durables_table.tex", "w") as f:
+                f.write(latex_table)
+            print("LaTeX table saved to results/durables/durables_table.tex")
+        sys.exit(0)  # Exit after tests complete
 
     # 2. Solve the baseline model with MPI parallelization across methods
     
@@ -615,28 +703,29 @@ if __name__ == "__main__":
     
     # All ranks create the consumer problem
     cp = ConsumerProblem(cp_settings,
-                     r=0.01,
+                     r=0.03,
                      sigma=.001,
                      r_H=0,
                      beta=.93,
-                     alpha=0.03,
+                     alpha=0.05,
                      delta=0,
-                     Pi=((0.5, 0.5), (0.5, 0.5)),
-                     z_vals=(.1, 1),
+                     Pi=((0.8, 0.1, 0.1), (0.05, 0.9, 0.05), (0.1, 0.1, 0.8)),
+                     z_vals=(0.1, .7526, 1.167),
                      b=1e-10,
-                     grid_max_A=20.0,
-                     grid_max_WE=70,
-                     grid_size_W=1000,
-                     grid_max_H=50.0,
-                     grid_size=1000,
-                     grid_size_H=300,
-                     gamma_c=3,
+                     grid_max_A=15.0,
+                     grid_max_WE=50,
+                     grid_size_W=200,
+                     grid_max_H=200.0,
+                     grid_size_A=200,
+                     grid_size_H=200,
+                     gamma_c=4.5,
+                     gamma_h=1.5,
                      chi=0,
-                     tau=0.18,
+                     tau=0.16,
                      K=1.3,
                      tol_bel=1e-09,
                      m_bar=1.014,
-                     theta=np.exp(0.3), stat=False, t0=55)
+                     theta=np.exp(0.3), stat=False, t0=50)
             
     # 0. Solve with Bellman (VFI option)
     #iterVFI, iterEGM, condition_V, NEGM = Operator_Factory(cp)
@@ -650,28 +739,34 @@ if __name__ == "__main__":
         ('NEGM', solveNEGM),
         ('FUES', solveEGM)
     ]
-    
-    # Each rank solves its assigned method and saves to file
-    # (MPI gather fails for large arrays, so use file-based approach)
+
     # Use scratch for large pickle files, home for plots/tables
     scratch_dir = os.path.expandvars("/scratch/tp66/$USER/FUES/durables")
     results_dir = "../../results/durables"
     os.makedirs(scratch_dir, exist_ok=True)
     os.makedirs(results_dir, exist_ok=True)
-    
-    for i, (label, solver) in enumerate(methods):
-        if i % size == rank:
-            print(f"[Rank {rank}] Solving {label}...")
-            result = timing(solver, cp, rep=1)
-            result['label'] = label
-            # Save result to scratch (large files)
-            result_file = os.path.join(scratch_dir, f"{label}_result.pkl")
-            with open(result_file, 'wb') as f:
-                pickle.dump(result, f)
-            print(f"[Rank {rank}] Saved {label} to {result_file}")
-    
-    # Barrier - wait for all ranks to finish solving
-    comm.Barrier()
+
+    # Select methods based on --method argument or MPI rank
+    if args.method == 'negm':
+        methods_to_run = [('NEGM', solveNEGM)]
+    elif args.method == 'egm':
+        methods_to_run = [('FUES', solveEGM)]
+    else:
+        # Default: use MPI rank to select method
+        methods_to_run = [(label, solver) for i, (label, solver) in enumerate(methods) if i % size == rank]
+
+    for label, solver in methods_to_run:
+        print(f"Solving {label}...")
+        result = timing(solver, cp, rep=1)
+        result['label'] = label
+        result_file = os.path.join(scratch_dir, f"{label}_result.pkl")
+        with open(result_file, 'wb') as f:
+            pickle.dump(result, f)
+        print(f"Saved {label} to {result_file}")
+
+    # Barrier - wait for all ranks to finish solving (only if using MPI)
+    if args.method == 'both':
+        comm.Barrier()
     
     # Rank 0 loads all results and does plotting
     if rank == 0:
@@ -679,60 +774,131 @@ if __name__ == "__main__":
         NEGMRes = pickle.load(open(os.path.join(scratch_dir, "NEGM_result.pkl"), 'rb'))
         EGMRes_fues = pickle.load(open(os.path.join(scratch_dir, "FUES_result.pkl"), 'rb'))
 
-        # 2a. Policy function plots
-        plot_pols(cp,EGMRes_fues, NEGMRes, 59, [100,150,200])
+        # Get output directory from environment (scratch drive)
+        output_dir = os.environ.get('FUES_OUTPUT_DIR', scratch_dir)
+        print(f"[Rank 0] Saving plots to: {output_dir}/plots/")
+
+        # Determine plot start period with validation
+        # First valid period depends on solution structure (typically 0 or 1)
+        first_valid_period = 1  # Adjust if needed based on solution indexing
+        last_valid_period = cp.T - 1
+
+        if args.plot_start is not None:
+            plot_start = max(first_valid_period, min(args.plot_start, last_valid_period))
+            if plot_start != args.plot_start:
+                print(f"  Warning: plot_start clamped from {args.plot_start} to {plot_start} (valid range: {first_valid_period}-{last_valid_period})")
+        else:
+            plot_start = max(first_valid_period, cp.T - 2)
+
+        # 2a. Policy function plots for multiple periods
+        print(f"  Plotting periods {plot_start} to {cp.T - 1}...")
+        for t in range(plot_start, cp.T):
+            print(f"    Plotting age {t}...")
+            plot_pols(cp, EGMRes_fues, NEGMRes, t, [100, 150, 200], output_dir=output_dir)
 
         # 2.b. plot of adjuster endog. grids for FUES
-        plot_grids(EGMRes_fues,cp,term_t = 58)
+        print("  Plotting FUES grids...")
+        plot_grids(EGMRes_fues, cp, term_t=plot_start, output_dir=output_dir)
+
+        print(f"[Rank 0] All plots saved to: {output_dir}/plots/")
 
         # save results option 
         #pickle.dump(EGMRes_fues, open("EGMRes_fues.p", "wb"))
         #pickle.dump(NEGMRes, open("NEGMRes.p", "wb"))
         
-        # 3. Euler errors
-        eulerNEGM = euler_housing(NEGMRes, cp)
-        eulerEGM = euler_housing(EGMRes_fues, cp)
-        print("NEGM Euler error is {}".format(np.nanmean(eulerNEGM)))
-        print("EGM Euler error is {}".format(np.nanmean(eulerEGM)))
+        # 3. Euler errors (simulation-based with adjuster/keeper breakdown)
+        print("\n" + "="*70)
+        print(f"Computing Euler errors via simulation (N={cp.N_sim})...")
+        print("="*70)
 
-        # 4. Tabulate timing and errors with latex table
+        # Compute simulation-based Euler errors with timing
+        # Use same seed so both methods simulate identical agents for proper welfare comparison
+        t_euler_start = time.time()
+        euler_egm, sim_egm = euler_errors(EGMRes_fues, cp, N=cp.N_sim, seed=42)
+        euler_negm, sim_negm = euler_errors(NEGMRes, cp, N=cp.N_sim, seed=42)
+        t_euler = time.time() - t_euler_start
+        print(f"  Euler error computation time: {t_euler:.2f}s")
+
+        # Get detailed stats with adjuster/keeper breakdown
+        stats_egm = compute_euler_stats(euler_egm, discrete=sim_egm['discrete'])
+        stats_negm = compute_euler_stats(euler_negm, discrete=sim_negm['discrete'])
+
+        # Print detailed Euler error report
+        print("\n" + "-"*70)
+        print("EGM/FUES Euler Errors (log10 scale):")
+        print("-"*70)
+        print(f"  Combined:   mean={stats_egm['combined']['mean']:.4f}, "
+              f"median={stats_egm['combined']['median']:.4f}, "
+              f"p5={stats_egm['combined']['p5']:.4f}, "
+              f"p95={stats_egm['combined']['p95']:.4f}")
+        print(f"  Adjuster:   mean={stats_egm['adjuster']['mean']:.4f}, "
+              f"median={stats_egm['adjuster']['median']:.4f} "
+              f"(n={stats_egm['adjuster']['n_obs']})")
+        print(f"  Keeper:     mean={stats_egm['keeper']['mean']:.4f}, "
+              f"median={stats_egm['keeper']['median']:.4f} "
+              f"(n={stats_egm['keeper']['n_obs']})")
+        print(f"  Adj. rate:  {stats_egm['pct_adjuster']:.2f}%")
+
+        print("\n" + "-"*70)
+        print("NEGM Euler Errors (log10 scale):")
+        print("-"*70)
+        print(f"  Combined:   mean={stats_negm['combined']['mean']:.4f}, "
+              f"median={stats_negm['combined']['median']:.4f}, "
+              f"p5={stats_negm['combined']['p5']:.4f}, "
+              f"p95={stats_negm['combined']['p95']:.4f}")
+        print(f"  Adjuster:   mean={stats_negm['adjuster']['mean']:.4f}, "
+              f"median={stats_negm['adjuster']['median']:.4f} "
+              f"(n={stats_negm['adjuster']['n_obs']})")
+        print(f"  Keeper:     mean={stats_negm['keeper']['mean']:.4f}, "
+              f"median={stats_negm['keeper']['median']:.4f} "
+              f"(n={stats_negm['keeper']['n_obs']})")
+        print(f"  Adj. rate:  {stats_negm['pct_adjuster']:.2f}%")
+
+        # Report NPV utility
+        npv_egm = sim_egm['npv_utility']
+        npv_negm = sim_negm['npv_utility']
+
+        print("\n" + "-"*70)
+        print("Net Present Discounted Utility (per agent):")
+        print("-"*70)
+        print(f"  EGM/FUES:   mean={np.mean(npv_egm):.4f}, "
+              f"median={np.median(npv_egm):.4f}, "
+              f"std={np.std(npv_egm):.4f}")
+        print(f"  NEGM:       mean={np.mean(npv_negm):.4f}, "
+              f"median={np.median(npv_negm):.4f}, "
+              f"std={np.std(npv_negm):.4f}")
+
+        # 4. Tabulate timing and errors
         negm_time = _get_avg_time(NEGMRes)
         egm_time = _get_avg_time(EGMRes_fues)
-        print(f"NEGM Time is {negm_time}")
-        print(f"EGM Time is {egm_time}")
 
+        print("\n" + "="*70)
+        print("Summary Table")
+        print("="*70)
+        print(f"{'Metric':<30} {'EGM/FUES':>15} {'NEGM':>15}")
+        print("-"*70)
+        print(f"{'Combined mean':<30} {stats_egm['combined']['mean']:>15.4f} {stats_negm['combined']['mean']:>15.4f}")
+        print(f"{'Combined median':<30} {stats_egm['combined']['median']:>15.4f} {stats_negm['combined']['median']:>15.4f}")
+        print(f"{'Adjuster mean':<30} {stats_egm['adjuster']['mean']:>15.4f} {stats_negm['adjuster']['mean']:>15.4f}")
+        print(f"{'Keeper mean':<30} {stats_egm['keeper']['mean']:>15.4f} {stats_negm['keeper']['mean']:>15.4f}")
+        print(f"{'5th percentile':<30} {stats_egm['combined']['p5']:>15.4f} {stats_negm['combined']['p5']:>15.4f}")
+        print(f"{'95th percentile':<30} {stats_egm['combined']['p95']:>15.4f} {stats_negm['combined']['p95']:>15.4f}")
+        print(f"{'Adjustment rate (%)':<30} {stats_egm['pct_adjuster']:>15.2f} {stats_negm['pct_adjuster']:>15.2f}")
+        print(f"{'Avg. time/iter (sec)':<30} {egm_time:>15.2f} {negm_time:>15.2f}")
+        print("="*70)
+
+        # Build markdown table for file output
         lines = []
-        txt = '| All (average)'
-        txt += f' | {np.nanmean(eulerEGM):.3f}'
-        txt += f' | {np.nanmean(eulerNEGM):.3f}'
-        txt += ' |\n'
-        lines.append(txt)
-
-        txt = '| 5th percentile'
-        txt += f' | {np.nanpercentile(eulerEGM,5):.3f}'
-        txt += f' | {np.nanpercentile(eulerNEGM,5):.3f}'
-        txt += ' |\n'
-        lines.append(txt)
-
-        txt = '| 95th percentile'
-        txt += f' | {np.nanpercentile(eulerEGM,95):.3f}'
-        txt += f' | {np.nanpercentile(eulerNEGM,95):.3f}'
-        txt += ' |\n'
-        lines.append(txt)
-
-        txt = '| Median'
-        txt += f' | {np.nanpercentile(eulerEGM,50):.3f}'
-        txt += f' | {np.nanpercentile(eulerNEGM,50):.3f}'
-        txt += ' |\n'
-        lines.append(txt)
-
-        txt = '| Avg. time per iteration (sec.)'
-        txt += f' | {egm_time:.2f}'
-        txt += f' | {negm_time:.2f}'
-        txt += ' |\n'
-
-        lines.append(txt)
-        lines.insert(0, '| Method | EGM | NEGM |\n')
+        lines.append('| Metric | EGM/FUES | NEGM |\n')
+        lines.append('|--------|----------|------|\n')
+        lines.append(f"| Combined mean | {stats_egm['combined']['mean']:.4f} | {stats_negm['combined']['mean']:.4f} |\n")
+        lines.append(f"| Combined median | {stats_egm['combined']['median']:.4f} | {stats_negm['combined']['median']:.4f} |\n")
+        lines.append(f"| Adjuster mean | {stats_egm['adjuster']['mean']:.4f} | {stats_negm['adjuster']['mean']:.4f} |\n")
+        lines.append(f"| Keeper mean | {stats_egm['keeper']['mean']:.4f} | {stats_negm['keeper']['mean']:.4f} |\n")
+        lines.append(f"| 5th percentile | {stats_egm['combined']['p5']:.4f} | {stats_negm['combined']['p5']:.4f} |\n")
+        lines.append(f"| 95th percentile | {stats_egm['combined']['p95']:.4f} | {stats_negm['combined']['p95']:.4f} |\n")
+        lines.append(f"| Adjustment rate (%) | {stats_egm['pct_adjuster']:.2f} | {stats_negm['pct_adjuster']:.2f} |\n")
+        lines.append(f"| Avg. time/iter (sec) | {egm_time:.2f} | {negm_time:.2f} |\n")
 
         with open("../../results/durables/durables_single_result.tex", "w") as f:
             f.writelines(lines)

@@ -2,7 +2,7 @@
 #PBS -N durables-mpi
 #PBS -P tp66
 #PBS -q expresssr
-#PBS -l ncpus=2,mem=10GB,walltime=01:00:00
+#PBS -l ncpus=2,mem=80GB,walltime=02:00:00
 #PBS -l storage=scratch/tp66
 #PBS -l wd
 #PBS -j oe
@@ -12,6 +12,11 @@
 # ======================================================================
 #  Durables Model - 2 methods in parallel (NEGM, FUES)
 # ======================================================================
+
+# ===== USER CONFIGURATION =====
+# Set plot start period here (leave empty for default T-2)
+PLOT_START=57
+# ==============================
 
 set -euo pipefail
 
@@ -59,15 +64,23 @@ echo "========================================================"
 
 cd "$REPO_ROOT/examples/durables"
 
-# Create results directories in repo root (following project structure)
-mkdir -p "$REPO_ROOT/results/durables"
-mkdir -p "$REPO_ROOT/results/durables/plots"
+# Create scratch directory for outputs (NOT home drive!)
+export FUES_OUTPUT_DIR="/scratch/tp66/$USER/FUES/durables"
+mkdir -p "$FUES_OUTPUT_DIR/plots"
 
-# Create scratch directory for large pickle files
-mkdir -p "/scratch/tp66/$USER/FUES/durables"
+# Build plot-start argument if specified
+PLOT_START_ARG=""
+if [[ -n "$PLOT_START" ]]; then
+    PLOT_START_ARG="--plot-start $PLOT_START"
+fi
 
 # Run with MPI (2 cores for 2 methods: NEGM, FUES)
-mpirun -np 2 python3 durables_plot.py
+# Note: --run-tests is NOT passed, so grid/tau comparison tests are disabled
+echo "Running with PLOT_START=${PLOT_START:-default}"
+mpirun -np 2 python3 durables_plot.py $PLOT_START_ARG
+
+echo ""
+echo "Plots saved to: $FUES_OUTPUT_DIR/plots/"
 
 echo ""
 echo "Job completed at $(date)"

@@ -133,11 +133,11 @@ def EGM_UE(
     # -------- select engine (cached) ----------------------------------
     engine = _ENGINE_CACHE.get(ue_method)
     if engine is None:
-        engine = get_engine(ue_method)
-        if engine is None:
-            raise ValueError(
-                f"Unknown UE method '{ue_method}'. Available: {', '.join(available())}"
-            )
+    engine = get_engine(ue_method)
+    if engine is None:
+        raise ValueError(
+            f"Unknown UE method '{ue_method}'. Available: {', '.join(available())}"
+        )
         _ENGINE_CACHE[ue_method] = engine
 
     # -------- run -----------------------------------------------------
@@ -162,7 +162,7 @@ def EGM_UE(
     # Merge ue_kwargs (allows override of defaults like m_bar)
     if ue_kwargs:
         engine_kwargs.update(ue_kwargs)
-    
+
     refined = engine(**engine_kwargs)
 
     ue_time = time.time() - t0

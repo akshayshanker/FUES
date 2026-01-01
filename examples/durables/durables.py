@@ -7,11 +7,10 @@ import quantecon.markov as Markov
 import quantecon as qe
 from quantecon.optimize.root_finding import brentq
 from numba import jit, prange
-from numba.typed import Dict
 import time
 import dill as pickle
 from sklearn.utils.extmath import cartesian
-from numba import njit, prange, types
+from numba import njit, prange
 from interpolation.splines import UCGrid, CGrid, nodes, eval_linear
 from interpolation.splines import extrap_options as xto
 from interpolation import interp
@@ -46,7 +45,7 @@ _FUES_EPS_FWD = _fd['eps_fwd_back']
 _FUES_PAR_GUARD = _fd['parallel_guard']
 del _fd
 from dc_smm.fues.rfc_simple import rfc
-from dc_smm.fues.helpers.math_funcs import interp_as, rootsearch, correct_jumps1d
+from dc_smm.fues.helpers.math_funcs import interp_as, rootsearch, correct_jumps1d_arr
 
 class ConsumerProblem:
     """
@@ -70,8 +69,8 @@ class ConsumerProblem:
             The borrowing constraint
     grid_max : scalar(float), optional(default=16)
             Max of the grid used to solve the problem
-    grid_size : scalar(int), optional(default=50)
-            Number of grid points to solve problem, a grid on [-b, grid_max]
+    grid_size_A : scalar(int), optional(default=50)
+            Number of grid points for asset grid A, a grid on [-b, grid_max]
     u : callable, optional(default=np.log)
             The utility function
     du_c : callable, optional(default=lambda x: 1/x)
@@ -99,10 +98,11 @@ class ConsumerProblem:
                  grid_max_A=50,
                  grid_max_WE=100,
                  grid_max_H=50,
-                 grid_size=50,
+                 grid_size_A=50,
                  grid_size_H=50,
                  grid_size_W=50,
                  gamma_c=1.458,
+                 gamma_h=1.0,
                  K=200,
                  theta=2,
                  tau=0.2,
@@ -111,16 +111,18 @@ class ConsumerProblem:
                  tol_bel=1e-4,
                  root_eps=1e-1,
                  m_bar=2,
-                 stat = True, 
+                 stat = True,
                  tol_timeiter = 1e-4,
-                 T=60,T1=60, t0=50):
-        
-        self.grid_size = int(grid_size)
+                 T=60,T1=60, t0=50,
+                 N_sim=10000):
+
+        self.grid_size_A = int(grid_size_A)
+        self.N_sim = config.get('N_sim', N_sim)  # Number of agents for simulation
         self.r, self.R = r, 1 + r
         self.r_H, self.R_H = r_H, 1 + r_H
         self.beta = beta
         self.delta = delta
-        self.gamma_c, self.chi = gamma_c, chi
+        self.gamma_c, self.gamma_h, self.chi = gamma_c, gamma_h, chi
         self.b = b
         self.T = T
         self.T1 = T1
@@ -129,17 +131,17 @@ class ConsumerProblem:
         lambdas = np.array(config['lambdas'])
         self.alpha = alpha
         self.Pi, self.z_vals = np.array(Pi), np.asarray(z_vals)
-        self.asset_grid_A = np.linspace(b, np.float64(grid_max_A), grid_size)
+        self.asset_grid_A = np.linspace(b, np.float64(grid_max_A), grid_size_A)
         self.asset_grid_H = np.linspace(b, np.float64(grid_max_H), grid_size_H)
         
-        self.asset_grid_HE = np.linspace(b, np.float64(grid_max_H), grid_size_H*3)
+        self.asset_grid_HE = np.linspace(b, np.float64(grid_max_H), grid_size_H)
         self.asset_grid_WE = np.linspace(b, np.float64(grid_max_WE), grid_size_W)
         
         self.X_all = cartesian([np.arange(len(z_vals)),
                                 np.arange(len(self.asset_grid_A)),
                                 np.arange(len(self.asset_grid_H))])
 
-        self.UGgrid_all = UCGrid((b, grid_max_A, grid_size),
+        self.UGgrid_all = UCGrid((b, grid_max_A, grid_size_A),
                                  (b, grid_max_H, grid_size_H))
         self.tau = tau
         self.EGM_N = EGM_N
@@ -167,10 +169,8 @@ class ConsumerProblem:
 
         @njit
         def du_h(y):
-            #if y <= 0:
-            #return 1e250
-            #else:
-            return alpha / y
+            # CRRA marginal utility for housing
+            return alpha * np.power(y, -gamma_h)
 
         @njit
         def term_du(x):
@@ -182,13 +182,14 @@ class ConsumerProblem:
 
         @njit
         def u(x, y, chi):
+            # CRRA utility for both consumption and housing
             if x <= 0:
-                cons_u = - np.inf
+                cons_u = -np.inf
             elif y <= 0:
-                cons_u - np.inf
+                cons_u = -np.inf
             else:
                 cons_u = (np.power(x, 1 - gamma_c) - 1) / (1 - gamma_c) \
-                    + alpha * np.log(y)
+                    + alpha * (np.power(y, 1 - gamma_h) - 1) / (1 - gamma_h)
 
             return cons_u - chi
 
@@ -251,24 +252,21 @@ def Operator_Factory(cp):
 
     @njit
     def roots(f, a, l, h_prime, z, Ud_prime_a, Ud_prime_h, t, eps=root_eps):
-
         sols_array = np.zeros(EGM_N)
         i = 0
-        while True:
+        while i < EGM_N:  # Guard against overflow
             x1, x2 = rootsearch(f, a, l, eps, h_prime, z,
                                 Ud_prime_a, Ud_prime_h, t)
-            if np.isnan(x1) == False:
-                a = x2
-                root = brentq(f, x1, x2,
-                              args=(h_prime, z, Ud_prime_a, Ud_prime_h, t),
-                              xtol=1e-12)
-                if root is not None:
-                    sols_array[i] = root[0]
-
-            else:
+            # NaN check: x1 != x1 is True only for NaN (faster than np.isnan)
+            if x1 != x1:
                 break
-            i = i + 1
-
+            a = x2
+            root = brentq(f, x1, x2,
+                          args=(h_prime, z, Ud_prime_a, Ud_prime_h, t),
+                          xtol=1e-12)
+            if root is not None:
+                sols_array[i] = root[0]
+                i += 1
         return sols_array
 
     @njit
@@ -650,7 +648,7 @@ def Operator_Factory(cp):
 
         return a_prime_points, e_grid_points
 
-    @njit
+    @njit(parallel=True)
     def _keeperEGM(Ud_prime_a, V, t):
         """
         Function produces unrefinded endogenous grids for non-adjusters
@@ -686,12 +684,12 @@ def Operator_Factory(cp):
         """
 
         endog_grid_unrefined = np.ones((len(z_vals), int(len(asset_grid_A)*2), len(asset_grid_H)))
-        
+
         vf_unrefined = np.ones((len(z_vals), int(len(asset_grid_A)*2), len(asset_grid_H)))
         c_unrefined = np.ones((len(z_vals), int(len(asset_grid_A)*2), len(asset_grid_H)))
 
 
-        for index_z in range(len(z_vals)):
+        for index_z in prange(len(z_vals)):
             for index_h_today in range(len(asset_grid_H)):
                 z = z_vals[index_z]
                 h_prime = asset_grid_H[index_h_today] * (1 - delta)
@@ -835,24 +833,19 @@ def Operator_Factory(cp):
                     if new_a_prime_refined[index_z, i, index_h_today] < b:
                         new_a_prime_refined[index_z, i, index_h_today] = b
                 
-                # remove jumps - create typed dict with explicit types
-                policy_value_funcs = Dict.empty(
-                    key_type=types.unicode_type,
-                    value_type=types.float64[:]
-                )
-                policy_value_funcs['v'] = new_v_refined[index_z, :, index_h_today].copy()
-                policy_value_funcs['a'] = new_a_prime_refined[index_z, :, index_h_today].copy()
-
-                sharp_c, corrected_policy_value_funcs = correct_jumps1d(
+                # remove jumps - uses consumption to detect jumps, corrects v and a
+                # For keeper, no durable policy to correct, so pass dummy (v_arr used as placeholder)
+                (new_c_refined[index_z, :, index_h_today],
+                 new_v_refined[index_z, :, index_h_today],
+                 _,  # dummy d output (not used for keeper)
+                 new_a_prime_refined[index_z, :, index_h_today]) = correct_jumps1d_arr(
                     new_c_refined[index_z, :, index_h_today],
                     asset_grid_A,
                     m_bar,
-                    policy_value_funcs
+                    new_v_refined[index_z, :, index_h_today],
+                    new_v_refined[index_z, :, index_h_today].copy(),  # dummy for d_arr
+                    new_a_prime_refined[index_z, :, index_h_today]
                 )
-                
-                new_a_prime_refined[index_z, :, index_h_today] = corrected_policy_value_funcs['a']
-                new_c_refined[index_z, :, index_h_today] = sharp_c
-                new_v_refined[index_z, :, index_h_today] = corrected_policy_value_funcs['v']
 
         # Return dummy arrays when plotting not needed
         if return_grids == 0:
@@ -861,36 +854,35 @@ def Operator_Factory(cp):
         else:
             return new_a_prime_refined, new_c_refined, new_v_refined, e_grid_clean, vf_clean, c_clean, a_prime_clean
 
-    @njit
+    @njit(parallel=True)
     def _adjEGM(Ud_prime_a, Ud_prime_h, V, t):
         # Cache dimensions
         n_z = len(z_vals)
         n_he = len(asset_grid_HE)
         n_egm = EGM_N
         tau_adj = 1.0 + tau  # Pre-compute
-        
+
         # Use zeros - need 0 for invalid points
         endog_grid_unrefined = np.zeros((n_z, n_he, n_egm))
         vf_unrefined = np.zeros((n_z, n_he, n_egm))
         a_prime_unrefined = np.zeros((n_z, n_he, n_egm))
         h_prime_unrefined = np.zeros((n_z, n_he, n_egm))
-        
-        # Pre-allocate point array outside loop
-        point = np.empty(2)
 
-        for index_h_prime in range(n_he):
+        for index_h_prime in prange(n_he):
             h_prime = asset_grid_HE[index_h_prime]
             h_adj = h_prime * tau_adj  # Pre-compute for inner loop
-            
+            # Allocate point array inside prange to avoid race conditions
+            point = np.empty(2)
+
             for index_z in range(n_z):
                 z = z_vals[index_z]
                 Ud_a_z = Ud_prime_a[index_z]
                 Ud_h_z = Ud_prime_h[index_z]
                 V_z = V[index_z]
-                
+
                 a_primes, e_grid_points = root_H_UPRIME_func(h_prime, z,
                                                              Ud_a_z, Ud_h_z, t)
-                
+
                 endog_grid_unrefined[index_z, index_h_prime] = e_grid_points
                 a_prime_unrefined[index_z, index_h_prime] = a_primes
 
@@ -917,6 +909,9 @@ def Operator_Factory(cp):
         Returns function on *wealth*.
 
         If return_grids=1, also returns intermediate grids for plotting.
+
+        Note: Cannot use prange here due to complex array operations (ravel, mask,
+        variable-length arrays) that Numba's parallel lowering doesn't support.
         """
         n_z = len(z_vals)
         n_we = len(asset_grid_WE)
@@ -960,11 +955,13 @@ def Operator_Factory(cp):
             a_sorted = aprime_unrefined_points[sortidx]
             h_sorted = hprime_unrefined_points[sortidx]
             c_sorted = c_unrefined_points[sortidx]
-
+            _FUES_POST_STATE = True
+            _FUES_POST_CLEAN = True
+            _FUES_INCLUDE_INTER = False
             # Call FUES_jit_core with all parameters
             keep, intersections, n_inter, final_mask, n_final = FUES_jit_core(
-                e_sorted, v_sorted, a_sorted, h_sorted, c_sorted,  # e, v, p1, p2, del_a
-                m_bar, 5,  # m_bar, LB
+                e_sorted, v_sorted, h_sorted, a_sorted, c_sorted,  # e, v, p1, p2, del_a
+                m_bar, 10,  # m_bar, LB
                 0, _FUES_INCLUDE_INTER, _FUES_NO_DOUBLE,  # endog_mbar=False
                 _FUES_SINGLE_INTER, _FUES_DISABLE_CHECKS, _FUES_LEFT_STRICT,
                 _FUES_POST_STATE, _FUES_DETECT_DEC, _FUES_POST_CLEAN,
@@ -1015,6 +1012,14 @@ def Operator_Factory(cp):
             new_v_refined[index_z] = interp_as(e_grid_clean, vf_clean, grid_we)
             new_c_refined[index_z] = interp_as(e_grid_clean, c_clean, grid_we)
 
+            # Post-clean: correct double jumps in interpolated policies
+            # Uses consumption as primary array to detect jumps, corrects v, h_prime, a_prime
+            (new_c_refined[index_z], new_v_refined[index_z],
+             new_h_prime_refined[index_z], new_a_prime_refined[index_z]) = correct_jumps1d_arr(
+                new_c_refined[index_z], grid_we, m_bar,
+                new_v_refined[index_z], new_h_prime_refined[index_z], new_a_prime_refined[index_z]
+            )
+
         # Return dummy arrays when plotting not needed (saves nothing on compute, but clearer API)
         if return_grids == 0:
             dummy = np.empty(1)
@@ -1029,10 +1034,8 @@ def Operator_Factory(cp):
     #@njit
     def iterEGM(t, V_prime,
                          ELambdaAnxt,
-                         ELambdaHnxt, m_bar=1.4):
-        
-        """"
-
+                         ELambdaHnxt, m_bar=1.4, plot_age=-1):
+        """
         Iterates on the Coleman operator
 
         Note: V_prime,Ud_prime_a, Ud_prime_h assumed
@@ -1040,7 +1043,11 @@ def Operator_Factory(cp):
 
                  - the t+1 marginal utilities are not multiplied
                    by the discount factor and rate of return
+
+        If plot_age == t, returns intermediate grids for plotting.
         """
+        # Always return grids for plotting (optimization disabled for now)
+        return_grids = 1
 
         # Declare empty grids
         # uc indicates conditioned on time t shock
@@ -1065,7 +1072,7 @@ def Operator_Factory(cp):
             = _refineKeeper(endog_grid_unrefined_noadj,
                             vf_unrefined_noadj,
                             c_unrefined_noadj,
-                            V_prime, t, m_bar=m_bar)
+                            V_prime, t, m_bar=m_bar, return_grids=return_grids)
 
         endog_grid_unrefined_adj, vf_unrefined_adj, a_prime_unrefined_adj,\
             h_prime_unrefined_adj\
@@ -1076,7 +1083,7 @@ def Operator_Factory(cp):
          vf_unrefined_adj_1, h_prime_unrefined_adj_1, a_prime_unrefined_adj_1,
          endog_grid_unrefined_adj_1) = refine_adj(
             endog_grid_unrefined_adj, vf_unrefined_adj,
-            a_prime_unrefined_adj, h_prime_unrefined_adj, m_bar=m_bar)
+            a_prime_unrefined_adj, h_prime_unrefined_adj, m_bar=m_bar, return_grids=return_grids)
         
         AdjGrids = {}
         AdjGrids["endog_grid_unrefined_adj"] = endog_grid_unrefined_adj_1
@@ -1166,7 +1173,7 @@ def Operator_Factory(cp):
         return Vcurr, Hnxt, Cnxt,Dnxt, LambdaAcurr,LambdaHcurr, AdjPol, KeeperPol, AdjGrids
     
     
-    @njit
+    @njit(parallel=True)
     def _solveAdjNEGM(EVnxt,Ckeeper,
                             Akeeper,t):
         """"
@@ -1179,7 +1186,7 @@ def Operator_Factory(cp):
         v_adj = np.ones((len(z_vals), len(asset_grid_WE)))
         #c_adj = np.ones((len(z_vals), len(asset_grid_WE)))
 
-        for i_a in range(len(asset_grid_WE)):
+        for i_a in prange(len(asset_grid_WE)):
             #for i_h in range(len(asset_grid_H)):
             for i_z in range(len(z_vals)):
 

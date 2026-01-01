@@ -723,3 +723,72 @@ def circ_put(buf, head, value):
     """Write *value* at *head* position, return new head index."""
     buf[head] = value
     return (head + 1) % buf.size
+
+
+# ============== Post-Interpolation Jump Correction ==============
+
+@njit(cache=True)
+def calculate_gradient_1d(data, x):
+    """Calculate gradients for 1D data."""
+    n = len(data)
+    gradients = np.zeros(n)
+    for i in range(1, n):
+        dx = x[i] - x[i - 1]
+        if dx != 0:
+            gradients[i] = (data[i] - data[i - 1]) / dx
+        else:
+            gradients[i] = 0.0
+    return gradients
+
+
+@njit(cache=True)
+def correct_jumps1d_arr(data, x, gradient_jump_threshold, v_arr, d_arr, a_arr):
+    """
+    Removes jumps in 1D interpolated data using explicit arrays.
+
+    Parameters
+    ----------
+    data : np.ndarray
+        The 1D array of interpolated values to correct.
+    x : np.ndarray
+        The x-coordinates corresponding to data.
+    gradient_jump_threshold : float
+        Threshold for detecting jumps based on gradient magnitude.
+    v_arr : np.ndarray
+        Value function array to correct alongside data.
+    d_arr : np.ndarray
+        Durable choice array to correct alongside data.
+    a_arr : np.ndarray
+        Asset choice array to correct alongside data.
+
+    Returns
+    -------
+    corrected_data : np.ndarray
+        The corrected data array.
+    corrected_v : np.ndarray
+        The corrected value function array.
+    corrected_d : np.ndarray
+        The corrected durable choice array.
+    corrected_a : np.ndarray
+        The corrected asset choice array.
+    """
+    n = len(data)
+    corrected_data = np.copy(data)
+    corrected_v = np.copy(v_arr)
+    corrected_d = np.copy(d_arr)
+    corrected_a = np.copy(a_arr)
+
+    gradients = calculate_gradient_1d(data, x)
+
+    for i in range(1, n - 1):
+        left_jump = np.abs(gradients[i]) > gradient_jump_threshold
+        right_jump = np.abs(gradients[i + 1]) > gradient_jump_threshold
+
+        if left_jump and right_jump:
+            # Interpolate from neighbors
+            corrected_data[i] = 0.5 * (data[i - 1] + data[i + 1])
+            corrected_v[i] = 0.5 * (v_arr[i - 1] + v_arr[i + 1])
+            corrected_d[i] = 0.5 * (d_arr[i - 1] + d_arr[i + 1])
+            corrected_a[i] = 0.5 * (a_arr[i - 1] + a_arr[i + 1])
+
+    return corrected_data, corrected_v, corrected_d, corrected_a
