@@ -25,6 +25,116 @@ def get_output_dir():
 	return os.environ.get('FUES_OUTPUT_DIR', '/scratch/tp66/as3442/FUES/durables')
 
 
+def plot_wage_profile(cp, age_min=20, age_max=60, output_dir=None):
+	"""
+	Plot the wage profile as a function of age.
+
+	Plots wages for:
+	- Mean shock (xi=0)
+	- All shock states (for comparison)
+
+	Parameters
+	----------
+	cp : ConsumerProblem
+		The consumer problem instance with y_func and parameters.
+	age_min : int, optional
+		Minimum age to plot (default 20).
+	age_max : int, optional
+		Maximum age to plot (default 60).
+	output_dir : str, optional
+		Directory to save the plot. If None, uses FUES_OUTPUT_DIR.
+
+	Returns
+	-------
+	fig : matplotlib.figure.Figure
+		The figure object.
+	"""
+	if output_dir is None:
+		output_dir = get_output_dir()
+
+	# Age range
+	ages = np.arange(age_min, age_max + 1)
+
+	# Get shock values
+	z_vals = cp.z_vals
+	n_z = len(z_vals)
+
+	# Compute mean shock (for symmetric Tauchen, this should be ~0)
+	mean_shock = np.mean(z_vals)
+
+	# Compute wages for each age
+	wages_mean = np.zeros(len(ages))
+	wages_by_shock = np.zeros((n_z, len(ages)))
+
+	for i, age in enumerate(ages):
+		# Wage at mean shock
+		wages_mean[i] = cp.y_func(age, mean_shock)
+
+		# Wage at each shock state
+		for j, z in enumerate(z_vals):
+			wages_by_shock[j, i] = cp.y_func(age, z)
+
+	# Create figure with two subplots
+	fig, axes = pl.subplots(1, 2, figsize=(12, 5))
+
+	# Left plot: Mean wage profile
+	ax1 = axes[0]
+	ax1.plot(ages, wages_mean, 'b-', linewidth=2, label=f'Mean shock (ξ={mean_shock:.3f})')
+	ax1.set_xlabel('Age', fontsize=11)
+	ax1.set_ylabel('Wage (y)', fontsize=11)
+	ax1.set_title('Wage Profile at Mean Shock', fontsize=12)
+	ax1.grid(True, alpha=0.3)
+	ax1.legend(frameon=False)
+	ax1.spines['right'].set_visible(False)
+	ax1.spines['top'].set_visible(False)
+
+	# Right plot: Wage profile by shock state
+	ax2 = axes[1]
+	colors = pl.cm.viridis(np.linspace(0, 1, n_z))
+	for j in range(n_z):
+		ax2.plot(ages, wages_by_shock[j, :], color=colors[j], linewidth=1.5,
+				 label=f'State {j}: ξ={z_vals[j]:.3f}')
+
+	ax2.set_xlabel('Age', fontsize=11)
+	ax2.set_ylabel('Wage (y)', fontsize=11)
+	ax2.set_title('Wage Profile by Shock State', fontsize=12)
+	ax2.grid(True, alpha=0.3)
+	ax2.legend(frameon=False, fontsize=9)
+	ax2.spines['right'].set_visible(False)
+	ax2.spines['top'].set_visible(False)
+
+	fig.tight_layout()
+
+	# Save figure
+	plot_dir = os.path.join(output_dir, 'plots')
+	os.makedirs(plot_dir, exist_ok=True)
+	plot_path = os.path.join(plot_dir, 'wage_profile.png')
+	fig.savefig(plot_path, dpi=150, bbox_inches='tight')
+	print(f"Wage profile plot saved to: {plot_path}")
+
+	# Also print wage statistics
+	print("\n" + "="*60)
+	print("Wage Profile Summary")
+	print("="*60)
+	print(f"  Age range: {age_min} to {age_max}")
+	print(f"  Mean shock value: {mean_shock:.6f}")
+	print(f"  Shock states: {z_vals}")
+	print(f"\n  Wage at age {age_min}:")
+	print(f"    Mean shock: {wages_mean[0]:.6f}")
+	print(f"    Min shock:  {wages_by_shock[0, 0]:.6f}")
+	print(f"    Max shock:  {wages_by_shock[-1, 0]:.6f}")
+	print(f"\n  Wage at age {age_max}:")
+	print(f"    Mean shock: {wages_mean[-1]:.6f}")
+	print(f"    Min shock:  {wages_by_shock[0, -1]:.6f}")
+	print(f"    Max shock:  {wages_by_shock[-1, -1]:.6f}")
+	print(f"\n  Peak wage age (mean shock): {ages[np.argmax(wages_mean)]}")
+	print(f"  Peak wage value: {np.max(wages_mean):.6f}")
+	print("="*60 + "\n")
+
+	pl.close(fig)
+	return fig
+
+
 def plot_pols(cp, Results1, Results2, plot_t, index, output_dir=None):
 
 		pl.close()
@@ -497,4 +607,10 @@ def plot_grids(adj_ur_grids, cp, term_t=58, output_dir=None):
 		fig.tight_layout()
 		ax[1].legend(frameon=False, prop={'size': 10})
 		"""
-		fig.savefig('../../results/durables/plots/hous_vf_aprime_all_big_{}.png'.format(plot_t))
+		# Save to scratch drive with age subfolder
+		if output_dir is None:
+			output_dir = get_output_dir()
+		age_dir = os.path.join(output_dir, 'plots', f'age_{plot_t}')
+		os.makedirs(age_dir, exist_ok=True)
+		fig.savefig(os.path.join(age_dir, 'hous_vf_aprime_all_big.png'))
+		pl.close()

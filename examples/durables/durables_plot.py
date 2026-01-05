@@ -27,9 +27,128 @@ cwd = os.getcwd()
 sys.path.append('..')
 os.chdir(cwd)
 from examples.durables.durables import ConsumerProblem, Operator_Factory
-from examples.durables.plot import plot_pols, plot_grids
+from examples.durables.plot import plot_pols, plot_grids, plot_wage_profile
 from examples.durables.simulate import euler_errors, compute_euler_stats, print_euler_stats
 from dc_smm.fues.helpers.math_funcs import f, interp_as
+
+# Plot styling (matching durable-cons/figs.py)
+plt.rcParams.update({"axes.grid": True, "grid.color": "black", "grid.alpha": "0.25", "grid.linestyle": "--"})
+plt.rcParams.update({'font.size': 12})
+
+
+def plot_lifecycle_compare(sim_egm, sim_negm, cp, output_dir=None):
+    """
+    Plot lifecycle comparison of mean paths for EGM/FUES vs NEGM.
+
+    Parameters
+    ----------
+    sim_egm : dict
+        Simulation data from EGM/FUES method.
+    sim_negm : dict
+        Simulation data from NEGM method.
+    cp : ConsumerProblem
+        The consumer problem instance.
+    output_dir : str, optional
+        Directory to save plots. If None, uses FUES_OUTPUT_DIR or current dir.
+    """
+    if output_dir is None:
+        output_dir = os.environ.get('FUES_OUTPUT_DIR', '.')
+
+    t0 = cp.t0
+    T = cp.T
+
+    # Variables to plot: (key, label, ylabel)
+    varlist = [
+        ('y', 'Income', '$y_t$'),
+        ('c', 'Consumption', '$c_t$'),
+        ('h', 'Housing', '$h_t$'),
+        ('a', 'Liquid Assets', '$a_t$'),
+    ]
+
+    # Create figure
+    fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+    axes = axes.flatten()
+
+    age = np.arange(t0, T)
+
+    for i, (var, title, ylabel) in enumerate(varlist):
+        ax = axes[i]
+
+        # Get data for valid time range
+        data_egm = sim_egm[var][t0:T, :]
+        data_negm = sim_negm[var][t0:T, :]
+
+        # Compute means (ignore zeros from uninitialized periods)
+        # Use nanmean to handle any nan values
+        mean_egm = np.nanmean(data_egm, axis=1)
+        mean_negm = np.nanmean(data_negm, axis=1)
+
+        # Plot means
+        ax.plot(age, mean_egm, lw=2, label='EGM/FUES', color='C0')
+        ax.plot(age, mean_negm, lw=2, label='NEGM', color='C1', linestyle='--')
+
+        # Add percentile bands (25th-75th)
+        p25_egm = np.nanpercentile(data_egm, 25, axis=1)
+        p75_egm = np.nanpercentile(data_egm, 75, axis=1)
+        ax.fill_between(age, p25_egm, p75_egm, alpha=0.2, color='C0')
+
+        p25_negm = np.nanpercentile(data_negm, 25, axis=1)
+        p75_negm = np.nanpercentile(data_negm, 75, axis=1)
+        ax.fill_between(age, p25_negm, p75_negm, alpha=0.2, color='C1')
+
+        ax.set_title(title)
+        ax.set_ylabel(ylabel)
+        ax.legend(loc='best')
+        ax.grid(True)
+
+        # Set x-axis ticks
+        if T - t0 > 10:
+            ax.set_xticks(age[::5])
+        else:
+            ax.set_xticks(age)
+
+    # Add x-axis label to bottom plots
+    axes[2].set_xlabel('Age')
+    axes[3].set_xlabel('Age')
+
+    # Add adjuster share subplot (replace housing with adjuster share comparison)
+    # Actually, let's add a 5th plot for adjuster share
+    fig.tight_layout()
+
+    # Save figure
+    plot_path = os.path.join(output_dir, 'plots', 'lifecycle_comparison.png')
+    os.makedirs(os.path.dirname(plot_path), exist_ok=True)
+    fig.savefig(plot_path, dpi=150, bbox_inches='tight')
+    plt.close(fig)
+    print(f"  Lifecycle comparison plot saved to: {plot_path}")
+
+    # Also create adjuster share plot
+    fig2, ax2 = plt.subplots(figsize=(8, 5))
+
+    discrete_egm = sim_egm['discrete'][t0:T, :]
+    discrete_negm = sim_negm['discrete'][t0:T, :]
+
+    adj_rate_egm = np.mean(discrete_egm, axis=1)
+    adj_rate_negm = np.mean(discrete_negm, axis=1)
+
+    ax2.plot(age, adj_rate_egm, lw=2, label='EGM/FUES', color='C0')
+    ax2.plot(age, adj_rate_negm, lw=2, label='NEGM', color='C1', linestyle='--')
+
+    ax2.set_title('Adjustment Rate')
+    ax2.set_xlabel('Age')
+    ax2.set_ylabel('Fraction Adjusting')
+    ax2.legend(loc='best')
+    ax2.grid(True)
+
+    if T - t0 > 10:
+        ax2.set_xticks(age[::5])
+    else:
+        ax2.set_xticks(age)
+
+    plot_path2 = os.path.join(output_dir, 'plots', 'lifecycle_adjuster_rate.png')
+    fig2.savefig(plot_path2, dpi=150, bbox_inches='tight')
+    plt.close(fig2)
+    print(f"  Adjuster rate plot saved to: {plot_path2}")
 
 
 def _get_avg_time(res) -> float:
@@ -457,18 +576,20 @@ def compare_grids_and_tau(cp_settings, tau_values, grid_sizes, max_iter=200, tol
     comm = MPI.COMM_WORLD
     rank = comm.Get_rank()  # Get the rank (ID) of the current process
     size = comm.Get_size()  # Get the total number of processes
+    print(f"[Rank {rank}] Inside compare_grids_and_tau, size={size}", flush=True)
 
     # Distribute work based on rank
     total_combinations = len(tau_values) * len(grid_sizes) * len(methods)
     combinations_per_process = total_combinations // size  # Split work equally
     leftover_combinations = total_combinations % size  # Handle leftover combinations
+    print(f"[Rank {rank}] total_combinations={total_combinations}, per_process={combinations_per_process}", flush=True)
 
     # Each process works on a subset of combinations
     results_summary = []
 
     # Flatten the combinations of tau, grid_size, and method for easy distribution
     combinations = [(tau, grid_size, method) for tau in tau_values for grid_size in grid_sizes for method in methods]
-    
+
     # Get the range of combinations this process will handle
     start_index = rank * combinations_per_process
     end_index = start_index + combinations_per_process
@@ -479,38 +600,48 @@ def compare_grids_and_tau(cp_settings, tau_values, grid_sizes, max_iter=200, tol
         start_index += leftover_combinations
         end_index += leftover_combinations
 
+    my_combinations = combinations[start_index:end_index]
+    print(f"[Rank {rank}] Handling {len(my_combinations)} combinations: {my_combinations}", flush=True)
+
     # Each process works on its subset of combinations
-    for tau, grid_size, method in combinations[start_index:end_index]:
+    for tau, grid_size, method in my_combinations:
         # Update the tau and grid size in the model parameters
+        # Use AR(1) wage process via Tauchen method (Pi and z_vals generated internally)
+        # Note: float()/int() conversions needed because YAML may read scientific notation as strings
         cp = ConsumerProblem(cp_settings,
-                             r=cp_settings['r'],
-                             sigma=cp_settings['sigma'],
-                             r_H=cp_settings['r_H'],
-                             beta=cp_settings['beta'],
-                             alpha=cp_settings['alpha'],
-                             delta=cp_settings['delta'],
-                             Pi=cp_settings['Pi'],
-                             z_vals=cp_settings['z_vals'],
-                             b=np.float64(cp_settings['b']),
-                             grid_max_A=cp_settings['grid_max_A'],
-                             grid_max_WE=cp_settings['grid_max_WE'],
-                             grid_size_W=grid_size,
-                             grid_max_H=cp_settings['grid_max_H'],
-                             grid_size_A=grid_size,
-                             grid_size_H=grid_size,
-                             gamma_c=cp_settings['gamma_c'],
-                             gamma_h=cp_settings['gamma_h'],
-                             chi=cp_settings['chi'],
-                             tau=tau,
-                             K=cp_settings['K'],
-                             tol_bel=np.float64(cp_settings['tol_bel']),
-                             m_bar=cp_settings['M_bar'],
-                             T=cp_settings['max_iter'],
-                             theta=cp_settings['theta'], 
-                             t0=0, 
-                             root_eps= np.float64(cp_settings['root_eps']), 
+                             r=float(cp_settings['r']),
+                             sigma=float(cp_settings['sigma']),
+                             r_H=float(cp_settings['r_H']),
+                             beta=float(cp_settings['beta']),
+                             alpha=float(cp_settings['alpha']),
+                             kappa=float(cp_settings.get('kappa', 1.0)),
+                             delta=float(cp_settings['delta']),
+                             # AR(1) wage process parameters (Tauchen method)
+                             phi_w=float(cp_settings.get('phi_w', 0.9170411)),
+                             sigma_w=float(cp_settings.get('sigma_w', 0.0817012)),
+                             N_wage=int(cp_settings.get('N_wage', 3)),
+                             b=float(cp_settings['b']),
+                             grid_max_A=float(cp_settings['grid_max_A']),
+                             grid_max_WE=float(cp_settings['grid_max_WE']),
+                             grid_size_W=int(grid_size),
+                             grid_max_H=float(cp_settings['grid_max_H']),
+                             grid_size_A=int(grid_size),
+                             grid_size_H=int(grid_size),
+                             gamma_c=float(cp_settings['gamma_c']),
+                             gamma_h=float(cp_settings['gamma_h']),
+                             chi=float(cp_settings['chi']),
+                             tau=float(tau),
+                             K=float(cp_settings['K']),
+                             tol_bel=float(cp_settings['tol_bel']),
+                             m_bar=float(cp_settings['M_bar']),
+                             T=int(cp_settings['max_iter']),
+                             theta=float(cp_settings['theta']),
+                             t0=0,
+                             root_eps=float(cp_settings['root_eps']),
                              stat=False
                              )
+
+        print(f"[Rank {rank}] Solving tau={tau}, grid={grid_size}, method={method}...", flush=True)
 
         # Timing and Euler error calculations
         best_time = np.inf
@@ -525,10 +656,13 @@ def compare_grids_and_tau(cp_settings, tau_values, grid_sizes, max_iter=200, tol
             else:
                 solution = solveEGM(cp, verbose=False)
 
+            print(f"[Rank {rank}] Solved, computing Euler errors...", flush=True)
             # Use simulation-based Euler errors with adjuster/keeper breakdown
             euler, sim_data = euler_errors(solution, cp, N=cp.N_sim, seed=42)
             stats = compute_euler_stats(euler, discrete=sim_data['discrete'])
             npv = sim_data['npv_utility']
+            npv_adj = sim_data['npv_utility_adj']
+            n_adj = sim_data['n_adj_periods']
 
             runtime = solution[0]['avg_time']
             iterations = solution[0]['iterations']
@@ -539,8 +673,14 @@ def compare_grids_and_tau(cp_settings, tau_values, grid_sizes, max_iter=200, tol
                 best_iterations = iterations
                 best_stats = stats
                 best_npv = npv
+                best_npv_adj = npv_adj
+                best_n_adj = n_adj
 
         avg_time = total_runtime / rep
+
+        # Compute adjuster-conditional NPV (only agents with at least one adjustment)
+        adj_mask = best_n_adj > 0
+        npv_adj_mean = np.mean(best_npv_adj[adj_mask]) if np.sum(adj_mask) > 0 else 0.0
 
         results_summary.append({
             'Tau': tau,
@@ -552,8 +692,10 @@ def compare_grids_and_tau(cp_settings, tau_values, grid_sizes, max_iter=200, tol
             'Euler_Keeper': best_stats['keeper']['mean'],
             'NPV_Mean': np.mean(best_npv),
             'NPV_Median': np.median(best_npv),
+            'NPV_Adj_Mean': npv_adj_mean,
             'Adj_Rate': best_stats['pct_adjuster'],
-            'Iterations': best_iterations
+            'Iterations': best_iterations,
+            'gamma_c': cp.gamma_c
         })
 
     # Gather results from all processes
@@ -610,11 +752,11 @@ def create_latex_table(results_summary):
         "\\multicolumn{2}{c|}{\\textbf{Euler Comb.}} & "
         "\\multicolumn{2}{c|}{\\textbf{Euler Adj.}} & "
         "\\multicolumn{2}{c|}{\\textbf{Euler Keep.}} & "
-        "\\multicolumn{2}{c}{\\textbf{NPV Utility}} \\\\\n"
+        "\\textbf{CE (\\%)} & \\textbf{CE Adj (\\%)} \\\\\n"
     )
     table += (
         "\\textit{Grid} & \\textit{$\\tau$} & "
-        "FUES & NEGM & FUES & NEGM & FUES & NEGM & FUES & NEGM & FUES & NEGM \\\\\n"
+        "FUES & NEGM & FUES & NEGM & FUES & NEGM & FUES & NEGM & & \\\\\n"
     )
     table += "\\midrule\n"
 
@@ -639,6 +781,26 @@ def create_latex_table(results_summary):
             else:
                 table += " "
 
+            # Compute consumption equivalent (% loss from using NEGM instead of FUES)
+            # λ = 1 - (V_NEGM / V_FUES)^(1/(1-γ))
+            # Positive means FUES is better (NEGM agent loses λ% consumption equivalent)
+            gamma_c = fues.get('gamma_c', 3.0)  # Default to 3 if not stored
+            v_fues = fues['NPV_Mean']
+            v_negm = negm['NPV_Mean']
+            exponent = 1 / (1 - gamma_c)
+            if v_fues != 0:
+                ce_loss = 100 * (1 - (v_negm / v_fues) ** exponent)
+            else:
+                ce_loss = 0.0
+
+            # Compute adjuster-conditional CE
+            v_fues_adj = fues.get('NPV_Adj_Mean', 0.0)
+            v_negm_adj = negm.get('NPV_Adj_Mean', 0.0)
+            if v_fues_adj != 0:
+                ce_loss_adj = 100 * (1 - (v_negm_adj / v_fues_adj) ** exponent)
+            else:
+                ce_loss_adj = 0.0
+
             # Data row
             table += (
                 f"& {tau} "
@@ -646,7 +808,7 @@ def create_latex_table(results_summary):
                 f"& {fues['Euler_Combined']:.2f} & {negm['Euler_Combined']:.2f} "
                 f"& {fues['Euler_Adjuster']:.2f} & {negm['Euler_Adjuster']:.2f} "
                 f"& {fues['Euler_Keeper']:.2f} & {negm['Euler_Keeper']:.2f} "
-                f"& {fues['NPV_Mean']:.3f} & {negm['NPV_Mean']:.3f} "
+                f"& {ce_loss:.4f} & {ce_loss_adj:.4f} "
                 "\\\\\n"
             )
 
@@ -654,7 +816,9 @@ def create_latex_table(results_summary):
     table += (
         "\\caption{Comparison of FUES and NEGM across grid sizes and transaction costs ($\\tau$). "
         "Euler errors are log$_{10}$ scale (more negative = better). "
-        "NPV is mean net present discounted utility.}\n"
+        "CE is the consumption equivalent welfare loss (\\%) from using NEGM instead of FUES; "
+        "CE Adj is the same but computed only on utility in adjustment periods. "
+        "Positive values mean FUES delivers higher welfare.}\n"
         "\\label{tab:durables_comparison}\n"
         "\\end{table}\n"
     )
@@ -662,6 +826,11 @@ def create_latex_table(results_summary):
     return table
 
 if __name__ == "__main__":
+    # Get MPI info early for debug output
+    rank = MPI.COMM_WORLD.Get_rank()
+    size = MPI.COMM_WORLD.Get_size()
+    print(f"[Rank {rank}/{size}] Starting...", flush=True)
+
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument('--method', type=str, choices=['negm', 'egm', 'both'], default='both',
@@ -673,19 +842,22 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     run_tests = args.run_tests
+    print(f"[Rank {rank}] Parsed args, run_tests={run_tests}", flush=True)
+
     # Read settings
     with open("settings.yml", "r") as stream:
-        settings = yaml.safe_load(stream) 
+        settings = yaml.safe_load(stream)
 
     # 1. Error and timing comparisons across grid sizes and tau values
     # Tau values and grid sizes to compare
     cp_settings = settings['durables']
-    
+
     tau_values = [0.05, 0.07, 0.15]
     grid_sizes_A = [250, 500, 700]
 
     # Run comparison across grid sizes and tau values
     if run_tests:
+        print(f"[Rank {rank}] Entering compare_grids_and_tau...", flush=True)
         results, latex_table = compare_grids_and_tau(cp_settings, tau_values, grid_sizes_A)
         if MPI.COMM_WORLD.Get_rank() == 0 and latex_table:
             print(latex_table)
@@ -702,31 +874,46 @@ if __name__ == "__main__":
     size = comm.Get_size()
     
     # All ranks create the consumer problem
+    # Use AR(1) wage process via Tauchen method (Pi and z_vals generated internally)
+    # Parameters taken from settings.yml unless overwritten below
+    # Note: float()/int() conversions needed because YAML may read scientific notation as strings
     cp = ConsumerProblem(cp_settings,
-                     r=0.03,
-                     sigma=.001,
-                     r_H=0,
-                     beta=.93,
-                     alpha=0.05,
-                     delta=0,
-                     Pi=((0.8, 0.1, 0.1), (0.05, 0.9, 0.05), (0.1, 0.1, 0.8)),
-                     z_vals=(0.1, .7526, 1.167),
-                     b=1e-10,
-                     grid_max_A=15.0,
-                     grid_max_WE=50,
-                     grid_size_W=200,
-                     grid_max_H=200.0,
-                     grid_size_A=200,
-                     grid_size_H=200,
-                     gamma_c=4.5,
-                     gamma_h=1.5,
-                     chi=0,
-                     tau=0.16,
-                     K=1.3,
-                     tol_bel=1e-09,
-                     m_bar=1.014,
-                     theta=np.exp(0.3), stat=False, t0=50)
+                     r=float(cp_settings.get('r', 0.01)),
+                     sigma=float(cp_settings.get('sigma', 0.001)),
+                     r_H=float(cp_settings.get('r_H', 0)),
+                     beta=float(cp_settings.get('beta', 0.93)),
+                     alpha=float(cp_settings.get('alpha', 0.7)),
+                     kappa=float(cp_settings.get('kappa', 1.0)),
+                     delta=float(cp_settings.get('delta', 0)),
+                     b=float(cp_settings.get('b', 1e-08)),
+                     grid_max_A=float(cp_settings.get('grid_max_A', 20.0)),
+                     grid_max_WE=float(cp_settings.get('grid_max_WE', 70.0)),
+                     grid_size_W=int(cp_settings.get('grid_size_W', 300)),
+                     grid_max_H=float(cp_settings.get('grid_max_H', 50.0)),
+                     grid_size_A=int(cp_settings.get('grid_size_A', 300)),
+                     grid_size_H=int(cp_settings.get('grid_size_H', 300)),
+                     gamma_c=float(cp_settings.get('gamma_c', 3)),
+                     gamma_h=float(cp_settings.get('gamma_h', 3)),
+                     chi=float(cp_settings.get('chi', 0)),
+                     tau=float(cp_settings.get('tau', 0.12)),
+                     K=float(cp_settings.get('K', 1.3)),
+                     tol_bel=float(cp_settings.get('tol_bel', 1e-03)),
+                     m_bar=float(cp_settings.get('M_bar', 1.4)),
+                     theta=float(cp_settings.get('theta', 1.3498)),
+                     stat=cp_settings.get('stat', False),
+                     T=int(cp_settings.get('max_iter', 60)),
+                     t0=int(cp_settings.get('t0', 20)),
+                     N_wage=int(cp_settings.get('N_wage', 4)),
+                     phi_w=float(cp_settings.get('phi_w', 0.8170411)),
+                     sigma_w=float(cp_settings.get('sigma_w', 0.1117012)))
             
+    # Plot wage profile diagnostics before solving (rank 0 only)
+    if rank == 0:
+        print("\n" + "="*60)
+        print("Plotting wage profile diagnostics...")
+        print("="*60)
+        plot_wage_profile(cp, age_min=20, age_max=60)
+
     # 0. Solve with Bellman (VFI option)
     #iterVFI, iterEGM, condition_V, NEGM = Operator_Factory(cp)
     #pickle.dump(bell_results, open("bell_results_300.p", "wb"))
@@ -868,6 +1055,94 @@ if __name__ == "__main__":
               f"median={np.median(npv_negm):.4f}, "
               f"std={np.std(npv_negm):.4f}")
 
+        # Consumption equivalent welfare comparison
+        # For CRRA utility, CE = 1 - (V_NEGM / V_FUES)^(1/(1-γ))
+        # This approximation works best for the non-shifted CRRA form
+        gamma_c = cp.gamma_c
+        v_fues = np.mean(npv_egm)
+        v_negm = np.mean(npv_negm)
+
+        # Utility difference as percentage
+        util_diff_pct = 100 * (v_fues - v_negm) / abs(v_fues) if v_fues != 0 else 0.0
+
+        # CE calculation using CRRA formula
+        if v_fues != 0 and v_negm != 0:
+            ratio = v_negm / v_fues
+            exponent = 1 / (1 - gamma_c)
+            ce_raw = 100 * (1 - ratio ** exponent)
+        else:
+            ce_raw = 0.0
+
+        print("\n" + "-"*70)
+        print("Consumption Equivalent Welfare Comparison:")
+        print("-"*70)
+        print(f"  gamma_c = {gamma_c}")
+        print(f"  V_FUES = {v_fues:.6f}, V_NEGM = {v_negm:.6f}")
+        print(f"  Utility difference: {util_diff_pct:.4f}%")
+        print(f"  V_NEGM/V_FUES = {v_negm/v_fues:.6f}")
+
+        if v_fues > v_negm:
+            # FUES is better - report CE gain from using FUES (= loss from using NEGM)
+            ce_pct = abs(ce_raw)
+            print(f"  FUES delivers higher welfare than NEGM")
+            print(f"  CE loss from using NEGM: {ce_pct:.4f}% of consumption")
+        elif v_negm > v_fues:
+            # NEGM is better - report CE loss from using FUES
+            ce_pct = -abs(ce_raw)  # Make it negative to indicate NEGM is better
+            print(f"  NEGM delivers higher welfare than FUES")
+            print(f"  CE loss from using FUES: {abs(ce_raw):.4f}% of consumption")
+        else:
+            ce_pct = 0.0
+            print(f"  Both methods deliver equivalent welfare")
+
+        # Adjuster-conditional welfare comparison
+        # This computes CE based only on utility in adjustment periods
+        npv_adj_egm = sim_egm['npv_utility_adj']
+        npv_adj_negm = sim_negm['npv_utility_adj']
+        n_adj_egm = sim_egm['n_adj_periods']
+        n_adj_negm = sim_negm['n_adj_periods']
+
+        # Only include agents who had at least one adjustment period
+        adj_mask_egm = n_adj_egm > 0
+        adj_mask_negm = n_adj_negm > 0
+        # Use union mask to ensure we're comparing same agents
+        adj_mask = adj_mask_egm & adj_mask_negm
+
+        v_fues_adj = np.mean(npv_adj_egm[adj_mask]) if np.sum(adj_mask) > 0 else 0.0
+        v_negm_adj = np.mean(npv_adj_negm[adj_mask]) if np.sum(adj_mask) > 0 else 0.0
+
+        print("\n" + "-"*70)
+        print("Adjuster-Conditional Welfare Comparison:")
+        print("-"*70)
+        print(f"  (Utility accumulated only in periods when agent adjusts)")
+        print(f"  N agents with adjustment periods: {np.sum(adj_mask)}")
+        print(f"  Mean adj periods per agent: {np.mean(n_adj_egm[adj_mask]):.2f}")
+        print(f"  V_FUES (adj only) = {v_fues_adj:.6f}")
+        print(f"  V_NEGM (adj only) = {v_negm_adj:.6f}")
+
+        # Utility difference for adjusters
+        util_diff_adj_pct = 100 * (v_fues_adj - v_negm_adj) / abs(v_fues_adj) if v_fues_adj != 0 else 0.0
+        print(f"  Utility difference (adj only): {util_diff_adj_pct:.4f}%")
+
+        # CE for adjusters
+        if v_fues_adj != 0 and v_negm_adj != 0:
+            ratio_adj = v_negm_adj / v_fues_adj
+            ce_adj_raw = 100 * (1 - ratio_adj ** exponent)
+        else:
+            ce_adj_raw = 0.0
+
+        if v_fues_adj > v_negm_adj:
+            ce_adj_pct = abs(ce_adj_raw)
+            print(f"  FUES delivers higher adjuster welfare than NEGM")
+            print(f"  CE loss from using NEGM (adj only): {ce_adj_pct:.4f}% of consumption")
+        elif v_negm_adj > v_fues_adj:
+            ce_adj_pct = -abs(ce_adj_raw)
+            print(f"  NEGM delivers higher adjuster welfare than FUES")
+            print(f"  CE loss from using FUES (adj only): {abs(ce_adj_raw):.4f}% of consumption")
+        else:
+            ce_adj_pct = 0.0
+            print(f"  Both methods deliver equivalent adjuster welfare")
+
         # 4. Tabulate timing and errors
         negm_time = _get_avg_time(NEGMRes)
         egm_time = _get_avg_time(EGMRes_fues)
@@ -884,6 +1159,10 @@ if __name__ == "__main__":
         print(f"{'5th percentile':<30} {stats_egm['combined']['p5']:>15.4f} {stats_negm['combined']['p5']:>15.4f}")
         print(f"{'95th percentile':<30} {stats_egm['combined']['p95']:>15.4f} {stats_negm['combined']['p95']:>15.4f}")
         print(f"{'Adjustment rate (%)':<30} {stats_egm['pct_adjuster']:>15.2f} {stats_negm['pct_adjuster']:>15.2f}")
+        print(f"{'NPV Utility (mean)':<30} {v_fues:>15.4f} {v_negm:>15.4f}")
+        print(f"{'CE loss from NEGM (%)':<30} {ce_pct:>15.4f} {'-':>15}")
+        print(f"{'NPV Utility adj (mean)':<30} {v_fues_adj:>15.4f} {v_negm_adj:>15.4f}")
+        print(f"{'CE loss from NEGM adj (%)':<30} {ce_adj_pct:>15.4f} {'-':>15}")
         print(f"{'Avg. time/iter (sec)':<30} {egm_time:>15.2f} {negm_time:>15.2f}")
         print("="*70)
 
@@ -898,7 +1177,17 @@ if __name__ == "__main__":
         lines.append(f"| 5th percentile | {stats_egm['combined']['p5']:.4f} | {stats_negm['combined']['p5']:.4f} |\n")
         lines.append(f"| 95th percentile | {stats_egm['combined']['p95']:.4f} | {stats_negm['combined']['p95']:.4f} |\n")
         lines.append(f"| Adjustment rate (%) | {stats_egm['pct_adjuster']:.2f} | {stats_negm['pct_adjuster']:.2f} |\n")
+        lines.append(f"| NPV Utility (mean) | {v_fues:.4f} | {v_negm:.4f} |\n")
+        lines.append(f"| CE loss from NEGM (%) | {ce_pct:.4f} | - |\n")
+        lines.append(f"| NPV Utility adj (mean) | {v_fues_adj:.4f} | {v_negm_adj:.4f} |\n")
+        lines.append(f"| CE loss from NEGM adj (%) | {ce_adj_pct:.4f} | - |\n")
         lines.append(f"| Avg. time/iter (sec) | {egm_time:.2f} | {negm_time:.2f} |\n")
 
         with open("../../results/durables/durables_single_result.tex", "w") as f:
             f.writelines(lines)
+
+        # 5. Lifecycle comparison plots
+        print("\n" + "="*70)
+        print("Generating lifecycle comparison plots...")
+        print("="*70)
+        plot_lifecycle_compare(sim_egm, sim_negm, cp, output_dir=output_dir)

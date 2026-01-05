@@ -15,7 +15,7 @@
 
 # ===== USER CONFIGURATION =====
 # Set plot start period here (leave empty for default T-2)
-PLOT_START=57
+PLOT_START=50
 # ==============================
 
 set -euo pipefail

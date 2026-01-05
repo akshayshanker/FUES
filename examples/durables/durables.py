@@ -47,6 +47,49 @@ del _fd
 from dc_smm.fues.rfc_simple import rfc
 from dc_smm.fues.helpers.math_funcs import interp_as, rootsearch, correct_jumps1d_arr
 
+
+# =============================================================================
+# NaN/Inf Clamping Helpers (prevents crashes from interpolation edge cases)
+# =============================================================================
+
+@njit
+def clamp_value(arr, nan_val=-1e10):
+    """Clamp NaN/inf in value functions. NaN → large negative so state is never chosen."""
+    result = arr.copy()
+    for i in range(len(result)):
+        if np.isnan(result[i]) or np.isinf(result[i]):
+            result[i] = nan_val
+    return result
+
+
+@njit
+def clamp_policy(arr, min_val, max_val):
+    """Clamp NaN/inf in policy functions to valid bounds."""
+    result = arr.copy()
+    for i in range(len(result)):
+        if np.isnan(result[i]):
+            result[i] = min_val
+        elif result[i] < min_val:
+            result[i] = min_val
+        elif result[i] > max_val or np.isinf(result[i]):
+            result[i] = max_val
+    return result
+
+
+@njit
+def clamp_scalar(val, min_val, max_val, nan_replacement):
+    """Clamp a single scalar value. Returns nan_replacement if NaN."""
+    if np.isnan(val):
+        return nan_replacement
+    elif np.isinf(val):
+        return max_val if val > 0 else min_val
+    elif val < min_val:
+        return min_val
+    elif val > max_val:
+        return max_val
+    return val
+
+
 class ConsumerProblem:
     """
     A class that stores primitives for the Consumer Problem for
@@ -92,8 +135,11 @@ class ConsumerProblem:
                  beta=.945,
                  alpha=0.66,
                  delta=0.1,
-                 Pi=((0.09, 0.91), (0.06, 0.94)),
-                 z_vals=(0.1, 1.0),
+                 Pi=None,  # Will be generated from AR(1) if None
+                 z_vals=None,  # Will be generated from AR(1) if None
+                 phi_w=0.9170411,  # AR(1) persistence
+                 sigma_w=0.0817012,  # AR(1) shock std dev
+                 N_wage=3,  # Number of wage states for Tauchen
                  b=1e-2,
                  grid_max_A=50,
                  grid_max_WE=100,
@@ -101,8 +147,9 @@ class ConsumerProblem:
                  grid_size_A=50,
                  grid_size_H=50,
                  grid_size_W=50,
-                 gamma_c=1.458,
-                 gamma_h=1.0,
+                 gamma_c=1.458,  # Not used in log utility (kept for compatibility)
+                 gamma_h=1.0,   # Not used in log utility (kept for compatibility)
+                 kappa=1.0,     # Housing scaling factor in utility
                  K=200,
                  theta=2,
                  tau=0.2,
@@ -123,21 +170,57 @@ class ConsumerProblem:
         self.beta = beta
         self.delta = delta
         self.gamma_c, self.gamma_h, self.chi = gamma_c, gamma_h, chi
+        self.kappa = kappa
         self.b = b
         self.T = T
         self.T1 = T1
         self.grid_max_A, self.grid_max_H = grid_max_A, grid_max_H
         self.sigma = sigma
-        lambdas = np.array(config['lambdas'])
         self.alpha = alpha
-        self.Pi, self.z_vals = np.array(Pi), np.asarray(z_vals)
+
+        # Generate AR(1) wage process using Tauchen method
+        # AR(1): z' = phi_w * z + sigma_w * epsilon, epsilon ~ N(0,1)
+        self.phi_w = phi_w
+        self.sigma_w = sigma_w
+        self.N_wage = N_wage
+
+        if Pi is None or z_vals is None:
+            # Use Tauchen method to discretize AR(1) process
+            # qe.markov.tauchen(n, rho, sigma, mu=0.0, n_std=3)
+            # n = num states, rho = persistence, sigma = std of innovation, n_std = width in std devs
+            labour_mc = qe.markov.tauchen(N_wage, phi_w, sigma_w, mu=0.0, n_std=3)
+            self.z_vals = np.asarray(labour_mc.state_values)  # Log wage states
+            self.Pi = np.asarray(labour_mc.P)  # Transition matrix
+
+            # Enforce minimum probability floor to avoid tiny numbers
+            min_prob = 1e-3
+            self.Pi = np.maximum(self.Pi, min_prob)
+            # Rescale rows to sum to 1
+            self.Pi = self.Pi / self.Pi.sum(axis=1, keepdims=True)
+
+            # Print the wage process
+            print("\n" + "="*60)
+            print("AR(1) Wage Process (Tauchen Method)")
+            print("="*60)
+            print(f"  Persistence (phi_w):     {phi_w:.6f}")
+            print(f"  Shock std dev (sigma_w): {sigma_w:.6f}")
+            print(f"  Number of states:        {N_wage}")
+            print(f"\n  State values (log shock): {self.z_vals}")
+            print(f"\n  Transition matrix P:")
+            for i, row in enumerate(self.Pi):
+                print(f"    State {i}: {row}")
+            print("="*60 + "\n")
+        else:
+            # Use manually specified values
+            self.Pi, self.z_vals = np.array(Pi), np.asarray(z_vals)
+
         self.asset_grid_A = np.linspace(b, np.float64(grid_max_A), grid_size_A)
         self.asset_grid_H = np.linspace(b, np.float64(grid_max_H), grid_size_H)
-        
+
         self.asset_grid_HE = np.linspace(b, np.float64(grid_max_H), grid_size_H)
         self.asset_grid_WE = np.linspace(b, np.float64(grid_max_WE), grid_size_W)
-        
-        self.X_all = cartesian([np.arange(len(z_vals)),
+
+        self.X_all = cartesian([np.arange(len(self.z_vals)),
                                 np.arange(len(self.asset_grid_A)),
                                 np.arange(len(self.asset_grid_H))])
 
@@ -152,60 +235,140 @@ class ConsumerProblem:
         self.tol_timeiter = tol_timeiter
         self.stat = stat
 
+        # Income function parameters
+        lambdas = np.array(config.get('lambdas', [0, 0, 0, 0, 0, 0, 0]))
+        tau_av = int(config.get('tau_av', 15))
+        normalisation = float(config.get('normalisation', 1e-5))  # Ensure float for numba
+        tzero = 20  # Starting age for tenure calculation (fixed at 20)
+
+        # Store for reference
+        self.lambdas = lambdas
+        self.tau_av = tau_av
+        self.normalisation = normalisation
+        self.tzero = tzero
+
+        # Print income function parameters
+        print("\n" + "-"*60)
+        print("Income Function Parameters")
+        print("-"*60)
+        print(f"  Age polynomial coeffs (lambdas[0:5]):")
+        print(f"    {lambdas[0:5]}")
+        print(f"  Tenure polynomial coeffs (lambdas[5:7]):")
+        print(f"    {lambdas[5:7]}")
+        print(f"  Max tenure (tau_av): {tau_av}")
+        print(f"  Starting age (tzero): {tzero}")
+        print(f"  Normalisation: {normalisation}")
+
+        # Compute actual wages at age 35 for each shock state
+        t_example = 35
+        tau_example = min(tau_av, t_example - tzero)
+        age_factors = np.array([1.0, float(t_example), float(t_example)**2,
+                                float(t_example)**3, float(t_example)**4])
+        wage_age = np.dot(age_factors, lambdas[0:5])
+        tenure_factors = np.array([float(tau_example), float(tau_example)**2])
+        wage_tenure = np.dot(tenure_factors, lambdas[5:7])
+        wages_at_35 = np.exp(wage_age + wage_tenure + self.z_vals) * normalisation
+        print(f"\n  Example: Wages at age {t_example} (tenure={tau_example}):")
+        for i, (z, w) in enumerate(zip(self.z_vals, wages_at_35)):
+            print(f"    State {i}: shock={z:.4f}, wage={w:.6f}")
+        print("-"*60 + "\n")
+
        # define functions
+        # CRRA utility form: u(c,h) = alpha * c^(1-gamma_c)/(1-gamma_c) + (1-alpha) * (kappa*h)^(1-gamma_h)/(1-gamma_h)
+        # alpha = consumption weight, (1-alpha) = housing weight, kappa = housing scaling
         @njit
         def du_c(x):
-            #if x <= 0:
-            #    return 1e250
-            #else:
-            return np.power(x, - gamma_c)
-
-        @njit
-        def du_c_inv(x):
+            # Marginal utility of consumption: alpha * c^(-gamma_c)
             if x <= 0:
                 return 1e250
-            else:
-                return np.power(x, -1 / gamma_c)
+            return alpha * np.power(x, -gamma_c)
+
+        @njit
+        def du_c_inv(m):
+            # Inverse marginal utility: given du_c = alpha * c^(-gamma_c), c = (alpha/m)^(1/gamma_c)
+            if m <= 0:
+                return 1e250
+            return np.power(alpha / m, 1.0 / gamma_c)
 
         @njit
         def du_h(y):
-            # CRRA marginal utility for housing
-            return alpha * np.power(y, -gamma_h)
+            # Marginal utility of housing: (1-alpha) * kappa^(1-gamma_h) * h^(-gamma_h)
+            if y <= 0:
+                return 1e250
+            return (1.0 - alpha) * np.power(kappa, 1.0 - gamma_h) * np.power(y, -gamma_h)
 
         @njit
         def term_du(x):
-            return theta * np.power(K + x, - gamma_c)
+            # Terminal marginal utility (CRRA form)
+            if x <= 0:
+                return 1e250
+            return theta * alpha * np.power(K + x, -gamma_c)
 
         @njit
         def term_u(x):
-            return theta * (np.power(K + x, 1 - gamma_c) - 1) / (1 - gamma_c)
+            # Terminal utility (CRRA form)
+            if x <= 0:
+                return -np.inf
+            return theta * alpha * np.power(K + x, 1.0 - gamma_c) / (1.0 - gamma_c)
 
         @njit
         def u(x, y, chi):
-            # CRRA utility for both consumption and housing
+            # CRRA utility: alpha * c^(1-gamma_c)/(1-gamma_c) + (1-alpha) * (kappa*h)^(1-gamma_h)/(1-gamma_h)
             if x <= 0:
                 cons_u = -np.inf
             elif y <= 0:
                 cons_u = -np.inf
             else:
-                cons_u = (np.power(x, 1 - gamma_c) - 1) / (1 - gamma_c) \
-                    + alpha * (np.power(y, 1 - gamma_h) - 1) / (1 - gamma_h)
+                c_utility = alpha * np.power(x, 1.0 - gamma_c) / (1.0 - gamma_c)
+                h_utility = (1.0 - alpha) * np.power(kappa * y, 1.0 - gamma_h) / (1.0 - gamma_h)
+                cons_u = c_utility + h_utility
 
             return cons_u - chi
 
+        # Retirement parameters
+        retirement_age = 60
+        retirement_income = 0.1  # Nominal $10,000/year after normalisation
+
         @njit
         def y_func(t, xi):
+            """
+            Income function with age-tenure profile and AR(1) shock.
 
-            if stat == True:
-                t = T1
-            else:
-                t = t
+            Parameters
+            ----------
+            t : int
+                Time period (age)
+            xi : float
+                Log wage shock from AR(1) process (from z_vals)
 
-            wage_age = np.dot(np.array([1, t, np.power(t, 2), np.power(
-                t, 3), np.power(t, 4)]).astype(np.float64), lambdas[0:5])
-            wage_tenure = t * lambdas[5] + np.power(t, 2) * lambdas[6]
+            Returns
+            -------
+            float
+                Income level
 
-            return np.exp(wage_age + wage_tenure + xi) * 1e-5
+            Notes
+            -----
+            - Before retirement: Wage = exp(age_polynomial + tenure_polynomial + xi) * normalisation
+            - After retirement (age > 60): Fixed income of 0.1 (with certainty, no shock)
+            - Tenure is capped at tau_av
+            """
+            # After retirement age, return fixed income with certainty
+            if t > retirement_age:
+                return retirement_income
+
+            # Tenure: years since tzero, capped at tau_av
+            tau_tenure = min(tau_av, t - tzero)
+
+            # Age polynomial: lambdas[0:5] on [1, t, t^2, t^3, t^4]
+            age_factors = np.array([1.0, float(t), np.power(float(t), 2),
+                                    np.power(float(t), 3), np.power(float(t), 4)])
+            wage_age = np.dot(age_factors, lambdas[0:5])
+
+            # Tenure polynomial: lambdas[5:7] on [tau, tau^2]
+            tenure_factors = np.array([float(tau_tenure), np.power(float(tau_tenure), 2)])
+            wage_tenure = np.dot(tenure_factors, lambdas[5:7])
+
+            return np.exp(wage_age + wage_tenure + xi) * normalisation
 
         self.u, self.du_c, self.term_u, self.term_du, self.y_func\
             = u, du_c, term_u, term_du, y_func
@@ -280,7 +443,7 @@ def Operator_Factory(cp):
             # if t > T-1:
             #	Ev_prime = term_u(h_prime*R_H*(1-delta) + a_prime[0]*R)
             # else:
-            Ev_prime = eval_linear(UGgrid_all, V[i_z], point, xto.NEAREST)
+            Ev_prime = eval_linear(UGgrid_all, V[i_z], point, xto.LINEAR)
             consumption = w - a_prime[0]
 
             return np.exp(u(consumption, h_prime_nad, chi) + beta * Ev_prime)
@@ -316,7 +479,7 @@ def Operator_Factory(cp):
             a_prime = x_prime_nadj_star_1
 
             point = np.array([a_prime, h_prime])
-            Ev_prime = eval_linear(UGgrid_all, V[i_z, :], point, xto.NEAREST)
+            Ev_prime = eval_linear(UGgrid_all, V[i_z, :], point, xto.LINEAR)
             consumption = w_2 - a_prime
 
             return np.exp(u(consumption, h_prime, chi) + beta * Ev_prime)
@@ -334,12 +497,12 @@ def Operator_Factory(cp):
 
         if w_2 > 0 and h_prime >0:
 
-            c_keeper = eval_linear(UGgrid_all, keeper_pol_c, np.array([w_2, h_prime]), xto.NEAREST)
+            c_keeper = eval_linear(UGgrid_all, keeper_pol_c, np.array([w_2, h_prime]), xto.LINEAR)
 
             a_prime = w_2 - c_keeper
 
             point = np.array([a_prime, h_prime])
-            Ev_prime = eval_linear(UGgrid_all, V[i_z, :], point, xto.NEAREST)
+            Ev_prime = eval_linear(UGgrid_all, V[i_z, :], point, xto.LINEAR)
             
             return u(c_keeper, h_prime, 0) + beta * Ev_prime
         else:
@@ -359,7 +522,7 @@ def Operator_Factory(cp):
 
 
             point = np.array([b, h_prime])
-            Ev_prime = eval_linear(UGgrid_all, V[i_z, :], point, xto.NEAREST)
+            Ev_prime = eval_linear(UGgrid_all, V[i_z, :], point, xto.LINEAR)
             
             consumption = w_2 - b
 
@@ -525,7 +688,7 @@ def Operator_Factory(cp):
 
         Ud_prime_a_val = eval_linear(UGgrid_all,
                                      Ud_prime_a,
-                                     point, xto.NEAREST)
+                                     point, xto.LINEAR)
 
         c = du_c_inv(Ud_prime_a_val)
         egm_a = c + a_prime  # - y_func(t,z)
@@ -565,7 +728,7 @@ def Operator_Factory(cp):
 
         point = np.array([a_prime, h_prime])
         Ud_prime_h_val = eval_linear(UGgrid_all, Ud_prime_h,
-                                     point, xto.NEAREST)
+                                     point, xto.LINEAR)
 
         return du_c(c) * (1 + tau) - Ud_prime_h_val - du_h(h_prime)
 
@@ -620,7 +783,7 @@ def Operator_Factory(cp):
                 point_for_c = np.array([a_prime_points[j], h_prime])
 
                 Ud_prime_h_val = eval_linear(UGgrid_all, Ud_prime_h,
-                                             point_for_c, xto.NEAREST)
+                                             point_for_c, xto.LINEAR)
 
                 c = du_c_inv((Ud_prime_h_val
                               + du_h(h_prime)) / (1 + tau))
@@ -636,10 +799,10 @@ def Operator_Factory(cp):
             point_at_amin = np.array([b, h_prime])
 
             Ud_prime_h_val = eval_linear(UGgrid_all, Ud_prime_h,
-                                         point_at_amin, xto.NEAREST)
+                                         point_at_amin, xto.LINEAR)
 
             Ud_prime_a_val = eval_linear(UGgrid_all, Ud_prime_a,
-                                         point_at_amin, xto.NEAREST)
+                                         point_at_amin, xto.LINEAR)
 
             c_at_amin = du_c_inv((Ud_prime_h_val + du_h(h_prime)) / (1 + tau))
             a_prime_points[-1] = b
@@ -701,7 +864,7 @@ def Operator_Factory(cp):
                 point = np.array([b, h_prime])
                 v_prime = beta * eval_linear(UGgrid_all,
                                                     V[index_z, :],
-                                                    point, xto.NEAREST)
+                                                    point, xto.LINEAR)
                 
                 for k in range(len(asset_grid_A)):
                     vf_unrefined[index_z, k, index_h_today] =  u(C_array[k], h_prime, 0) + v_prime
@@ -728,7 +891,7 @@ def Operator_Factory(cp):
 
                         v_prime = beta * eval_linear(UGgrid_all,
                                                     V[index_z, :],
-                                                    point, xto.NEAREST)
+                                                    point, xto.LINEAR)
 
                         vf_unrefined[index_z, index_a_db, index_h_today]\
                             = u(c, h_prime, 0) + v_prime
@@ -774,6 +937,12 @@ def Operator_Factory(cp):
                 v_sorted = vf_unrefined_points[sortidx]
                 c_sorted = c_unrefined_points[sortidx]
                 a_sorted = asset_grid_AC_unique[sortidx]
+
+                _FUES_POST_STATE = True
+                _FUES_POST_CLEAN = True
+                _FUES_INCLUDE_INTER = False
+                _FUES_DISABLE_CHECKS = True
+                _FUES_EPS_FWD = 0.05
                 
                 # Call FUES_jit_core with all parameters (post_clean=0 for keeper)
                 keep, intersections, n_inter, final_mask, n_final = FUES_jit_core(
@@ -827,6 +996,14 @@ def Operator_Factory(cp):
                     e_grid_clean, c_clean, asset_grid_A)
                 new_v_refined[index_z, :, index_h_today] = interp_as(
                     e_grid_clean, vf_clean, asset_grid_A)
+
+                # Clamp NaN/inf after interpolation
+                new_a_prime_refined[index_z, :, index_h_today] = clamp_policy(
+                    new_a_prime_refined[index_z, :, index_h_today], b, grid_max_A)
+                new_c_refined[index_z, :, index_h_today] = clamp_policy(
+                    new_c_refined[index_z, :, index_h_today], 1e-10, 1e10)
+                new_v_refined[index_z, :, index_h_today] = clamp_value(
+                    new_v_refined[index_z, :, index_h_today])
 
                 # Enforce borrowing constraint
                 for i in range(n_a):
@@ -892,7 +1069,7 @@ def Operator_Factory(cp):
                         point[0] = a_p
                         point[1] = h_prime
                         c_val = e_grid_points[i] - h_adj - a_p
-                        v_prime = beta * eval_linear(UGgrid_all, V_z, point, xto.NEAREST)
+                        v_prime = beta * eval_linear(UGgrid_all, V_z, point, xto.LINEAR)
                         vf_unrefined[index_z, index_h_prime, i] = u(c_val, h_prime, chi) + v_prime
                         h_prime_unrefined[index_z, index_h_prime, i] = h_prime
 
@@ -958,6 +1135,8 @@ def Operator_Factory(cp):
             _FUES_POST_STATE = True
             _FUES_POST_CLEAN = True
             _FUES_INCLUDE_INTER = False
+            _FUES_DISABLE_CHECKS = True
+            _FUES_EPS_FWD = 0.05
             # Call FUES_jit_core with all parameters
             keep, intersections, n_inter, final_mask, n_final = FUES_jit_core(
                 e_sorted, v_sorted, h_sorted, a_sorted, c_sorted,  # e, v, p1, p2, del_a
@@ -1007,10 +1186,16 @@ def Operator_Factory(cp):
             c_clean = e_grid_clean - hprime_clean * tau_adj - a_prime_clean
             
             # Interpolate to output grid
-            new_a_prime_refined[index_z] = interp_as(e_grid_clean, a_prime_clean, grid_we)
-            new_h_prime_refined[index_z] = interp_as(e_grid_clean, hprime_clean, grid_we)
-            new_v_refined[index_z] = interp_as(e_grid_clean, vf_clean, grid_we)
-            new_c_refined[index_z] = interp_as(e_grid_clean, c_clean, grid_we)
+            new_a_prime_refined[index_z] = interp_as(e_grid_clean, a_prime_clean, grid_we, extrap= True)
+            new_h_prime_refined[index_z] = interp_as(e_grid_clean, hprime_clean, grid_we, extrap= True)
+            new_v_refined[index_z] = interp_as(e_grid_clean, vf_clean, grid_we, extrap= True)
+            new_c_refined[index_z] = interp_as(e_grid_clean, c_clean, grid_we, extrap= True)
+
+            # Clamp NaN/inf after interpolation
+            new_a_prime_refined[index_z] = clamp_policy(new_a_prime_refined[index_z], b, grid_max_A)
+            new_h_prime_refined[index_z] = clamp_policy(new_h_prime_refined[index_z], b, grid_max_H)
+            new_v_refined[index_z] = clamp_value(new_v_refined[index_z])
+            new_c_refined[index_z] = clamp_policy(new_c_refined[index_z], 1e-10, 1e10)
 
             # Post-clean: correct double jumps in interpolated policies
             # Uses consumption as primary array to detect jumps, corrects v, h_prime, a_prime
@@ -1119,22 +1304,32 @@ def Operator_Factory(cp):
             # non-adjusters
             wealth_nadj = R * a + y_func(t, z)
             v_nadj_val = interp_as(
-                asset_grid_A, Vkeeper[i_z, :, i_h], np.array([wealth_nadj]))[0]
+                asset_grid_A, Vkeeper[i_z, :, i_h], np.array([wealth_nadj]), extrap= True)[0]
             c_nadj_val = interp_as(
-                asset_grid_A, Ckeeper[i_z, :, i_h], np.array([wealth_nadj]), extrap= False)[0]
+                asset_grid_A, Ckeeper[i_z, :, i_h], np.array([wealth_nadj]), extrap= True)[0]
             a_prime_nadj_val = interp_as(
-                asset_grid_A, Akeeper[i_z, :, i_h], np.array([wealth_nadj]))[0]
+                asset_grid_A, Akeeper[i_z, :, i_h], np.array([wealth_nadj]), extrap= True)[0]
             h_prime_nadj_val = (1 - delta) * h
+
+            # Clamp NaN/inf after keeper interpolations
+            v_nadj_val = clamp_scalar(v_nadj_val, -1e10, 1e10, -1e10)
+            c_nadj_val = clamp_scalar(c_nadj_val, 1e-10, 1e10, 1e-10)
+            a_prime_nadj_val = clamp_scalar(a_prime_nadj_val, b, grid_max_A, b)
 
             # adjusters
             wealth = R * a + R_H * h * (1 - delta) + y_func(t, z)
 
             a_adj_val = interp_as(asset_grid_WE, Aadj[i_z, :],
-                                  np.array([wealth]))[0]
+                                  np.array([wealth]), extrap= True)[0]
             h_adj_val = interp_as(asset_grid_WE, Hadj[i_z, :],
-                                  np.array([wealth]))[0]
+                                  np.array([wealth]), extrap= True)[0]
             c_adj_val = interp_as(asset_grid_WE, Cadj[i_z, :],
-                                    np.array([wealth]))[0]
+                                    np.array([wealth]), extrap= True)[0]
+
+            # Clamp NaN/inf after adjuster interpolations
+            a_adj_val = clamp_scalar(a_adj_val, b, grid_max_A, b)
+            h_adj_val = clamp_scalar(h_adj_val, b, grid_max_H, b)
+            c_adj_val = clamp_scalar(c_adj_val, 1e-10, 1e10, 1e-10)
 
             points_adj = np.array([a_adj_val, h_adj_val])
 
@@ -1142,7 +1337,7 @@ def Operator_Factory(cp):
                 + beta * eval_linear(UGgrid_all,
                                      V_prime[i_z],
                                      points_adj,
-                                     xto.NEAREST)
+                                     xto.LINEAR)
 
             if v_adj_val >= v_nadj_val:
                 d_adj = 1
@@ -1165,7 +1360,7 @@ def Operator_Factory(cp):
             Phi_t = du_h(h_prime_nadj_val) \
                 + eval_linear(UGgrid_all,
                               ELambdaHnxt[i_z],
-                              point_nadj, xto.NEAREST)
+                              point_nadj, xto.LINEAR)
             LambdaHcurr[i_z, i_a, i_h] = beta * R_H * (1 - delta)\
                 * (d_adj * du_c(c_adj_val)
                    + (1 - d_adj) * Phi_t)
@@ -1220,7 +1415,7 @@ def Operator_Factory(cp):
                                                 Akeeper[i_z],\
                                                 np.array([left_over_wealth,\
                                                         h_prime_adj_star1]),\
-                                                xto.NEAREST)
+                                                xto.LINEAR)
                 
                 abound_flag  = v_prime_adj_star<v_prime_a_bound
                 h_prime_adj_star  = abound_flag*h_prime_a_bound\
@@ -1298,12 +1493,17 @@ def Operator_Factory(cp):
             # non-adjusters
             wealth_nadj = R * a + y_func(t, z)
             v_nadj_val = interp_as(
-                asset_grid_A, Vkeeper[i_z, :, i_h], np.array([wealth_nadj]))[0]
+                asset_grid_A, Vkeeper[i_z, :, i_h], np.array([wealth_nadj]), extrap= True)[0]
             c_nadj_val = interp_as(
-                asset_grid_A, Ckeeper[i_z, :, i_h], np.array([wealth_nadj]))[0]
+                asset_grid_A, Ckeeper[i_z, :, i_h], np.array([wealth_nadj]), extrap= True)[0]
             a_prime_nadj_val = interp_as(
-                asset_grid_A, Akeeper[i_z, :, i_h], np.array([wealth_nadj]))[0]
+                asset_grid_A, Akeeper[i_z, :, i_h], np.array([wealth_nadj]), extrap= True)[0]
             h_prime_nadj_val = (1 - delta) * h
+
+            # Clamp NaN/inf after keeper interpolations
+            v_nadj_val = clamp_scalar(v_nadj_val, -1e10, 1e10, -1e10)
+            c_nadj_val = clamp_scalar(c_nadj_val, 1e-10, 1e10, 1e-10)
+            a_prime_nadj_val = clamp_scalar(a_prime_nadj_val, b, grid_max_A, b)
 
             # adjusters
             wealth = R * a + R_H * h * (1 - delta) + y_func(t, z)
@@ -1312,7 +1512,14 @@ def Operator_Factory(cp):
                                   np.array([wealth]))[0]
             h_adj_val = interp_as(asset_grid_WE, Hadj[i_z, :],
                                   np.array([wealth]))[0]
+
+            # Clamp NaN/inf after adjuster interpolations
+            a_adj_val = clamp_scalar(a_adj_val, b, grid_max_A, b)
+            h_adj_val = clamp_scalar(h_adj_val, b, grid_max_H, b)
+
             c_adj_val = wealth - a_adj_val - h_adj_val * (1 + tau)
+            # Clamp consumption (computed from budget constraint)
+            c_adj_val = clamp_scalar(c_adj_val, 1e-10, 1e10, 1e-10)
 
             points_adj = np.array([a_adj_val, h_adj_val])
 
@@ -1320,7 +1527,7 @@ def Operator_Factory(cp):
                 + beta * eval_linear(UGgrid_all,
                                      EVnxt[i_z],
                                      points_adj,
-                                     xto.NEAREST)
+                                     xto.LINEAR)
             d_adj = 0
             d_adj = v_adj_val >= v_nadj_val
             Dnxt[i_z, i_a, i_h] = d_adj
@@ -1348,7 +1555,7 @@ def Operator_Factory(cp):
             Phi_t = du_h(h_prime_nadj_val) \
                 + eval_linear(UGgrid_all,
                               ELambdaHnxt[i_z],
-                              point_nadj, xto.NEAREST)
+                              point_nadj, xto.LINEAR)
             LambdaHcurr[i_z, i_a, i_h] = beta * R_H * (1 - delta)\
                                                 * (d_adj * du_c(c_adj_val)
                                                 + (1 - d_adj) * Phi_t)

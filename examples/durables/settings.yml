@@ -1,40 +1,44 @@
 durables:
   lambdas:
-    - 4.7651949
-    - 0.57802016
-    - -0.02022858
-    - 0.00030696
-    - -1.71E-06
-    - 0.0241546
-    - -0.0001102
+    - 4.329982
+    - 0.610214
+    - -0.0209832
+    - 0.0003132
+    - -0.00000172
+    - 0.0199949
+    - 0.0000476
+  tau_av: 30  # Average tenure for wage calculation
+  normalisation: 1e-5  # Income normalisation factor
   N_sim: 10000  # Number of agents for Euler error simulation
-  r: 0.01
+  r: 0.04
   sigma: 0.001
   r_H: 0
   beta: 0.93
-  alpha: 0.03
+  alpha: 0.7  # Consumption weight in utility (1-alpha = housing weight)
+  kappa: 0.06  # Housing scaling factor in utility
   delta: 0
-  Pi: [[0.5, 0.5], [0.5, 0.5]]
-  z_vals: [0.1, 1.0]
   b: 1e-08
-  grid_max_A: 20.0 # max for liquid asset grid 
-  grid_max_WE: 70.0 # max for wealth (market resources grid)
+  grid_max_A: 10.0 # max for liquid asset grid 
+  grid_max_WE: 25.0 # max for wealth (market resources grid)
   grid_size_W: 300 # size of wealth grid
-  grid_max_H: 50.0
+  grid_max_H: 15.0
   grid_size_A: 300 # size of liquid asset grid
   grid_size_H: 300
-  gamma_c: 3
-  gamma_h: 3
+  gamma_c: 3.5
+  gamma_h: 1.5
   chi: 0
   tau: 0.12
   K: 1.3
   tol_bel: 1E-03
-  M_bar: 1.4
-  max_iter: 60
+  M_bar: 1.001
+  max_iter: 70
   theta: 1.3498
   t0: 20
   root_eps: 1E-2
   stat: False
+  phi_w: 0.8170411
+  sigma_w: 0.1117012
+  N_wage: 4
 
 fella:
   r: 0.0346
