@@ -6,11 +6,11 @@ import numpy as np
 import quantecon.markov as Markov
 import quantecon as qe
 from quantecon.optimize.root_finding import brentq
-from numba import jit, prange
+from numba import jit
 import time
 import dill as pickle
 from sklearn.utils.extmath import cartesian
-from numba import njit, prange
+from numba import njit
 from interpolation.splines import UCGrid, CGrid, nodes, eval_linear
 from interpolation.splines import extrap_options as xto
 from interpolation import interp
@@ -164,7 +164,9 @@ class ConsumerProblem:
                  N_sim=10000):
 
         self.grid_size_A = int(grid_size_A)
+        self.grid_size_H = int(grid_size_H)
         self.N_sim = config.get('N_sim', N_sim)  # Number of agents for simulation
+        self.N_HD_LAMBDA = int(config.get('N_HD_LAMBDA', 1))  # HD grid multiplier for Euler errors
         self.r, self.R = r, 1 + r
         self.r_H, self.R_H = r_H, 1 + r_H
         self.beta = beta
@@ -852,7 +854,7 @@ def Operator_Factory(cp):
         c_unrefined = np.ones((len(z_vals), int(len(asset_grid_A)*2), len(asset_grid_H)))
 
 
-        for index_z in prange(len(z_vals)):
+        for index_z in range(len(z_vals)):
             for index_h_today in range(len(asset_grid_H)):
                 z = z_vals[index_z]
                 h_prime = asset_grid_H[index_h_today] * (1 - delta)
@@ -1045,10 +1047,9 @@ def Operator_Factory(cp):
         a_prime_unrefined = np.zeros((n_z, n_he, n_egm))
         h_prime_unrefined = np.zeros((n_z, n_he, n_egm))
 
-        for index_h_prime in prange(n_he):
+        for index_h_prime in range(n_he):
             h_prime = asset_grid_HE[index_h_prime]
             h_adj = h_prime * tau_adj  # Pre-compute for inner loop
-            # Allocate point array inside prange to avoid race conditions
             point = np.empty(2)
 
             for index_z in range(n_z):
@@ -1086,9 +1087,6 @@ def Operator_Factory(cp):
         Returns function on *wealth*.
 
         If return_grids=1, also returns intermediate grids for plotting.
-
-        Note: Cannot use prange here due to complex array operations (ravel, mask,
-        variable-length arrays) that Numba's parallel lowering doesn't support.
         """
         n_z = len(z_vals)
         n_we = len(asset_grid_WE)
@@ -1140,7 +1138,7 @@ def Operator_Factory(cp):
             # Call FUES_jit_core with all parameters
             keep, intersections, n_inter, final_mask, n_final = FUES_jit_core(
                 e_sorted, v_sorted, h_sorted, a_sorted, c_sorted,  # e, v, p1, p2, del_a
-                m_bar, 10,  # m_bar, LB
+                m_bar, 5,  # m_bar, LB
                 0, _FUES_INCLUDE_INTER, _FUES_NO_DOUBLE,  # endog_mbar=False
                 _FUES_SINGLE_INTER, _FUES_DISABLE_CHECKS, _FUES_LEFT_STRICT,
                 _FUES_POST_STATE, _FUES_DETECT_DEC, _FUES_POST_CLEAN,
@@ -1381,7 +1379,7 @@ def Operator_Factory(cp):
         v_adj = np.ones((len(z_vals), len(asset_grid_WE)))
         #c_adj = np.ones((len(z_vals), len(asset_grid_WE)))
 
-        for i_a in prange(len(asset_grid_WE)):
+        for i_a in range(len(asset_grid_WE)):
             #for i_h in range(len(asset_grid_H)):
             for i_z in range(len(z_vals)):
 
@@ -1425,10 +1423,14 @@ def Operator_Factory(cp):
                 v_adj[i_z, i_a] = (1-abound_flag)*v_prime_adj_star\
                                      + abound_flag*v_prime_a_bound
                 
+                # Clamp to grid bounds (consistent with EGM)
+                h_prime_adj_star = min(max(h_prime_adj_star, b), grid_max_H)
+                a_prime_adj_star = min(max(a_prime_adj_star, b), grid_max_A)
+
                 h_prime_adj[i_z, i_a] = h_prime_adj_star
                 a_prime_adj[i_z, i_a] = a_prime_adj_star
                 c_adj[i_z, i_a] = liqAct - h_prime_adj_star*(1 + tau) - a_prime_adj_star
-        
+
         return a_prime_adj,c_adj, h_prime_adj, v_adj
 
     
