@@ -6,7 +6,7 @@ import numpy as np
 def rootsearch(f,a,b,dx, h_prime,z, Ud_prime_a, Ud_prime_h,t):
     x1 = a; f1 = f(a, h_prime,z, Ud_prime_a, Ud_prime_h,t)
     x2 = a + dx; f2 = f(x2, h_prime,z, Ud_prime_a, Ud_prime_h,t)
-    
+
     while f1*f2 > 0.0:
         if x1 >= b:
             return np.nan,np.nan
@@ -14,6 +14,143 @@ def rootsearch(f,a,b,dx, h_prime,z, Ud_prime_a, Ud_prime_h,t):
         x2 = x1 + dx; f2 = f(x2,h_prime,z, Ud_prime_a, Ud_prime_h,t)
         #print(x2)
     return x1,x2
+
+
+@njit
+def rootsearch_wf(f, a, b, dx, h_prime, z, Ud_prime_a, Ud_prime_h, t):
+    """Rootsearch that also returns f values at bracket endpoints.
+
+    Returns (x1, x2, f1, f2) to avoid redundant evaluations in bisection.
+    """
+    x1 = a
+    f1 = f(a, h_prime, z, Ud_prime_a, Ud_prime_h, t)
+    x2 = a + dx
+    f2 = f(x2, h_prime, z, Ud_prime_a, Ud_prime_h, t)
+
+    while f1 * f2 > 0.0:
+        if x1 >= b:
+            return np.nan, np.nan, np.nan, np.nan
+        x1 = x2
+        f1 = f2
+        x2 = x1 + dx
+        f2 = f(x2, h_prime, z, Ud_prime_a, Ud_prime_h, t)
+    return x1, x2, f1, f2
+
+
+@njit
+def bisect_wf(f, x1, x2, f1, f2, h_prime, z, Ud_prime_a, Ud_prime_h, t, xtol=1e-6):
+    """Bisection that accepts pre-computed f1, f2 to avoid redundant evals.
+
+    Returns (root, converged) tuple.
+    """
+    # Check if already at root
+    if f1 == 0.0:
+        return x1
+    if f2 == 0.0:
+        return x2
+
+    # Bisection iterations (log2((x2-x1)/xtol) iterations needed)
+    while (x2 - x1) > xtol:
+        x3 = 0.5 * (x1 + x2)
+        f3 = f(x3, h_prime, z, Ud_prime_a, Ud_prime_h, t)
+        if f3 == 0.0:
+            return x3
+        if f2 * f3 < 0.0:
+            x1 = x3
+            f1 = f3
+        else:
+            x2 = x3
+            f2 = f3
+    return 0.5 * (x1 + x2)
+
+
+@njit
+def find_roots_piecewise_linear(resid, grid, max_roots, root_eps=0.0):
+    """Find all roots of a piecewise linear function via sign changes.
+
+    Given a residual function evaluated at grid points, finds all roots
+    by detecting sign changes and using linear interpolation.
+
+    Parameters
+    ----------
+    resid : 1D array
+        Residual values at each grid point (must be same length as grid)
+    grid : 1D array
+        Grid points where residual is evaluated
+    max_roots : int
+        Maximum number of roots to find
+    root_eps : float, optional
+        If > 0, use coarse sampling at this spacing instead of checking
+        every grid point. This makes root finding O(grid_range/root_eps)
+        instead of O(n_grid). Default 0.0 means check every point.
+
+    Returns
+    -------
+    roots : 1D array
+        Array of roots (zeros padded with 0.0)
+    n_roots : int
+        Number of roots found
+
+    Notes
+    -----
+    When root_eps > 0, we sample at coarse intervals and interpolate
+    directly between sample points when a sign change is detected.
+    This decouples root-finding cost from grid density.
+    """
+    n_grid = len(grid)
+    roots = np.zeros(max_roots)
+    n_roots = 0
+
+    if n_grid < 2:
+        return roots, n_roots
+
+    # Determine step size
+    grid_range = grid[-1] - grid[0]
+    if grid_range <= 0.0:
+        return roots, n_roots
+    avg_spacing = grid_range / (n_grid - 1)
+
+    if root_eps > 0.0 and root_eps > avg_spacing:
+        # Coarse sampling: step based on root_eps spacing
+        # Only use if root_eps is larger than grid spacing
+        step = int(root_eps / avg_spacing)
+    else:
+        # Fine sampling: check every grid point
+        # Used when root_eps=0 or grid is coarser than root_eps
+        step = 1
+
+    # Scan at step intervals
+    i = 0
+    while i < n_grid - 1 and n_roots < max_roots:
+        j = min(i + step, n_grid - 1)
+
+        r_i = resid[i]
+        r_j = resid[j]
+
+        # Check for sign change
+        if r_i * r_j < 0.0:
+            # Linear interpolation for exact root
+            x_i = grid[i]
+            x_j = grid[j]
+            denom = r_j - r_i
+            if denom != 0.0:
+                root = x_i - r_i * (x_j - x_i) / denom
+                roots[n_roots] = root
+                n_roots += 1
+        elif r_i == 0.0:
+            # Exact root at sample point
+            roots[n_roots] = grid[i]
+            n_roots += 1
+
+        i = j
+
+    # Check last grid point
+    if n_roots < max_roots and resid[n_grid - 1] == 0.0:
+        roots[n_roots] = grid[n_grid - 1]
+        n_roots += 1
+
+    return roots, n_roots
+
 
 def bisect(f,x1,x2,switch=0,epsilon=1.0e-9):
     f1 = f(x1)
@@ -48,46 +185,147 @@ def f(x):
 
 @njit(cache=True)
 def interp_as(xp, yp, x, extrap=False):
-    """Function  interpolates 1D
-    with linear extraplolation
+    """Function interpolates 1D (array version) with linear extrapolation.
 
     Parameters
     ----------
     xp : 1D array
-            points of x values
+        x coordinates of data points (must be increasing)
     yp : 1D array
-            points of y values
-    x  : 1D array
-            points to interpolate
+        y coordinates of data points
+    x : 1D array
+        points to interpolate
 
     Returns
     -------
-    evals: 1D array
-            y values at x
-
+    evals : 1D array
+        y values at x
     """
+    n_x = len(x)
+    n_xp = len(xp)
+    evals = np.empty(n_x)
 
-    evals = np.zeros(len(x))
-    if extrap and len(xp) > 1:
-        for i in range(len(x)):
-            if x[i] < xp[0]:
-                if (xp[1] - xp[0]) != 0:
-                    evals[i] = yp[0] + (x[i] - xp[0]) * (yp[1] - yp[0])\
-                        / (xp[1] - xp[0])
-                else:
-                    evals[i] = yp[0]
+    if n_xp == 0:
+        for i in range(n_x):
+            evals[i] = 0.0
+        return evals
 
-            elif x[i] > xp[-1]:
-                if (xp[-1] - xp[-2]) != 0:
-                    evals[i] = yp[-1] + (x[i] - xp[-1]) * (yp[-1] - yp[-2])\
-                        / (xp[-1] - xp[-2])
-                else:
-                    evals[i] = yp[-1]
-            else:
-                evals[i] = np.interp(x[i], xp, yp)
+    if n_xp == 1:
+        for i in range(n_x):
+            evals[i] = yp[0]
+        return evals
+
+    # Pre-compute bounds and extrapolation slopes
+    x_lo, x_hi = xp[0], xp[-1]
+    y_lo, y_hi = yp[0], yp[-1]
+
+    # Left extrapolation slope
+    dx_left = xp[1] - xp[0]
+    if dx_left != 0.0:
+        slope_left = (yp[1] - yp[0]) / dx_left
     else:
-        evals = np.interp(x, xp, yp)
+        slope_left = 0.0
+
+    # Right extrapolation slope
+    dx_right = xp[-1] - xp[-2]
+    if dx_right != 0.0:
+        slope_right = (yp[-1] - yp[-2]) / dx_right
+    else:
+        slope_right = 0.0
+
+    for i in range(n_x):
+        xi = x[i]
+
+        if xi <= x_lo:
+            if extrap:
+                evals[i] = y_lo + (xi - x_lo) * slope_left
+            else:
+                evals[i] = y_lo
+        elif xi >= x_hi:
+            if extrap:
+                evals[i] = y_hi + (xi - x_hi) * slope_right
+            else:
+                evals[i] = y_hi
+        else:
+            # Binary search for interval: find j such that xp[j] <= xi < xp[j+1]
+            lo, hi = 0, n_xp - 1
+            while hi - lo > 1:
+                mid = (lo + hi) >> 1
+                if xp[mid] <= xi:
+                    lo = mid
+                else:
+                    hi = mid
+
+            # Linear interpolation
+            dx = xp[hi] - xp[lo]
+            if dx != 0.0:
+                t = (xi - xp[lo]) / dx
+                evals[i] = yp[lo] + t * (yp[hi] - yp[lo])
+            else:
+                evals[i] = yp[lo]
+
     return evals
+
+
+@njit(cache=True)
+def interp_as_scalar(xp, yp, x, extrap=False):
+    """Function interpolates 1D (scalar version) with linear extrapolation.
+
+    Parameters
+    ----------
+    xp : 1D array
+        x coordinates of data points (must be increasing)
+    yp : 1D array
+        y coordinates of data points
+    x : float64
+        scalar point to interpolate
+
+    Returns
+    -------
+    eval : float64
+        y value at x
+    """
+    n_xp = len(xp)
+
+    if n_xp == 0:
+        return 0.0
+
+    if n_xp == 1:
+        return float(yp[0])
+
+    x_lo, x_hi = xp[0], xp[-1]
+
+    # Left boundary/extrapolation
+    if x <= x_lo:
+        if extrap:
+            dx = xp[1] - xp[0]
+            if dx != 0.0:
+                return float(yp[0] + (x - x_lo) * (yp[1] - yp[0]) / dx)
+        return float(yp[0])
+
+    # Right boundary/extrapolation
+    if x >= x_hi:
+        if extrap:
+            dx = xp[-1] - xp[-2]
+            if dx != 0.0:
+                return float(yp[-1] + (x - x_hi) * (yp[-1] - yp[-2]) / dx)
+        return float(yp[-1])
+
+    # Binary search for interval: find j such that xp[j] <= x < xp[j+1]
+    lo, hi = 0, n_xp - 1
+    while hi - lo > 1:
+        mid = (lo + hi) >> 1
+        if xp[mid] <= x:
+            lo = mid
+        else:
+            hi = mid
+
+    # Linear interpolation
+    dx = xp[hi] - xp[lo]
+    if dx != 0.0:
+        t = (x - xp[lo]) / dx
+        return float(yp[lo] + t * (yp[hi] - yp[lo]))
+    return float(yp[lo])
 
 
 def upper_envelope(segments,  calc_crossings=False):

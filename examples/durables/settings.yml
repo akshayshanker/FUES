@@ -11,18 +11,18 @@ durables:
   normalisation: 1e-5  # Income normalisation factor
   N_sim: 10000  # Number of agents for Euler error simulation
   N_HD_LAMBDA: 2  # Multiplier for HD grid size (each dimension) for accurate Euler errors
-  r: 0.04
+  r: 0.045
   sigma: 0.001
   r_H: 0
-  beta: 0.93
+  beta: 0.945
   alpha: 0.7  # Consumption weight in utility (1-alpha = housing weight)
   kappa: 0.06  # Housing scaling factor in utility
   delta: 0
   b: 1e-08
   grid_max_A: 10.0 # max for liquid asset grid 
-  grid_max_WE: 25.0 # max for wealth (market resources grid)
+  grid_max_WE: 30.0 # max for wealth (market resources grid)
   grid_size_W: 300 # size of wealth grid
-  grid_max_H: 15.0
+  grid_max_H: 20.0
   grid_size_A: 300 # size of liquid asset grid
   grid_size_H: 300
   gamma_c: 3.5
@@ -40,24 +40,3 @@ durables:
   phi_w: 0.8170411
   sigma_w: 0.1117012
   N_wage: 4
-
-fella:
-  r: 0.0346
-  r_H: 0
-  beta: 0.93
-  delta: 0
-  Pi:
-    - [0.99, 0.01, 0]
-    - [0.01, 0.98, 0.01]
-    - [0, 0.09, 0.91]
-  z_vals: [0.2, 0.526, 4.66]
-  b: 1e-100
-  grid_max_A: 30.0
-  grid_max_H: 5  
-  grid_size_A: 1000
-  grid_size_H: 7.0
-  gamma_1: 0
-  xi: 0
-  kappa: 0.077
-  phi: 0.09
-  theta: 0.77

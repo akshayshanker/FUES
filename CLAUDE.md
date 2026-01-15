@@ -46,3 +46,13 @@ For the EGM method, the shadow value of durables `q_d` requires computing:
 - In `post_decision.compute_wq`, just interpolate `lambda_d_keep[t+1]` once per shock
 
 **Result**: w computation reduced from ~4.5s to ~2.5s per period (grid 150x150x300).
+
+## Coding Rules
+
+### 1D Interpolation
+
+For 1D interpolation, always use functions from `dc_smm.fues.helpers.math_funcs`:
+- `interp_as(xp, yp, x)` - array version, `x` is a 1D array
+- `interp_as_scalar(xp, yp, x)` - scalar version, `x` is a float
+
+Do NOT use `interp` from `interpolation` or `np.interp` directly. Any optimizations to 1D interpolation should be done in these functions.

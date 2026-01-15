@@ -166,6 +166,30 @@ def _get_avg_time(res) -> float:
             return res[0]["avg_time"]
     return float("nan")
 
+
+def _get_avg_keeper_ms(res) -> float:
+    """Extract average keeper time in ms from solver result dicts."""
+    if res is None:
+        return float("nan")
+    if isinstance(res, dict):
+        if "avg_keeper_ms" in res:
+            return res["avg_keeper_ms"]
+        if 0 in res and isinstance(res[0], dict) and "avg_keeper_ms" in res[0]:
+            return res[0]["avg_keeper_ms"]
+    return float("nan")
+
+
+def _get_avg_adj_ms(res) -> float:
+    """Extract average adjuster time in ms from solver result dicts."""
+    if res is None:
+        return float("nan")
+    if isinstance(res, dict):
+        if "avg_adj_ms" in res:
+            return res["avg_adj_ms"]
+        if 0 in res and isinstance(res[0], dict) and "avg_adj_ms" in res[0]:
+            return res[0]["avg_adj_ms"]
+    return float("nan")
+
 def euler_housing(results, cp):
     """
     Compute Euler errors for the housing model.
@@ -396,7 +420,7 @@ def initVal(cp):
 
 
 def solveVFI(cp, verbose=False):
-    iterVFI, _, condition_V, _ = Operator_Factory(cp)
+    iterVFI, _, condition_V, _, _ = Operator_Factory(cp)
 
     # Initial VF
     EVnxt, _, _ = initVal(cp)
@@ -443,13 +467,18 @@ def solveVFI(cp, verbose=False):
     return results
 
 def solveEGM(cp, LS=True, verbose=True, plot_age=58):
-    _, iterEGM, condition_V, _ = Operator_Factory(cp)
+    _, iterEGM, condition_V, condition_V_HD, _ = Operator_Factory(cp)
 
     # Initial values
     EVnxt, ELambdaAnxt, ELambdaHnxt = initVal(cp)
 
+    # HD Lambda initialization (None for terminal period, will be handled by iterEGM)
+    ELambdaH_HD_nxt = None
+
     t = cp.T
     times = []
+    keeper_times = []
+    adj_times = []
     results = {}
     results[0] = {}
 
@@ -458,16 +487,26 @@ def solveEGM(cp, LS=True, verbose=True, plot_age=58):
     while t >= cp.t0 and error > cp.tol_bel:
         start = time.time()
 
-        (Vcurr, Hnxt, Cnxt, Dnxt, LambdaAcurr, LambdaHcurr, AdjPol,
-         KeeperPol, EGMGrids) = iterEGM(t, EVnxt, ELambdaAnxt,
-                                        ELambdaHnxt, m_bar=cp.m_bar, plot_age=plot_age)
-                    
+        (Vcurr, Hnxt, Cnxt, Dnxt, LambdaAcurr, LambdaHcurr, LambdaH_HD_curr, AdjPol,
+         KeeperPol, EGMGrids, timing) = iterEGM(t, EVnxt, ELambdaAnxt,
+                                        ELambdaHnxt, ELambdaH_HD_nxt, m_bar=cp.m_bar, plot_age=plot_age,
+                                        verbose_timing=verbose)
+
         EVnxt, ELambdaAnxt, ELambdaHnxt = condition_V(
                                             Vcurr, LambdaAcurr, LambdaHcurr
         )
-        
+        # Condition HD Lambda for next iteration and store conditioned version
+        if cp.N_HD_LAMBDA > 1:
+            ELambdaH_HD_nxt = condition_V_HD(LambdaH_HD_curr)
+            # Store conditioned Lambda: E[Lambda_H(t)|z] for simulation
+            ELambdaH_HD_store = ELambdaH_HD_nxt
+        else:
+            ELambdaH_HD_store = LambdaH_HD_curr  # Dummy when not using HD
+
         if t < cp.T:
             times.append(time.time() - start)
+            keeper_times.append(timing['keeper_ms'])
+            adj_times.append(timing['adj_ms'])
 
         results[t] = {}
         results[t]["D"] = Dnxt
@@ -482,6 +521,7 @@ def solveEGM(cp, LS=True, verbose=True, plot_age=58):
         results[t]["Akeeper"] = KeeperPol['A']
         results[t]["EGMGrids"] = EGMGrids
         results[t]["ELambdaHnxt"] = ELambdaHnxt
+        results[t]["ELambdaH_HD"] = ELambdaH_HD_store  # Conditioned HD Lambda for simulation
 
         if t < cp.T:
             error = np.max(np.abs(Vcurr - results[t + 1]["VF"]))
@@ -493,36 +533,50 @@ def solveEGM(cp, LS=True, verbose=True, plot_age=58):
         t = t - 1
 
     results[0]['avg_time'] = np.mean(times)
+    results[0]['avg_keeper_ms'] = np.mean(keeper_times) if keeper_times else 0.0
+    results[0]['avg_adj_ms'] = np.mean(adj_times) if adj_times else 0.0
     results[0]['iterations'] = cp.T1 -t
 
     return results
 
 def solveNEGM(cp, LS=True, verbose=True):
-    iterVFI, iterEGM, condition_V, iterNEGM = Operator_Factory(cp)
+    iterVFI, iterEGM, condition_V, condition_V_HD, iterNEGM = Operator_Factory(cp)
 
     # Initial values
     EVnxt, ELambdaAnxt, ELambdaHnxt = initVal(cp)
 
+    # HD Lambda initialization (None for terminal period, will be handled by iterNEGM)
+    ELambdaH_HD_nxt = None
+
     # Results dictionaries
     results = {}
-    results[0] = {} 
+    results[0] = {}
     times = []
+    keeper_times = []
+    adj_times = []
     t = cp.T
-    error =1
+    error = 1
     while t >= cp.t0 and error > cp.tol_bel:
         results[t] = {}
         start = time.time()
 
-        (Vcurr, Hnxt, Cnxt, Dnxt, LambdaAcurr, LambdaHcurr, AdjPol, KeeperPol) = iterNEGM(
-            EVnxt, ELambdaAnxt, ELambdaHnxt, t)
-
-        
+        (Vcurr, Hnxt, Cnxt, Dnxt, LambdaAcurr, LambdaHcurr, LambdaH_HD_curr, AdjPol, KeeperPol, timing) = iterNEGM(
+            EVnxt, ELambdaAnxt, ELambdaHnxt, t, ELambdaH_HD_nxt, verbose_timing=verbose)
 
         EVnxt, ELambdaAnxt, ELambdaHnxt = condition_V(
             Vcurr, LambdaAcurr, LambdaHcurr)
+        # Condition HD Lambda for next iteration and store conditioned version
+        if cp.N_HD_LAMBDA > 1:
+            ELambdaH_HD_nxt = condition_V_HD(LambdaH_HD_curr)
+            # Store conditioned Lambda: E[Lambda_H(t)|z] for simulation
+            ELambdaH_HD_store = ELambdaH_HD_nxt
+        else:
+            ELambdaH_HD_store = LambdaH_HD_curr  # Dummy when not using HD
 
         if t < cp.T:
             times.append(time.time() - start)
+            keeper_times.append(timing['keeper_ms'])
+            adj_times.append(timing['adj_ms'])
 
         results[t] = {}
         results[t]["D"] = Dnxt
@@ -536,6 +590,7 @@ def solveNEGM(cp, LS=True, verbose=True):
         results[t]["Ckeeper"] = KeeperPol['C']
         results[t]["Akeeper"] = KeeperPol['A']
         results[t]["ELambdaHnxt"] = ELambdaHnxt
+        results[t]["ELambdaH_HD"] = ELambdaH_HD_store  # Conditioned HD Lambda for simulation
 
         if t < cp.T:
             error = np.max(np.abs(Vcurr - results[t + 1]["VF"]))
@@ -543,10 +598,12 @@ def solveNEGM(cp, LS=True, verbose=True):
         if verbose:
             print(f"NEGM age {t}, time {time.time() - start}")
             if t< cp.T: print(f"Error at age {t} is {error}")
-            
+
         t = t - 1
 
     results[0]['avg_time'] = np.mean(times)
+    results[0]['avg_keeper_ms'] = np.mean(keeper_times) if keeper_times else 0.0
+    results[0]['avg_adj_ms'] = np.mean(adj_times) if adj_times else 0.0
     results[0]['iterations'] = cp.T1 -t
 
     return results
@@ -641,9 +698,9 @@ def compare_grids_and_tau(cp_settings, tau_values, grid_sizes, max_iter=200, tol
                              m_bar=float(cp_settings['M_bar']),
                              T=int(cp_settings['max_iter']),
                              theta=float(cp_settings['theta']),
-                             t0=0,
+                             t0=int(cp_settings.get('t0', 0)),
                              root_eps=float(cp_settings['root_eps']),
-                             stat=False
+                             stat=cp_settings.get('stat', False)
                              )
 
         print(f"[Rank {rank}] Solving tau={tau}, grid={grid_size}, method={method}...", flush=True)
@@ -655,6 +712,8 @@ def compare_grids_and_tau(cp_settings, tau_values, grid_sizes, max_iter=200, tol
         best_stats = None
         best_stats_hd = None
         best_npv = None
+        best_keeper_ms = 0.0
+        best_adj_ms = 0.0
 
         for _ in range(rep):  # Run each method `rep` times
             if method == 'NEGM':
@@ -662,7 +721,9 @@ def compare_grids_and_tau(cp_settings, tau_values, grid_sizes, max_iter=200, tol
             else:
                 solution = solveEGM(cp, verbose=False)
 
-            print(f"[Rank {rank}] Solved, computing Euler errors...", flush=True)
+            # Debug: print timing from this run
+            print(f"[Rank {rank}] {method} solved: keeper={solution[0].get('avg_keeper_ms', 0.0):.1f}ms, "
+                  f"adj={solution[0].get('avg_adj_ms', 0.0):.1f}ms", flush=True)
             # Use simulation-based Euler errors with adjuster/keeper breakdown
             euler, euler_hd, sim_data = euler_errors(solution, cp, N=cp.N_sim, seed=42)
             stats = compute_euler_stats(euler, discrete=sim_data['discrete'])
@@ -683,6 +744,9 @@ def compare_grids_and_tau(cp_settings, tau_values, grid_sizes, max_iter=200, tol
                 best_npv = npv
                 best_npv_adj = npv_adj
                 best_n_adj = n_adj
+                # Track keeper/adjuster timing from best run
+                best_keeper_ms = solution[0].get('avg_keeper_ms', 0.0)
+                best_adj_ms = solution[0].get('avg_adj_ms', 0.0)
 
         avg_time = total_runtime / rep
 
@@ -695,16 +759,30 @@ def compare_grids_and_tau(cp_settings, tau_values, grid_sizes, max_iter=200, tol
             'Grid_Size': grid_size,
             'Method': method,
             'Avg_Time': avg_time,
+            'Avg_Keeper_ms': best_keeper_ms,
+            'Avg_Adj_ms': best_adj_ms,
             'Euler_Combined': best_stats['combined']['mean'],
+            'Euler_Combined_HD': best_stats_hd['combined']['mean'],
             'Euler_Adjuster': best_stats['adjuster']['mean'],
             'Euler_Adjuster_HD': best_stats_hd['adjuster']['mean'],
             'Euler_Keeper': best_stats['keeper']['mean'],
+            'Euler_Keeper_HD': best_stats_hd['keeper']['mean'],
             'NPV_Mean': np.mean(best_npv),
             'NPV_Median': np.median(best_npv),
             'NPV_Adj_Mean': npv_adj_mean,
             'Adj_Rate': best_stats['pct_adjuster'],
             'Iterations': best_iterations,
-            'gamma_c': cp.gamma_c
+            # Model parameters for table notes
+            'beta': cp.beta,
+            'gamma_c': cp.gamma_c,
+            'gamma_h': cp.gamma_h,
+            'alpha': cp.alpha,
+            'delta': cp.delta,
+            'r': cp.r,
+            'r_H': cp.r_H,
+            'phi_w': cp.phi_w,
+            'sigma_w': cp.sigma_w,
+            'N_sim': cp.N_sim
         })
 
     # Gather results from all processes
@@ -745,6 +823,7 @@ def create_latex_table(results_summary):
     grid sizes and tau values across FUES and NEGM.
 
     Format matches housing_timing.tex: methods as column groups.
+    Shows separate keeper and adjuster timing columns.
 
     Parameters
     ----------
@@ -771,32 +850,45 @@ def create_latex_table(results_summary):
         except StopIteration:
             return None
 
-    # Build table with format matching housing_timing.tex (methods as column groups)
+    # Build table with hierarchical headers:
+    # Method -> Time (NA, Adj) | Euler (Comb, NA, Adj)
+    # NA = Non-Adjuster
     table = "% Requires: \\usepackage{booktabs}\n"
     table += "\\begin{table}[htbp]\n\\centering\n"
     table += "\\begingroup\n\\small\n"
-    table += "\\setlength{\\tabcolsep}{4pt}\n"
+    table += "\\setlength{\\tabcolsep}{3pt}\n"
     table += "\\renewcommand{\\arraystretch}{1.05}\n"
     table += "\\caption{Durables Model: Per-Period Timing and Accuracy}\n"
     table += "\\label{tab:durables_timing}\n"
-    table += "\\begin{tabular}{@{}rr rrr rrr@{}}\n"
+    table += "\\begin{tabular}{@{}rr rrrrr rrrrr@{}}\n"
     table += "\\toprule\n"
 
-    # Header row 1: method groups (like housing table)
+    # Header row 1: method groups
     table += (
-        "\\multicolumn{2}{c}{Grid} & "
-        "\\multicolumn{3}{c}{FUES} & "
-        "\\multicolumn{3}{c}{NEGM} \\\\\n"
+        "& & "
+        "\\multicolumn{5}{c}{FUES} & "
+        "\\multicolumn{5}{c}{NEGM} \\\\\n"
     )
     table += (
-        "\\cmidrule(lr){1-2} \\cmidrule(lr){3-5} \\cmidrule(lr){6-8}\n"
+        "\\cmidrule(lr){3-7} \\cmidrule(lr){8-12}\n"
     )
 
-    # Header row 2: metrics under each method
+    # Header row 2: Time and Euler subgroups
+    table += (
+        "& & "
+        "\\multicolumn{2}{c}{Time} & \\multicolumn{3}{c}{Euler} & "
+        "\\multicolumn{2}{c}{Time} & \\multicolumn{3}{c}{Euler} \\\\\n"
+    )
+    table += (
+        "\\cmidrule(lr){3-4} \\cmidrule(lr){5-7} \\cmidrule(lr){8-9} \\cmidrule(lr){10-12}\n"
+    )
+
+    # Header row 3: individual column labels
+    # Use "NA" for Non-Adjuster to keep columns compact
     table += (
         "$N_A$ & $\\tau$ & "
-        "Per. & E.Adj & E.Keep & "
-        "Per. & E.Adj & E.Keep \\\\\n"
+        "NA & Adj & Comb & NA & Adj & "
+        "NA & Adj & Comb & NA & Adj \\\\\n"
     )
     table += "\\midrule\n"
 
@@ -820,25 +912,56 @@ def create_latex_table(results_summary):
             else:
                 grid_str = ""
 
-            # Use HD adjuster error (most accurate measure)
+            # Use HD errors (most accurate measure)
+            fues_comb = fues.get('Euler_Combined_HD', fues['Euler_Combined'])
+            negm_comb = negm.get('Euler_Combined_HD', negm['Euler_Combined'])
             fues_adj = fues.get('Euler_Adjuster_HD', fues['Euler_Adjuster'])
             negm_adj = negm.get('Euler_Adjuster_HD', negm['Euler_Adjuster'])
+            fues_keep = fues.get('Euler_Keeper_HD', fues['Euler_Keeper'])
+            negm_keep = negm.get('Euler_Keeper_HD', negm['Euler_Keeper'])
 
-            # Data row: Grid | FUES (Per., E.Adj, E.Keep) | NEGM (Per., E.Adj, E.Keep)
+            # Get timing in ms
+            fues_keeper_ms = fues.get('Avg_Keeper_ms', 0.0)
+            fues_adj_ms = fues.get('Avg_Adj_ms', 0.0)
+            negm_keeper_ms = negm.get('Avg_Keeper_ms', 0.0)
+            negm_adj_ms = negm.get('Avg_Adj_ms', 0.0)
+
+            # Data row: Grid | FUES (Time: NA, Adj | Euler: Comb, NA, Adj) | NEGM (...)
             table += (
                 f"{grid_str} & {tau} & "
-                f"{fues['Avg_Time']:.2f} & {fues_adj:.2f} & {fues['Euler_Keeper']:.2f} & "
-                f"{negm['Avg_Time']:.2f} & {negm_adj:.2f} & {negm['Euler_Keeper']:.2f} "
+                f"{fues_keeper_ms:.0f} & {fues_adj_ms:.0f} & {fues_comb:.2f} & {fues_keep:.2f} & {fues_adj:.2f} & "
+                f"{negm_keeper_ms:.0f} & {negm_adj_ms:.0f} & {negm_comb:.2f} & {negm_keep:.2f} & {negm_adj:.2f} "
                 "\\\\\n"
             )
 
     table += "\\bottomrule\n\\end{tabular}\n"
     table += "\\vspace{0.3em}\n"
+
+    # Extract parameters from first result (they're the same across all runs)
+    if results_summary:
+        p = results_summary[0]
+        param_str = (
+            f"$\\beta={p.get('beta', 0.93):.2f}$, "
+            f"$\\gamma_c={p.get('gamma_c', 3):.1f}$, "
+            f"$\\gamma_h={p.get('gamma_h', 3):.1f}$, "
+            f"$\\alpha={p.get('alpha', 0.7):.2f}$, "
+            f"$\\delta={p.get('delta', 0.0):.2f}$, "
+            f"$r={p.get('r', 0.01):.2f}$, "
+            f"$r_H={p.get('r_H', 0.0):.2f}$, "
+            f"$\\rho_w={p.get('phi_w', 0.9):.2f}$, "
+            f"$\\sigma_w={p.get('sigma_w', 0.08):.2f}$, "
+            f"$N_{{sim}}={p.get('N_sim', 10000):,}$"
+        )
+    else:
+        param_str = ""
+
     table += (
-        "\\par\\small \\textit{Notes:} All timings in seconds. "
-        "\\textbf{Per.}: time per period. "
-        "\\textbf{E.Adj}: adjuster Euler error ($\\log_{10}$). "
-        "\\textbf{E.Keep}: keeper Euler error ($\\log_{10}$).\n"
+        "\\par\\small \\textit{Notes:} "
+        "Time in ms; Euler errors in $\\log_{10}$ scale. "
+        "\\textbf{Comb}: combined mean. "
+        "\\textbf{NA}: non-adjusters. "
+        "\\textbf{Adj}: adjusters. "
+        f"Parameters: {param_str}.\n"
     )
     table += "\\endgroup\n\\end{table}\n"
 
@@ -1176,6 +1299,10 @@ if __name__ == "__main__":
         # 4. Tabulate timing and errors
         negm_time = _get_avg_time(NEGMRes)
         egm_time = _get_avg_time(EGMRes_fues)
+        egm_keeper_ms = _get_avg_keeper_ms(EGMRes_fues)
+        egm_adj_ms = _get_avg_adj_ms(EGMRes_fues)
+        negm_keeper_ms = _get_avg_keeper_ms(NEGMRes)
+        negm_adj_ms = _get_avg_adj_ms(NEGMRes)
 
         print("\n" + "="*70)
         print("Summary Table")
@@ -1195,6 +1322,8 @@ if __name__ == "__main__":
         print(f"{'NPV Utility adj (mean)':<30} {v_fues_adj:>15.4f} {v_negm_adj:>15.4f}")
         print(f"{'CE loss from NEGM adj (%)':<30} {ce_adj_pct:>15.4f} {'-':>15}")
         print(f"{'Avg. time/iter (sec)':<30} {egm_time:>15.2f} {negm_time:>15.2f}")
+        print(f"{'Avg. keeper time (ms)':<30} {egm_keeper_ms:>15.1f} {negm_keeper_ms:>15.1f}")
+        print(f"{'Avg. adjuster time (ms)':<30} {egm_adj_ms:>15.1f} {negm_adj_ms:>15.1f}")
         print("="*70)
 
         # Build markdown table for file output
@@ -1214,6 +1343,8 @@ if __name__ == "__main__":
         lines.append(f"| NPV Utility adj (mean) | {v_fues_adj:.4f} | {v_negm_adj:.4f} |\n")
         lines.append(f"| CE loss from NEGM adj (%) | {ce_adj_pct:.4f} | - |\n")
         lines.append(f"| Avg. time/iter (sec) | {egm_time:.2f} | {negm_time:.2f} |\n")
+        lines.append(f"| Avg. keeper time (ms) | {egm_keeper_ms:.1f} | {negm_keeper_ms:.1f} |\n")
+        lines.append(f"| Avg. adjuster time (ms) | {egm_adj_ms:.1f} | {negm_adj_ms:.1f} |\n")
 
         with open("../../results/durables/durables_single_result.tex", "w") as f:
             f.writelines(lines)

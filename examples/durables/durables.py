@@ -18,6 +18,7 @@ from interpolation import interp
 import scipy
 import matplotlib.pylab as pl
 import os, sys
+from consav import golden_section_search
 
 # Import local modules
 cwd = os.getcwd()
@@ -25,6 +26,7 @@ sys.path.append('..')
 os.chdir(cwd)
 from dc_smm.fues import FUES_jit_core, get_fues_defaults  # JIT-compiled core
 from dc_smm.fues.fues_v0dev import uniqueEG  # Duplicate removal utility
+from dc_smm.fues.helpers.math_funcs import interp_as_scalar  # 1D scalar interpolation
 
 # Extract FUES defaults as module-level constants for numba compatibility
 _fd = get_fues_defaults()
@@ -45,7 +47,9 @@ _FUES_EPS_FWD = _fd['eps_fwd_back']
 _FUES_PAR_GUARD = _fd['parallel_guard']
 del _fd
 from dc_smm.fues.rfc_simple import rfc
-from dc_smm.fues.helpers.math_funcs import interp_as, rootsearch, correct_jumps1d_arr
+from dc_smm.fues.helpers.math_funcs import (interp_as, rootsearch, rootsearch_wf,
+                                             bisect_wf, correct_jumps1d_arr,
+                                             find_roots_piecewise_linear)
 
 
 # =============================================================================
@@ -167,6 +171,8 @@ class ConsumerProblem:
         self.grid_size_H = int(grid_size_H)
         self.N_sim = config.get('N_sim', N_sim)  # Number of agents for simulation
         self.N_HD_LAMBDA = int(config.get('N_HD_LAMBDA', 1))  # HD grid multiplier for Euler errors
+        # Read return_grids from environment variable (set in PBS script)
+        self.return_grids = os.environ.get('FUES_RETURN_GRIDS', '0') == '1'
         self.r, self.R = r, 1 + r
         self.r_H, self.R_H = r_H, 1 + r_H
         self.beta = beta
@@ -403,6 +409,15 @@ def Operator_Factory(cp):
     sigma = cp.sigma
     tau = cp.tau
     du_c_inv = cp.du_c_inv
+
+    # HD grid for Lambda_H computation (N_HD_LAMBDA times finer)
+    N_HD_LAMBDA = getattr(cp, 'N_HD_LAMBDA', 1)
+    n_a_hd = len(asset_grid_A) * N_HD_LAMBDA
+    n_h_hd = len(asset_grid_H) * N_HD_LAMBDA
+    asset_grid_A_HD = np.linspace(b, grid_max_A, n_a_hd)
+    asset_grid_H_HD = np.linspace(b, grid_max_H, n_h_hd)
+    UGgrid_HD = UCGrid((b, grid_max_A, n_a_hd), (b, grid_max_H, n_h_hd))
+    use_hd_lambda = N_HD_LAMBDA > 1
     du_h = cp.du_h
     EGM_N = cp.EGM_N
     gamma_c = cp.gamma_c
@@ -414,6 +429,7 @@ def Operator_Factory(cp):
     UGgrid_all = cp.UGgrid_all
 
     root_eps = cp.root_eps
+    return_grids = getattr(cp, 'return_grids', False)  # Whether to store EGM grids
 
     @njit
     def roots(f, a, l, h_prime, z, Ud_prime_a, Ud_prime_h, t, eps=root_eps):
@@ -428,7 +444,7 @@ def Operator_Factory(cp):
             a = x2
             root = brentq(f, x1, x2,
                           args=(h_prime, z, Ud_prime_a, Ud_prime_h, t),
-                          xtol=1e-12)
+                          xtol=1e-08)
             if root is not None:
                 sols_array[i] = root[0]
                 i += 1
@@ -487,7 +503,12 @@ def Operator_Factory(cp):
             return np.exp(u(consumption, h_prime, chi) + beta * Ev_prime)
         else:
             return -1e250
-        
+
+    @njit
+    def obj_adj_min(x_prime, a, h, z, i_z, V, R, R_H, t):
+        """Negated objective for golden_section_search (minimizer)."""
+        return -obj_adj(x_prime, a, h, z, i_z, V, R, R_H, t)
+
     @njit
     def obj_adj_nested(x_prime, wealth, i_z, V, keeper_pol_c, t):
 
@@ -497,40 +518,137 @@ def Operator_Factory(cp):
 
         w_2 = wealth - h_prime - tau * h_prime
 
-        if w_2 > 0 and h_prime >0:
+        # Check bounds to avoid extrapolation issues
+        if w_2 > 0 and h_prime > 0 and h_prime <= grid_max_H and w_2 <= grid_max_A:
 
             c_keeper = eval_linear(UGgrid_all, keeper_pol_c, np.array([w_2, h_prime]), xto.LINEAR)
 
-            a_prime = w_2 - c_keeper
+            # Ensure c_keeper is valid
+            if c_keeper <= 0 or c_keeper > w_2:
+                return -np.inf
+
+            a_prime = max(b, w_2 - c_keeper)
+
+            # Check a_prime is within grid
+            if a_prime > grid_max_A:
+                return -np.inf
 
             point = np.array([a_prime, h_prime])
             Ev_prime = eval_linear(UGgrid_all, V[i_z, :], point, xto.LINEAR)
-            
+
             return u(c_keeper, h_prime, 0) + beta * Ev_prime
         else:
             return -np.inf
-        
-            
+
+    @njit
+    def obj_adj_nested_min(x_prime, wealth, i_z, V, keeper_pol_c, t):
+        """Negated objective for golden_section_search (minimizer)."""
+        return -obj_adj_nested(x_prime, wealth, i_z, V, keeper_pol_c, t)
+
+
     @njit
     def obj_adj_nested_b(x_prime, wealth, i_z, V, keeper_pol, t):
 
-        # objective function to be *maximised* for adjusters
+        # objective function to be *maximised* for adjusters (at borrowing constraint a'=b)
 
         h_prime = x_prime
 
         w_2 = wealth - h_prime - tau * h_prime
 
-        if w_2 > 0 and h_prime >= b:
+        # Check bounds to avoid extrapolation issues
+        if w_2 > 0 and h_prime >= b and h_prime <= grid_max_H:
 
+            consumption = w_2 - b
+
+            # Ensure consumption is valid
+            if consumption <= 0:
+                return -np.inf
 
             point = np.array([b, h_prime])
             Ev_prime = eval_linear(UGgrid_all, V[i_z, :], point, xto.LINEAR)
-            
-            consumption = w_2 - b
 
             return u(consumption, h_prime, 0) + beta * Ev_prime
         else:
             return -np.inf
+
+    @njit
+    def obj_adj_nested_b_min(x_prime, wealth, i_z, V, keeper_pol, t):
+        """Negated objective for golden_section_search (minimizer)."""
+        return -obj_adj_nested_b(x_prime, wealth, i_z, V, keeper_pol, t)
+
+    @njit
+    def gs_max_multisect(obj, obj_neg, a, b, args, n_sections=5, xtol=1e-10):
+        """Golden section maximization over multiple sections to handle multiple optima.
+
+        Divides [a, b] into n_sections intervals, runs golden_section_search on each,
+        returns the (x, val) that gives the maximum across all sections.
+
+        Parameters
+        ----------
+        obj : callable
+            Objective function to maximize (not negated)
+        obj_neg : callable
+            Negated objective function for minimization (golden_section_search)
+        a : float
+            Lower bound
+        b : float
+            Upper bound
+        args : tuple
+            Additional arguments to obj and obj_neg
+        n_sections : int
+            Number of sections to divide interval into
+        xtol : float
+            Tolerance for optimization
+
+        Returns
+        -------
+        best_x : float
+            x value that maximizes obj
+        best_val : float
+            Maximum value found
+        """
+        # Handle edge case where interval is too small
+        if b - a < xtol:
+            val = obj(a, *args)
+            return a, val
+
+        # Pre-allocate arrays to store results from each section
+        x_opts = np.zeros(n_sections)
+        vals = np.zeros(n_sections)
+        vals[:] = -1e250  # Initialize to large negative (safer than -inf for numba)
+
+        section_width = (b - a) / n_sections
+
+        for i in range(n_sections):
+            lo = a + i * section_width
+            hi = a + (i + 1) * section_width
+
+            # Skip sections that are too narrow
+            if hi - lo < xtol:
+                continue
+
+            # Run golden_section_search (minimizer) with negated objective
+            x_opt = golden_section_search.optimizer(obj_neg, lo, hi, args=args, tol=xtol)
+            x_opts[i] = x_opt
+            vals[i] = obj(x_opt, *args)  # Evaluate original objective for max value
+
+        # Find the section with the maximum value
+        best_idx = 0
+        best_val = vals[0]
+        for i in range(1, n_sections):
+            if vals[i] > best_val:
+                best_val = vals[i]
+                best_idx = i
+
+        best_x = x_opts[best_idx]
+
+        # Fallback if all sections returned invalid
+        if best_val < -1e200:
+            mid = (a + b) / 2
+            best_x = mid
+            best_val = obj(mid, *args)
+
+        return best_x, best_val
 
     @njit
     def iterVFI(t, V):
@@ -586,10 +704,11 @@ def Operator_Factory(cp):
             args_adj = (a, h, z, i_z, V, R, R_H, t)
 
             # maximise over h_prime, implicitly maximising over a_prime
-            h_prime_adj_star = qe.optimize.brent_max(obj_adj, bnds_adj[0],
-                                                     bnds_adj[1],
-                                                     args=args_adj,
-                                                     xtol=1e-10)[0]
+            # Use golden_section_search (minimizer) with negated objective
+            h_prime_adj_star = golden_section_search.optimizer(obj_adj_min, bnds_adj[0],
+                                                               bnds_adj[1],
+                                                               args=args_adj,
+                                                               tol=1e-10)
 
             # set no adjust bounds, initial val and args
             # we take in wealth/ cash at hand as input state to obj_noadj
@@ -657,22 +776,19 @@ def Operator_Factory(cp):
         return Vcurr, Anxt, Hnxt, Cnxt, Aadj, Hadj
 
     @njit
-    def root_A_liq_euler_inv(a_prime, h_prime, z, Ud_prime_a, t):
+    def root_A_liq_euler_inv_2d(a_prime, h_prime, z, Ud_prime_a, t):
         """ Gives inverse of liquid asset Euler and EGM point
-                for non-adjusters
+                for non-adjusters (2D version for off-grid h_prime)
 
         Parameters
         ----------
         a_prime: float64
         h_prime: float64
-                                t+1 housing value adjusted
+                                t+1 housing value (may be off-grid)
         z: float64
                 value of shock
         Ud_prime_a: 2D array
                                  discounted marginal utility of liq assets
-                                 for given shock value today
-        Ud_prime_h: 2D array
-                                 discounted marginal utility of housing assets
                                  for given shock value today
         t: int
                 time
@@ -685,12 +801,42 @@ def Operator_Factory(cp):
                 consumption
         """
 
-        #h_prime = (1-delta)*R_H*h
         point = np.array([a_prime, h_prime])
+        Ud_prime_a_val = eval_linear(UGgrid_all, Ud_prime_a, point, xto.LINEAR)
 
-        Ud_prime_a_val = eval_linear(UGgrid_all,
-                                     Ud_prime_a,
-                                     point, xto.LINEAR)
+        c = du_c_inv(Ud_prime_a_val)
+        egm_a = c + a_prime
+
+        return egm_a, c
+
+    @njit
+    def root_A_liq_euler_inv(a_prime, h_prime, z, Ud_prime_a_1d, t):
+        """ Gives inverse of liquid asset Euler and EGM point
+                for adjusters (1D version for on-grid h_prime)
+
+        Parameters
+        ----------
+        a_prime: float64
+        h_prime: float64
+                                t+1 housing value adjusted (on grid)
+        z: float64
+                value of shock
+        Ud_prime_a_1d: 1D array
+                                 discounted marginal utility of liq assets
+                                 for given shock value today, sliced at h_prime index
+        t: int
+                time
+
+        Returns
+        -------
+        egm_a: float64
+                EGM point for a today
+        c: float64
+                consumption
+        """
+
+        # 1D interpolation along a dimension (h_prime is on grid)
+        Ud_prime_a_val = interp_as_scalar(asset_grid_A, Ud_prime_a_1d, a_prime)
 
         c = du_c_inv(Ud_prime_a_val)
         egm_a = c + a_prime  # - y_func(t,z)
@@ -698,9 +844,11 @@ def Operator_Factory(cp):
         return egm_a, c
 
     @njit
-    def housing_euler_resid_(a_prime, h_prime, z, Ud_prime_a, Ud_prime_h, t):
-        """ Euler residual to housing
-                Euler given h_prime and a_prime
+    def housing_euler_resid_(a_prime, h_prime, z, Ud_prime_a_1d, Ud_prime_h_1d, t):
+        """ Euler residual for housing Euler given h_prime and a_prime.
+
+        Optimized: Uses du_c(c) = Ud_prime_a_val directly (from liquid asset Euler)
+        instead of computing c = du_c_inv(Ud_prime_a_val) then du_c(c).
 
         Parameters
         ----------
@@ -709,48 +857,44 @@ def Operator_Factory(cp):
                                 t+1 housing value adjusted
         z: float64
                 value of shock
-        Ud_prime_a: 2D array
+        Ud_prime_a_1d: 1D array
                                  discounted marginal utility of liq assets
-                                 for given shock value today
-        Ud_prime_h: 2D array
+                                 for given shock value today, sliced at h_prime index
+        Ud_prime_h_1d: 1D array
                                  discounted marginal utility of housing assets
-                                 for given shock value today
+                                 for given shock value today, sliced at h_prime index
         t: int
                 time
 
         Returns
         -------
         resid: float64
-
-
         """
+        # Direct interpolation - no consumption calculation needed
+        # At liquid asset Euler root: du_c(c) = Ud_prime_a_val
+        Ud_prime_a_val = interp_as_scalar(asset_grid_A, Ud_prime_a_1d, a_prime)
+        Ud_prime_h_val = interp_as_scalar(asset_grid_A, Ud_prime_h_1d, a_prime)
 
-        egm_a, c = root_A_liq_euler_inv(a_prime, h_prime, z,
-                                        Ud_prime_a, t)
-
-        point = np.array([a_prime, h_prime])
-        Ud_prime_h_val = eval_linear(UGgrid_all, Ud_prime_h,
-                                     point, xto.LINEAR)
-
-        return du_c(c) * (1 + tau) - Ud_prime_h_val - du_h(h_prime)
+        # Housing Euler: du_c(c) * (1+tau) = Ud_prime_h_val + du_h(h_prime)
+        return Ud_prime_a_val * (1 + tau) - Ud_prime_h_val - du_h(h_prime)
 
     @njit
-    def root_H_UPRIME_func(h_prime, z, Ud_prime_a, Ud_prime_h, t):
+    def root_H_UPRIME_func(h_prime, z, Ud_prime_a_1d, Ud_prime_h_1d, t):
         """ Function returns a_prime roots of housing Euler equation
                 for adjusters given h_prime.
 
         Parameters
         ----------
         h_prime: float64
-                                t+1 housing value adjusted
+                                t+1 housing value adjusted (on grid)
         z: float64
                 value of shock
-        Ud_prime_a: 2D array
+        Ud_prime_a_1d: 1D array
                                  discounted marginal utility of liq assets
-                                 for given shock value today
-        Ud_prime_h: 2D array
+                                 for given shock value today, sliced at h_prime index
+        Ud_prime_h_1d: 1D array
                                  discounted marginal utility of housing assets
-                                 for given shock value today
+                                 for given shock value today, sliced at h_prime index
         t: int
                 time
 
@@ -777,15 +921,13 @@ def Operator_Factory(cp):
         a_prime_points = roots(housing_euler_resid_,
                                asset_grid_A[0],
                                asset_grid_A[-1],
-                               h_prime, z, Ud_prime_a, Ud_prime_h, t)
+                               h_prime, z, Ud_prime_a_1d, Ud_prime_h_1d, t)
 
         for j in range(len(a_prime_points)):
             # recover consumption associated with liquid asset Euler
             if a_prime_points[j] > 0:
-                point_for_c = np.array([a_prime_points[j], h_prime])
-
-                Ud_prime_h_val = eval_linear(UGgrid_all, Ud_prime_h,
-                                             point_for_c, xto.LINEAR)
+                # 1D interpolation along a dimension (h_prime is on grid)
+                Ud_prime_h_val = interp_as_scalar(asset_grid_A, Ud_prime_h_1d, a_prime_points[j])
 
                 c = du_c_inv((Ud_prime_h_val
                               + du_h(h_prime)) / (1 + tau))
@@ -797,14 +939,8 @@ def Operator_Factory(cp):
                 break
 
         if len(np.where(a_prime_points == b)[0]) == 0:
-
-            point_at_amin = np.array([b, h_prime])
-
-            Ud_prime_h_val = eval_linear(UGgrid_all, Ud_prime_h,
-                                         point_at_amin, xto.LINEAR)
-
-            Ud_prime_a_val = eval_linear(UGgrid_all, Ud_prime_a,
-                                         point_at_amin, xto.LINEAR)
+            # 1D interpolation at a=b (h_prime is on grid)
+            Ud_prime_h_val = interp_as_scalar(asset_grid_A, Ud_prime_h_1d, b)
 
             c_at_amin = du_c_inv((Ud_prime_h_val + du_h(h_prime)) / (1 + tau))
             a_prime_points[-1] = b
@@ -813,7 +949,96 @@ def Operator_Factory(cp):
 
         return a_prime_points, e_grid_points
 
-    @njit(parallel=True)
+    @njit
+    def root_H_UPRIME_func_fast(h_prime, z, Ud_prime_a_1d, Ud_prime_h_1d, t):
+        """Fast version using piecewise linear root-finding with coarse sampling.
+
+        Samples at root_eps intervals to avoid O(n_A) operations.
+        Time complexity: O(grid_range / root_eps) instead of O(n_grid).
+
+        Parameters
+        ----------
+        h_prime: float64
+            t+1 housing value adjusted (on grid)
+        z: float64
+            value of shock
+        Ud_prime_a_1d: 1D array
+            discounted marginal utility of liq assets
+        Ud_prime_h_1d: 1D array
+            discounted marginal utility of housing assets
+        t: int
+            time
+
+        Returns
+        -------
+        a_prime_points: 1D array
+            a_prime roots (zeros are padding, not roots)
+        e_grid_points: 1D array
+            EGM wealth points corresponding to roots
+        """
+        # Compute du_h(h_prime) once
+        du_h_val = du_h(h_prime)
+
+        # Determine sample points based on root_eps
+        n_A = len(asset_grid_A)
+        grid_range = asset_grid_A[-1] - asset_grid_A[0]
+        avg_spacing = grid_range / (n_A - 1)
+
+        if root_eps > avg_spacing:
+            # Coarse sampling: only evaluate at root_eps intervals
+            step = int(root_eps / avg_spacing)
+            n_samples = (n_A - 1) // step + 1
+
+            # Build sample grid and compute residual only at samples
+            sample_grid = np.empty(n_samples)
+            resid = np.empty(n_samples)
+
+            for k in range(n_samples):
+                idx = min(k * step, n_A - 1)
+                sample_grid[k] = asset_grid_A[idx]
+                resid[k] = Ud_prime_a_1d[idx] * (1.0 + tau) - Ud_prime_h_1d[idx] - du_h_val
+
+            # Find roots on coarse grid (no root_eps param needed - already sampled)
+            a_prime_points, n_roots = find_roots_piecewise_linear(
+                resid, sample_grid, EGM_N, 0.0)
+        else:
+            # Fine grid: compute residual at all points
+            resid = Ud_prime_a_1d * (1.0 + tau) - Ud_prime_h_1d - du_h_val
+            a_prime_points, n_roots = find_roots_piecewise_linear(
+                resid, asset_grid_A, EGM_N, 0.0)
+
+        # Make EGM wealth points array
+        e_grid_points = np.zeros(EGM_N)
+
+        # Recover consumption and EGM wealth for each root
+        for j in range(n_roots):
+            a_p = a_prime_points[j]
+            if a_p > 0:
+                # 1D interpolation along a dimension (h_prime is on grid)
+                Ud_prime_h_val = interp_as_scalar(asset_grid_A, Ud_prime_h_1d, a_p)
+
+                c = du_c_inv((Ud_prime_h_val + du_h_val) / (1 + tau))
+                egm_wealth = c + a_p + h_prime * (1 + tau)
+                e_grid_points[j] = egm_wealth
+
+        # Add borrowing constraint point if not already a root
+        has_b = False
+        for j in range(n_roots):
+            if a_prime_points[j] == b:
+                has_b = True
+                break
+
+        if not has_b:
+            # 1D interpolation at a=b (h_prime is on grid)
+            Ud_prime_h_val = interp_as_scalar(asset_grid_A, Ud_prime_h_1d, b)
+            c_at_amin = du_c_inv((Ud_prime_h_val + du_h_val) / (1 + tau))
+            a_prime_points[-1] = b
+            egm_wealth_min = c_at_amin + b + h_prime * (1 + tau)
+            e_grid_points[-1] = egm_wealth_min
+
+        return a_prime_points, e_grid_points
+
+    @njit
     def _keeperEGM(Ud_prime_a, V, t):
         """
         Function produces unrefinded endogenous grids for non-adjusters
@@ -857,8 +1082,9 @@ def Operator_Factory(cp):
         for index_z in range(len(z_vals)):
             for index_h_today in range(len(asset_grid_H)):
                 z = z_vals[index_z]
+                # Keeper: h_prime is off-grid (depreciated), use 2D interpolation
                 h_prime = asset_grid_H[index_h_today] * (1 - delta)
-                egm_a0, c0 = root_A_liq_euler_inv(b, h_prime, z,
+                egm_a0, c0 = root_A_liq_euler_inv_2d(b, h_prime, z,
                                                     Ud_prime_a[index_z, :], t)
                 c_at_a_zero_max = c0
                 C_array = np.linspace(1e-08, max(1e-08,c0-1e-10), len(asset_grid_A))
@@ -867,20 +1093,21 @@ def Operator_Factory(cp):
                 v_prime = beta * eval_linear(UGgrid_all,
                                                     V[index_z, :],
                                                     point, xto.LINEAR)
-                
+
                 for k in range(len(asset_grid_A)):
                     vf_unrefined[index_z, k, index_h_today] =  u(C_array[k], h_prime, 0) + v_prime
-                
+
                     endog_grid_unrefined[index_z, k, index_h_today] = C_array[k] + b
                     c_unrefined[index_z, k, index_h_today] = C_array[k]
-                
+
                 for index_a_prime in range(len(asset_grid_A)):
-                        
+
                         index_a_db = int(len(asset_grid_A) + index_a_prime)
                         a_prime = asset_grid_AC[index_a_db]
                         h_prime = asset_grid_H[index_h_today] * (1 - delta)
 
-                        egm_a, c = root_A_liq_euler_inv(a_prime, h_prime, z,
+                        # Keeper: h_prime is off-grid (depreciated), use 2D interpolation
+                        egm_a, c = root_A_liq_euler_inv_2d(a_prime, h_prime, z,
                                                         Ud_prime_a[index_z, :], t)
                         #print(c)
                         #c = max(1e-100, c)
@@ -941,7 +1168,7 @@ def Operator_Factory(cp):
                 a_sorted = asset_grid_AC_unique[sortidx]
 
                 _FUES_POST_STATE = True
-                _FUES_POST_CLEAN = True
+                _FUES_POST_CLEAN = False
                 _FUES_INCLUDE_INTER = False
                 _FUES_DISABLE_CHECKS = True
                 _FUES_EPS_FWD = 0.05
@@ -993,38 +1220,38 @@ def Operator_Factory(cp):
                 
                 # Interpolate to output grid
                 new_a_prime_refined[index_z, :, index_h_today] = interp_as(
-                    e_grid_clean, a_prime_clean, asset_grid_A)
+                    e_grid_clean, a_prime_clean, asset_grid_A, extrap=True)
                 new_c_refined[index_z, :, index_h_today] = interp_as(
-                    e_grid_clean, c_clean, asset_grid_A)
+                    e_grid_clean, c_clean, asset_grid_A, extrap=True)
                 new_v_refined[index_z, :, index_h_today] = interp_as(
-                    e_grid_clean, vf_clean, asset_grid_A)
+                    e_grid_clean, vf_clean, asset_grid_A, extrap=True)
 
-                # Clamp NaN/inf after interpolation
+                # Clamp NaN/inf after interpolation (allow off-grid)
                 new_a_prime_refined[index_z, :, index_h_today] = clamp_policy(
-                    new_a_prime_refined[index_z, :, index_h_today], b, grid_max_A)
+                    new_a_prime_refined[index_z, :, index_h_today], b, grid_max_A*2)
                 new_c_refined[index_z, :, index_h_today] = clamp_policy(
                     new_c_refined[index_z, :, index_h_today], 1e-10, 1e10)
                 new_v_refined[index_z, :, index_h_today] = clamp_value(
                     new_v_refined[index_z, :, index_h_today])
 
                 # Enforce borrowing constraint
-                for i in range(n_a):
-                    if new_a_prime_refined[index_z, i, index_h_today] < b:
-                        new_a_prime_refined[index_z, i, index_h_today] = b
+                #for i in range(n_a):
+                #    if new_a_prime_refined[index_z, i, index_h_today] < b:
+                #        new_a_prime_refined[index_z, i, index_h_today] = b
                 
                 # remove jumps - uses consumption to detect jumps, corrects v and a
                 # For keeper, no durable policy to correct, so pass dummy (v_arr used as placeholder)
-                (new_c_refined[index_z, :, index_h_today],
-                 new_v_refined[index_z, :, index_h_today],
-                 _,  # dummy d output (not used for keeper)
-                 new_a_prime_refined[index_z, :, index_h_today]) = correct_jumps1d_arr(
-                    new_c_refined[index_z, :, index_h_today],
-                    asset_grid_A,
-                    m_bar,
-                    new_v_refined[index_z, :, index_h_today],
-                    new_v_refined[index_z, :, index_h_today].copy(),  # dummy for d_arr
-                    new_a_prime_refined[index_z, :, index_h_today]
-                )
+                #(new_c_refined[index_z, :, index_h_today],
+                # new_v_refined[index_z, :, index_h_today],
+                # _,  # dummy d output (not used for keeper)
+                # new_a_prime_refined[index_z, :, index_h_today]) = correct_jumps1d_arr(
+                #    new_c_refined[index_z, :, index_h_today],
+                #    asset_grid_A,
+                #    m_bar,
+                #    new_v_refined[index_z, :, index_h_today],
+                #    new_v_refined[index_z, :, index_h_today].copy(),  # dummy for d_arr
+                #    new_a_prime_refined[index_z, :, index_h_today]
+                #)
 
         # Return dummy arrays when plotting not needed
         if return_grids == 0:
@@ -1033,7 +1260,7 @@ def Operator_Factory(cp):
         else:
             return new_a_prime_refined, new_c_refined, new_v_refined, e_grid_clean, vf_clean, c_clean, a_prime_clean
 
-    @njit(parallel=True)
+    @njit
     def _adjEGM(Ud_prime_a, Ud_prime_h, V, t):
         # Cache dimensions
         n_z = len(z_vals)
@@ -1050,16 +1277,20 @@ def Operator_Factory(cp):
         for index_h_prime in range(n_he):
             h_prime = asset_grid_HE[index_h_prime]
             h_adj = h_prime * tau_adj  # Pre-compute for inner loop
-            point = np.empty(2)
 
             for index_z in range(n_z):
                 z = z_vals[index_z]
-                Ud_a_z = Ud_prime_a[index_z]
-                Ud_h_z = Ud_prime_h[index_z]
-                V_z = V[index_z]
+                # Slice 2D arrays to 1D along h dimension (h_prime is on grid)
+                Ud_a_z_1d = Ud_prime_a[index_z, :, index_h_prime]
+                Ud_h_z_1d = Ud_prime_h[index_z, :, index_h_prime]
+                V_z_1d = V[index_z, :, index_h_prime]
 
-                a_primes, e_grid_points = root_H_UPRIME_func(h_prime, z,
-                                                             Ud_a_z, Ud_h_z, t)
+                # ============================================================
+                # SWITCH: Use root_H_UPRIME_func_fast for O(n) piecewise linear
+                #         Use root_H_UPRIME_func for iterative brentq (slower)
+                # ============================================================
+                a_primes, e_grid_points = root_H_UPRIME_func_fast(h_prime, z,
+                                                                   Ud_a_z_1d, Ud_h_z_1d, t)
 
                 endog_grid_unrefined[index_z, index_h_prime] = e_grid_points
                 a_prime_unrefined[index_z, index_h_prime] = a_primes
@@ -1067,10 +1298,9 @@ def Operator_Factory(cp):
                 for i in range(len(a_primes)):
                     a_p = a_primes[i]
                     if a_p > 0.0:
-                        point[0] = a_p
-                        point[1] = h_prime
                         c_val = e_grid_points[i] - h_adj - a_p
-                        v_prime = beta * eval_linear(UGgrid_all, V_z, point, xto.LINEAR)
+                        # 1D interpolation along a dimension (h_prime is on grid)
+                        v_prime = beta * interp_as_scalar(asset_grid_A, V_z_1d, a_p)
                         vf_unrefined[index_z, index_h_prime, i] = u(c_val, h_prime, chi) + v_prime
                         h_prime_unrefined[index_z, index_h_prime, i] = h_prime
 
@@ -1131,7 +1361,7 @@ def Operator_Factory(cp):
             h_sorted = hprime_unrefined_points[sortidx]
             c_sorted = c_unrefined_points[sortidx]
             _FUES_POST_STATE = True
-            _FUES_POST_CLEAN = True
+            _FUES_POST_CLEAN = False
             _FUES_INCLUDE_INTER = False
             _FUES_DISABLE_CHECKS = True
             _FUES_EPS_FWD = 0.05
@@ -1190,8 +1420,8 @@ def Operator_Factory(cp):
             new_c_refined[index_z] = interp_as(e_grid_clean, c_clean, grid_we, extrap= True)
 
             # Clamp NaN/inf after interpolation
-            new_a_prime_refined[index_z] = clamp_policy(new_a_prime_refined[index_z], b, grid_max_A)
-            new_h_prime_refined[index_z] = clamp_policy(new_h_prime_refined[index_z], b, grid_max_H)
+            new_a_prime_refined[index_z] = clamp_policy(new_a_prime_refined[index_z], b, grid_max_A*2)
+            new_h_prime_refined[index_z] = clamp_policy(new_h_prime_refined[index_z], b, grid_max_H*2)
             new_v_refined[index_z] = clamp_value(new_v_refined[index_z])
             new_c_refined[index_z] = clamp_policy(new_c_refined[index_z], 1e-10, 1e10)
 
@@ -1213,11 +1443,132 @@ def Operator_Factory(cp):
                     e_grid_clean, vf_clean, hprime_clean, a_prime_clean,
                     vf_unrefined_points, hprime_unrefined_points,
                     aprime_unrefined_points, egrid_unref_points)
-    
+
+    @njit
+    def _discrete_choice_loop(t, V_prime, ELambdaHnxt,
+                              Akeeper, Ckeeper, Vkeeper,
+                              Aadj, Cadj, Hadj,
+                              Vcurr, Anxt, Hnxt, Cnxt, Dnxt,
+                              LambdaAcurr, LambdaHcurr,
+                              ELambdaH_HD_nxt, LambdaH_HD_curr,
+                              c_from_budget=0):
+        """JIT-compiled discrete choice evaluation over all states.
+
+        c_from_budget: if 1, compute c_adj from budget constraint (NEGM style)
+                       if 0, interpolate Cadj (EGM style)
+
+        ELambdaH_HD_nxt: HD Lambda from next period (n_z, n_a_hd, n_h_hd)
+                         Used for more accurate Phi_t evaluation
+        LambdaH_HD_curr: Output HD Lambda for current period (n_z, n_a_hd, n_h_hd)
+        """
+        tau_adj = 1.0 + tau
+        n_z = len(z_vals)
+
+        # First pass: compute policies on normal grid
+        for state in range(len(X_all)):
+            a = asset_grid_A[X_all[state][1]]
+            h = asset_grid_H[X_all[state][2]]
+            i_a = X_all[state][1]
+            i_h = X_all[state][2]
+            i_z = int(X_all[state][0])
+            z = z_vals[i_z]
+
+            # non-adjusters
+            wealth_nadj = R * a + y_func(t, z)
+            v_nadj_val = interp_as_scalar(asset_grid_A, Vkeeper[i_z, :, i_h], wealth_nadj)
+            c_nadj_val = interp_as_scalar(asset_grid_A, Ckeeper[i_z, :, i_h], wealth_nadj)
+            a_prime_nadj_val = interp_as_scalar(asset_grid_A, Akeeper[i_z, :, i_h], wealth_nadj)
+            h_prime_nadj_val = (1 - delta) * h
+
+            # Clamp NaN/inf after keeper interpolations (allow off-grid)
+            v_nadj_val = clamp_scalar(v_nadj_val, -1e10, 1e10, -1e10)
+            c_nadj_val = clamp_scalar(c_nadj_val, 1e-10, 1e10, 1e-10)
+            a_prime_nadj_val = clamp_scalar(a_prime_nadj_val, b, grid_max_A*2, b)
+
+            # adjusters
+            wealth = R * a + R_H * h * (1 - delta) + y_func(t, z)
+            a_adj_val = interp_as_scalar(asset_grid_WE, Aadj[i_z, :], wealth)
+            h_adj_val = interp_as_scalar(asset_grid_WE, Hadj[i_z, :], wealth)
+
+            # Clamp NaN/inf after adjuster interpolations
+            a_adj_val = clamp_scalar(a_adj_val, b, grid_max_A*2, b)
+            h_adj_val = clamp_scalar(h_adj_val, b, grid_max_H*2, b)
+
+            if c_from_budget == 1:
+                # NEGM: compute from budget constraint
+                c_adj_val = wealth - a_adj_val - h_adj_val * tau_adj
+            else:
+                # EGM: interpolate
+                c_adj_val = interp_as_scalar(asset_grid_WE, Cadj[i_z, :], wealth)
+            c_adj_val = clamp_scalar(c_adj_val, 1e-10, 1e10, 1e-10)
+
+            points_adj = np.array([a_adj_val, h_adj_val])
+            v_adj_val = u(c_adj_val, h_adj_val, chi) \
+                + beta * eval_linear(UGgrid_all, V_prime[i_z], points_adj, xto.LINEAR)
+
+            if v_adj_val >= v_nadj_val:
+                d_adj = 1
+            else:
+                d_adj = 0
+
+            Dnxt[i_z, i_a, i_h] = d_adj
+            point_nadj = np.array([a_prime_nadj_val, h_prime_nadj_val])
+            Hnxt[i_z, i_a, i_h] = d_adj * h_adj_val + (1 - d_adj) * h_prime_nadj_val
+            Anxt[i_z, i_a, i_h] = d_adj * a_adj_val + (1 - d_adj) * a_prime_nadj_val
+            Cnxt[i_z, i_a, i_h] = d_adj * c_adj_val + (1 - d_adj) * c_nadj_val
+            Vcurr[i_z, i_a, i_h] = d_adj * v_adj_val + (1 - d_adj) * v_nadj_val
+            LambdaAcurr[i_z, i_a, i_h] = beta * R * d_adj * du_c(c_adj_val) \
+                + (1 - d_adj) * beta * R * du_c(c_nadj_val)
+
+            # Use HD Lambda for Phi_t if available, otherwise use normal grid
+            if use_hd_lambda:
+                Phi_t = du_h(h_prime_nadj_val) \
+                    + eval_linear(UGgrid_HD, ELambdaH_HD_nxt[i_z], point_nadj, xto.LINEAR)
+            else:
+                Phi_t = du_h(h_prime_nadj_val) \
+                    + eval_linear(UGgrid_all, ELambdaHnxt[i_z], point_nadj, xto.LINEAR)
+
+            LambdaHcurr[i_z, i_a, i_h] = beta * R_H * (1 - delta) \
+                * (d_adj * du_c(c_adj_val) + (1 - d_adj) * Phi_t)
+
+        # Second pass: compute Lambda_H on HD grid (if using HD)
+        if use_hd_lambda:
+            for i_z in range(n_z):
+                for i_a_hd in range(n_a_hd):
+                    a_hd = asset_grid_A_HD[i_a_hd]
+                    for i_h_hd in range(n_h_hd):
+                        h_hd = asset_grid_H_HD[i_h_hd]
+
+                        # Interpolate discrete choice from normal grid
+                        point_hd = np.array([a_hd, h_hd])
+                        d_adj_hd = eval_linear(UGgrid_all, Dnxt[i_z], point_hd, xto.LINEAR)
+                        d_adj_hd = int(min(max(round(d_adj_hd), 0), 1))
+
+                        if d_adj_hd == 1:
+                            # Adjuster: Lambda = beta * R_H * (1-delta) * u'_c(c)
+                            c_hd = eval_linear(UGgrid_all, Cnxt[i_z], point_hd, xto.LINEAR)
+                            c_hd = max(c_hd, 1e-10)
+                            LambdaH_HD_curr[i_z, i_a_hd, i_h_hd] = beta * R_H * (1 - delta) * du_c(c_hd)
+                        else:
+                            # Keeper: Lambda = beta * R_H * (1-delta) * (u'_h(h') + E[Lambda'])
+                            a_prime_hd = eval_linear(UGgrid_all, Anxt[i_z], point_hd, xto.LINEAR)
+                            a_prime_hd = max(a_prime_hd, b)
+                            h_prime_hd = (1 - delta) * h_hd
+
+                            point_next_hd = np.array([a_prime_hd, h_prime_hd])
+                            E_lambda_h_next = eval_linear(UGgrid_HD, ELambdaH_HD_nxt[i_z], point_next_hd, xto.LINEAR)
+                            if np.isnan(E_lambda_h_next) or np.isinf(E_lambda_h_next):
+                                E_lambda_h_next = 0.0
+
+                            Phi_t_hd = du_h(h_prime_hd) + E_lambda_h_next
+                            LambdaH_HD_curr[i_z, i_a_hd, i_h_hd] = beta * R_H * (1 - delta) * Phi_t_hd
+
+        return Vcurr, Anxt, Hnxt, Cnxt, Dnxt, LambdaAcurr, LambdaHcurr, LambdaH_HD_curr
+
     #@njit
     def iterEGM(t, V_prime,
                          ELambdaAnxt,
-                         ELambdaHnxt, m_bar=1.4, plot_age=-1):
+                         ELambdaHnxt, ELambdaH_HD_nxt=None, m_bar=1.4, plot_age=-1, verbose_timing=True):
         """
         Iterates on the Coleman operator
 
@@ -1228,9 +1579,13 @@ def Operator_Factory(cp):
                    by the discount factor and rate of return
 
         If plot_age == t, returns intermediate grids for plotting.
+        If verbose_timing=True, prints timing for each step.
+
+        ELambdaH_HD_nxt: HD Lambda from next period (n_z, n_a_hd, n_h_hd) or None
+                         Used for more accurate Phi_t evaluation in discrete choice
         """
-        # Always return grids for plotting (optimization disabled for now)
-        return_grids = 1
+        # return_grids is set from cp.return_grids (via FUES_RETURN_GRIDS env var)
+        # When False, intermediate grids are not stored (faster, less memory)
 
         # Declare empty grids
         # uc indicates conditioned on time t shock
@@ -1242,31 +1597,55 @@ def Operator_Factory(cp):
         Aadj = np.empty(V_prime.shape)
         Hadj = np.empty(V_prime.shape)
         #Cadj = np.empty(V_prime.shape)
- 
+
         Vcurr = np.empty(V_prime.shape)
         LambdaAcurr = np.empty(V_prime.shape)
         LambdaHcurr = np.empty(V_prime.shape)
 
+        # HD Lambda for current period (only allocated if using HD)
+        if use_hd_lambda:
+            LambdaH_HD_curr = np.zeros((len(z_vals), n_a_hd, n_h_hd))
+            if ELambdaH_HD_nxt is None:
+                # Initialize with zeros for terminal period
+                ELambdaH_HD_nxt = np.zeros((len(z_vals), n_a_hd, n_h_hd))
+        else:
+            LambdaH_HD_curr = np.zeros((1, 1, 1))  # Dummy
+            ELambdaH_HD_nxt = np.zeros((1, 1, 1))  # Dummy
+
+        t0 = time.perf_counter()
         endog_grid_unrefined_noadj, vf_unrefined_noadj, c_unrefined_noadj\
             = _keeperEGM(ELambdaAnxt, V_prime, t)
+        t_keeperEGM = time.perf_counter() - t0
 
+        t0 = time.perf_counter()
         Akeeper, Ckeeper, Vkeeper, e_grid_clean, vf_clean,\
             c_clean, a_prime_clean\
             = _refineKeeper(endog_grid_unrefined_noadj,
                             vf_unrefined_noadj,
                             c_unrefined_noadj,
                             V_prime, t, m_bar=m_bar, return_grids=return_grids)
+        t_refineKeeper = time.perf_counter() - t0
 
+        t0 = time.perf_counter()
         endog_grid_unrefined_adj, vf_unrefined_adj, a_prime_unrefined_adj,\
             h_prime_unrefined_adj\
             = _adjEGM(ELambdaAnxt, ELambdaHnxt, V_prime, t)
+        t_adjEGM = time.perf_counter() - t0
 
+        t0 = time.perf_counter()
         (Aadj, Cadj, Hadj, Vadj,
          e_grid_clean, vf_clean, hprime_clean, a_prime_clean,
          vf_unrefined_adj_1, h_prime_unrefined_adj_1, a_prime_unrefined_adj_1,
          endog_grid_unrefined_adj_1) = refine_adj(
             endog_grid_unrefined_adj, vf_unrefined_adj,
             a_prime_unrefined_adj, h_prime_unrefined_adj, m_bar=m_bar, return_grids=return_grids)
+        t_refine_adj = time.perf_counter() - t0
+
+        if verbose_timing:
+            print(f"  [t={t}] _keeperEGM: {t_keeperEGM*1000:.1f}ms, "
+                  f"_refineKeeper: {t_refineKeeper*1000:.1f}ms, "
+                  f"_adjEGM: {t_adjEGM*1000:.1f}ms, "
+                  f"refine_adj: {t_refine_adj*1000:.1f}ms")
         
         AdjGrids = {}
         AdjGrids["endog_grid_unrefined_adj"] = endog_grid_unrefined_adj_1
@@ -1289,84 +1668,39 @@ def Operator_Factory(cp):
         KeeperPol["C"] = Ckeeper
         KeeperPol["V"] = Vkeeper
 
-        # Evaluate discrete choice on  the pre-state 
-        for state in range(len(X_all)):
+        # Evaluate discrete choice on the pre-state (JIT-compiled)
+        t0 = time.perf_counter()
+        Vcurr, Anxt, Hnxt, Cnxt, Dnxt, LambdaAcurr, LambdaHcurr, LambdaH_HD_curr = \
+            _discrete_choice_loop(t, V_prime, ELambdaHnxt,
+                                  Akeeper, Ckeeper, Vkeeper,
+                                  Aadj, Cadj, Hadj,
+                                  Vcurr, Anxt, Hnxt, Cnxt, Dnxt,
+                                  LambdaAcurr, LambdaHcurr,
+                                  ELambdaH_HD_nxt, LambdaH_HD_curr,
+                                  c_from_budget=1)
+        t_discrete = time.perf_counter() - t0
 
-            a = asset_grid_A[X_all[state][1]]
-            h = asset_grid_H[X_all[state][2]]
-            i_a = X_all[state][1]
-            i_h = X_all[state][2]
-            i_z = int(X_all[state][0])
-            z = z_vals[i_z]
-            
-            # non-adjusters
-            wealth_nadj = R * a + y_func(t, z)
-            v_nadj_val = interp_as(
-                asset_grid_A, Vkeeper[i_z, :, i_h], np.array([wealth_nadj]), extrap= True)[0]
-            c_nadj_val = interp_as(
-                asset_grid_A, Ckeeper[i_z, :, i_h], np.array([wealth_nadj]), extrap= True)[0]
-            a_prime_nadj_val = interp_as(
-                asset_grid_A, Akeeper[i_z, :, i_h], np.array([wealth_nadj]), extrap= True)[0]
-            h_prime_nadj_val = (1 - delta) * h
+        # Compute aggregate timing
+        t_keeper = t_keeperEGM + t_refineKeeper
+        t_adj = t_adjEGM + t_refine_adj
+        t_total = t_keeper + t_adj + t_discrete
 
-            # Clamp NaN/inf after keeper interpolations
-            v_nadj_val = clamp_scalar(v_nadj_val, -1e10, 1e10, -1e10)
-            c_nadj_val = clamp_scalar(c_nadj_val, 1e-10, 1e10, 1e-10)
-            a_prime_nadj_val = clamp_scalar(a_prime_nadj_val, b, grid_max_A, b)
+        if verbose_timing:
+            print(f"  [t={t}] discrete_choice: {t_discrete*1000:.1f}ms, "
+                  f"TOTAL: {t_total*1000:.1f}ms")
 
-            # adjusters
-            wealth = R * a + R_H * h * (1 - delta) + y_func(t, z)
+        # Build timing dict
+        timing = {
+            'keeper_ms': t_keeper * 1000,
+            'adj_ms': t_adj * 1000,
+            'discrete_ms': t_discrete * 1000,
+            'total_ms': t_total * 1000
+        }
 
-            a_adj_val = interp_as(asset_grid_WE, Aadj[i_z, :],
-                                  np.array([wealth]), extrap= True)[0]
-            h_adj_val = interp_as(asset_grid_WE, Hadj[i_z, :],
-                                  np.array([wealth]), extrap= True)[0]
-            c_adj_val = interp_as(asset_grid_WE, Cadj[i_z, :],
-                                    np.array([wealth]), extrap= True)[0]
-
-            # Clamp NaN/inf after adjuster interpolations
-            a_adj_val = clamp_scalar(a_adj_val, b, grid_max_A, b)
-            h_adj_val = clamp_scalar(h_adj_val, b, grid_max_H, b)
-            c_adj_val = clamp_scalar(c_adj_val, 1e-10, 1e10, 1e-10)
-
-            points_adj = np.array([a_adj_val, h_adj_val])
-
-            v_adj_val = u(c_adj_val, h_adj_val, chi)\
-                + beta * eval_linear(UGgrid_all,
-                                     V_prime[i_z],
-                                     points_adj,
-                                     xto.LINEAR)
-
-            if v_adj_val >= v_nadj_val:
-                d_adj = 1
-            else:
-                d_adj = 0
-
-            Dnxt[i_z, i_a, i_h] = d_adj
-            point_nadj = np.array([a_prime_nadj_val, h_prime_nadj_val])
-            Hnxt[i_z, i_a, i_h] = d_adj * h_adj_val \
-                + (1 - d_adj) * h_prime_nadj_val
-            Anxt[i_z, i_a, i_h] = d_adj * a_adj_val\
-                + (1 - d_adj) * a_prime_nadj_val
-
-            Cnxt[i_z, i_a, i_h] = d_adj * c_adj_val\
-                + (1 - d_adj) * c_nadj_val
-            Vcurr[i_z, i_a, i_h] = d_adj * v_adj_val\
-                + (1 - d_adj) * v_nadj_val
-            LambdaAcurr[i_z, i_a, i_h] = beta * R * d_adj * du_c(c_adj_val) \
-                + (1 - d_adj) * beta * R * du_c(c_nadj_val)
-            Phi_t = du_h(h_prime_nadj_val) \
-                + eval_linear(UGgrid_all,
-                              ELambdaHnxt[i_z],
-                              point_nadj, xto.LINEAR)
-            LambdaHcurr[i_z, i_a, i_h] = beta * R_H * (1 - delta)\
-                * (d_adj * du_c(c_adj_val)
-                   + (1 - d_adj) * Phi_t)
-
-        return Vcurr, Hnxt, Cnxt,Dnxt, LambdaAcurr,LambdaHcurr, AdjPol, KeeperPol, AdjGrids
+        return Vcurr, Hnxt, Cnxt, Dnxt, LambdaAcurr, LambdaHcurr, LambdaH_HD_curr, AdjPol, KeeperPol, AdjGrids, timing
     
     
-    @njit(parallel=True)
+    @njit
     def _solveAdjNEGM(EVnxt,Ckeeper,
                             Akeeper,t):
         """"
@@ -1388,23 +1722,20 @@ def Operator_Factory(cp):
                 z = z_vals[i_z]
 
                 # Bounds for adjusters, initial val and args
-                bnds_adj = np.array([b, liqAct/(1+tau)+b])
-                args_adj = (liqAct, i_z, EVnxt, Ckeeper[i_z],t)
+                # Cap upper bound at grid_max_H to avoid extrapolation
+                bnds_adj_lo = b
+                bnds_adj_hi = min(liqAct/(1+tau)+b, grid_max_H)
+                args_adj = (liqAct, i_z, EVnxt, Ckeeper[i_z], t)
 
-                # Maximize over h_prime, implicitly maximising over a_prime
-                outadj = qe.optimize.brent_max(obj_adj_nested, 
-                                                        bnds_adj[0],\
-                                                        bnds_adj[1],\
-                                                        args=args_adj)
-                h_prime_adj_star1,v_prime_adj_star = outadj[0],outadj[1]
+                # Maximize over h_prime using multi-section golden section (handles multiple optima)
+                h_prime_adj_star1, v_prime_adj_star = gs_max_multisect(
+                    obj_adj_nested, obj_adj_nested_min, bnds_adj_lo, bnds_adj_hi,
+                    args=args_adj, n_sections=1, xtol=1e-06)
 
                 # calculate max h_prime for a_prime = b
-                outb =  qe.optimize.brent_max(obj_adj_nested_b, 
-                                                        bnds_adj[0],\
-                                                        bnds_adj[1],\
-                                                            args=args_adj)
-                
-                h_prime_a_bound, v_prime_a_bound = outb[0],outb[1]
+                h_prime_a_bound, v_prime_a_bound = gs_max_multisect(
+                    obj_adj_nested_b, obj_adj_nested_b_min, bnds_adj_lo, bnds_adj_hi,
+                    args=args_adj, n_sections=1, xtol=1e-06)
                 
                 # Wealth after housing expenditure                                       
                 left_over_wealth = liqAct - h_prime_adj_star1* (1 + tau)
@@ -1424,8 +1755,8 @@ def Operator_Factory(cp):
                                      + abound_flag*v_prime_a_bound
                 
                 # Clamp to grid bounds (consistent with EGM)
-                h_prime_adj_star = min(max(h_prime_adj_star, b), grid_max_H)
-                a_prime_adj_star = min(max(a_prime_adj_star, b), grid_max_A)
+                h_prime_adj_star = min(max(h_prime_adj_star, b), grid_max_H*2)
+                a_prime_adj_star = min(max(a_prime_adj_star, b), grid_max_A*2)
 
                 h_prime_adj[i_z, i_a] = h_prime_adj_star
                 a_prime_adj[i_z, i_a] = a_prime_adj_star
@@ -1435,9 +1766,8 @@ def Operator_Factory(cp):
 
     
     
-    def iterNEGM(EVnxt, LambdaAnxt,ELambdaHnxt, t):
-        
-        """ 
+    def iterNEGM(EVnxt, LambdaAnxt, ELambdaHnxt, t, ELambdaH_HD_nxt=None, verbose_timing=True):
+        """
         Solve iteration of using the nested EGM algorithm
         or hypbrid EGM-VFI algorithm
 
@@ -1445,8 +1775,10 @@ def Operator_Factory(cp):
         ----------
         EVnxt: 3D array
                 t+1 Expected Value function undiscounted
-
-        
+        ELambdaH_HD_nxt: HD Lambda from next period (n_z, n_a_hd, n_h_hd) or None
+                         Used for more accurate Phi_t evaluation in discrete choice
+        verbose_timing: bool
+                If True, print timing for each step
         """
 
         Anxt = np.empty(EVnxt.shape)
@@ -1457,20 +1789,40 @@ def Operator_Factory(cp):
         LambdaAcurr = np.empty(EVnxt.shape)
         LambdaHcurr = np.empty(EVnxt.shape)
 
+        # HD Lambda for current period (only allocated if using HD)
+        if use_hd_lambda:
+            LambdaH_HD_curr = np.zeros((len(z_vals), n_a_hd, n_h_hd))
+            if ELambdaH_HD_nxt is None:
+                # Initialize with zeros for terminal period
+                ELambdaH_HD_nxt = np.zeros((len(z_vals), n_a_hd, n_h_hd))
+        else:
+            LambdaH_HD_curr = np.zeros((1, 1, 1))  # Dummy
+            ELambdaH_HD_nxt = np.zeros((1, 1, 1))  # Dummy
+
         # Eval the keeper policy using EGM
+        t0 = time.perf_counter()
         endog_grid_unrefined_noadj, vf_unrefined_noadj, c_unrefined_noadj\
             = _keeperEGM(LambdaAnxt, EVnxt, t)
+        t_keeperEGM = time.perf_counter() - t0
 
+        t0 = time.perf_counter()
         Akeeper, Ckeeper, Vkeeper, _, _, _, _ = _refineKeeper(
             endog_grid_unrefined_noadj,
             vf_unrefined_noadj,
             c_unrefined_noadj,
             EVnxt, t, m_bar=cp.m_bar)
-        
-        # VFI part for each level of liquidf wealth after wages are realised
-        # and housing has been liquidated 
+        t_refineKeeper = time.perf_counter() - t0
 
-        Aadj, Cadj,Hadj, Vadj = _solveAdjNEGM(EVnxt,Ckeeper,Akeeper, t)
+        # VFI part for each level of liquid wealth after wages are realised
+        # and housing has been liquidated
+        t0 = time.perf_counter()
+        Aadj, Cadj, Hadj, Vadj = _solveAdjNEGM(EVnxt, Ckeeper, Akeeper, t)
+        t_solveAdjNEGM = time.perf_counter() - t0
+
+        if verbose_timing:
+            print(f"  [t={t}] _keeperEGM: {t_keeperEGM*1000:.1f}ms, "
+                  f"_refineKeeper: {t_refineKeeper*1000:.1f}ms, "
+                  f"_solveAdjNEGM: {t_solveAdjNEGM*1000:.1f}ms")
 
         AdjPol = {}
         AdjPol["A"] = Aadj
@@ -1481,111 +1833,84 @@ def Operator_Factory(cp):
         KeeperPol["A"] = Akeeper
         KeeperPol["C"] = Ckeeper
         KeeperPol["V"] = Vkeeper
-       
-        # Evaluate t+1 liq assets as a function of t+1 illiquid
-        for state in range(len(X_all)):
 
-            a = asset_grid_A[X_all[state][1]]
-            h = asset_grid_H[X_all[state][2]]
-            i_a = X_all[state][1]
-            i_h = X_all[state][2]
-            i_z = int(X_all[state][0])
-            z = z_vals[i_z]
+        # Evaluate discrete choice on the pre-state (JIT-compiled, NEGM style)
+        t0 = time.perf_counter()
+        Vcurr, Anxt, Hnxt, Cnxt, Dnxt, LambdaAcurr, LambdaHcurr, LambdaH_HD_curr = \
+            _discrete_choice_loop(t, EVnxt, ELambdaHnxt,
+                                  Akeeper, Ckeeper, Vkeeper,
+                                  Aadj, Cadj, Hadj,
+                                  Vcurr, Anxt, Hnxt, Cnxt, Dnxt,
+                                  LambdaAcurr, LambdaHcurr,
+                                  ELambdaH_HD_nxt, LambdaH_HD_curr,
+                                  c_from_budget=1)
+        t_discrete = time.perf_counter() - t0
 
-            # non-adjusters
-            wealth_nadj = R * a + y_func(t, z)
-            v_nadj_val = interp_as(
-                asset_grid_A, Vkeeper[i_z, :, i_h], np.array([wealth_nadj]), extrap= True)[0]
-            c_nadj_val = interp_as(
-                asset_grid_A, Ckeeper[i_z, :, i_h], np.array([wealth_nadj]), extrap= True)[0]
-            a_prime_nadj_val = interp_as(
-                asset_grid_A, Akeeper[i_z, :, i_h], np.array([wealth_nadj]), extrap= True)[0]
-            h_prime_nadj_val = (1 - delta) * h
+        # Compute aggregate timing
+        t_keeper = t_keeperEGM + t_refineKeeper
+        t_adj = t_solveAdjNEGM
+        t_total = t_keeper + t_adj + t_discrete
 
-            # Clamp NaN/inf after keeper interpolations
-            v_nadj_val = clamp_scalar(v_nadj_val, -1e10, 1e10, -1e10)
-            c_nadj_val = clamp_scalar(c_nadj_val, 1e-10, 1e10, 1e-10)
-            a_prime_nadj_val = clamp_scalar(a_prime_nadj_val, b, grid_max_A, b)
+        if verbose_timing:
+            print(f"  [t={t}] discrete_choice: {t_discrete*1000:.1f}ms, "
+                  f"TOTAL: {t_total*1000:.1f}ms")
 
-            # adjusters
-            wealth = R * a + R_H * h * (1 - delta) + y_func(t, z)
+        # Build timing dict
+        timing = {
+            'keeper_ms': t_keeper * 1000,
+            'adj_ms': t_adj * 1000,
+            'discrete_ms': t_discrete * 1000,
+            'total_ms': t_total * 1000
+        }
 
-            a_adj_val = interp_as(asset_grid_WE, Aadj[i_z, :],
-                                  np.array([wealth]))[0]
-            h_adj_val = interp_as(asset_grid_WE, Hadj[i_z, :],
-                                  np.array([wealth]))[0]
-
-            # Clamp NaN/inf after adjuster interpolations
-            a_adj_val = clamp_scalar(a_adj_val, b, grid_max_A, b)
-            h_adj_val = clamp_scalar(h_adj_val, b, grid_max_H, b)
-
-            c_adj_val = wealth - a_adj_val - h_adj_val * (1 + tau)
-            # Clamp consumption (computed from budget constraint)
-            c_adj_val = clamp_scalar(c_adj_val, 1e-10, 1e10, 1e-10)
-
-            points_adj = np.array([a_adj_val, h_adj_val])
-
-            v_adj_val = u(c_adj_val, h_adj_val, chi)\
-                + beta * eval_linear(UGgrid_all,
-                                     EVnxt[i_z],
-                                     points_adj,
-                                     xto.LINEAR)
-            d_adj = 0
-            d_adj = v_adj_val >= v_nadj_val
-            Dnxt[i_z, i_a, i_h] = d_adj
-            
-            Hnxt[i_z, i_a, i_h] = d_adj * h_adj_val \
-                + (1 - d_adj) * h_prime_nadj_val
-
-            #Hadj[i_z, i_a, i_h] = h_adj_val
-
-            Anxt[i_z, i_a, i_h] = d_adj * a_adj_val\
-                + (1 - d_adj) * a_prime_nadj_val
-            #Aadj[i_z, i_a, i_h] = a_adj_val
-
-            Cnxt[i_z, i_a, i_h] = d_adj * c_adj_val\
-                + (1 - d_adj) * c_nadj_val
-            #Cadj[i_z, i_a, i_h] = c_adj_val
-            Vcurr[i_z, i_a, i_h] = d_adj * v_adj_val\
-                + (1 - d_adj) * v_nadj_val
-
-            LambdaAcurr[i_z, i_a, i_h] = beta * R * d_adj * du_c(c_adj_val) \
-                + (1 - d_adj) * beta * R * du_c(c_nadj_val)
-            
-            
-            point_nadj = np.array([a_prime_nadj_val, h_prime_nadj_val])
-            Phi_t = du_h(h_prime_nadj_val) \
-                + eval_linear(UGgrid_all,
-                              ELambdaHnxt[i_z],
-                              point_nadj, xto.LINEAR)
-            LambdaHcurr[i_z, i_a, i_h] = beta * R_H * (1 - delta)\
-                                                * (d_adj * du_c(c_adj_val)
-                                                + (1 - d_adj) * Phi_t)
-            
-        return Vcurr,Hnxt, Cnxt,Dnxt,LambdaAcurr, LambdaHcurr, AdjPol, KeeperPol
+        return Vcurr, Hnxt, Cnxt, Dnxt, LambdaAcurr, LambdaHcurr, LambdaH_HD_curr, AdjPol, KeeperPol, timing
     
+    @njit
     def condition_V(Vcurr, LambdaAcurr, LambdaHcurr):
-        """ Condition the t+1 continuation vaue on
-        time t information"""
+        """Condition the t+1 continuation value on time t information (JIT-compiled).
 
-        new_V = np.zeros(np.shape(Vcurr))
-        new_UD_a = np.zeros(np.shape(LambdaAcurr))
-        new_UD_h = np.zeros(np.shape(LambdaHcurr))
+        Computes E[V|z] = sum over z' of Pi[z,z'] * V[z',a,h] for all (z,a,h).
+        Optimized to avoid non-contiguous array slicing in np.dot.
+        """
+        n_z, n_a, n_h = Vcurr.shape
+        new_V = np.zeros((n_z, n_a, n_h))
+        new_UD_a = np.zeros((n_z, n_a, n_h))
+        new_UD_h = np.zeros((n_z, n_a, n_h))
 
-        # numpy dot sum product over last axis of matrix_A
-        # (t+1 continuation value unconditioned)
-        # see nunpy dot docs
-        for state in range(len(X_all)):
-            i_a = X_all[state][1]
-            i_h = X_all[state][2]
-            i_z = int(X_all[state][0])
+        # Loop over (a,h) and do matrix-vector multiply for all z at once
+        # Make contiguous copies to avoid NumbaPerformanceWarning
+        for i_a in range(n_a):
+            for i_h in range(n_h):
+                # Extract contiguous slices along z dimension
+                v_slice = np.ascontiguousarray(Vcurr[:, i_a, i_h])
+                a_slice = np.ascontiguousarray(LambdaAcurr[:, i_a, i_h])
+                h_slice = np.ascontiguousarray(LambdaHcurr[:, i_a, i_h])
 
-            new_V[i_z, i_a, i_h] = np.dot(Pi[i_z, :], Vcurr[:, i_a, i_h])
-            new_UD_a[i_z, i_a, i_h] = np.dot(
-                Pi[i_z, :], LambdaAcurr[:, i_a, i_h])
-            new_UD_h[i_z, i_a, i_h] = np.dot(
-                Pi[i_z, :], LambdaHcurr[:, i_a, i_h])
+                # Pi @ slice computes all z values at once
+                new_V[:, i_a, i_h] = np.dot(Pi, v_slice)
+                new_UD_a[:, i_a, i_h] = np.dot(Pi, a_slice)
+                new_UD_h[:, i_a, i_h] = np.dot(Pi, h_slice)
 
         return new_V, new_UD_a, new_UD_h
 
-    return iterVFI, iterEGM, condition_V, iterNEGM
+    @njit
+    def condition_V_HD(LambdaH_HD_curr):
+        """Condition HD Lambda on current shock state (JIT-compiled).
+
+        Computes E[Lambda_H_HD|z] = sum over z' of Pi[z,z'] * Lambda_H_HD[z',a,h]
+        for all (z,a,h) on the HD grid.
+        """
+        n_z, n_a_hd_loc, n_h_hd_loc = LambdaH_HD_curr.shape
+        new_HD = np.zeros((n_z, n_a_hd_loc, n_h_hd_loc))
+
+        # Loop over (a_hd, h_hd) and do matrix-vector multiply for all z at once
+        for i_a in range(n_a_hd_loc):
+            for i_h in range(n_h_hd_loc):
+                # Extract contiguous slice along z dimension
+                hd_slice = np.ascontiguousarray(LambdaH_HD_curr[:, i_a, i_h])
+                # Pi @ slice computes all z values at once
+                new_HD[:, i_a, i_h] = np.dot(Pi, hd_slice)
+
+        return new_HD
+
+    return iterVFI, iterEGM, condition_V, condition_V_HD, iterNEGM

@@ -50,6 +50,10 @@ parameters:
 settings:
   tol: 1.0e-6           # Convergence tolerance
   max_iter: 4000        # Maximum iterations
+
+  # Owner-only mode: when true, tenure stage always chooses owner path
+  # This replicates the Fella (2014) model without renting
+  owner_only: false
   
   # Grid parameters - Updated from Fella
   a_min: 1E-8         # Minimum asset value

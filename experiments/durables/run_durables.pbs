@@ -16,6 +16,10 @@
 # ===== USER CONFIGURATION =====
 # Set plot start period here (leave empty for default T-2)
 PLOT_START=55
+
+# EGM Grid Storage: Set to 1 to store intermediate grids (for debugging/plotting)
+# Set to 0 to skip storing grids (faster, less memory)
+export FUES_RETURN_GRIDS="${FUES_RETURN_GRIDS:-0}"
 # ==============================
 
 set -euo pipefail
