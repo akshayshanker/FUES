@@ -3,8 +3,8 @@
 # Smaller grid for quick testing of sweep mode
 
 # Experiment identification
-config_id: "test_0.3"
-trial_id: "paper-sweep-10-small"  # Must match sweep_VFI_GPU.yml so baselines can be found
+config_id: "owner_only"
+trial_id: "paper-sweep-owner-10-small"  # Must match sweep_VFI_GPU.yml so baselines can be found
 output_dir: "/scratch/tp66/${USER}/FUES/solutions/housing_renting"  # Base output directory
 
 # Reference method for baseline comparison
@@ -38,7 +38,7 @@ sweep:
 # Fixed parameters
 fixed:
   delta_pb: 1
-  periods: 20
+  periods: 20   # Finite horizon with 20 periods
 
 # Override params when constructing ref_params for baseline comparison
 ref_params_override:

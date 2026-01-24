@@ -357,12 +357,12 @@ def Operator_Factory(cp):
         policy_value_dict['sigma'] = sigma_work_t
         policy_value_dict['dela'] = dela_work_t
         
-        vf_work_t_corrected, corrected_policies = correct_jumps1d(
-            vf_work_t, asset_grid_wealth, gradient_jump_threshold, policy_value_dict
-        )
-        vf_work_t = vf_work_t_corrected
-        sigma_work_t = corrected_policies['sigma']
-        dela_work_t = corrected_policies['dela']
+        #vf_work_t_corrected, corrected_policies = correct_jumps1d(
+        #    vf_work_t, asset_grid_wealth, gradient_jump_threshold, policy_value_dict
+        #)
+        #vf_work_t = vf_work_t_corrected
+        #sigma_work_t = corrected_policies['sigma']
+        #dela_work_t = corrected_policies['dela']
 
         constrained_indices = np.where(asset_grid_wealth < min_a_val)
         sigma_work_t[constrained_indices] = asset_grid_wealth[constrained_indices] - asset_grid_A[0]

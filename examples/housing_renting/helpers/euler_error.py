@@ -9,6 +9,45 @@ except Exception:
     cuda = None
     CUDA_AVAILABLE = False
 
+
+def _get_model_setting(model, key: str, default=None):
+    """Robustly fetch a setting from a DynX model (settings_dict/settings/getattr)."""
+    if model is None:
+        return default
+
+    settings_dict = getattr(model, "settings_dict", None)
+    if isinstance(settings_dict, dict):
+        return settings_dict.get(key, default)
+
+    settings = getattr(model, "settings", None)
+    if isinstance(settings, dict):
+        return settings.get(key, default)
+    if hasattr(settings, "get"):
+        try:
+            return settings.get(key, default)
+        except Exception:
+            pass
+
+    return getattr(settings, key, default)
+
+
+def _get_bool_setting(model, key: str, default: bool = False) -> bool:
+    """Like `_get_model_setting`, but coerces to bool safely."""
+    val = _get_model_setting(model, key, default)
+    if isinstance(val, bool):
+        return val
+    if val is None:
+        return default
+    if isinstance(val, (int, np.integer)):
+        return bool(val)
+    if isinstance(val, str):
+        v = val.strip().lower()
+        if v in ("1", "true", "yes", "y", "on"):
+            return True
+        if v in ("0", "false", "no", "n", "off", ""):
+            return False
+    return bool(val)
+
 # Import non-GPU functions unconditionally
 from dc_smm.models.housing_renting.horses_common import interp_as
 
@@ -99,11 +138,29 @@ def calculate_euler_error_gpu(model, sample_size=10000, debug=False):
         if debug:
             print("[GPU Euler] CUDA not available, falling back to CPU")
         return calculate_euler_error_cpu(model, debug=debug)
-    
-    p0, p1 = model.get_period(0), model.get_period(1)
+
+    # Handle infinite horizon (single period) vs finite horizon (multiple periods)
+    n_periods = len(model.periods_list)
+    if n_periods == 1:
+        # Infinite horizon: stationary solution, use same period for both
+        p0, p1 = model.get_period(0), model.get_period(0)
+    else:
+        # Finite horizon: use periods 0 and 1
+        p0, p1 = model.get_period(0), model.get_period(1)
+
     ownc_now = p0.get_stage("OWNC")
-    ownc, tenu, ownh, rnth, rntc = (p1.get_stage("OWNC"), p1.get_stage("TENU"), p1.get_stage("OWNH"),
-                                  p1.get_stage("RNTH"), p1.get_stage("RNTC"))
+    ownc = p1.get_stage("OWNC")
+    tenu = p1.get_stage("TENU")
+    ownh = p1.get_stage("OWNH")
+
+    owner_only = _get_bool_setting(getattr(tenu, "model", None), "owner_only", default=False)
+
+    if not owner_only:
+        rnth = p1.get_stage("RNTH")
+        rntc = p1.get_stage("RNTC")
+    else:
+        rnth = None
+        rntc = None
     
     # Check problem size and decide whether to sample
     n_w = len(ownc_now.dcsn.grid.w)
@@ -127,30 +184,59 @@ def calculate_euler_error_gpu(model, sample_size=10000, debug=False):
     if use_sampling and debug:
         print(f"[GPU Euler] Sampling {sample_size:,} states from {total_states:,} total")
 
+    z_vals = tenu.dcsn_to_arvl.model.num.shocks.income_shock.process.values
+    H_grid = ownc.dcsn.grid.H_nxt
+    tenure_a_grid = tenu.dcsn.grid.a
+
+    # Tenure policy may be missing in some owner-only experiments; default to "always own".
+    try:
+        tenure_pol = tenu.dcsn.sol.policy["tenure"]
+    except Exception:
+        tenure_pol = np.ones((len(tenure_a_grid), len(H_grid), len(z_vals)), dtype=np.float64)
+
+    if owner_only:
+        # Dummy renter-side arrays (never used when tenure == 1 everywhere).
+        S_pol = np.zeros((2, len(z_vals)), dtype=np.float64)
+        c_renter_n = np.zeros((2, 2, len(z_vals)), dtype=np.float64)
+        renter_a_grid = np.array([0.0, 1.0], dtype=np.float64)
+        S_grid = np.array([0.0, 1.0], dtype=np.float64)
+        w_dcsn_r = np.array([0.0, 1.0], dtype=np.float64)
+    else:
+        S_pol = rnth.dcsn.sol.policy["S"]
+        c_renter_n = rntc.dcsn.sol.policy["c"]
+        renter_a_grid = rnth.dcsn.grid.w
+        S_grid = rnth.cntn.grid.S
+        w_dcsn_r = rntc.dcsn.grid.w
+
     data = {
-        'z_vals': tenu.dcsn_to_arvl.model.num.shocks.income_shock.process.values, 
-        'H_grid': ownc.dcsn.grid.H_nxt,
-        'w_dcsn_now': ownc_now.dcsn.grid.w, 
+        'z_vals': z_vals,
+        'H_grid': H_grid,
+        'w_dcsn_now': ownc_now.dcsn.grid.w,
         'c_now': ownc_now.dcsn.sol.policy["c"],
-        'tenure_pol': tenu.dcsn.sol.policy["tenure"], 
+        'tenure_pol': tenure_pol,
         'H_pol': ownh.dcsn.sol.policy["H"],
-        'S_pol': rnth.dcsn.sol.policy["S"], 
+        'S_pol': S_pol,
         'c_owner_n': ownc.dcsn.sol.policy["c"],
-        'c_renter_n': rntc.dcsn.sol.policy["c"], 
-        'tenure_a_grid': tenu.dcsn.grid.a,
-        'owner_a_grid': ownh.dcsn.grid.a, 
-        'renter_a_grid': rnth.dcsn.grid.w,
-        'H_nxt_grid': ownh.cntn.grid.H_nxt, 
-        'S_grid': rnth.cntn.grid.S,
-        'w_dcsn_o': ownc.dcsn.grid.w, 
-        'w_dcsn_r': rntc.dcsn.grid.w,
+        'c_renter_n': c_renter_n,
+        'tenure_a_grid': tenure_a_grid,
+        'owner_a_grid': ownh.dcsn.grid.a,
+        'renter_a_grid': renter_a_grid,
+        'H_nxt_grid': ownh.cntn.grid.H_nxt,
+        'S_grid': S_grid,
+        'w_dcsn_o': ownc.dcsn.grid.w,
+        'w_dcsn_r': w_dcsn_r,
         'Pi': tenu.dcsn_to_arvl.model.num.shocks.income_shock.transition_matrix
     }
     par = ownc.model.param
+    Pr_val = getattr(par, "Pr", None)
+    if Pr_val is None and (not owner_only) and rnth is not None:
+        Pr_val = rnth.model.param.Pr
+    if Pr_val is None:
+        Pr_val = 0.0
     data.update({
         'beta': par.beta, 
         'R': 1 + par.r, 
-        'Pr': rnth.model.param.Pr,
+        'Pr': Pr_val,
         'tau_phi': par.phi, 
         'tau_phi_R': getattr(par, "phi_R", 0.0),
         'theta': par.theta, 
@@ -294,28 +380,71 @@ def calculate_euler_error_cpu(model, debug=True, sample_size=50000, random_sampl
         Maximum number of states to compute. If grid is larger, will sample uniformly.
     """
     from dc_smm.models.housing_renting.horses_common import build_njit_utility
-    
-    p0, p1 = model.get_period(0), model.get_period(1)
-    
+
+    # Handle infinite horizon (single period) vs finite horizon (multiple periods)
+    n_periods = len(model.periods_list)
+    if n_periods == 1:
+        # Infinite horizon: stationary solution, use same period for both
+        p0, p1 = model.get_period(0), model.get_period(0)
+    else:
+        # Finite horizon: use periods 0 and 1
+        p0, p1 = model.get_period(0), model.get_period(1)
+
     ownc_now = p0.get_stage("OWNC")
-    ownc, tenu, ownh, rnth, rntc = (
-        p1.get_stage("OWNC"), p1.get_stage("TENU"), p1.get_stage("OWNH"),
-        p1.get_stage("RNTH"), p1.get_stage("RNTC"))
+    ownc = p1.get_stage("OWNC")
+    tenu = p1.get_stage("TENU")
+    ownh = p1.get_stage("OWNH")
+
+    owner_only = _get_bool_setting(getattr(tenu, "model", None), "owner_only", default=False)
 
     # ------------- grids & policies ---------------------------------------
-    w_dcsn_now, w_dcsn_o, w_dcsn_r = ownc_now.dcsn.grid.w, ownc.dcsn.grid.w, rntc.dcsn.grid.w
-    H_grid, S_grid = ownc.dcsn.grid.H_nxt, rnth.cntn.grid.S
+    w_dcsn_now = ownc_now.dcsn.grid.w
+    w_dcsn_o = ownc.dcsn.grid.w
+    H_grid = ownc.dcsn.grid.H_nxt
     z_vals = tenu.dcsn_to_arvl.model.num.shocks.income_shock.process.values
-    tenure_a_grid, owner_a_grid, renter_a_grid = tenu.dcsn.grid.a, ownh.dcsn.grid.a, rnth.dcsn.grid.w
+    tenure_a_grid = tenu.dcsn.grid.a
+    owner_a_grid = ownh.dcsn.grid.a
     H_nxt_grid = ownh.cntn.grid.H_nxt
     Pi = tenu.dcsn_to_arvl.model.num.shocks.income_shock.transition_matrix
-    c_now, tenure_pol, H_pol, S_pol = ownc_now.dcsn.sol.policy["c"], tenu.dcsn.sol.policy["tenure"], ownh.dcsn.sol.policy["H"], rnth.dcsn.sol.policy["S"]
-    c_owner_n, c_renter_n = ownc.dcsn.sol.policy["c"], rntc.dcsn.sol.policy["c"]
+
+    c_now = ownc_now.dcsn.sol.policy["c"]
+    c_owner_n = ownc.dcsn.sol.policy["c"]
+    H_pol = ownh.dcsn.sol.policy["H"]
+
+    # Tenure policy may be missing in some owner-only experiments; default to "always own".
+    try:
+        tenure_pol = tenu.dcsn.sol.policy["tenure"]
+    except Exception:
+        tenure_pol = np.ones((len(tenure_a_grid), len(H_grid), len(z_vals)), dtype=np.float64)
+
+    if owner_only:
+        # Dummy renter-side arrays (never used when tenure == 1 everywhere).
+        w_dcsn_r = np.array([0.0, 1.0], dtype=np.float64)
+        S_grid = np.array([0.0, 1.0], dtype=np.float64)
+        renter_a_grid = np.array([0.0, 1.0], dtype=np.float64)
+        S_pol = np.zeros((2, len(z_vals)), dtype=np.float64)
+        c_renter_n = np.zeros((2, 2, len(z_vals)), dtype=np.float64)
+    else:
+        rnth = p1.get_stage("RNTH")
+        rntc = p1.get_stage("RNTC")
+        w_dcsn_r = rntc.dcsn.grid.w
+        S_grid = rnth.cntn.grid.S
+        renter_a_grid = rnth.dcsn.grid.w
+        S_pol = rnth.dcsn.sol.policy["S"]
+        c_renter_n = rntc.dcsn.sol.policy["c"]
     
     # ------------- primitives --------------------------------------------
     par = ownc.model.param
     par_dict_for_njit_builder = {"alpha": par.alpha, "kappa": par.kappa, "iota": par.iota}
-    beta, r, Pr, tau_phi = par.beta, par.r, rnth.model.param.Pr, par.phi
+    beta, r, tau_phi = par.beta, par.r, par.phi
+    Pr = getattr(par, "Pr", None)
+    if Pr is None and (not owner_only):
+        try:
+            Pr = rnth.model.param.Pr
+        except Exception:
+            Pr = None
+    if Pr is None:
+        Pr = 0.0
     tau_phi_R, R = getattr(par, "phi_R", 0.0), 1 + r
 
     # --- Build JIT-compatible functions from the model config ---
@@ -323,9 +452,12 @@ def calculate_euler_error_cpu(model, debug=True, sample_size=50000, random_sampl
     uc_owner_expr = ownc.model.math["functions"]["owner_marginal_utility"]["expr"]
     uc_owner = build_njit_utility(uc_owner_expr, par_dict_for_njit_builder, arg1_name="c", arg2_name="H_nxt")
 
-    # 2. Renter's marginal utility
-    uc_rent_expr = ownc.model.math["functions"]["uc_func"]["expr"]
-    uc_rent = build_njit_utility(uc_rent_expr, par_dict_for_njit_builder, arg1_name="c", arg2_name="H_nxt")
+    # 2. Renter's marginal utility (unused in owner-only mode)
+    if owner_only:
+        uc_rent = uc_owner
+    else:
+        uc_rent_expr = ownc.model.math["functions"]["uc_func"]["expr"]
+        uc_rent = build_njit_utility(uc_rent_expr, par_dict_for_njit_builder, arg1_name="c", arg2_name="H_nxt")
 
     # 3. Inverse marginal utility
     uc_inv_expr = ownc.model.math["functions"]["inv_marginal_utility"]["expr"]

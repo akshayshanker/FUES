@@ -6,8 +6,8 @@
 # Each MPI rank solves one (method, grid_size, H_points) combination.
 
 # Experiment identification
-config_id: "test_0.3"
-trial_id: "paper-sweep-11"  # Shared with sweep_VFI_GPU for baseline lookup
+config_id: "owner_only"
+trial_id: "paper-sweep-owner-11"  # Shared with sweep_VFI_GPU for baseline lookup
 output_dir: "/scratch/tp66/${USER}/FUES/solutions/housing_renting"  # Base output directory
 
 # Reference method for baseline comparison
@@ -49,7 +49,7 @@ sweep:
 # Fixed parameters (not in sweep)
 fixed:
   delta_pb: 1
-  periods: 20
+  periods: 20   # Finite horizon with 20 periods
 
 # Override specific params when constructing ref_params
 # (ref_params = sweep params with method=ref_method + these overrides)

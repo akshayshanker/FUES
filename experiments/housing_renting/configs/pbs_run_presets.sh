@@ -21,12 +21,23 @@ STD_RES_SETTINGS[version_suffix]="test_0.1"
 STD_RES_SETTINGS[delta_pb]=1
 
 declare -A STD_RES_SETTINGS_3
-STD_RES_SETTINGS_3[periods]=5
+STD_RES_SETTINGS_3[periods]=20
 STD_RES_SETTINGS_3[vfi_ngrid]=2000
 STD_RES_SETTINGS_3[hd_points]=2000
 STD_RES_SETTINGS_3[grid_points]=2000
 STD_RES_SETTINGS_3[version_suffix]="test_0.3"
 STD_RES_SETTINGS_3[delta_pb]=1
+
+# Owner-only infinite horizon config (Fella 2014)
+# periods=1 for recursive iteration on single period
+declare -A STD_RES_SETTINGS_4
+STD_RES_SETTINGS_4[periods]=20
+STD_RES_SETTINGS_4[vfi_ngrid]=2000
+STD_RES_SETTINGS_4[hd_points]=2000
+STD_RES_SETTINGS_4[grid_points]=2000
+STD_RES_SETTINGS_4[version_suffix]="owner_only"
+STD_RES_SETTINGS_4[delta_pb]=1
+
 
 
 declare -A STD_RES_SETTINGS_PB

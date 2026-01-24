@@ -145,3 +145,68 @@ def F_t_cntn_to_dcsn(mover):
         return sol
     
     return operator
+
+
+def F_t_cntn_to_dcsn_owner_only(mover):
+    """Create operator for tenure choice (TENU) that always chooses owner path.
+
+    This implements the Fella (2014) model without renting option.
+    Simply passes through owner continuation values without max comparison.
+
+    V_v(a, H, y) = V_e^{own}(a, y, H)  (no comparison with rent path)
+
+    Parameters
+    ----------
+    mover : Mover
+        The cntn_to_dcsn mover with self-contained model
+
+    Returns
+    -------
+    callable
+        The operator function that passes through owner continuation values
+    """
+    # Extract model
+    model = mover.model
+
+    # Get grids from model
+    a_grid = model.num.state_space.dcsn.grids.a
+    H_grid = model.num.state_space.dcsn.grids.H
+    y_grid = model.num.state_space.dcsn.grids.y
+
+    n_a = len(a_grid)
+    n_H = len(H_grid)
+    n_y = len(y_grid)
+
+    def operator(perch_data):
+        """Pass through owner continuation values (no renter comparison)
+
+        Parameters
+        ----------
+        perch_data : dict
+            Dictionary with 'from_owner' and 'from_renter' keys
+            (from_renter is ignored in owner-only mode)
+
+        Returns
+        -------
+        Solution
+            Decision perch data with owner values, tenure policy always = 1 (own)
+        """
+        # Extract owner continuation values (ignore renter path)
+        own_data = perch_data["from_owner"]
+
+        # Get values directly from owner path (already on correct grid)
+        vlu_own = own_data["vlu"]       # Shape: (n_a, n_H, n_y)
+        lambda_own = own_data["lambda_"]  # Shape: (n_a, n_H, n_y)
+
+        # Create tenure policy: always own (1.0)
+        policy_tenu = np.ones((n_a, n_H, n_y))
+
+        # Create Solution object
+        sol = Solution()
+        sol.vlu = vlu_own
+        sol.lambda_ = lambda_own
+        sol.policy["tenure"] = policy_tenu
+
+        return sol
+
+    return operator

@@ -537,9 +537,9 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model, store_egm_grids=False):
 
             # Pre-process the EGM solution
             # Add constraint points for OBC / time-inconsistency handling, etc.
-            # NOTE: When routing through CONSAV (ue_engine == "CONSAV"), we skip this
+            # NOTE: When routing through CONSAV (ue_method == "CONSAV"), we skip this
             # preprocessing and pass raw EGM outputs directly to CONSAV's UE routine.
-            if ue_engine != "CONSAV":
+            if ue_method != "CONSAV":
                 # Only add jump constraints when delta_pb != 1 (time inconsistent)
                 add_jump_constraints = (delta != 1.0)
 
@@ -598,13 +598,13 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model, store_egm_grids=False):
                     m_egm_unique, vlu_q_egm_unique, q_nxt_raw, c_egm_unique,
                     a_nxt_grid_unique, w_grid, partial_uc,
                     u_func={"func": utility_func, "args": {"H_nxt": H_val}},
-                    ue_method=ue_engine, m_bar=m_bar, lb=lb,
+                    ue_method=ue_method, m_bar=m_bar, lb=lb,
                     rfc_radius=rfc_radius, rfc_n_iter=rfc_n_iter,
                     ue_kwargs=ue_kwargs
                 )
             except Exception as e:
-                print(f"[DEBUG] {ue_method}->{ue_engine}: EGM_UE failed for grid key {grid_key}: {e}")
-                print(f"[DEBUG] {ue_method}->{ue_engine}: Input shapes - m_egm: {m_egm_unique.shape}, vf: {vlu_q_egm_unique.shape}")
+                print(f"[DEBUG] {ue_method}: EGM_UE failed for grid key {grid_key}: {e}")
+                print(f"[DEBUG] {ue_method}: Input shapes - m_egm: {m_egm_unique.shape}, vf: {vlu_q_egm_unique.shape}")
                 # Create fallback empty refined results
                 refined = {
                     "x_dcsn_ref": np.array([]),
@@ -625,7 +625,7 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model, store_egm_grids=False):
 
             lambda_refined = refined["lambda_ref"]
 
-            if ue_engine != "CONSAV":
+            if ue_method != "CONSAV":
                 # Use cleaner interpolation for non-ConSav methods
                 Q_dcsn[:, i_h, i_y] = interp_clean(
                     m_refined, q_refined, w_grid, extrap=True)

@@ -31,7 +31,7 @@ fi
 source "$SCRIPT_DIR/configs/pbs_run_presets.sh"
 
 # --- Define the Sequence of Configurations to Run ---
-CONFIG_TO_RUN=("STD_RES_SETTINGS_3")
+CONFIG_TO_RUN=("STD_RES_SETTINGS_4")
 
 
 # --- Environment Setup ---

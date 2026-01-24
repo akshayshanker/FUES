@@ -22,7 +22,8 @@ from dc_smm.models.housing_renting.horses_t import (
 from .whisperer import (
     build_operators,
     solve_stage,
-    run_time_iteration
+    run_time_iteration,
+    run_recursive_iteration
 )
 
 __all__ = [
@@ -32,9 +33,10 @@ __all__ = [
     'F_ownc_cntn_to_dcsn',
     'F_id',
     'F_t_cntn_to_dcsn',
-    
+
     # Whisperer functions (external solver)
     'build_operators',
     'solve_stage',
-    'run_time_iteration'
+    'run_time_iteration',
+    'run_recursive_iteration'
 ] 

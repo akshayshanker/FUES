@@ -12,10 +12,12 @@ import os
 import sys
 import yaml
 
-# Add repo root to path
+# Add repo root + src/ to path so `dc_smm` imports work without installation
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(os.path.dirname(SCRIPT_DIR))
+SRC_ROOT = os.path.join(REPO_ROOT, "src")
 sys.path.insert(0, REPO_ROOT)
+sys.path.insert(0, SRC_ROOT)
 
 from examples.retirement.plots import plot_egrids, plot_cons_pol, plot_dcegm_cf
 from examples.retirement.benchmarks import test_Timings
@@ -82,6 +84,11 @@ def main():
 
     print(f'Running with grid_size={grid_size}, plot_age={args.plot_age}')
     print(f'Output: {args.output_dir}')
+    smooth_sigma = float(params.get('smooth_sigma', 0.0))
+    sigma_tag = "sigma0" if abs(smooth_sigma) < 1e-12 else f"sigma{int(round(smooth_sigma * 100)):02d}"
+    print(f'smooth_sigma={smooth_sigma} (tag={sigma_tag})')
+
+
 
     # Run timing comparison if requested
     if args.run_timings:
@@ -110,7 +117,7 @@ def main():
         b=params.get('b', 1e-10),
         grid_max_A=params.get('grid_max_A', 500),
         grid_size=grid_size,
-        T=params.get('T', 20),
+        T=params.get('T', 50),
         smooth_sigma=params.get('smooth_sigma', 0),
         m_bar=params.get('m_bar', 1.2),
     )
@@ -148,10 +155,10 @@ def main():
     # Generate plots
     print(f'Generating plots to {save_path}...')
     plot_egrids(args.plot_age, e_grid, vf_unref, c_unref, dela,
-                args.grid_size, cp, save_path)
+                grid_size, cp, save_path, tag=sigma_tag)
     plot_cons_pol(c_FUES, cp, save_path)
-    plot_dcegm_cf(args.plot_age, args.grid_size, e_grid, vf_unref, c_unref,
-                  dela, cp.asset_grid_A, cp, save_path)
+    plot_dcegm_cf(args.plot_age, grid_size, e_grid, vf_unref, c_unref,
+                  dela, cp.asset_grid_A, cp, save_path, tag=sigma_tag)
 
     print('Done!')
 

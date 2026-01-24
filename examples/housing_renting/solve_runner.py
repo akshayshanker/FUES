@@ -272,7 +272,7 @@ trace_print("0.4: DynX imports done", detail=True)
 #  local helpers (imported lazily to keep fall-back stubs tiny)
 # ────────────────────────────────────────────────────────────────────────────
 try:
-    from whisperer import build_operators_for_circuit, run_time_iteration
+    from whisperer import build_operators_for_circuit, run_time_iteration, run_recursive_iteration
     from helpers.euler_error import euler_error_metric
     from helpers.plots import generate_plots
     from helpers.tables import print_summary, generate_latex_table
@@ -281,7 +281,7 @@ try:
     from helpers.memory_utils import MemoryMonitor, log_memory_usage, cleanup_if_needed, get_memory_config, get_memory_usage, get_available_memory
     from helpers.execution_settings import ExecutionSettings
 except ImportError:
-    from .whisperer import build_operators_for_circuit, run_time_iteration
+    from .whisperer import build_operators_for_circuit, run_time_iteration, run_recursive_iteration
     from .helpers.euler_error import euler_error_metric
     from .helpers.plots import generate_plots
     from .helpers.tables import print_summary, generate_latex_table
@@ -586,24 +586,97 @@ def make_housing_solver(args, use_mpi: bool, comm, baseline_method=None):
                 pass  # GPU module not available
         
         # 2. backward time iteration
-        # Free memory during solving if we're not saving the model
-        free_memory = not getattr(args, 'save_full_model', False)
-        # Keep periods 0 and 1: period 0 for plots, both for Euler error calculation
-        periods_to_keep = [0, 1] if free_memory else None
-        # Enable lazy compilation in low-memory mode to reduce peak memory usage
-        # This compiles each period's grids just before solving, then clears them
-        lazy_compile = getattr(args, 'low_memory', False)
-        
-        run_time_iteration(
-            mc,
-            n_periods=args.periods,
-            verbose=args.verbose,
-            verbose_timings=args.verbose,
-            recorder=recorder,
-            free_memory=free_memory,
-            periods_to_keep=periods_to_keep,
-            lazy_compile=lazy_compile,
-        )
+        # Check if recursive iteration is enabled (infinite horizon mode)
+        print("[DEBUG] Entering recursive iteration detection block")  # UNCONDITIONAL DEBUG
+        recursive_mode = False
+        convergence_tol = 1e-6
+        max_iterations = 500
+
+        try:
+            # Get settings from stage model (same pattern as whisperer.py _get_model_setting)
+            stage = mc.get_period(0).get_stage("TENU")
+            model = stage.model
+
+            # Try settings_dict first (like _get_model_setting does)
+            settings_dict = getattr(model, 'settings_dict', None)
+            settings = getattr(model, 'settings', None)
+
+            print(f"[DEBUG] settings_dict type: {type(settings_dict)}, keys: {list(settings_dict.keys()) if isinstance(settings_dict, dict) else 'N/A'}")
+            print(f"[DEBUG] settings type: {type(settings)}, keys: {list(settings.keys()) if isinstance(settings, dict) else 'N/A'}")
+
+            # Extract from settings_dict first (higher priority), then settings
+            if isinstance(settings_dict, dict) and 'recursive_iteration' in settings_dict:
+                recursive_mode = settings_dict.get("recursive_iteration", False)
+                convergence_tol = settings_dict.get("convergence_tol", 1e-6)
+                max_iterations = settings_dict.get("max_iterations", 500)
+                print(f"[DEBUG] Got values from settings_dict: recursive_mode={recursive_mode}")
+            elif isinstance(settings, dict) and 'recursive_iteration' in settings:
+                recursive_mode = settings.get("recursive_iteration", False)
+                convergence_tol = settings.get("convergence_tol", 1e-6)
+                max_iterations = settings.get("max_iterations", 500)
+                print(f"[DEBUG] Got values from settings: recursive_mode={recursive_mode}")
+            elif hasattr(settings, 'get'):
+                recursive_mode = settings.get("recursive_iteration", False)
+                convergence_tol = settings.get("convergence_tol", 1e-6)
+                max_iterations = settings.get("max_iterations", 500)
+                print(f"[DEBUG] Got values from settings.get(): recursive_mode={recursive_mode}")
+
+            # Ensure correct types (YAML can return lists for unresolved references)
+            if isinstance(recursive_mode, list):
+                recursive_mode = False
+            if isinstance(convergence_tol, list):
+                convergence_tol = 1e-6
+            if isinstance(max_iterations, list):
+                max_iterations = 500
+
+            # Convert to proper types
+            if recursive_mode is not False:
+                recursive_mode = bool(recursive_mode)
+            max_iterations = int(max_iterations)
+            convergence_tol = float(convergence_tol)
+
+        except (AttributeError, KeyError) as e:
+            if args.verbose:
+                print(f"[DEBUG] Could not get recursive iteration settings: {e}")
+            recursive_mode = False
+            convergence_tol = 1e-6
+            max_iterations = 500
+
+        # Always print for debugging (remove args.verbose check temporarily)
+        if comm is None or comm.rank == 0:
+            print(f"[DEBUG] FINAL: recursive_mode={recursive_mode}, max_iterations={max_iterations}, convergence_tol={convergence_tol}")
+
+        if recursive_mode:
+            # Infinite horizon: recursive iteration on single period
+            if args.verbose and (comm is None or comm.rank == 0):
+                print("Using recursive iteration (infinite horizon mode)")
+            run_recursive_iteration(
+                mc,
+                max_iterations=max_iterations,
+                convergence_tol=convergence_tol,
+                verbose=args.verbose,
+                recorder=recorder,
+            )
+        else:
+            # Finite horizon: standard backward time iteration
+            # Free memory during solving if we're not saving the model
+            free_memory = not getattr(args, 'save_full_model', False)
+            # Keep periods 0 and 1: period 0 for plots, both for Euler error calculation
+            periods_to_keep = [0, 1] if free_memory else None
+            # Enable lazy compilation in low-memory mode to reduce peak memory usage
+            # This compiles each period's grids just before solving, then clears them
+            lazy_compile = getattr(args, 'low_memory', False)
+
+            run_time_iteration(
+                mc,
+                n_periods=args.periods,
+                verbose=args.verbose,
+                verbose_timings=args.verbose,
+                recorder=recorder,
+                free_memory=free_memory,
+                periods_to_keep=periods_to_keep,
+                lazy_compile=lazy_compile,
+            )
         return mc
 
     return _solve

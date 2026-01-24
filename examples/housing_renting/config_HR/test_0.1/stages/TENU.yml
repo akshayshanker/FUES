@@ -22,6 +22,7 @@ stage:
   settings:
     tol: ["tol"]                # Convergence tolerance from master
     max_iter: ["max_iter"]      # Maximum iterations from master
+    owner_only: ["owner_only"]  # Owner-only mode (Fella 2014) from master
     
     # Grid parameters for state variables
     a_min: ["a_min"]            # From master

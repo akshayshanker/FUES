@@ -25,7 +25,7 @@ from dc_smm.models.housing_renting.horses_c import (
     F_rntc_cntn_to_dcsn_gpu
 )
 from dc_smm.models.housing_renting.horses_common import F_id
-from dc_smm.models.housing_renting.horses_t import F_t_cntn_to_dcsn
+from dc_smm.models.housing_renting.horses_t import F_t_cntn_to_dcsn, F_t_cntn_to_dcsn_owner_only
 from dynx.stagecraft.solmaker import Solution
 # MPI utilities are now handled by circuit_runner
 
@@ -49,6 +49,52 @@ def _drop_grid_references(obj) -> None:
                 pass
     except Exception:
         pass
+
+
+def _get_model_setting(model, key: str, default=None):
+    """Robustly fetch a setting from a DynX model.
+
+    Across the codebase we sometimes have:
+    - `model.settings_dict` (plain dict)
+    - `model.settings` (dict-like with `.get`)
+    - occasionally attribute-style settings objects
+    """
+    if model is None:
+        return default
+
+    settings_dict = getattr(model, "settings_dict", None)
+    if isinstance(settings_dict, dict):
+        return settings_dict.get(key, default)
+
+    settings = getattr(model, "settings", None)
+    if isinstance(settings, dict):
+        return settings.get(key, default)
+    if hasattr(settings, "get"):
+        try:
+            return settings.get(key, default)
+        except Exception:
+            pass
+
+    return getattr(settings, key, default)
+
+
+def _get_bool_setting(model, key: str, default: bool = False) -> bool:
+    """Like `_get_model_setting`, but coerces to bool safely."""
+    val = _get_model_setting(model, key, default)
+    if isinstance(val, bool):
+        return val
+    if val is None:
+        return default
+    if isinstance(val, (int, np.integer)):
+        return bool(val)
+    if isinstance(val, str):
+        v = val.strip().lower()
+        if v in ("1", "true", "yes", "y", "on"):
+            return True
+        if v in ("0", "false", "no", "n", "off", ""):
+            return False
+    return bool(val)
+
 
 def build_operators(stage, use_mpi=False, comm=None):
     """Build operator mappings for a given stage.
@@ -101,7 +147,12 @@ def build_operators(stage, use_mpi=False, comm=None):
     elif "TENU" in stage.name:
         # Tenure stage with branching
         operators["dcsn_to_arvl"] = F_shocks_dcsn_to_arvl(stage.dcsn_to_arvl)
-        operators["cntn_to_dcsn"] = F_t_cntn_to_dcsn(stage.cntn_to_dcsn)
+        # Check if owner_only mode is enabled (Fella 2014 model)
+        owner_only = _get_bool_setting(stage.model, "owner_only", default=False)
+        if owner_only:
+            operators["cntn_to_dcsn"] = F_t_cntn_to_dcsn_owner_only(stage.cntn_to_dcsn)
+        else:
+            operators["cntn_to_dcsn"] = F_t_cntn_to_dcsn(stage.cntn_to_dcsn)
         
     else:
         raise ValueError(f"Unknown stage type: {stage.name}")
@@ -454,7 +505,15 @@ def run_time_iteration(model_circuit, n_periods=None, verbose=False,verbose_timi
     
     # Set memory management flag on model circuit
     model_circuit.free_after_use = free_memory
-    
+
+    # Check if owner_only mode is enabled (Fella 2014 model - no renting)
+    # Get setting from TENU stage of first period
+    first_period = model_circuit.get_period(0)
+    tenu_stage_check = first_period.get_stage("TENU")
+    owner_only = _get_bool_setting(tenu_stage_check.model, "owner_only", default=False)
+    if owner_only and verbose and (not use_mpi or comm is None or comm.rank == 0):
+        print("Owner-only mode enabled (Fella 2014) - skipping renter stages")
+
     # Default periods to keep if using free_memory
     if free_memory and periods_to_keep is None:
         # By default, keep periods 0 and 1 for Euler error
@@ -499,12 +558,14 @@ def run_time_iteration(model_circuit, n_periods=None, verbose=False,verbose_timi
     
     # Set terminal flags for consumption stages
     final_ownc.status_flags["is_terminal"] = True
-    final_rntc.status_flags["is_terminal"] = True
-    
+    if not owner_only:
+        final_rntc.status_flags["is_terminal"] = True
+
     # Initialize terminal continuation values for the last period's consumption stages
     if comm is None or comm.rank == 0:
         initialize_terminal_values(final_ownc, verbose=verbose, use_mpi=use_mpi, comm=comm)
-        initialize_terminal_values(final_rntc, verbose=verbose, use_mpi=use_mpi, comm=comm)
+        if not owner_only:
+            initialize_terminal_values(final_rntc, verbose=verbose, use_mpi=use_mpi, comm=comm)
 
     if verbose and (not use_mpi or comm is None or comm.rank == 0):
         print("terminal values initialized")
@@ -570,17 +631,19 @@ def run_time_iteration(model_circuit, n_periods=None, verbose=False,verbose_timi
             except Exception:
                 pass
         
-        rntc_stage, rntc_timing = solve_stage(rntc_stage, verbose=verbose, use_mpi=use_mpi, comm=comm)
-        _sync_perch_solutions(rntc_stage, use_mpi, comm)
-        stage_timings.append(rntc_timing)
-        period_ue_time += rntc_timing.get("ue_time", 0)
-        # Drop large continuation objects once consumed (policies live in dcsn.sol).
-        if free_memory:
-            try:
-                rntc_stage.cntn.sol = None
-            except Exception:
-                pass
-        
+        # Solve RNTC only if not in owner_only mode
+        if not owner_only:
+            rntc_stage, rntc_timing = solve_stage(rntc_stage, verbose=verbose, use_mpi=use_mpi, comm=comm)
+            _sync_perch_solutions(rntc_stage, use_mpi, comm)
+            stage_timings.append(rntc_timing)
+            period_ue_time += rntc_timing.get("ue_time", 0)
+            # Drop large continuation objects once consumed (policies live in dcsn.sol).
+            if free_memory:
+                try:
+                    rntc_stage.cntn.sol = None
+                except Exception:
+                    pass
+
         # -------------------------------------------------------------------------------
         # 2. Connect consumption stages to housing stages
         # -------------------------------------------------------------------------------
@@ -592,16 +655,17 @@ def run_time_iteration(model_circuit, n_periods=None, verbose=False,verbose_timi
             ownc_stage.arvl.sol = None
             # Keep dcsn.sol for Euler error calculation (has policy functions)
             # Keep cntn.sol as it might be needed for next period
-        
-        # RNTC.arvl → RNTH.cntn
-        rnth_stage.cntn.sol = rntc_stage.arvl.sol
-        # Free memory if not needed for saving
-        # (For periods not in keep list, we'll free everything at end of loop)
-        if getattr(model_circuit, 'free_after_use', True) and (periods_to_keep is None or period_idx in periods_to_keep):
-            rntc_stage.arvl.sol = None
-            # Keep dcsn.sol for Euler error calculation (has policy functions)
-            # Keep cntn.sol as it might be needed for next period
-        
+
+        # RNTC.arvl → RNTH.cntn (only if not owner_only)
+        if not owner_only:
+            rnth_stage.cntn.sol = rntc_stage.arvl.sol
+            # Free memory if not needed for saving
+            # (For periods not in keep list, we'll free everything at end of loop)
+            if getattr(model_circuit, 'free_after_use', True) and (periods_to_keep is None or period_idx in periods_to_keep):
+                rntc_stage.arvl.sol = None
+                # Keep dcsn.sol for Euler error calculation (has policy functions)
+                # Keep cntn.sol as it might be needed for next period
+
         # Force gc after consumption stage connections (largest memory consumers)
         if free_memory:
             gc.collect()
@@ -613,11 +677,13 @@ def run_time_iteration(model_circuit, n_periods=None, verbose=False,verbose_timi
         _sync_perch_solutions(ownh_stage, use_mpi, comm)
         stage_timings.append(ownh_timing)
         period_ue_time += ownh_timing.get("ue_time", 0)
-        
-        rnth_stage, rnth_timing = solve_stage(rnth_stage, verbose=verbose, use_mpi=use_mpi, comm=comm)
-        _sync_perch_solutions(rnth_stage, use_mpi, comm)
-        stage_timings.append(rnth_timing)
-        period_ue_time += rnth_timing.get("ue_time", 0)
+
+        # Solve RNTH only if not in owner_only mode
+        if not owner_only:
+            rnth_stage, rnth_timing = solve_stage(rnth_stage, verbose=verbose, use_mpi=use_mpi, comm=comm)
+            _sync_perch_solutions(rnth_stage, use_mpi, comm)
+            stage_timings.append(rnth_timing)
+            period_ue_time += rnth_timing.get("ue_time", 0)
         
         # -------------------------------------------------------------------------------
         # 4. Connect housing stages to tenure choice stage
@@ -630,15 +696,19 @@ def run_time_iteration(model_circuit, n_periods=None, verbose=False,verbose_timi
             ownh_stage.arvl.sol = None
             # Keep dcsn.sol for Euler error calculation (has policy functions)
             ownh_stage.cntn.sol = None  # Already consumed
-        
-        # RNTH.arvl → TENU.cntn_rent
-        tenu_stage.cntn.sol["from_renter"] = rnth_stage.arvl.sol
-        # Free memory if not needed for saving
-        # (For periods not in keep list, we'll free everything at end of loop)
-        if getattr(model_circuit, 'free_after_use', True) and (periods_to_keep is None or period_idx in periods_to_keep):
-            rnth_stage.arvl.sol = None
-            # Keep dcsn.sol for Euler error calculation (has policy functions)
-            rnth_stage.cntn.sol = None  # Already consumed
+
+        # RNTH.arvl → TENU.cntn_rent (only if not owner_only)
+        if owner_only:
+            # In owner_only mode, set from_renter to None (ignored by owner_only operator)
+            tenu_stage.cntn.sol["from_renter"] = None
+        else:
+            tenu_stage.cntn.sol["from_renter"] = rnth_stage.arvl.sol
+            # Free memory if not needed for saving
+            # (For periods not in keep list, we'll free everything at end of loop)
+            if getattr(model_circuit, 'free_after_use', True) and (periods_to_keep is None or period_idx in periods_to_keep):
+                rnth_stage.arvl.sol = None
+                # Keep dcsn.sol for Euler error calculation (has policy functions)
+                rnth_stage.cntn.sol = None  # Already consumed
         
         # -------------------------------------------------------------------------------
         # 5. Solve the tenure choice stage (TENU)
@@ -657,15 +727,18 @@ def run_time_iteration(model_circuit, n_periods=None, verbose=False,verbose_timi
         # 6. Inter-period connection: If not first period, connect to previous period
         # -------------------------------------------------------------------------------
         if period_idx > 0:
-            # Get the previous period's tenure choice stage
+            # Get the previous period's consumption stages
             prev_period = model_circuit.get_period(period_idx - 1)
-            prev_rentc = prev_period.get_stage("RNTC")
             prev_ownc = prev_period.get_stage("OWNC")
-            
-            # Connect inter-period: TENU.arvl → previous TENU.cntn
-            prev_rentc.cntn.sol = tenu_stage.arvl.sol
+
+            # Connect inter-period: TENU.arvl → previous consumption stage cntn
             prev_ownc.cntn.sol = tenu_stage.arvl.sol
-            
+
+            # Only connect to RNTC if not in owner_only mode
+            if not owner_only:
+                prev_rentc = prev_period.get_stage("RNTC")
+                prev_rentc.cntn.sol = tenu_stage.arvl.sol
+
             # Free TENU memory after period connection if not needed for saving
             if getattr(model_circuit, 'free_after_use', True):
                 # Only keep arvl.sol if it's the last solved period (period_idx == 0)
@@ -674,18 +747,7 @@ def run_time_iteration(model_circuit, n_periods=None, verbose=False,verbose_timi
                 # Keep dcsn.sol for Euler error calculation (has policy functions)
                 tenu_stage.cntn.sol = None  # Already consumed
         
-        # Store this period's stages in dictionary format for the return value
-        stages_dict = {
-            "TENU": tenu_stage,
-            "OWNH": ownh_stage,
-            "OWNC": ownc_stage,
-            "RNTH": rnth_stage,
-            "RNTC": rntc_stage
-        }
-            
-        all_stages_by_period.append(stages_dict)
-        
-        
+        # Record timing data
         period_data = {
             "period": period_idx + 1,
             "time": period_time,
@@ -693,24 +755,31 @@ def run_time_iteration(model_circuit, n_periods=None, verbose=False,verbose_timi
             "is_terminal": is_terminal_period
         }
         period_timings.append(period_data)
-        
+
         # Track times for non-terminal periods only (exclude terminal period)
         if not is_terminal_period:
             total_ue_time += period_ue_time
             total_nonterminal_time += period_time
             nonterminal_period_count += 1
-        
+
         # --- Memory cleanup (NOT included in period timing) ---
-        
+
+        # Determine if this period should be kept
+        keep_this_period = (periods_to_keep is not None and period_idx in periods_to_keep)
+
         # Free all memory from this period if it's not in the keep list
-        if free_memory and periods_to_keep is not None and period_idx not in periods_to_keep:
+        if free_memory and periods_to_keep is not None and not keep_this_period:
             if verbose and (not use_mpi or comm is None or comm.rank == 0):
                 print(f"  Freeing all memory from period {period_idx} (not in keep list: {periods_to_keep})")
             _free_period_memory(period)
+            # CRITICAL: Store None to release stage references and allow GC
+            all_stages_by_period.append(None)
+            # Clear local references to help GC
+            tenu_stage = ownh_stage = ownc_stage = rnth_stage = rntc_stage = None
             gc.collect()  # Force immediate collection after freeing period
-        
+
         # Even for periods we keep, clear Q and lambda arrays which are rarely needed
-        elif free_memory and period_idx in periods_to_keep:
+        elif free_memory and keep_this_period:
             for stage_name in ["OWNC", "RNTC"]:
                 try:
                     stage = period.get_stage(stage_name)
@@ -720,19 +789,43 @@ def run_time_iteration(model_circuit, n_periods=None, verbose=False,verbose_timi
                         stage.dcsn.sol.lambda_ = None
                 except:
                     pass
-            
+
             # NOTE: Do NOT clear numerical grids for kept periods!
             # Euler error calculation needs grids (stage.dcsn.grid.w, etc.)
             # Only clear solutions arrays (Q, lambda) which are not needed for metrics
+
+            # Store stages for kept periods
+            stages_dict = {
+                "TENU": tenu_stage,
+                "OWNH": ownh_stage,
+                "OWNC": ownc_stage,
+                "RNTH": rnth_stage,
+                "RNTC": rntc_stage
+            }
+            all_stages_by_period.append(stages_dict)
             gc.collect()
-        
+
         # Lazy compile mode: clear grids for periods NOT in keep list
         # (periods in keep_list need grids for Euler error calculation)
-        elif lazy_compile and (periods_to_keep is None or period_idx not in periods_to_keep):
+        elif lazy_compile and not keep_this_period:
             if verbose and (not use_mpi or comm is None or comm.rank == 0):
                 print(f"  [Lazy compile] Clearing numerical grids from period {period_idx+1}")
             _clear_period_numerics(period)
+            # Store None to release stage references
+            all_stages_by_period.append(None)
+            tenu_stage = ownh_stage = ownc_stage = rnth_stage = rntc_stage = None
             gc.collect()
+
+        else:
+            # Default: store stages (no memory freeing mode)
+            stages_dict = {
+                "TENU": tenu_stage,
+                "OWNH": ownh_stage,
+                "OWNC": ownc_stage,
+                "RNTH": rnth_stage,
+                "RNTC": rntc_stage
+            }
+            all_stages_by_period.append(stages_dict)
     
     # Reverse the list to have periods in correct order (T-n to T-1)
     all_stages_by_period.reverse()
@@ -819,6 +912,220 @@ def run_time_iteration(model_circuit, n_periods=None, verbose=False,verbose_timi
     
     return all_stages_by_period
 
+
+def run_recursive_iteration(model_circuit, max_iterations=500, convergence_tol=1e-6,
+                            verbose=False, recorder=None):
+    """
+    Infinite horizon solver using recursive iteration on a single period.
+
+    Memory efficient: only one period is created and reused until convergence.
+    Suitable for stationary infinite horizon problems like Fella (2014).
+
+    Parameters
+    ----------
+    model_circuit : ModelCircuit
+        Model circuit with exactly 1 period (horizon=1)
+    max_iterations : int
+        Maximum number of iterations before stopping
+    convergence_tol : float
+        Convergence tolerance for value function (sup norm)
+    verbose : bool
+        Print iteration progress
+    recorder : optional
+        Recorder for metrics
+
+    Returns
+    -------
+    dict
+        Dictionary with converged stages and iteration info
+    """
+    import time
+    import copy
+
+    total_start_time = time.time()
+
+    # Validate parameters (handle unresolved YAML references)
+    if isinstance(max_iterations, list):
+        max_iterations = 500
+    if isinstance(convergence_tol, list):
+        convergence_tol = 1e-6
+    max_iterations = int(max_iterations)
+    convergence_tol = float(convergence_tol)
+
+    # Get MPI parameters
+    use_mpi = getattr(model_circuit, '_use_mpi', False)
+    comm = getattr(model_circuit, '_comm', None)
+    is_root = (comm is None or comm.rank == 0)
+
+    # Check that we have exactly 1 period
+    n_periods = len(model_circuit.periods_list)
+    if n_periods != 1:
+        raise ValueError(f"run_recursive_iteration requires horizon=1, got {n_periods} periods")
+
+    # Get the single period
+    period = model_circuit.get_period(0)
+
+    # Get stages
+    tenu_stage = period.get_stage("TENU")
+    ownh_stage = period.get_stage("OWNH")
+    ownc_stage = period.get_stage("OWNC")
+    rnth_stage = period.get_stage("RNTH")
+    rntc_stage = period.get_stage("RNTC")
+
+    # Check owner_only mode
+    owner_only = _get_bool_setting(tenu_stage.model, "owner_only", default=False)
+    if not owner_only:
+        raise ValueError("run_recursive_iteration currently only supports owner_only mode")
+
+    # Always print start message (unconditional for debugging)
+    if is_root:
+        print(f"[RECURSIVE] Starting recursive iteration (infinite horizon, owner-only)")
+        print(f"[RECURSIVE] Max iterations: {max_iterations}, Convergence tol: {convergence_tol}")
+
+    # Set external mode
+    for stage_name, stage in period.stages.items():
+        stage.model_mode = "external"
+
+    # Compile stages
+    _compile_period_stages(period)
+
+    # Initialize terminal values for OWNC (starting point)
+    ownc_stage.status_flags["is_terminal"] = True
+    if is_root:
+        initialize_terminal_values(ownc_stage, verbose=verbose, use_mpi=use_mpi, comm=comm)
+    _barrier_if_mpi(use_mpi, comm)
+
+    # Store previous value function for convergence check
+    vlu_prev = None
+
+    # Iteration loop - track timing like run_time_iteration does per-period
+    iteration_times = []
+    iteration_ue_times = []  # Track UE time per iteration
+    total_ue_time = 0.0
+
+    for iteration in range(max_iterations):
+        iter_start = time.time()
+        iter_ue_time = 0.0
+
+        # ---- Solve OWNC (consumption stage) ----
+        ownc_stage, ownc_timing = solve_stage(ownc_stage, verbose=False, use_mpi=use_mpi, comm=comm)
+        _sync_perch_solutions(ownc_stage, use_mpi, comm)
+        iter_ue_time += ownc_timing.get("ue_time", 0.0)
+
+        # ---- Connect OWNC.arvl → OWNH.cntn ----
+        ownh_stage.cntn.sol = ownc_stage.arvl.sol
+
+        # ---- Solve OWNH (housing choice stage) ----
+        ownh_stage, ownh_timing = solve_stage(ownh_stage, verbose=False, use_mpi=use_mpi, comm=comm)
+        _sync_perch_solutions(ownh_stage, use_mpi, comm)
+        iter_ue_time += ownh_timing.get("ue_time", 0.0)
+
+        # ---- Connect OWNH.arvl → TENU.cntn (owner path only) ----
+        tenu_stage.cntn.sol["from_owner"] = ownh_stage.arvl.sol
+        tenu_stage.cntn.sol["from_renter"] = None  # Not used in owner_only mode
+
+        # ---- Solve TENU (tenure choice - just passes through owner values) ----
+        tenu_stage, tenu_timing = solve_stage(tenu_stage, verbose=False, use_mpi=use_mpi, comm=comm)
+        _sync_perch_solutions(tenu_stage, use_mpi, comm)
+        iter_ue_time += tenu_timing.get("ue_time", 0.0)
+
+        # ---- Check convergence ----
+        vlu_current = tenu_stage.arvl.sol.vlu
+        if vlu_prev is not None:
+            diff = np.max(np.abs(vlu_current - vlu_prev))
+            converged = diff < convergence_tol
+        else:
+            diff = np.inf
+            converged = False
+
+        iter_time = time.time() - iter_start
+        iteration_times.append(iter_time)
+        iteration_ue_times.append(iter_ue_time)
+        total_ue_time += iter_ue_time
+
+        # Always print progress (unconditional for debugging)
+        if is_root and (iteration % 10 == 0 or converged):
+            print(f"[RECURSIVE] Iteration {iteration+1}: diff = {diff:.2e}, time = {iter_time:.3f}s")
+
+        if converged:
+            if is_root:
+                print(f"[RECURSIVE] Converged after {iteration+1} iterations!")
+            break
+
+        # ---- Feedback: TENU.arvl.sol → OWNC.cntn.sol (for next iteration) ----
+        ownc_stage.cntn.sol = tenu_stage.arvl.sol
+        ownc_stage.status_flags["is_terminal"] = False  # No longer terminal
+
+        # Store for next convergence check
+        vlu_prev = vlu_current.copy()
+
+    else:
+        if is_root:
+            print(f"[RECURSIVE] Warning: Did not converge after {max_iterations} iterations (diff={diff:.2e})")
+
+    total_time = time.time() - total_start_time
+    n_iterations = iteration + 1  # Actual number of iterations completed
+
+    # Compute timing metrics for infinite horizon
+    # Unlike finite horizon, ALL iterations use the same (non-terminal) operators
+    # First iteration has JIT overhead, so we report both total and excluding-first
+    total_iter_time = sum(iteration_times) if iteration_times else 0.0
+    avg_iter_time = np.mean(iteration_times) if iteration_times else 0
+    avg_ue_time = np.mean(iteration_ue_times) if iteration_ue_times else 0.0
+
+    # For metrics, report excluding first iteration (JIT overhead) for fair comparison
+    # This matches "non-terminal" semantics in finite horizon
+    nonterminal_iteration_count = max(0, n_iterations - 1)
+    total_nonterminal_time = sum(iteration_times[1:]) if len(iteration_times) > 1 else 0.0
+    total_nonterminal_ue_time = sum(iteration_ue_times[1:]) if len(iteration_ue_times) > 1 else 0.0
+    avg_nonterminal_time = np.mean(iteration_times[1:]) if len(iteration_times) > 1 else 0.0
+    avg_nonterminal_ue_time = np.mean(iteration_ue_times[1:]) if len(iteration_ue_times) > 1 else 0.0
+
+    if is_root:
+        print(f"[RECURSIVE] Total time: {total_time:.2f}s, {n_iterations} iterations, Avg: {avg_iter_time:.3f}s")
+        print(f"[RECURSIVE] Excluding 1st (JIT): {nonterminal_iteration_count} iters, Avg time: {avg_nonterminal_time:.3f}s, Avg UE: {avg_nonterminal_ue_time*1000:.2f}ms")
+
+    # Record metrics if a recorder was provided (same format as run_time_iteration)
+    if recorder is not None:
+        # Compute per-iteration UE percentages (excluding first iteration with JIT)
+        per_iter_ue_percents = []
+        for i in range(1, len(iteration_times)):
+            if iteration_times[i] > 0:
+                per_iter_ue_percents.append((iteration_ue_times[i] / iteration_times[i]) * 100)
+        avg_ue_percent = sum(per_iter_ue_percents) / len(per_iter_ue_percents) if per_iter_ue_percents else 0
+
+        recorder.add(
+            total_solution_time=total_time,
+            total_ue_time=total_nonterminal_ue_time,  # Exclude JIT overhead
+            total_nonterminal_time=total_nonterminal_time,
+            avg_ue_time_per_period=avg_nonterminal_ue_time,
+            avg_nonterminal_time_per_period=avg_nonterminal_time,
+            nonterminal_period_count=nonterminal_iteration_count,
+            ue_time_percent=((total_nonterminal_ue_time / total_nonterminal_time) * 100) if total_nonterminal_time > 0 else 0,
+            avg_ue_percent_per_period=avg_ue_percent,
+            avg_ownc_time_per_period=0.0,  # Not tracked separately in recursive mode
+            # Store iteration-specific data
+            recursive_iterations=n_iterations,
+            recursive_converged=converged,
+            recursive_final_diff=diff,
+        )
+
+    # Return results
+    return {
+        "stages": {
+            "TENU": tenu_stage,
+            "OWNH": ownh_stage,
+            "OWNC": ownc_stage,
+        },
+        "iterations": n_iterations,
+        "converged": converged,
+        "final_diff": diff,
+        "total_time": total_time,
+        "iteration_times": iteration_times,
+        "iteration_ue_times": iteration_ue_times,
+    }
+
+
 # Helper for rank alignment when needed
 def _barrier_if_mpi(use_mpi: bool, comm):
     """Simple barrier for rank alignment when needed."""
@@ -852,10 +1159,10 @@ def _free_period_memory(period, clear_grids=True):
     """
     Completely free all solution data from a period's stages.
     Used for periods that are not needed for metrics.
-    
+
     Args:
         period: Period object to free memory from
-        clear_grids: If True, also clear numerical grids (saves significant memory 
+        clear_grids: If True, also clear numerical grids (saves significant memory
                      with many income states, but prevents re-solving this period)
     """
     for stage_name in ["TENU", "OWNH", "OWNC", "RNTH", "RNTC"]:
@@ -864,49 +1171,61 @@ def _free_period_memory(period, clear_grids=True):
             # Free all perch solution data
             for perch_name in ["arvl", "dcsn", "cntn"]:
                 perch = getattr(stage, perch_name, None)
-                if perch is not None and hasattr(perch, 'sol'):
-                    # If it's a Solution object, clear its internal arrays too
-                    if hasattr(perch.sol, 'vlu'):
-                        perch.sol.vlu = None
-                    if hasattr(perch.sol, 'lambda_'):
-                        perch.sol.lambda_ = None
-                    if hasattr(perch.sol, 'Q'):
-                        perch.sol.Q = None
-                    if hasattr(perch.sol, 'policy'):
-                        perch.sol.policy = {}
-                    perch.sol = None
-                # Drop grid refs (often the dominant per-period memory in DynX)
-                if clear_grids:
-                    _drop_grid_references(perch)
-            
+                if perch is not None:
+                    if hasattr(perch, 'sol') and perch.sol is not None:
+                        # If it's a Solution object, clear its internal arrays too
+                        if hasattr(perch.sol, 'vlu'):
+                            perch.sol.vlu = None
+                        if hasattr(perch.sol, 'lambda_'):
+                            perch.sol.lambda_ = None
+                        if hasattr(perch.sol, 'Q'):
+                            perch.sol.Q = None
+                        if hasattr(perch.sol, 'policy'):
+                            perch.sol.policy = {}
+                        perch.sol = None
+                    # Drop grid refs (often the dominant per-period memory in DynX)
+                    if clear_grids:
+                        _drop_grid_references(perch)
+                        # Also clear perch.model.num if present
+                        if hasattr(perch, 'model') and perch.model is not None:
+                            if hasattr(perch.model, 'num'):
+                                perch.model.num = None
+
             # Also clear any cached operators
             if hasattr(stage, '_ops'):
                 stage._ops = None
-            
+
             # Clear numerical grids if requested (saves significant memory)
             # These are duplicated per period but are identical, so can be freed after solving
-            if clear_grids and hasattr(stage, 'model') and hasattr(stage.model, 'num'):
-                try:
-                    # Clear state space grids
-                    if hasattr(stage.model.num, 'state_space'):
-                        for perch_name in ['arvl', 'dcsn', 'cntn']:
-                            perch_space = getattr(stage.model.num.state_space, perch_name, None)
-                            if perch_space and hasattr(perch_space, 'grids'):
-                                # Set grids to empty to free memory
-                                for attr in dir(perch_space.grids):
-                                    if not attr.startswith('_'):
-                                        try:
-                                            setattr(perch_space.grids, attr, None)
-                                        except:
-                                            pass
-                    # Clear compiled functions cache
-                    if hasattr(stage.model.num, 'functions'):
-                        stage.model.num.functions = None
-                except:
-                    pass
+            if clear_grids and hasattr(stage, 'model') and stage.model is not None:
+                if hasattr(stage.model, 'num'):
+                    try:
+                        # Clear state space grids
+                        if hasattr(stage.model.num, 'state_space'):
+                            for perch_name in ['arvl', 'dcsn', 'cntn']:
+                                perch_space = getattr(stage.model.num.state_space, perch_name, None)
+                                if perch_space and hasattr(perch_space, 'grids'):
+                                    # Set grids to empty to free memory
+                                    for attr in dir(perch_space.grids):
+                                        if not attr.startswith('_'):
+                                            try:
+                                                setattr(perch_space.grids, attr, None)
+                                            except:
+                                                pass
+                        # Clear compiled functions cache
+                        if hasattr(stage.model.num, 'functions'):
+                            stage.model.num.functions = None
+                    except:
+                        pass
+                    # Clear entire numerical model to release all grid memory
+                    stage.model.num = None
         except:
             pass  # Stage might not exist
-    
+
+    # NOTE: Do NOT clear period.stages[stage_name] references!
+    # The circuit may need to be saved later, which requires stage objects to exist.
+    # We've already cleared the heavy data (solutions, grids) - that's sufficient.
+
     # Force garbage collection
     gc.collect()
 

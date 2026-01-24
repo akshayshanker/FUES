@@ -7,6 +7,17 @@ Author: Akshay Shanker, University of New South Wales, akshay.shanker@me.com
 
 import numpy as np
 import os
+import sys
+
+# Ensure `dc_smm` is importable when running from a repo checkout.
+# (On Gadi we often run from $HOME with outputs on /scratch, without pip-installing.)
+_THIS_DIR = os.path.dirname(os.path.abspath(__file__))
+_REPO_ROOT = os.path.dirname(os.path.dirname(_THIS_DIR))
+_SRC_ROOT = os.path.join(_REPO_ROOT, "src")
+if _SRC_ROOT not in sys.path:
+    sys.path.insert(0, _SRC_ROOT)
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
 
 from dc_smm.models.retirement.retirement import Operator_Factory, RetirementModel, euler, consumption_deviation
 from .tables import generate_timing_table_combined, generate_accuracy_table
@@ -217,7 +228,7 @@ if __name__ == "__main__":
     grid_sizes = [500, 1000, 2000, 3000, 10000]
     delta_values = [0.25, 0.5, 1, 2]
     egrid_plot_age = 17
-    run_performance_tests = True
+    run_performance_tests = False
 
     save_path = os.path.join('results', 'plots', 'retirement')
     os.makedirs(save_path, exist_ok=True)

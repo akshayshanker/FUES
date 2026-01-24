@@ -16,6 +16,21 @@ import matplotlib.lines as mlines
 from dc_smm.fues.fues import FUES as fues_alg
 
 
+def _style_axis_spines(ax, *, color="0.65", linewidth=0.8) -> None:
+    """Make left/bottom spines lighter (avoid bold black axes)."""
+    for side in ("left", "bottom"):
+        try:
+            ax.spines[side].set_color(color)
+            ax.spines[side].set_linewidth(linewidth)
+        except Exception:
+            pass
+    # Match tick marks to spine color (labels remain default/black)
+    try:
+        ax.tick_params(axis="both", which="both", color=color)
+    except Exception:
+        pass
+
+
 def plot_egrids(age, e_grid, vf_work, c_worker, del_a, g_size, cp, save_path, tag='sigma0'):
     """Plot unrefined vs refined endogenous grid for age.
 
@@ -79,10 +94,11 @@ def plot_egrids(age, e_grid, vf_work, c_worker, del_a, g_size, cp, save_path, ta
                       label='Intersection points', zorder=5)
 
     ax[0].set_ylabel('Value', fontsize=11)
-    ax[0].set_ylim(7.9, 8.1)
-    ax[0].set_xlim(40, 60)
+    ax[0].set_ylim(7.6, 8.4)
+    ax[0].set_xlim(45, 55)
     ax[0].spines['right'].set_visible(False)
     ax[0].spines['top'].set_visible(False)
+    _style_axis_spines(ax[0])
     ax[0].legend(frameon=False, prop={'size': 10})
     ax[0].tick_params(axis='y', labelsize=9)
     ax[0].tick_params(axis='x', labelsize=9)
@@ -103,11 +119,11 @@ def plot_egrids(age, e_grid, vf_work, c_worker, del_a, g_size, cp, save_path, ta
                       edgecolors='black', label='Intersection points', zorder=5)
 
     ax[1].set_ylim(20, 40)
-    ax[1].set_xlim(40, 60)
-    ax[0].set_xlim(40, 60)
+    ax[1].set_xlim(45, 55)
     ax[1].set_ylabel('Financial assets at time t+1', fontsize=11)
     ax[1].spines['right'].set_visible(False)
     ax[1].spines['top'].set_visible(False)
+    _style_axis_spines(ax[1])
     ax[1].tick_params(axis='y', labelsize=9)
     ax[1].tick_params(axis='x', labelsize=9)
     ax[1].yaxis.set_major_formatter(FormatStrFormatter("%.0f"))
@@ -156,6 +172,7 @@ def plot_cons_pol(sigma_work, cp, save_path, ages=[17, 10, 0]):
         ax.set_ylabel('Consumption at time $t$', fontsize=11)
         ax.set_xlabel('Financial assets at time $t$', fontsize=11)
 
+    _style_axis_spines(ax)
     ax.legend(frameon=False, prop={'size': 10})
     fig.savefig(os.path.join(save_path, 'ret_cons_all.png'))
     pl.close()
@@ -319,6 +336,8 @@ def plot_dcegm_cf(age, g_size, e_grid, vf_work, c_worker, dela_worker, a_prime, 
         ax[0].spines['top'].set_visible(False)
         ax[1].spines['right'].set_visible(False)
         ax[1].spines['top'].set_visible(False)
+        _style_axis_spines(ax[0])
+        _style_axis_spines(ax[1])
 
         ax[0].legend(handles=handles0, labels=labels0, frameon=False, prop={'size': 10}, loc='upper left')
         ax[1].legend(handles=handles0, labels=labels0, frameon=False, prop={'size': 10}, loc='upper left')
