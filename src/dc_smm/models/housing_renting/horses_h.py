@@ -42,6 +42,11 @@ from dc_smm.models.housing_renting.horses_common import interp_as
 from dynx.stagecraft.solmaker import Solution
 import os
 
+# Tax utilities for capital income tax
+from examples.housing_renting.helpers.asset_tax import (
+    parse_tax_table, total_tax_array, snap_brackets_to_grid
+)
+
 # --- Conditional CUDA import and GPU Availability Check ---
 try:
     from numba import cuda
@@ -479,6 +484,32 @@ def F_h_cntn_to_dcsn_owner(mover, use_mpi=False, comm=None):
     n_a, n_H, n_y = len(a_grid), len(H_grid), len(shock_grid)
     a_mesh, _, y_mesh = np.meshgrid(a_grid, H_grid, shock_grid, indexing='ij')
     resources_liquid_3d = (1 + r) * a_mesh + y_mesh
+
+    # Apply capital income tax if enabled (read from settings_dict, not params)
+    settings = model.settings_dict if hasattr(model, 'settings_dict') else {}
+    use_taxes = settings.get('use_taxes', False)
+    tax_table = settings.get('tax_table', None)
+    print(f"[TAX DEBUG] OWNH: use_taxes={use_taxes}, tax_table is {'set' if tax_table else 'None'}")
+    if use_taxes:
+        if tax_table is not None:
+            # CRITICAL: Snap bracket boundaries to grid points BEFORE any tax calculations
+            # This ensures all stages (VFI, EGM, resource calc) use consistent boundaries
+            if not tax_table.get('_snapped_to_grid', False):
+                tax_table = snap_brackets_to_grid(tax_table, a_grid)
+                tax_table['_snapped_to_grid'] = True
+                settings['tax_table'] = tax_table
+                print(f"[TAX DEBUG] OWNH: Snapped {len(tax_table.get('brackets', []))} brackets to a_grid")
+
+            a0_arr, a1_arr, B_arr, tau_arr = parse_tax_table(tax_table)
+            # Compute tax for each asset level
+            T_a = total_tax_array(a_grid, a0_arr, a1_arr, B_arr, tau_arr)
+            print(f"[TAX DEBUG] OWNH: Tax applied! T(a) range: [{T_a.min():.4f}, {T_a.max():.4f}]")
+            # Reshape for broadcasting: (N_a, 1, 1) to match (a, H, y) mesh
+            T_a_3d = T_a[:, np.newaxis, np.newaxis]
+            resources_liquid_3d = resources_liquid_3d - T_a_3d
+        else:
+            print(f"[TAX DEBUG] OWNH: use_taxes=True but tax_table is None!")
+
     del a_mesh, y_mesh  # Free intermediate arrays immediately
 
     def operator(perch_data):

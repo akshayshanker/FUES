@@ -2,6 +2,11 @@ import numpy as np
 from scipy.interpolate import RegularGridInterpolator, interp1d
 from dynx.stagecraft.solmaker import Solution
 
+# Tax utilities for capital income tax
+from examples.housing_renting.helpers.asset_tax import (
+    parse_tax_table, total_tax_array, snap_brackets_to_grid
+)
+
 def F_t_cntn_to_dcsn(mover):
     """Create operator for tenure choice (TENU) continuation to decision.
     
@@ -44,9 +49,29 @@ def F_t_cntn_to_dcsn(mover):
     # Precompute the transformed states for renter path
     # Create meshgrid of (a, H) for broadcasting
     a_mesh, H_mesh = np.meshgrid(a_grid, H_grid, indexing='ij')
-    
+
     # Calculate liquid wealth for rent path: (1+r)a + H for all combinations
     w_rent_mesh = (1 + r) * a_mesh + H_mesh
+
+    # Apply capital income tax if enabled (read from settings_dict, not param)
+    settings = model.settings_dict if hasattr(model, 'settings_dict') else {}
+    use_taxes = settings.get('use_taxes', False)
+    if use_taxes:
+        tax_table = settings.get('tax_table', None)
+        if tax_table is not None:
+            # CRITICAL: Snap bracket boundaries to grid points BEFORE any tax calculations
+            # This ensures all stages (VFI, EGM, resource calc) use consistent boundaries
+            if not tax_table.get('_snapped_to_grid', False):
+                tax_table = snap_brackets_to_grid(tax_table, a_grid)
+                tax_table['_snapped_to_grid'] = True
+                settings['tax_table'] = tax_table
+
+            a0_arr, a1_arr, B_arr, tau_arr = parse_tax_table(tax_table)
+            # Compute tax for each asset level
+            T_a = total_tax_array(a_grid, a0_arr, a1_arr, B_arr, tau_arr)
+            # Reshape for broadcasting: (N_a, 1) to match (a, H) mesh
+            T_a_2d = T_a[:, np.newaxis]
+            w_rent_mesh = w_rent_mesh - T_a_2d
     
     def operator(perch_data):
         """Transform continuation data into decision data using vectorized operations

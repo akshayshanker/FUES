@@ -1,5 +1,5 @@
 #!/bin/bash
-#PBS -N sweep-noPB
+#PBS -N sweep-noPB-tax
 #PBS -P tp66
 #PBS -q megamem
 #PBS -l ncpus=96,mem=5980GB,walltime=5:00:00
@@ -10,10 +10,10 @@
 #PBS -o logs/
 
 # ======================================================================
-#  Parameter Sweep Job - Methods × Grid Sizes × H_points
+#  Parameter Sweep Job - Methods × Grid Sizes × H_points (WITH TAXES)
 #  Uses MPI to distribute configurations across ranks
-#  Trial ID: paper-v1
-#  
+#  Trial ID: paper-sweep-4_taxes
+#
 #  84 configs = 4 methods × 7 grid_sizes × 3 H_sizes
 #  Megamem queue: 2 nodes × 48 CPUs = 96 CPUs, 2 × 2990GB = ~6TB RAM
 #  Running 84 MPI ranks with ~70GB memory per rank
@@ -87,8 +87,8 @@ EXPERIMENT_SET="sweep_noPB_tax"
 EXPERIMENT_SET_FILE="$SCRIPT_DIR/experiment_sets/${EXPERIMENT_SET}.yml"
 
 # Read config from YAML (falls back to defaults if not found)
-CONFIG_ID=$(python3 -c "import yaml; d=yaml.safe_load(open('$EXPERIMENT_SET_FILE')); print(d.get('config_id', 'test_0.1'))")
-TRIAL_ID=$(python3 -c "import yaml; d=yaml.safe_load(open('$EXPERIMENT_SET_FILE')); print(d.get('trial_id', 'sweep-noPB'))")
+CONFIG_ID=$(python3 -c "import yaml; d=yaml.safe_load(open('$EXPERIMENT_SET_FILE')); print(d.get('config_id', 'STD_RES_SETTINGS_4_TAXES'))")
+TRIAL_ID=$(python3 -c "import yaml; d=yaml.safe_load(open('$EXPERIMENT_SET_FILE')); print(d.get('trial_id', 'paper-sweep-4_taxes'))")
 OUTPUT_BASE=$(python3 -c "import yaml,os; d=yaml.safe_load(open('$EXPERIMENT_SET_FILE')); print(os.path.expandvars(d.get('output_dir', '/scratch/tp66/\$USER/FUES/solutions/housing_renting')))")
 
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
@@ -102,7 +102,7 @@ mkdir -p "$OUTPUT_DIR"
 MPI_RANKS=84  # 84 configs = 4 methods × 7 grid_sizes × 3 H_sizes
 
 echo "========================================================"
-echo "Parameter Sweep: sweep_noPB"
+echo "Parameter Sweep: sweep_noPB_tax (WITH CAPITAL INCOME TAX)"
 echo "Config ID: ${CONFIG_ID}"
 echo "Trial ID: ${TRIAL_ID}"
 echo "Output: ${OUTPUT_DIR}"
@@ -125,8 +125,8 @@ mpirun -np ${MPI_RANKS} python3 -m examples.housing_renting.solve_runner \
     --skip-egm-plots \
     --low-memory \
     --trace \
-    2> >(tee "${LOG_DIR}/sweep_${TIMESTAMP}.err") \
-    1> >(tee "${LOG_DIR}/sweep_${TIMESTAMP}.log")
+    2> >(tee "${LOG_DIR}/sweep_tax_${TIMESTAMP}.err") \
+    1> >(tee "${LOG_DIR}/sweep_tax_${TIMESTAMP}.log")
 
 EXIT_CODE=$?
 if [ $EXIT_CODE -ne 0 ]; then
@@ -135,26 +135,26 @@ if [ $EXIT_CODE -ne 0 ]; then
 else
     echo "Sweep completed successfully."
     echo "Results saved to: $OUTPUT_DIR"
-    
+
     # Generate paper tables from results (in config-id/trial-id subfolder)
     echo "========================================================"
     echo "Generating paper tables..."
     echo "========================================================"
-    
+
     TABLES_OUTPUT="$REPO_ROOT/results/housing_renting/${CONFIG_ID}-${TRIAL_ID}"
     mkdir -p "$TABLES_OUTPUT"
-    
+
     # Copy sweep_results.csv to results folder for persistence and re-tabulation
     echo "Copying sweep_results.csv to results folder..."
     cp "$OUTPUT_DIR/sweep_results.csv" "$TABLES_OUTPUT/sweep_results.csv"
     echo "Copied: $TABLES_OUTPUT/sweep_results.csv"
-    
+
     # Generate tables from the local copy
     python3 "$REPO_ROOT/examples/housing_renting/tabulate_results.py" \
         --trial "${CONFIG_ID}-${TRIAL_ID}" \
         --experiment-set "${EXPERIMENT_SET}" \
-        2>&1 | tee "${LOG_DIR}/tables_${TIMESTAMP}.log"
-    
+        2>&1 | tee "${LOG_DIR}/tables_tax_${TIMESTAMP}.log"
+
     echo "Paper tables saved to: $TABLES_OUTPUT"
 fi
 

@@ -274,7 +274,7 @@ trace_print("0.4: DynX imports done", detail=True)
 try:
     from whisperer import build_operators_for_circuit, run_time_iteration, run_recursive_iteration
     from helpers.euler_error import euler_error_metric
-    from helpers.plots import generate_plots
+    from helpers.plots import generate_plots, plot_compare_consumption_policy
     from helpers.tables import print_summary, generate_latex_table
     from helpers.metrics import dev_c_L2, dev_v_L2, dev_c_log10_mean, plot_comparison_factory
     from helpers.plot_csv_export import csv_plot_comparison_factory, csv_generate_plots
@@ -283,7 +283,7 @@ try:
 except ImportError:
     from .whisperer import build_operators_for_circuit, run_time_iteration, run_recursive_iteration
     from .helpers.euler_error import euler_error_metric
-    from .helpers.plots import generate_plots
+    from .helpers.plots import generate_plots, plot_compare_consumption_policy
     from .helpers.tables import print_summary, generate_latex_table
     from .helpers.metrics import dev_c_L2, dev_v_L2, dev_c_log10_mean, plot_comparison_factory
     from .helpers.plot_csv_export import csv_plot_comparison_factory, csv_generate_plots
@@ -403,12 +403,25 @@ def make_housing_model(args, cfg_container: dict, periods: int, vf_ngrid: int, c
     # 1. patch master + stage configs
     cfg = patch_cfg(args, cfg_container, periods, vf_ngrid)
 
+    # Apply use_taxes from CLI (must happen after patch_cfg deep copy)
+    use_taxes_flag = getattr(args, 'use_taxes', False)
+    if use_taxes_flag:
+        cfg["master"]["parameters"]["use_taxes"] = True
+        print(f"[TAX DEBUG] make_housing_model: use_taxes set to True in cfg")
+        print(f"[TAX DEBUG] tax_table in cfg: {'yes' if cfg['master']['parameters'].get('tax_table') else 'no'}")
+
     # 2. build ModelCircuit skeleton (no heavy maths yet)
     mc = initialize_model_Circuit(
         master_config=cfg["master"],
         stage_configs=cfg["stages"],
         connections_config=cfg["connections"],
     )
+
+    # Store tax config for injection after compilation
+    _tax_table = cfg["master"]["parameters"].get("tax_table")
+    _use_taxes = use_taxes_flag or cfg["master"]["parameters"].get("use_taxes", False)
+    if _use_taxes:
+        print(f"[TAX DEBUG] Injecting tax params onto model stages (before compile)...")
     # Optional: log memory right after circuit skeleton creation
     if getattr(args, "trace", False):
         try:
@@ -463,6 +476,37 @@ def make_housing_model(args, cfg_container: dict, periods: int, vf_ngrid: int, c
         except Exception as exc:
             # logger.error("Stage compilation failed – aborting make_housing_model()", exc_info=True)
             raise
+    
+    # WORKAROUND: Dynx model.param may be reconstructed on each access, losing injected attrs.
+    # Instead, inject use_taxes and tax_table into settings_dict (a regular dict that persists).
+    # Also inject into mover.model.settings_dict since operator factories use mover.model.
+    if _use_taxes:
+        print(f"[TAX DEBUG] Injecting tax params into settings_dict (after compile)...")
+        # Track unique model objects to avoid double-counting
+        injected_models = set()
+        for period_idx in range(len(mc.periods_list)):
+            period = mc.get_period(period_idx)
+            for stage_name, stage in period.stages.items():
+                # Collect all model objects: stage.model and mover.model for all movers
+                models_to_inject = []
+                if hasattr(stage, 'model'):
+                    models_to_inject.append((f"{stage_name}.model", stage.model))
+                for mover_name in ['cntn_to_dcsn', 'dcsn_to_arvl', 'arvl_to_cntn']:
+                    mover = getattr(stage, mover_name, None)
+                    if mover is not None and hasattr(mover, 'model'):
+                        models_to_inject.append((f"{stage_name}.{mover_name}.model", mover.model))
+                
+                # Inject into each unique model's settings_dict
+                for model_path, model in models_to_inject:
+                    model_id = id(model)
+                    if model_id not in injected_models:
+                        if hasattr(model, 'settings_dict'):
+                            model.settings_dict['use_taxes'] = True
+                            model.settings_dict['tax_table'] = _tax_table
+                            injected_models.add(model_id)
+                        else:
+                            print(f"[TAX DEBUG] {model_path} has no settings_dict!")
+        print(f"[TAX DEBUG] Tax params injected into {len(injected_models)} unique model objects")
     
     # DEBUG: Print model info to trace period mismatch
     print(f"[DEBUG] make_housing_model: periods param={periods}, model has {len(mc.periods_list)} periods, cfg horizon={cfg['master'].get('horizon', 'NOT SET')}")
@@ -789,6 +833,10 @@ def main(argv=None):
     model_config = load_config(settings.cfg_dir_bundle)
     trace_print("6: Model config loaded", detail=True)
 
+    # Apply use_taxes from CLI to model config
+    if getattr(args, 'use_taxes', False):
+        model_config["master"]["parameters"]["use_taxes"] = True
+
     # Apply a_grid_multiplier in standard (non-sweep) runs:
     a_grid_mult = model_config["master"]["settings"].get("a_grid_multiplier", 1)
 
@@ -933,7 +981,13 @@ def main(argv=None):
         # Set fixed parameters from sweep config (override command-line args)
         if "delta_pb" in fixed_params:
             sweep_base_cfg["master"]["parameters"]["delta_pb"] = fixed_params["delta_pb"]
-        
+
+        # Handle use_taxes from sweep config or fall back to CLI arg
+        if "use_taxes" in fixed_params:
+            sweep_base_cfg["master"]["parameters"]["use_taxes"] = fixed_params["use_taxes"]
+            if is_root:
+                print(f"  Using use_taxes from sweep config: {fixed_params['use_taxes']}")
+
         # Use periods from sweep config if specified, otherwise fall back to args
         sweep_periods = fixed_params.get("periods", args.periods)
         if "periods" in fixed_params:
@@ -1079,7 +1133,8 @@ def main(argv=None):
                         print(f"  [Sweep] Generating plots for {method} to {bundle_images_dir}")
                         generate_plots(model, method, bundle_images_dir,
                                      egm_bounds=plot_config['egm_bounds'],
-                                     skip_egm_plots=args.skip_egm_plots)
+                                     skip_egm_plots=args.skip_egm_plots,
+                                     policy_config=plot_config.get('policy_config'))
 
                     # Aggressive cleanup after plotting to free memory for next config
                     # Always do complete cleanup in sweep mode to prevent memory accumulation
@@ -1308,7 +1363,8 @@ def main(argv=None):
                         
                         generate_plots(ref_model, settings.baseline_method, plot_output_dir,
                                      egm_bounds=plot_config['egm_bounds'],
-                                     skip_egm_plots=args.skip_egm_plots)
+                                     skip_egm_plots=args.skip_egm_plots,
+                                     policy_config=plot_config.get('policy_config'))
                 except Exception as err:
                     print(f"[warn] plot-gen for {settings.baseline_method} failed: {err}")
                 finally:
@@ -1435,11 +1491,53 @@ def main(argv=None):
                                 print(f"  Plots will be saved to: {plot_output_dir}/{method}/")
                             else:
                                 plot_output_dir = bundle_images_dir
-                            
+
                             generate_plots(model, method, plot_output_dir,
                                          egm_bounds=plot_config['egm_bounds'],
                                          y_idx_list=plot_config['y_idx_list'],
-                                         skip_egm_plots=args.skip_egm_plots)
+                                         skip_egm_plots=args.skip_egm_plots,
+                                         policy_config=plot_config.get('policy_config'))
+
+                            # Generate consumption policy comparison plot (FUES vs VFI side-by-side)
+                            # Only for EGM-based methods when baseline is available
+                            print(f"  [DEBUG] Checking comparison plot: method={method}, needs_baseline={settings.needs_baseline}, has_ref_params={hasattr(runner, 'ref_params')}")
+                            if method in ['FUES', 'CONSAV', 'DCEGM']:
+                                try:
+                                    from dynx.stagecraft.io import load_circuit
+                                    # Try to get baseline bundle path
+                                    baseline_bundle_path = None
+                                    if hasattr(runner, 'ref_params') and runner.ref_params is not None:
+                                        baseline_bundle_path = runner._bundle_path(runner.ref_params)
+                                        print(f"  [DEBUG] baseline_bundle_path from ref_params: {baseline_bundle_path}")
+                                    elif hasattr(settings, 'baseline_method') and settings.baseline_method:
+                                        # Try to construct baseline params from settings
+                                        baseline_params = settings.get_baseline_params()
+                                        baseline_bundle_path = runner._bundle_path(baseline_params)
+                                        print(f"  [DEBUG] baseline_bundle_path from settings: {baseline_bundle_path}")
+
+                                    if baseline_bundle_path and baseline_bundle_path.exists():
+                                        print(f"  Generating FUES vs VFI consumption comparison plot...")
+                                        baseline_model = load_circuit(baseline_bundle_path)
+                                        if baseline_model is not None:
+                                            plot_compare_consumption_policy(
+                                                model_fues=model,
+                                                model_vfi=baseline_model,
+                                                image_dir=plot_output_dir,
+                                                plot_period=0,
+                                                bounds=plot_config.get('egm_bounds', {})
+                                            )
+                                            print(f"  Comparison plot saved to: {plot_output_dir}")
+                                            # Clean up baseline model after comparison plot
+                                            del baseline_model
+                                            gc.collect()
+                                        else:
+                                            print(f"  [DEBUG] baseline_model is None after load_circuit")
+                                    else:
+                                        print(f"  [DEBUG] baseline_bundle_path doesn't exist or is None: {baseline_bundle_path}")
+                                except Exception as comp_err:
+                                    import traceback
+                                    print(f"[warn] consumption comparison plot failed: {comp_err}")
+                                    traceback.print_exc()
                     except Exception as err:
                         print(f"[warn] plot-gen for {method} failed: {err}")
                     finally:

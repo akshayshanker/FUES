@@ -48,10 +48,16 @@ from dc_smm.models.housing_renting.gradients import (
     compute_gradient
 )
 from numba import njit
-from dc_smm.uenvelope.upperenvelope import EGM_UE, clear_engine_cache
+from dc_smm.uenvelope.upperenvelope import EGM_UE
 from dc_smm.fues.helpers import interp_as, interp_clean
 from quantecon.optimize.scalar_maximization import brent_max
 from dynx.stagecraft.solmaker import Solution
+
+# Tax utilities for capital income tax
+from examples.housing_renting.helpers.asset_tax import (
+    parse_tax_table, marginal_tax_array, parse_tax_constraint_nodes,
+    snap_brackets_to_grid
+)
 
 
 @njit
@@ -239,9 +245,6 @@ def F_ownc_cntn_to_dcsn(mover, use_mpi=False, comm=None):
             
             # Clear egm_grids to free memory immediately
             del egm_grids
-            
-            # Clear engine cache at end of stage
-            clear_engine_cache()
 
             return sol
 
@@ -272,14 +275,10 @@ def F_ownc_cntn_to_dcsn(mover, use_mpi=False, comm=None):
                 # VFI doesn't produce meaningful EGM grids, so skip storage
                 # Clear egm_grids to free memory immediately
                 del egm_grids
-                
-                # Clear engine cache at end of stage
-                clear_engine_cache()
 
                 return sol
-            
+
             # Workers return feather-weight stub
-            clear_engine_cache()
             return Solution()        # empty, <1 kB
         else:
             raise ValueError(
@@ -387,7 +386,47 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model, store_egm_grids=False):
     # parameters
     beta = model.param.beta
     delta = model.param.delta_pb      # NEW
-    Rfree = model.param.r + 1
+    r = model.param.r
+
+    # Compute Rfree (potentially with marginal tax adjustment)
+    # Read from settings_dict, not param (param may be reconstructed on access)
+    settings = model.settings_dict if hasattr(model, 'settings_dict') else {}
+    use_taxes = settings.get('use_taxes', False)
+    tax_constraint_nodes = None  # Will be set if taxes enabled with constraints
+
+    if use_taxes:
+        tax_table = settings.get('tax_table', None)
+        if tax_table is not None:
+            # CRITICAL: Snap bracket boundaries to grid points BEFORE any tax calculations
+            # This ensures VFI, EGM, and all tax computations use consistent boundaries
+            # Check if already snapped (to avoid re-snapping on subsequent calls)
+            if not tax_table.get('_snapped_to_grid', False):
+                tax_table = snap_brackets_to_grid(tax_table, a_nxt_grid)
+                tax_table['_snapped_to_grid'] = True
+                # Store snapped version back to settings for consistency
+                settings['tax_table'] = tax_table
+                if getattr(model, 'verbose', False):
+                    print(f"  [TAX] Snapped {len(tax_table.get('brackets', []))} bracket boundaries to a_nxt grid")
+
+            a0_arr, a1_arr, B_arr, tau_arr = parse_tax_table(tax_table)
+            # Compute marginal tax rates on continuation asset grid
+            tau_a_nxt = marginal_tax_array(a_nxt_grid, a0_arr, a1_arr, tau_arr)
+            # Net-of-tax return: Rfree_net(a') = (1+r) - tau_a(a')
+            Rfree_net = (1 + r) - tau_a_nxt  # Shape: (n_a_nxt,)
+            # Reshape for broadcasting: (n_a_nxt, 1, 1) to match lambda_cntn shape
+            Rfree = Rfree_net[:, np.newaxis, np.newaxis]
+
+            # Parse tax constraint nodes for EGM preprocessing
+            # Only apply when pb=1 (taxes assume no present bias)
+            tax_constraint_nodes, n_points_per_node = parse_tax_constraint_nodes(tax_table, a_nxt_grid)
+            if tax_constraint_nodes and getattr(model, 'verbose', False):
+                print(f"  [TAX] Parsed {len(tax_constraint_nodes)} constraint nodes at tax bracket boundaries ({n_points_per_node} pts each)")
+        else:
+            Rfree = 1 + r
+            n_points_per_node = 10  # Default when no tax table
+    else:
+        Rfree = 1 + r
+        n_points_per_node = 10  # Default when taxes disabled
 
     # thorn for renters not for owners
     if "RNT" in model.stage_name:
@@ -483,13 +522,17 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model, store_egm_grids=False):
     # ------------------------------------------------------------------
     #  4. Vectorised pre-computation of c_egm for ALL (w,h,y) points
     # ------------------------------------------------------------------
-    # 1.  Scale λ once
-    lam_scaled = beta * delta * lambda_cntn * \
-        Rfree  # shape (n_w,n_H_total,n_y)
+    # 1. Scale λ once (Euler RHS on the continuation asset grid).
+    #
+    # NOTE: `lambda_cntn` lives on the OWNC/RNTC *continuation* grid:
+    #   (a_nxt_grid, H_nxt_total, y)
+    # so the leading dimension here is `n_a_nxt = len(a_nxt_grid)`.
+    #
+    # It equals `n_w = len(w_grid)` only when `a_nxt_points == w_points`.
+    lam_scaled = beta * delta * lambda_cntn * Rfree  # shape (n_a_nxt, n_H_total, n_y)
 
     # 2.  Map continuous-grid H-indices to decision-grid indices (renters need this)
-    lam_sel = np.take(lam_scaled, h_nxt_ind_array,
-                      axis=1)      # → (n_w,n_H,n_y)
+    lam_sel = np.take(lam_scaled, h_nxt_ind_array, axis=1)  # → (n_a_nxt, n_H, n_y)
     # same mapping for value
     vlu_sel = np.take(vlu_cntn, h_nxt_ind_array, axis=1)
 
@@ -513,8 +556,8 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model, store_egm_grids=False):
     q_egm_all = compiled_funcs.u_func(
         c_egm_all, H_bcast) + delta*beta * vlu_sel
     
-    # Pre-compute m_egm for all (w, H, y) points: m = c + a'
-    # a_nxt_grid is (n_w,), broadcast to (n_w, n_H, n_y)
+    # Pre-compute m_egm for all (a', H, y) EGM points: m = c + a'
+    # a_nxt_grid is (n_a_nxt,), broadcast to (n_a_nxt, n_H, n_y)
     m_egm_all = c_egm_all + a_nxt_grid[:, None, None]
 
     # ------------------------------------------------------------------
@@ -543,8 +586,11 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model, store_egm_grids=False):
                 # Only add jump constraints when delta_pb != 1 (time inconsistent)
                 add_jump_constraints = (delta != 1.0)
 
-                # Extract lambda for FOC checks (already scaled: beta*delta*lambda*R)
-                lambda_e = lam_sel[:, i_h, i_y] if add_jump_constraints and uc_func is not None else None
+                # Extract lambda for KT/FOC checks (already scaled: beta*delta*lambda*Rfree)
+                # - For pb != 1: used to filter jump-constraint segments
+                # - For tax constraints (pb == 1): used to filter tax-node segments as well
+                needs_KT_checks = (uc_func is not None) and (add_jump_constraints or (tax_constraint_nodes is not None and len(tax_constraint_nodes) > 0))
+                lambda_e = lam_sel[:, i_h, i_y] if needs_KT_checks else None
 
                 # FUES sorts internally; other methods can keep current order here.
                 should_sort = False
@@ -556,9 +602,11 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model, store_egm_grids=False):
                         n_con_nxt=n_con_nxt, c_max=c_max, h_nxt=H_val,
                         add_jump_constraints=add_jump_constraints,
                         sort_output=should_sort,  # Don't sort for DCEGM
+                        tax_constraint_nodes=tax_constraint_nodes,  # Tax bracket constraints (pb=1 only)
+                        n_points_per_node=n_points_per_node,  # Configurable constraint points per node
                         # Pass FOC checking parameters
                         lambda_next=lambda_e,  # Already scaled by beta*delta*Rfree
-                        uc_func=uc_test,
+                        uc_func=uc_func,
                         override_KT_conditions=override_KT,
                         # Pass jump detection thresholds
                         grad_c_threshold=grad_c_threshold,
@@ -600,7 +648,7 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model, store_egm_grids=False):
                     u_func={"func": utility_func, "args": {"H_nxt": H_val}},
                     ue_method=ue_method, m_bar=m_bar, lb=lb,
                     rfc_radius=rfc_radius, rfc_n_iter=rfc_n_iter,
-                    ue_kwargs=ue_kwargs
+                    ue_kwargs=ue_kwargs,
                 )
             except Exception as e:
                 print(f"[DEBUG] {ue_method}: EGM_UE failed for grid key {grid_key}: {e}")

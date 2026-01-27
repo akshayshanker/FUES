@@ -1,0 +1,49 @@
+# Small Sweep Experiment Set - For Testing
+# ==========================================
+# Smaller grid for quick testing of sweep mode
+
+# Experiment identification
+config_id: "STD_RES_SETTINGS_4_TAXES"
+trial_id: "paper-sweep-4_taxes-small"  # Must match sweep_VFI_GPU.yml so baselines can be found
+output_dir: "/scratch/tp66/${USER}/FUES/solutions/housing_renting"  # Base output directory
+
+# Reference method for baseline comparison
+ref_method: VFI_HDGRID_GPU
+
+param_paths:
+  - master.methods.upper_envelope    # Method (excluded from hash)
+  - master.settings.a_points         # Asset grid points
+  - master.settings.H_points         # Housing/Services grid points
+
+sweep:
+  # Methods to sweep over
+  methods:
+    - FUES
+    - VFI
+  
+  # Smaller grid sizes for testing
+  grid_sizes:
+    - 1000
+    - 2000
+    - 4000
+  
+  # Fewer H sizes for testing
+  H_sizes:
+    - 3
+    - 5
+    - 7
+
+# Fixed parameters
+fixed:
+  delta_pb: 1
+  periods: 20   # Finite horizon with 20 periods
+  use_taxes: true  # Enable capital income tax
+
+# Override params when constructing ref_params for baseline comparison
+ref_params_override:
+  grid_sizes: 20000  # Compare to high-res VFI baseline
+
+# Metrics to compute (comparison metrics require baseline)
+metrics:
+  - euler_error
+

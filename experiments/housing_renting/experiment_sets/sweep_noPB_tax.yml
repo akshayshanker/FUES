@@ -1,0 +1,62 @@
+# Sweep Experiment Set - No Price Bound Variation (WITH TAXES)
+# =============================================================
+# For sweeping over grid sizes and H_points across methods
+# Capital income tax enabled
+#
+# This configuration is for running parameter sweeps using mpi_map.
+# Each MPI rank solves one (method, grid_size, H_points) combination.
+
+# Experiment identification
+config_id: "STD_RES_SETTINGS_4_TAXES"
+trial_id: "paper-sweep-4_taxes"  # Distinct from non-tax sweep
+output_dir: "/scratch/tp66/${USER}/FUES/solutions/housing_renting"  # Base output directory
+
+# Reference method for baseline comparison
+# ref_params uses same sweep params but with method=ref_method and ref_params_override applied
+ref_method: VFI_HDGRID_GPU
+
+# Parameter paths passed to CircuitRunner
+# These define what goes into the bundle hash.
+param_paths:
+  - master.methods.upper_envelope    # Method (excluded from hash via method_param_path)
+  - master.settings.a_points         # Asset grid points
+  - master.settings.H_points         # Housing/Services grid points
+
+# Sweep configuration
+sweep:
+  # Methods to sweep over
+  methods:
+    - FUES
+    - VFI
+
+  # Grid sizes to sweep (a_points = a_nxt_points = w_points)
+  grid_sizes:
+    - 500
+    - 1000
+    - 2000
+    - 4000
+    - 6000
+    - 8000
+    - 10000
+
+  # Housing grid sizes (H_points = S_points)
+  H_sizes:
+    - 5
+    - 7
+    - 10
+
+# Fixed parameters (not in sweep)
+fixed:
+  delta_pb: 1
+  periods: 20   # Finite horizon with 20 periods
+  use_taxes: true  # Enable capital income tax
+
+# Override specific params when constructing ref_params
+# (ref_params = sweep params with method=ref_method + these overrides)
+ref_params_override:
+  grid_sizes: 100000  # Compare fast methods to high-res VFI baseline
+
+# Metrics to compute (comparison metrics require baseline)
+metrics:
+  - euler_error
+  - dev_c_log10_mean

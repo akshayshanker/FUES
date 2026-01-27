@@ -379,15 +379,106 @@ class ExecutionSettings:
             Configuration for plot generation
         """
         # EGM bounds for plots
+        # Tax bracket boundaries are at a=5.00, 5.50, 7.74, 13.94
+        # Add zoom windows around these to see constraint segments
+        # Keys: value_y{y_idx}_h{h_idx}, assets_y{y_idx}_h{h_idx}
         egm_bounds = {
             'value_h14': (27, 27.5, 8.220, 8.30),
             'assets_h14': (27, 27.5, 20, 24),
             'value_h0': (2, 4, -2, None),
-            'assets_h0': (2,4, 0, 4),
+            'assets_h0': (2, 4, 0, 4),
             'value_h5': (25, 30.5, 6.9, 7),
             'assets_h5': (25, 30, 24, 26),
             'value_h3': (25, 30.5, None, None),
             'assets_h3': (25, 30, None, None),
+            # Tax bracket zoom: y_idx=0 (low income), various H
+            # Zoom on endogenous grid m around tax transitions
+            # Value: y lower bound -5.5; Assets: y upper bound 12
+            'value_y0_h0': (4, 16, None, None),  # Auto-fit y-axis
+            'assets_y0_h0': (4, 16, None, 12),
+            'value_y0_h3': (4, 16, None, None),  # Auto-fit y-axis
+            'assets_y0_h3': (4, 16, None, 12),
+            'value_y0_h5': (4, 16, None, None),  # Auto-fit y-axis
+            'assets_y0_h5': (4, 16, None, 12),
+            # Tax bracket zoom: y_idx=24 (mid income)
+            'value_y24_h0': (4, 16, None, None),  # Auto-fit y-axis
+            'assets_y24_h0': (4, 16, None, 12),
+            'value_y24_h3': (4, 16, None, None),  # Auto-fit y-axis
+            'assets_y24_h3': (4, 16, None, 12),
+            'value_y24_h5': (4, 16, None, None),  # Auto-fit y-axis
+            'assets_y24_h5': (4, 16, None, 12),
+            # Tax bracket zoom: y_idx=48 (high income)
+            'value_y48_h0': (4, 16, None, None),  # Auto-fit y-axis
+            'assets_y48_h0': (4, 16, None, 12),
+            'value_y48_h3': (4, 16, None, None),  # Auto-fit y-axis
+            'assets_y48_h3': (4, 16, None, 12),
+            'value_y48_h5': (4, 16, None, None),  # Auto-fit y-axis
+            'assets_y48_h5': (4, 16, None, 12),
+            # Wide view (0-10): y_idx=0 (low income)
+            'value_y0_h0_wide': (0, 10, None, None),  # Auto-fit y-axis
+            'assets_y0_h0_wide': (0, 10, None, 12),
+            'value_y0_h3_wide': (0, 10, None, None),  # Auto-fit y-axis
+            'assets_y0_h3_wide': (0, 10, None, 12),
+            'value_y0_h5_wide': (0, 10, None, None),  # Auto-fit y-axis
+            'assets_y0_h5_wide': (0, 10, None, 12),
+            # Wide view (0-10): y_idx=24 (mid income)
+            'value_y24_h0_wide': (0, 10, None, None),  # Auto-fit y-axis
+            'assets_y24_h0_wide': (0, 10, None, 12),
+            'value_y24_h3_wide': (0, 10, None, None),  # Auto-fit y-axis
+            'assets_y24_h3_wide': (0, 10, None, 12),
+            'value_y24_h5_wide': (0, 10, None, None),  # Auto-fit y-axis
+            'assets_y24_h5_wide': (0, 10, None, 12),
+            # Wide view (0-10): y_idx=48 (high income)
+            'value_y48_h0_wide': (0, 10, None, None),  # Auto-fit y-axis
+            'assets_y48_h0_wide': (0, 10, None, 12),
+            'value_y48_h3_wide': (0, 10, None, None),  # Auto-fit y-axis
+            'assets_y48_h3_wide': (0, 10, None, 12),
+            'value_y48_h5_wide': (0, 10, None, None),  # Auto-fit y-axis
+            'assets_y48_h5_wide': (0, 10, None, 12),
+            # Zoom view (3-9, value -3 to 2.5): y_idx=0 (low income)
+            'value_y0_h0_zoom': (3, 9, -3, 2.5),
+            'assets_y0_h0_zoom': (3, 9, None, 12),
+            'value_y0_h3_zoom': (3, 9, -3, 2.5),
+            'assets_y0_h3_zoom': (3, 9, None, 12),
+            'value_y0_h5_zoom': (3, 9, -3, 2.5),
+            'assets_y0_h5_zoom': (3, 9, None, 12),
+            # Zoom view (3-9, value -3 to 2.5): y_idx=24 (mid income)
+            'value_y24_h0_zoom': (3, 9, -3, 2.5),
+            'assets_y24_h0_zoom': (3, 9, None, 12),
+            'value_y24_h3_zoom': (3, 9, -3, 2.5),
+            'assets_y24_h3_zoom': (3, 9, None, 12),
+            'value_y24_h5_zoom': (3, 9, -3, 2.5),
+            'assets_y24_h5_zoom': (3, 9, None, 12),
+            # Zoom view (3-9): y_idx=48 (high income)
+            'value_y48_h0_zoom': (3, 9, -3.5, 0),  # value y-axis -3.5 to 0
+            'assets_y48_h0_zoom': (3, 9, 1, 8),  # assets y-axis 1 to 8 (excludes 8.36 line)
+            'value_y48_h3_zoom': (3, 9, -3, 2.5),
+            'assets_y48_h3_zoom': (3, 9, None, 12),
+            'value_y48_h5_zoom': (3, 9, -3, 2.5),
+            'assets_y48_h5_zoom': (3, 9, None, 12),
+            # Zoom2 view (4.5-7.5): y_idx=0 (low income)
+            'value_y0_h0_zoom2': (4.5, 7.5, None, None),  # Auto-fit y-axis
+            'assets_y0_h0_zoom2': (4.5, 7.5, None, 12),
+            'value_y0_h3_zoom2': (4.5, 7.5, None, None),  # Auto-fit y-axis
+            'assets_y0_h3_zoom2': (4.5, 7.5, None, 12),
+            'value_y0_h5_zoom2': (4.5, 7.5, None, None),  # Auto-fit y-axis
+            'assets_y0_h5_zoom2': (4.5, 7.5, None, 12),
+            # Zoom2 view (4.5-7.5): y_idx=24 (mid income)
+            'value_y24_h0_zoom2': (4.5, 7.5, None, None),  # Auto-fit y-axis
+            'assets_y24_h0_zoom2': (4.5, 7.5, None, 12),
+            'value_y24_h3_zoom2': (4.5, 7.5, None, None),  # Auto-fit y-axis
+            'assets_y24_h3_zoom2': (4.5, 7.5, None, 12),
+            'value_y24_h5_zoom2': (4.5, 7.5, None, None),  # Auto-fit y-axis
+            'assets_y24_h5_zoom2': (4.5, 7.5, None, 12),
+            # Zoom2 view (4.5-7.5): y_idx=48 (high income)
+            'value_y48_h0_zoom2': (4.5, 7.5, None, None),  # Auto-fit y-axis
+            'assets_y48_h0_zoom2': (4.5, 7.5, None, 12),
+            'value_y48_h3_zoom2': (4.5, 7.5, None, None),  # Auto-fit y-axis
+            'assets_y48_h3_zoom2': (4.5, 7.5, None, 12),
+            'value_y48_h5_zoom2': (4.5, 7.5, None, None),  # Auto-fit y-axis
+            'assets_y48_h5_zoom2': (4.5, 7.5, None, 12),
+            # Kink points (tax bracket boundaries) for horizontal lines on assets panel
+            'kink_points': [2.20, 2.50, 2.75, 3.87, 6.97, 8.36, 12.0, 15.0, 20.0],
         }
         
         # Dimension labels for policy arrays
@@ -402,11 +493,36 @@ class ExecutionSettings:
             'h_idx': [5, 10, 14]  # Generate plots only for these h indices
         }
         
+        # Policy plot configuration
+        # - zoom_windows: list of (x_min, x_max) tuples for asset/wealth axis
+        #   Use (None, None) for full range
+        # - y_idx_list: income grid indices to plot
+        # - H_idx_list: housing grid indices to plot
+        # Tax bracket boundaries: a=5.00, 5.50, 7.74, 13.94
+        policy_config = {
+            'zoom_windows': [
+                (None, None),  # Full range
+                (0, 5),        # Assets 0-5
+                (4, 8),        # Tax bracket zoom: a=5.0 to 7.74
+                (5, 10),       # Assets 5-10
+                (7, 15),       # Tax bracket zoom: a=7.74 to 13.94
+                (10, 15),      # Assets 10-15
+                (15, 20),      # Assets 15-20
+                (20, 25),      # Assets 20-25
+                (25, 30),      # Assets 25-30
+                (30, 35),      # Assets 30-35
+                (35, 40),      # Assets 35-40
+            ],
+            'y_idx_list': [0, 24, 48],    # Income indices: low (0), mid (24), high (48)
+            'H_idx_list': [0, 5, 10, 14], # Housing indices to plot
+        }
+        
         return {
             'egm_bounds': egm_bounds,
             'asset_dims': asset_dims,
             'plots_of_interest': plots_of_interest,
-            'y_idx_list': None  # None = export all income states; or tuple like (0, 1, 2) for specific states
+            'y_idx_list': [0, 24, 48],  # EGM plots: low (0), mid (24), high (48) income indices
+            'policy_config': policy_config,
         }
     
     def get_memory_config(self):

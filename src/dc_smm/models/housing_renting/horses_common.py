@@ -676,7 +676,125 @@ def fast_vectorized_interpolation(values_grid, policies_grid, wealth_grid, valid
                 else:
                     output[i, j] = y_left
     
-    return output, valid_count 
+    return output, valid_count
+
+
+@njit
+def _add_tax_constraint_segments_from_base_grid(
+    e_old, vf_old, c_old, a_old,
+    vf_next, beta, u_func, h_nxt,
+    a_base, c_base,
+    vf_base,               # 1D array of base (pre-preprocess) values aligned with a_base
+    tax_node_indices,      # 1D array of indices into a_base/c_base/vf_next/vf_base
+    tax_node_c_lb_pct,     # 1D array of lb percentages
+    tax_node_c_ub_pct,     # 1D array of ub percentages
+    tax_node_is_lhs,       # 1D array: 1 if LHS node (enter bracket), 0 if RHS node (exit bracket)
+    n_points_per_node=10,
+    lambda_next=None,     # Optional: scaled continuation marginal utility on base grid
+    uc_func=None,         # Optional: marginal utility function uc(c, h)
+    override_KT_conditions=False,
+):
+    """
+    Add constraint segments at specified tax bracket nodes, using indices into
+    the *base* continuation asset grid (a_base).
+
+    Why this exists
+    --------------
+    `tax_node_indices` are computed as indices into the model's continuation
+    asset grid (e.g., `a_nxt_grid`). However, EGM preprocessing may prepend
+    borrowing/jump constraint points and may optionally sort the resulting
+    arrays. In that case, indices into the base grid no longer correspond to
+    positions in the preprocessed arrays.
+
+    This helper avoids index misalignment by:
+    - Looking up (a_star, c_star) at node indices in (a_base, c_base)
+    - Appending the generated constraint points to the already-preprocessed
+      arrays (e_old, vf_old, c_old, a_old)
+
+    KT / FOC filtering
+    ------------------
+    If `lambda_next` and `uc_func` are provided, we apply the same Kuhn–Tucker
+    style filter used for pb != 1 jump segments:
+        uc(c) >= lambda_next[k]
+    where `lambda_next` is already fully scaled (e.g., beta*delta*Rfree*lambda).
+    """
+    n_nodes = len(tax_node_indices)
+    if n_nodes == 0:
+        return e_old, vf_old, c_old, a_old
+
+    n_old = len(e_old)
+    max_add = n_nodes * n_points_per_node
+
+    # Pre-allocate
+    e_new = np.empty(n_old + max_add, dtype=e_old.dtype)
+    vf_new = np.empty(n_old + max_add, dtype=vf_old.dtype)
+    c_new = np.empty(n_old + max_add, dtype=c_old.dtype)
+    a_new = np.empty(n_old + max_add, dtype=a_old.dtype)
+
+    p = 0
+    n_base = len(a_base)
+
+    for node_idx in range(n_nodes):
+        k = tax_node_indices[node_idx]
+        c_lb_pct = tax_node_c_lb_pct[node_idx]
+        c_ub_pct = tax_node_c_ub_pct[node_idx]
+        is_lhs = tax_node_is_lhs[node_idx]
+
+        if k < 0 or k >= n_base:
+            continue
+
+        # Monotonicity guard for tax nodes:
+        # If this is an LHS node (entering the *next* bracket/segment),
+        # only add constraints if the base value function is locally increasing
+        # to the right: vf_base[k+1] - vf_base[k] > 0.
+        if is_lhs == 1:
+            if k >= (len(vf_base) - 1):
+                continue
+            if (vf_base[k + 1] - vf_base[k]) <= 0: #k+1 is the first piint on the new segm. 
+                continue
+
+        a_star = a_base[k]
+        c_star = c_base[k]
+
+        if c_star < 1e-8:
+            continue
+
+        lb_c = max(1e-8, c_star * (1.0 - c_lb_pct))
+        ub_c = c_star * (1.0 + c_ub_pct)
+
+        for i in range(n_points_per_node):
+            c_pt = lb_c + (ub_c - lb_c) * i / max(1, n_points_per_node - 1)
+
+            # Optional KT/FOC filtering (side-specific):
+            # - LHS node (entering next bracket): keep if uc(c) >= lambda_next[k]
+            # - RHS node (exiting current bracket): keep if uc(c) <= lambda_next[k]
+            if lambda_next is not None and uc_func is not None and (not override_KT_conditions):
+                mu_c = uc_func(c_pt, h_nxt)
+                if is_lhs == 1:
+                    if mu_c < lambda_next[k]:
+                        continue
+                else:
+                    if mu_c > lambda_next[k]:
+                        continue
+
+            m_pt = a_star + c_pt
+            vf_pt = u_func(c_pt, h_nxt) + beta * vf_next[k]
+
+            e_new[p] = m_pt
+            vf_new[p] = vf_pt
+            c_new[p] = c_pt
+            a_new[p] = a_star
+            p += 1
+
+    # Append original arrays
+    for i in range(n_old):
+        e_new[p + i] = e_old[i]
+        vf_new[p + i] = vf_old[i]
+        c_new[p + i] = c_old[i]
+        a_new[p + i] = a_old[i]
+
+    actual_size = p + n_old
+    return e_new[:actual_size], vf_new[:actual_size], c_new[:actual_size], a_new[:actual_size]
 
 
 @njit
@@ -784,7 +902,7 @@ def _egm_preprocess_core(e_old, vf_old, c_old, a_old,
         vf_diff = vf_next[1:] - vf_next[:-1]
         c_diff = c_old[1:] - c_old[:-1]
         a_diff = a_old[1:] - a_old[:-1]
-        q_diff = vf_old[1:] - vf_old[:-1]
+        q_diff = vf_old[1:] - vf_old[:-1]  # local monotonicity of value on (e_old) grid
 
         mean_e_diff = np.mean(np.abs(a_diff))
 
@@ -817,12 +935,22 @@ def _egm_preprocess_core(e_old, vf_old, c_old, a_old,
             n_points_after = np.zeros(n_jump_case_1, dtype=np.int64)
             n_points_before = np.zeros(n_jump_case_1, dtype=np.int64)
             allow_after = np.ones(n_jump_case_1, dtype=np.bool_)
+            allow_before = np.ones(n_jump_case_1, dtype=np.bool_)
             
             for idx, k in enumerate(j_idx_case_1):
                 # Determine available length of the following segment before the next jump
                 next_jump_idx = j_idx_case_1[idx + 1] if idx + 1 < n_jump_case_1 else n_old - 1
                 after_len = (next_jump_idx - (k + 1)) + 1  # inclusive length
                 if after_len < min_following_seg_len:
+                    allow_after[idx] = False
+
+                # Require the value function to be locally increasing only on the
+                # *next* (right) segment where we add the LHS constraint segment.
+                # The RHS constraint segment of the previous (left) segment should
+                # still be added even if vf is locally decreasing to the left.
+                #
+                # "after" segment uses point k+1, so require vf_old[k+1] - vf_old[k] > 0
+                if q_diff[k] <= 0:
                     allow_after[idx] = False
                 
                 # "after" segment bounds (using k+1)
@@ -835,7 +963,7 @@ def _egm_preprocess_core(e_old, vf_old, c_old, a_old,
                     n_points_after[idx] = n_pts
                 
                 # "before" segment bounds (using k)
-                if jump_extend in ("before", "both"):
+                if jump_extend in ("before", "both") and allow_before[idx]:
                     c_star2 = c_old[k]
                     lb_c2 = max(1e-8, c_star2 * (1.0 - c_star_lb_pct))
                     ub_c2 = c_star2 * (1.0 + c_star_ub_pct)
@@ -848,6 +976,14 @@ def _egm_preprocess_core(e_old, vf_old, c_old, a_old,
             n_add = n_con + total_jump_points
         else:
             allow_after = np.ones(n_jump_case_1, dtype=np.bool_)
+            allow_before = np.ones(n_jump_case_1, dtype=np.bool_)
+
+            # Same monotonicity guard in the fixed-count case:
+            # apply only to the "after" (next-segment LHS) constraint segment.
+            for idx, k in enumerate(j_idx_case_1):
+                if q_diff[k] <= 0:
+                    allow_after[idx] = False
+
             # Fall back to fixed n_con_nxt per segment
             if jump_extend == "both":
                 segments_per_jump = 2
@@ -903,6 +1039,8 @@ def _egm_preprocess_core(e_old, vf_old, c_old, a_old,
             # Skip adding "after" segment if the following segment is too short
             if not allow_after[idx]:
                 n_pts_after = 0
+            if not allow_before[idx]:
+                n_pts_before = 0
             
             # First segment: using k+1 (point after the jump)
             # Only add if jump_extend is "after" or "both"
@@ -1037,11 +1175,14 @@ def egm_preprocess(egrid, vf, c, a,
                    add_jump_constraints=True,  # New parameter
                    jump_extend="both",  # NEW: Which segments to extend at jumps
                    sort_output=True,    # Sort output by endogenous grid (True for FUES, False for DCEGM)
+                   tax_constraint_nodes=None,  # NEW: Tax bracket constraint nodes
+                   n_points_per_node=10,  # NEW: Configurable constraint points per tax node
                    **kwargs):
     """
     Wrapper that preprocesses EGM solution by:
       • Adding borrowing constraint points
-      • Optionally adding jump constraint points  
+      • Optionally adding jump constraint points (for pb != 1)
+      • Optionally adding tax bracket constraint points (for use_taxes=True, pb=1)
       • Removing duplicates with uniqueEG
       • Returning cleaned arrays
 
@@ -1079,6 +1220,11 @@ def egm_preprocess(egrid, vf, c, a,
         - "before": only extend segment before jump (using point k)
         - "after": only extend segment after jump (using point k+1)
         - "both": extend both segments (default)
+    tax_constraint_nodes : list of dict, optional
+        List of tax bracket constraint specifications. Each dict contains:
+        - 'a_idx': index in a grid for the bracket boundary
+        - 'c_lb_pct', 'c_ub_pct': consumption bounds as percentages
+        Only used when use_taxes=True and pb=1. Default: None
     **kwargs
         Additional arguments passed to _egm_preprocess_core:
         - lambda_next: Marginal utility values (already scaled)
@@ -1113,11 +1259,14 @@ def egm_preprocess(egrid, vf, c, a,
     #a = a[valid_mask]
 
     # Run the fast core with jump constraint flag and FOC checking
+    # NOTE: When tax constraints are used (pb=1), we disable jump constraints
+    effective_add_jump = add_jump_constraints and (tax_constraint_nodes is None or len(tax_constraint_nodes) == 0)
+
     e_cat, vf_cat, c_cat, a_cat = _egm_preprocess_core(
         egrid, vf, c, a,
         vf_next, beta, u_func,
         m_bar, n_con, n_con_nxt, c_max, h_nxt,
-        add_jump_constraints,
+        effective_add_jump,  # Disable jump constraints when using tax constraints
         lambda_next=kwargs.get('lambda_next'),  # Pass through lambda (already scaled)
         uc_func=kwargs.get('uc_func'),          # Pass through marginal utility
         override_KT_conditions=kwargs.get('override_KT_conditions', False),  # Pass override setting
@@ -1127,6 +1276,35 @@ def egm_preprocess(egrid, vf, c, a,
         c_star_ub_pct=kwargs.get('c_star_ub_pct', 0.10),  # Pass through c_star ub percentage
         use_mean_spacing=kwargs.get('use_mean_spacing', True),  # Use mean e_diff for point spacing
         sort_output=sort_output)  # Sort by endogenous grid (True for FUES, False for DCEGM)
+
+    # Add tax constraint segments if provided (for use_taxes=True, pb=1)
+    if tax_constraint_nodes is not None and len(tax_constraint_nodes) > 0:
+        # Convert list of dicts to arrays for njit function
+        tax_node_indices = np.array([n['a_idx'] for n in tax_constraint_nodes], dtype=np.int64)
+        tax_node_c_lb_pct = np.array([n['c_lb_pct'] for n in tax_constraint_nodes], dtype=np.float64)
+        tax_node_c_ub_pct = np.array([n['c_ub_pct'] for n in tax_constraint_nodes], dtype=np.float64)
+        tax_node_is_lhs = np.array([1 if n.get('side') == 'lhs' else 0 for n in tax_constraint_nodes], dtype=np.int8)
+
+        # IMPORTANT: `a_idx` is defined on the base `a` grid (e.g. a_nxt_grid),
+        # not on the post-preprocessed arrays. Use the base-grid aware helper.
+        e_cat, vf_cat, c_cat, a_cat = _add_tax_constraint_segments_from_base_grid(
+            e_cat, vf_cat, c_cat, a_cat,
+            vf_next, beta, u_func, h_nxt,
+            a, c, vf,
+            tax_node_indices, tax_node_c_lb_pct, tax_node_c_ub_pct, tax_node_is_lhs,
+            n_points_per_node=n_points_per_node,
+            lambda_next=kwargs.get('lambda_next'),
+            uc_func=kwargs.get('uc_func'),
+            override_KT_conditions=kwargs.get('override_KT_conditions', False),
+        )
+
+        # Re-sort after adding tax constraints if needed
+        if sort_output:
+            sort_idx = np.argsort(e_cat)
+            e_cat = e_cat[sort_idx]
+            vf_cat = vf_cat[sort_idx]
+            c_cat = c_cat[sort_idx]
+            a_cat = a_cat[sort_idx]
 
     # Remove duplicates based on endogenous grid and value function
     # Use a tolerance appropriate for float64 precision and the scale of the problem
