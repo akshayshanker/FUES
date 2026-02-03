@@ -505,7 +505,9 @@ def make_housing_model(args, cfg_container: dict, periods: int, vf_ngrid: int, c
                             model.settings_dict['tax_table'] = _tax_table
                             injected_models.add(model_id)
                         else:
-                            print(f"[TAX DEBUG] {model_path} has no settings_dict!")
+                            # Renter stages (RNTH, RNTC) don't need taxes - skip silently
+                            if 'RNT' not in model_path:
+                                print(f"[TAX DEBUG] {model_path} has no settings_dict!")
         print(f"[TAX DEBUG] Tax params injected into {len(injected_models)} unique model objects")
     
     # DEBUG: Print model info to trace period mismatch

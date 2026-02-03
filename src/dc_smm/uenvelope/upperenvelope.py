@@ -100,6 +100,7 @@ def EGM_UE(
     rfc_n_iter: int = 20,
     interpolate: bool = False,
     include_intersections: bool = True,
+    ue_kwargs: Optional[Dict[str, Any]] = None,
 ) -> Tuple[Dict[str, np.ndarray], Dict[str, np.ndarray], Dict[str, np.ndarray]]:
     """Universal entry point for all upper-envelope algorithms.
 
@@ -125,6 +126,14 @@ def EGM_UE(
     # -------- run -----------------------------------------------------
     t0 = time.time()
 
+    # Filter ue_kwargs to exclude params already passed explicitly
+    # This prevents "got multiple values for keyword argument" errors
+    explicit_params = {'m_bar', 'lb', 'rfc_radius', 'rfc_n_iter', 'include_intersections'}
+    extra_kwargs = {
+        k: v for k, v in (ue_kwargs or {}).items()
+        if k not in explicit_params
+    }
+
     refined = engine(
         x_dcsn_hat=x_dcsn_hat,
         qf_hat=qf_hat,
@@ -139,6 +148,7 @@ def EGM_UE(
         rfc_radius=rfc_radius,
         rfc_n_iter=rfc_n_iter,
         include_intersections=include_intersections,
+        **extra_kwargs,
     )
 
     ue_time = time.time() - t0
@@ -327,6 +337,10 @@ def _fues_engine(
     The optimized production version with pre-allocated scratch buffers,
     true circular buffer, and improved left turn interpolation.
     Uses the same interface as the original FUES implementation.
+
+    Additional FUES-specific kwargs (passed via ue_kwargs) include:
+        endog_mbar, padding_mbar, single_intersection, no_double_jumps,
+        disable_jump_checks, eps_d, eps_sep, eps_fwd_back, parallel_guard
     """
 
     if fues_current is None:
@@ -335,9 +349,19 @@ def _fues_engine(
     # Guard against lb being a list (edge-case seen in original code)
     lb_int = int(lb[0]) if isinstance(lb, (list, tuple)) else int(lb)
 
+    # Extract FUES-specific kwargs (filter out non-FUES params)
+    fues_kwargs = {
+        k: v for k, v in kwargs.items()
+        if k in ('endog_mbar', 'padding_mbar', 'single_intersection',
+                 'no_double_jumps', 'disable_jump_checks',
+                 'return_intersections_separately',
+                 'eps_d', 'eps_sep', 'eps_fwd_back', 'parallel_guard')
+    }
+
     x_dcsn_ref, qf_ref, kappa_ref, x_cntn_ref, _ = fues_current(
         x_dcsn_hat, qf_hat, kappa_hat, X_cntn, X_cntn,
-        m_bar=m_bar, LB=lb_int, include_intersections=include_intersections
+        m_bar=m_bar, LB=lb_int, include_intersections=include_intersections,
+        **fues_kwargs
     )
 
     return {

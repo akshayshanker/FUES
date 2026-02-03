@@ -121,8 +121,6 @@ mpirun -np ${MPI_RANKS} python3 -m examples.housing_renting.solve_runner \
     --mpi \
     --metrics "euler_error" \
     --fresh-fast \
-    --plots \
-    --skip-egm-plots \
     --low-memory \
     --trace \
     2> >(tee "${LOG_DIR}/sweep_${TIMESTAMP}.err") \

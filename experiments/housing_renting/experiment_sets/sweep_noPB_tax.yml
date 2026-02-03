@@ -31,12 +31,10 @@ sweep:
 
   # Grid sizes to sweep (a_points = a_nxt_points = w_points)
   grid_sizes:
-    - 500
     - 1000
     - 2000
     - 4000
     - 6000
-    - 8000
     - 10000
 
   # Housing grid sizes (H_points = S_points)

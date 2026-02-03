@@ -3,8 +3,8 @@
 # Smaller grid for quick testing of sweep mode
 
 # Experiment identification
-config_id: "owner_only"
-trial_id: "paper-sweep-owner-10-small"  # Must match sweep_VFI_GPU.yml so baselines can be found
+config_id: "STD_RES_SETTINGS_4_TAXES"
+trial_id: "paper-sweep-4_taxes-small"  # Must match sweep_VFI_GPU.yml so baselines can be found
 output_dir: "/scratch/tp66/${USER}/FUES/solutions/housing_renting"  # Base output directory
 
 # Reference method for baseline comparison

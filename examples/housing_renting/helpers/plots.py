@@ -154,9 +154,9 @@ def generate_plots(model, method, image_dir, plot_period=0, bounds=None,
                 plot_egm_grids(first_period, H_idx, y_idx, method, egm_dir,
                               egm_bounds, sol_override=ownc_sol)
 
-                # Check for variant bounds (_wide, _zoom, _zoom2, etc.) and generate additional plots
+                # Check for variant bounds (_wide, _zoom, _zoom2, _zoom3, _zoom4, etc.) and generate additional plots
                 if egm_bounds:
-                    for suffix in ["_wide", "_zoom", "_zoom2"]:
+                    for suffix in ["_wide", "_zoom", "_zoom2", "_zoom3", "_zoom4"]:
                         variant_value_key = f"value_y{y_idx}_h{H_idx}{suffix}"
                         variant_assets_key = f"assets_y{y_idx}_h{H_idx}{suffix}"
                         if variant_value_key in egm_bounds or variant_assets_key in egm_bounds:
@@ -170,8 +170,15 @@ def generate_plots(model, method, image_dir, plot_period=0, bounds=None,
                             variant_he_key = f"he_space_y{y_idx}_h{H_idx}{suffix}"
                             if variant_he_key in egm_bounds:
                                 variant_bounds[f"he_space_y{y_idx}_h{H_idx}"] = egm_bounds[variant_he_key]
-                            plot_egm_grids(first_period, H_idx, y_idx, method, egm_dir,
-                                          variant_bounds, sol_override=ownc_sol, filename_suffix=suffix)
+                            # Use subfolder for zoom4 plots
+                            if suffix == "_zoom4":
+                                zoom4_dir = os.path.join(egm_dir, "zoom4")
+                                os.makedirs(zoom4_dir, exist_ok=True)
+                                plot_egm_grids(first_period, H_idx, y_idx, method, zoom4_dir,
+                                              variant_bounds, sol_override=ownc_sol, filename_suffix=suffix)
+                            else:
+                                plot_egm_grids(first_period, H_idx, y_idx, method, egm_dir,
+                                              variant_bounds, sol_override=ownc_sol, filename_suffix=suffix)
 
         #print(f"EGM grid plots for {method} saved to {egm_dir}")
     else:
@@ -769,7 +776,8 @@ def plot_egm_grids(period, H_idx, y_idx, method, image_dir, bounds=None, sol_ove
                 ax[1].axhline(y=kp, color='black', linestyle='--', linewidth=0.8)
 
     # Legend after tax bracket lines so they appear in it
-    ax[1].legend(frameon=False, prop={'size': 10})
+    # Place at upper right to avoid overlap with tax bracket horizontal lines
+    ax[1].legend(frameon=False, prop={'size': 10}, loc='upper right')
 
     # Special tick formatting for value_h14 plot
     if H_idx == 14:
@@ -1013,6 +1021,124 @@ def plot_egm_grids(period, H_idx, y_idx, method, image_dir, bounds=None, sol_ove
 
     # Close figure
     plt.close(fig4)
+
+    # =========================================================================
+    # NEW: Two-panel plot with exogenous grid (a_nxt) on x-axis
+    # LHS: X = a_nxt, Y = Q (value = u + beta*vf_nxt)
+    # RHS: X = a_nxt, Y = m (endogenous grid)
+    # =========================================================================
+    fig5, ax5 = plt.subplots(1, 2, figsize=(10, 4))
+
+    # Set style
+    sns.set(style="white", rc={"font.size": 9, "axes.titlesize": 9, "axes.labelsize": 9})
+
+    # --- LHS: Value (Q) vs a_nxt ---
+    ax5[0].scatter(
+        a_unrefined[1:],
+        vf_unrefined[1:],
+        s=20,
+        facecolors='none',
+        edgecolors='r',
+        label='EGM points'
+    )
+    ax5[0].scatter(
+        a_refined[1:],
+        vf_refined[1:],
+        color='blue',
+        s=15,
+        marker='x',
+        linewidth=0.75,
+        label=f'{method} optimal points'
+    )
+
+    # Draw vertical lines at tax bracket boundaries
+    tax_line_drawn = False
+    for kp in kink_points:
+        if 8 <= kp <= 10:  # Only within x-axis range
+            if not tax_line_drawn:
+                ax5[0].axvline(x=kp, color='black', linestyle='--', linewidth=0.8,
+                              label='Tax brackets')
+                tax_line_drawn = True
+            else:
+                ax5[0].axvline(x=kp, color='black', linestyle='--', linewidth=0.8)
+
+    ax5[0].set_ylabel('Value', fontsize=11)
+    ax5[0].set_xlim([8, 10])
+
+    # Auto-fit y-axis to REFINED points only within x-range [8, 10]
+    # (unrefined points may have outliers from constraint segments)
+    mask_ref = (a_refined[1:] >= 8) & (a_refined[1:] <= 10)
+    vf_in_range = vf_refined[1:][mask_ref]
+    if len(vf_in_range) > 0:
+        y_min, y_max = vf_in_range.min(), vf_in_range.max()
+        y_margin = (y_max - y_min) * 0.05  # 5% margin
+        ax5[0].set_ylim([y_min - y_margin, y_max + y_margin])
+
+    ax5[0].legend(frameon=False, prop={'size': 10})
+    ax5[0].grid(True)
+    for spine in ax5[0].spines.values():
+        spine.set_visible(True)
+        spine.set_color('0.65')
+        spine.set_linewidth(0.8)
+    ax5[0].xaxis.set_major_locator(mticker.MaxNLocator(6))
+    ax5[0].yaxis.set_major_locator(mticker.MaxNLocator(6))
+    ax5[0].xaxis.set_major_formatter(mticker.FormatStrFormatter("%.1f"))
+    ax5[0].yaxis.set_major_formatter(mticker.FormatStrFormatter("%.3f"))
+
+    # --- RHS: Endogenous grid (m) vs a_nxt ---
+    ax5[1].scatter(
+        a_unrefined[1:],
+        e_grid_unrefined[1:],
+        s=20,
+        facecolors='none',
+        edgecolors='r',
+        label='EGM points'
+    )
+    ax5[1].scatter(
+        a_refined[1:],
+        e_grid_refined[1:],
+        color='blue',
+        s=15,
+        marker='x',
+        linewidth=0.75,
+        label=f'{method} optimal points'
+    )
+
+    # Draw vertical lines at tax bracket boundaries
+    tax_line_drawn = False
+    for kp in kink_points:
+        if 8 <= kp <= 10:  # Only within x-axis range
+            if not tax_line_drawn:
+                ax5[1].axvline(x=kp, color='black', linestyle='--', linewidth=0.8,
+                              label='Tax brackets')
+                tax_line_drawn = True
+            else:
+                ax5[1].axvline(x=kp, color='black', linestyle='--', linewidth=0.8)
+
+    ax5[1].set_ylabel(r'Endogenous grid (total wealth at $t$)', fontsize=11)
+    ax5[1].set_xlim([8, 10])
+    ax5[1].set_ylim([8, 11])
+    ax5[1].legend(frameon=False, prop={'size': 10})
+    ax5[1].grid(True)
+    for spine in ax5[1].spines.values():
+        spine.set_visible(True)
+        spine.set_color('0.65')
+        spine.set_linewidth(0.8)
+    ax5[1].xaxis.set_major_locator(mticker.MaxNLocator(6))
+    ax5[1].yaxis.set_major_locator(mticker.MaxNLocator(6))
+    ax5[1].xaxis.set_major_formatter(mticker.FormatStrFormatter("%.1f"))
+    ax5[1].yaxis.set_major_formatter(mticker.FormatStrFormatter("%.1f"))
+
+    # Shared x-axis label
+    fig5.supxlabel(r'Exogenous grid (savings at $t+1$)', fontsize=11)
+
+    fig5.tight_layout()
+
+    # Save to same directory as other plots from this function call
+    filename5 = f"egm_exog_space_H{H_idx}_y{y_idx}_period{period_idx}_{method}{filename_suffix}.png"
+    fig5.savefig(os.path.join(image_dir, filename5))
+
+    plt.close(fig5)
 
 def plot_compare_value_Q(model_list, methods, image_dir, plot_period=0, bounds=None):
     """Create comparison plots of value and Q functions across several methods.

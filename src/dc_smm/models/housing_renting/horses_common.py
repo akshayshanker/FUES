@@ -679,7 +679,9 @@ def fast_vectorized_interpolation(values_grid, policies_grid, wealth_grid, valid
     return output, valid_count
 
 
-@njit
+# Module-level counter for debug output
+_tax_constraint_debug_call_count = [0]  # Use list to allow mutation in nested function
+
 def _add_tax_constraint_segments_from_base_grid(
     e_old, vf_old, c_old, a_old,
     vf_next, beta, u_func, h_nxt,
@@ -722,6 +724,11 @@ def _add_tax_constraint_segments_from_base_grid(
     if n_nodes == 0:
         return e_old, vf_old, c_old, a_old
 
+    # Debug output disabled - set to True to enable detailed constraint debugging
+    # _tax_constraint_debug_call_count[0] += 1
+    # should_print_debug = (_tax_constraint_debug_call_count[0] == 1)
+    should_print_debug = False
+
     n_old = len(e_old)
     max_add = n_nodes * n_points_per_node
 
@@ -750,7 +757,7 @@ def _add_tax_constraint_segments_from_base_grid(
         if is_lhs == 1:
             if k >= (len(vf_base) - 1):
                 continue
-            if (vf_base[k + 1] - vf_base[k]) <= 0: #k+1 is the first piint on the new segm. 
+            if (vf_base[k] - vf_base[k-1]) <= 0: #k is the first piint on the new segm! AI: make sure this is K as new value 
                 continue
 
         a_star = a_base[k]
@@ -758,6 +765,29 @@ def _add_tax_constraint_segments_from_base_grid(
 
         if c_star < 1e-8:
             continue
+
+        # Debug: show VF values at this constraint node (only for nodes 8-11 which are around bracket 5)
+        # Node 8 = RHS of bracket 4 (a=6.9757), Node 9 = LHS of bracket 5 (a=6.9757)
+        # Node 10 = RHS of bracket 5 (a=8.3628), Node 11 = LHS of bracket 6 (a=8.3628)
+        if should_print_debug and 8 <= node_idx <= 11:
+            vf_egm_at_k = vf_base[k]  # The EGM-computed VF at this point
+            vf_cntn_at_k = vf_next[k]  # The continuation VF V'(a')
+            side_str = "LHS" if is_lhs == 1 else "RHS"
+            print(f"  [CONSTRAINT DEBUG] Node {node_idx} ({side_str}): k={k}, a*={a_star:.4f}, c*={c_star:.4f}")
+            print(f"    vf_egm[k]={vf_egm_at_k:.6f}, vf_next[k]={vf_cntn_at_k:.6f}")
+            computed_vf_at_cstar = u_func(c_star, h_nxt) + beta * vf_cntn_at_k
+            print(f"    Expected vf_pt at c*: u(c*,h) + beta*vf_next[k] = {computed_vf_at_cstar:.6f}")
+            print(f"    MATCH CHECK: vf_egm[k] vs computed = {vf_egm_at_k:.6f} vs {computed_vf_at_cstar:.6f} (diff={vf_egm_at_k - computed_vf_at_cstar:.8f})")
+
+            # Show nearby EGM points in e_old for comparison
+            # Find points in e_old near m_star = a_star + c_star
+            m_star = a_star + c_star
+            print(f"    m* = a* + c* = {m_star:.4f}")
+            nearby_count = 0
+            for ii in range(len(e_old)):
+                if abs(e_old[ii] - m_star) < 0.5 and nearby_count < 3:
+                    print(f"    Nearby in e_old: e={e_old[ii]:.4f}, vf={vf_old[ii]:.6f}, c={c_old[ii]:.4f}, a={a_old[ii]:.4f}")
+                    nearby_count += 1
 
         lb_c = max(1e-8, c_star * (1.0 - c_lb_pct))
         ub_c = c_star * (1.0 + c_ub_pct)
@@ -779,6 +809,10 @@ def _add_tax_constraint_segments_from_base_grid(
 
             m_pt = a_star + c_pt
             vf_pt = u_func(c_pt, h_nxt) + beta * vf_next[k]
+
+            # Debug: show first and last constraint points (only for nodes 8-11 on first call)
+            if should_print_debug and 8 <= node_idx <= 11 and (i == 0 or i == n_points_per_node - 1):
+                print(f"    Point {i}: c={c_pt:.4f}, m={m_pt:.4f}, vf={vf_pt:.6f}")
 
             e_new[p] = m_pt
             vf_new[p] = vf_pt
@@ -1177,6 +1211,7 @@ def egm_preprocess(egrid, vf, c, a,
                    sort_output=True,    # Sort output by endogenous grid (True for FUES, False for DCEGM)
                    tax_constraint_nodes=None,  # NEW: Tax bracket constraint nodes
                    n_points_per_node=10,  # NEW: Configurable constraint points per tax node
+                   debug=False,  # Debug output for tax bracket processing
                    **kwargs):
     """
     Wrapper that preprocesses EGM solution by:
@@ -1284,6 +1319,25 @@ def egm_preprocess(egrid, vf, c, a,
         tax_node_c_lb_pct = np.array([n['c_lb_pct'] for n in tax_constraint_nodes], dtype=np.float64)
         tax_node_c_ub_pct = np.array([n['c_ub_pct'] for n in tax_constraint_nodes], dtype=np.float64)
         tax_node_is_lhs = np.array([1 if n.get('side') == 'lhs' else 0 for n in tax_constraint_nodes], dtype=np.int8)
+
+        # Debug output for tax constraint nodes (controlled by debug flag)
+        if debug:
+            print(f"\n[TAX DEBUG] egm_preprocess: Processing {len(tax_constraint_nodes)} tax constraint nodes:")
+            for i, node in enumerate(tax_constraint_nodes):
+                side = node.get('side', 'unknown')
+                a_idx = node['a_idx']
+                a_value = node['a_value']
+                a_target = node.get('a_target', a_value)
+                bracket_idx = node.get('bracket_idx', '?')
+                is_lhs = tax_node_is_lhs[i]
+                print(f"  Node {i}: {side.upper()} at a_idx={a_idx}, a_value={a_value:.4f} (target={a_target:.4f})")
+                print(f"           bracket_idx={bracket_idx}, is_lhs={is_lhs}")
+                if side == 'lhs':
+                    print(f"           -> This is an ENTRY point into bracket {bracket_idx}")
+                    print(f"           -> If left_closed=True, a={a_value:.4f} uses bracket {bracket_idx}'s B and tau")
+                else:
+                    print(f"           -> This is an EXIT point from bracket {bracket_idx}")
+                    print(f"           -> a={a_value:.4f} is the upper bound of bracket {bracket_idx}")
 
         # IMPORTANT: `a_idx` is defined on the base `a` grid (e.g. a_nxt_grid),
         # not on the post-preprocessed arrays. Use the base-grid aware helper.

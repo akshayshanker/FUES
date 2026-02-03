@@ -19,6 +19,7 @@ STD_RES_SETTINGS[hd_points]=2000
 STD_RES_SETTINGS[grid_points]=2000
 STD_RES_SETTINGS[version_suffix]="test_0.1"
 STD_RES_SETTINGS[delta_pb]=1
+STD_RES_SETTINGS[use_taxes]=0
 
 declare -A STD_RES_SETTINGS_3
 STD_RES_SETTINGS_3[periods]=20
@@ -27,16 +28,28 @@ STD_RES_SETTINGS_3[hd_points]=2000
 STD_RES_SETTINGS_3[grid_points]=2000
 STD_RES_SETTINGS_3[version_suffix]="test_0.3"
 STD_RES_SETTINGS_3[delta_pb]=1
+STD_RES_SETTINGS_3[use_taxes]=0
 
 # Owner-only infinite horizon config (Fella 2014)
 # periods=1 for recursive iteration on single period
+# this is the standard one used for the main non-tax results in the paper 
 declare -A STD_RES_SETTINGS_4
-STD_RES_SETTINGS_4[periods]=20
+STD_RES_SETTINGS_4[periods]=5
 STD_RES_SETTINGS_4[vfi_ngrid]=2000
 STD_RES_SETTINGS_4[hd_points]=2000
 STD_RES_SETTINGS_4[grid_points]=2000
-STD_RES_SETTINGS_4[version_suffix]="owner_only"
+STD_RES_SETTINGS_4[version_suffix]="test_0.4"
 STD_RES_SETTINGS_4[delta_pb]=1
+STD_RES_SETTINGS_4[use_taxes]=1
+
+declare -A STD_RES_SETTINGS_4_TAXES
+STD_RES_SETTINGS_4_TAXES[periods]=10
+STD_RES_SETTINGS_4_TAXES[vfi_ngrid]=2000
+STD_RES_SETTINGS_4_TAXES[hd_points]=2000
+STD_RES_SETTINGS_4_TAXES[grid_points]=2000
+STD_RES_SETTINGS_4_TAXES[version_suffix]="test_0.4"
+STD_RES_SETTINGS_4_TAXES[delta_pb]=1
+STD_RES_SETTINGS_4_TAXES[use_taxes]=1
 
 
 
@@ -47,6 +60,7 @@ STD_RES_SETTINGS_PB[hd_points]=2000
 STD_RES_SETTINGS_PB[grid_points]=2000
 STD_RES_SETTINGS_PB[version_suffix]="test_0.1"
 STD_RES_SETTINGS_PB[delta_pb]=0.6
+STD_RES_SETTINGS_PB[use_taxes]=0
 
 # --- Configuration Set 2: High Resolution Benchmark ---
 # A high-resolution run for producing final, accurate results.
@@ -57,6 +71,7 @@ HIGH_RES_SETTINGS_A[hd_points]=6000
 HIGH_RES_SETTINGS_A[grid_points]=6000
 HIGH_RES_SETTINGS_A[version_suffix]="test_0.1"
 HIGH_RES_SETTINGS_A[delta_pb]=1
+HIGH_RES_SETTINGS_A[use_taxes]=0
 
 declare -A HIGH_RES_SETTINGS_A_PB
 HIGH_RES_SETTINGS_A_PB[periods]=20
@@ -65,6 +80,7 @@ HIGH_RES_SETTINGS_A_PB[hd_points]=2000
 HIGH_RES_SETTINGS_A_PB[grid_points]=10000
 HIGH_RES_SETTINGS_A_PB[version_suffix]="test_0.1"
 HIGH_RES_SETTINGS_A_PB[delta_pb]=0.6
+HIGH_RES_SETTINGS_A_PB[use_taxes]=0
 
 declare -A HIGH_RES_SETTINGS_A1_PB
 HIGH_RES_SETTINGS_A1_PB[periods]=5
@@ -73,6 +89,7 @@ HIGH_RES_SETTINGS_A1_PB[hd_points]=6000
 HIGH_RES_SETTINGS_A1_PB[grid_points]=30000
 HIGH_RES_SETTINGS_A1_PB[version_suffix]="test_0.1"
 HIGH_RES_SETTINGS_A1_PB[delta_pb]=0.6
+HIGH_RES_SETTINGS_A1_PB[use_taxes]=0
 
 declare -A HIGH_RES_SETTINGS_B
 HIGH_RES_SETTINGS_B[periods]=5
@@ -81,6 +98,7 @@ HIGH_RES_SETTINGS_B[hd_points]=2E4
 HIGH_RES_SETTINGS_B[grid_points]=2000
 HIGH_RES_SETTINGS_B[version_suffix]="test_0.1"
 HIGH_RES_SETTINGS_B[delta_pb]=1
+HIGH_RES_SETTINGS_B[use_taxes]=0
 
 declare -A HIGH_RES_SETTINGS_B1
 HIGH_RES_SETTINGS_B1[periods]=5
@@ -89,6 +107,7 @@ HIGH_RES_SETTINGS_B1[hd_points]=2E4
 HIGH_RES_SETTINGS_B1[grid_points]=2000
 HIGH_RES_SETTINGS_B1[version_suffix]="test_0.1"
 HIGH_RES_SETTINGS_B1[delta_pb]=1
+HIGH_RES_SETTINGS_B1[use_taxes]=0
 
 declare -A HIGH_RES_SETTINGS_C
 HIGH_RES_SETTINGS_C[periods]=20
@@ -97,6 +116,7 @@ HIGH_RES_SETTINGS_C[hd_points]=3E5
 HIGH_RES_SETTINGS_C[grid_points]=2000
 HIGH_RES_SETTINGS_C[version_suffix]="test_0.1"
 HIGH_RES_SETTINGS_C[delta_pb]=1
+HIGH_RES_SETTINGS_C[use_taxes]=0
 
 declare -A HIGH_RES_SETTINGS_C_PB
 HIGH_RES_SETTINGS_C_PB[periods]=5
@@ -105,6 +125,7 @@ HIGH_RES_SETTINGS_C_PB[hd_points]=3E5
 HIGH_RES_SETTINGS_C_PB[grid_points]=2000
 HIGH_RES_SETTINGS_C_PB[version_suffix]="test_0.1"
 HIGH_RES_SETTINGS_C_PB[delta_pb]=0.6
+HIGH_RES_SETTINGS_C_PB[use_taxes]=0
 
 declare -A HIGH_RES_SETTINGS_D
 HIGH_RES_SETTINGS_D[periods]=5
@@ -113,6 +134,7 @@ HIGH_RES_SETTINGS_D[hd_points]=6E5
 HIGH_RES_SETTINGS_D[grid_points]=2000
 HIGH_RES_SETTINGS_D[version_suffix]="test_0.1"
 HIGH_RES_SETTINGS_D[delta_pb]=1
+HIGH_RES_SETTINGS_D[use_taxes]=0
 
 declare -A HIGH_RES_SETTINGS_E
 HIGH_RES_SETTINGS_E[periods]=5
@@ -121,6 +143,7 @@ HIGH_RES_SETTINGS_E[hd_points]=12E5
 HIGH_RES_SETTINGS_E[grid_points]=2000
 HIGH_RES_SETTINGS_E[version_suffix]="test_0.1"
 HIGH_RES_SETTINGS_E[delta_pb]=1
+HIGH_RES_SETTINGS_E[use_taxes]=0
 
 declare -A HIGH_RES_SETTINGS_E_PB
 HIGH_RES_SETTINGS_E_PB[periods]=5
@@ -129,6 +152,7 @@ HIGH_RES_SETTINGS_E_PB[hd_points]=12E5
 HIGH_RES_SETTINGS_E_PB[grid_points]=2000
 HIGH_RES_SETTINGS_E_PB[version_suffix]="test_0.1"
 HIGH_RES_SETTINGS_E_PB[delta_pb]=0.95
+HIGH_RES_SETTINGS_E_PB[use_taxes]=0
 
 declare -A HIGH_RES_SETTINGS_F
 HIGH_RES_SETTINGS_F[periods]=5
@@ -137,6 +161,7 @@ HIGH_RES_SETTINGS_F[hd_points]=15E5
 HIGH_RES_SETTINGS_F[grid_points]=2000
 HIGH_RES_SETTINGS_F[version_suffix]="test_0.1"
 HIGH_RES_SETTINGS_F[delta_pb]=1
+HIGH_RES_SETTINGS_F[use_taxes]=0
 
 # Aliases for commonly used configurations
 declare -A HIGH_RES_SETTINGS_K
@@ -146,3 +171,4 @@ HIGH_RES_SETTINGS_K[hd_points]=6E5
 HIGH_RES_SETTINGS_K[grid_points]=2000
 HIGH_RES_SETTINGS_K[version_suffix]="test_0.1"
 HIGH_RES_SETTINGS_K[delta_pb]=1
+HIGH_RES_SETTINGS_K[use_taxes]=0

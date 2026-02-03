@@ -393,6 +393,7 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model, store_egm_grids=False):
     settings = model.settings_dict if hasattr(model, 'settings_dict') else {}
     use_taxes = settings.get('use_taxes', False)
     tax_constraint_nodes = None  # Will be set if taxes enabled with constraints
+    tax_debug = getattr(model, 'verbose', False)  # Debug output for tax processing
 
     if use_taxes:
         tax_table = settings.get('tax_table', None)
@@ -408,9 +409,9 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model, store_egm_grids=False):
                 if getattr(model, 'verbose', False):
                     print(f"  [TAX] Snapped {len(tax_table.get('brackets', []))} bracket boundaries to a_nxt grid")
 
-            a0_arr, a1_arr, B_arr, tau_arr = parse_tax_table(tax_table)
+            a0_arr, a1_arr, B_arr, tau_arr, left_closed_arr, open_arr = parse_tax_table(tax_table, debug=tax_debug)
             # Compute marginal tax rates on continuation asset grid
-            tau_a_nxt = marginal_tax_array(a_nxt_grid, a0_arr, a1_arr, tau_arr)
+            tau_a_nxt = marginal_tax_array(a_nxt_grid, a0_arr, a1_arr, tau_arr, left_closed_arr, open_arr)
             # Net-of-tax return: Rfree_net(a') = (1+r) - tau_a(a')
             Rfree_net = (1 + r) - tau_a_nxt  # Shape: (n_a_nxt,)
             # Reshape for broadcasting: (n_a_nxt, 1, 1) to match lambda_cntn shape
@@ -418,7 +419,7 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model, store_egm_grids=False):
 
             # Parse tax constraint nodes for EGM preprocessing
             # Only apply when pb=1 (taxes assume no present bias)
-            tax_constraint_nodes, n_points_per_node = parse_tax_constraint_nodes(tax_table, a_nxt_grid)
+            tax_constraint_nodes, n_points_per_node = parse_tax_constraint_nodes(tax_table, a_nxt_grid, debug=tax_debug)
             if tax_constraint_nodes and getattr(model, 'verbose', False):
                 print(f"  [TAX] Parsed {len(tax_constraint_nodes)} constraint nodes at tax bracket boundaries ({n_points_per_node} pts each)")
         else:
@@ -495,9 +496,11 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model, store_egm_grids=False):
     if store_egm_grids:
         unrefined_grids = {k: {} for k in ('e', 'Q', 'c', 'a')}
         refined_grids = {k: {} for k in ('e', 'Q', 'c', 'a', 'lambda_')}
+        constraint_star_points = {k: {} for k in ('a_star', 'c_star', 'm_star', 'q_star')}
     else:
         unrefined_grids = None
         refined_grids = None
+        constraint_star_points = None
 
     # array for indices of post-state housing (not services!)
     # for owners, it is the same as the housing index in the loop
@@ -611,7 +614,9 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model, store_egm_grids=False):
                         # Pass jump detection thresholds
                         grad_c_threshold=grad_c_threshold,
                         c_star_lb_pct=c_star_lb_pct,
-                        c_star_ub_pct=c_star_ub_pct
+                        c_star_ub_pct=c_star_ub_pct,
+                        # Debug output for tax bracket processing
+                        debug=tax_debug
                     )
                 )
 
@@ -636,6 +641,21 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model, store_egm_grids=False):
                 unrefined_grids['Q'][grid_key] = vlu_q_egm_unique
                 unrefined_grids['c'][grid_key] = c_egm_unique
                 unrefined_grids['a'][grid_key] = a_nxt_grid_unique
+
+                # Extract and store constraint star points (c_star, a_star at tax bracket boundaries)
+                # These are the base EGM points at each tax node index, before constraint segments are added
+                if tax_constraint_nodes is not None and len(tax_constraint_nodes) > 0:
+                    star_indices = np.array([n['a_idx'] for n in tax_constraint_nodes], dtype=np.int64)
+                    valid_mask = (star_indices >= 0) & (star_indices < len(a_nxt_grid))
+                    valid_indices = star_indices[valid_mask]
+                    if len(valid_indices) > 0:
+                        constraint_star_points['a_star'][grid_key] = a_nxt_grid[valid_indices]
+                        constraint_star_points['c_star'][grid_key] = c_egm[valid_indices]
+                        constraint_star_points['m_star'][grid_key] = m_egm[valid_indices]
+                        constraint_star_points['q_star'][grid_key] = q_egm[valid_indices]
+                        # Debug: print first grid_key stored
+                        if i_y == 0 and i_h == 0:
+                            print(f"[DEBUG] Stored constraint_star_points for grid_key={grid_key}, {len(valid_indices)} points")
 
             # Use pre-created partial_uc function (avoids closure creation in loop)
             partial_uc = partial_uc_funcs[i_h]
@@ -764,13 +784,14 @@ def _solve_egm_loop(vlu_cntn, lambda_cntn, model, store_egm_grids=False):
     if store_egm_grids:
         egm_grids = {
             'unrefined': unrefined_grids,
-            'refined': refined_grids
+            'refined': refined_grids,
+            'constraint_star': constraint_star_points
         }
     else:
         # Return None to save memory - downstream code should check for None
         egm_grids = None
         # Explicitly delete the None references (no-op but documents intent)
-        del unrefined_grids, refined_grids
+        del unrefined_grids, refined_grids, constraint_star_points
 
     # When delta == 1, vlu_dcsn is None - return Q_dcsn in its place (they're identical)
     return policy, vlu_dcsn if vlu_dcsn is not None else Q_dcsn, lambda_dcsn, total_ue_time, egm_grids, Q_dcsn

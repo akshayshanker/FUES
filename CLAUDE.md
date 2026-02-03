@@ -56,3 +56,4 @@ For 1D interpolation, always use functions from `dc_smm.fues.helpers.math_funcs`
 - `interp_as_scalar(xp, yp, x)` - scalar version, `x` is a float
 
 Do NOT use `interp` from `interpolation` or `np.interp` directly. Any optimizations to 1D interpolation should be done in these functions.
+

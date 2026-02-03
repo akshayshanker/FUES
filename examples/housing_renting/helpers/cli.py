@@ -26,6 +26,10 @@ def create_argument_parser() -> argparse.ArgumentParser:
                    help="Upper envelope method to use")
     p.add_argument("--delta-pb", default="1",
                    help="Probability of death parameter")
+
+    # Tax settings
+    p.add_argument("--use-taxes", action="store_true",
+                   help="Enable capital income tax from tax_table in config")
     
     # Grid settings
     p.add_argument("--vfi-ngrid", default="10000",

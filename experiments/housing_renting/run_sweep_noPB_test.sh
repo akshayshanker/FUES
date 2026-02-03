@@ -80,7 +80,7 @@ python3 -c "import numba; import quantecon; print('Numba version:', numba.__vers
 }
 
 # --- Sweep Configuration ---
-EXPERIMENT_SET="sweep_noPB_small"
+EXPERIMENT_SET="sweep_noPB_small_tax"
 EXPERIMENT_SET_FILE="$SCRIPT_DIR/experiment_sets/${EXPERIMENT_SET}.yml"
 
 # Read config from YAML (falls back to defaults if not found)

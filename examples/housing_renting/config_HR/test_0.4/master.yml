@@ -65,16 +65,16 @@ parameters:
       # And a noticeable drop (kink), without a level jump
       - {a0: 2.75, a1: 3.87, B: 0.00852, tau_a: 0.005}
       # JUMP #1: +0.10 at a = 3.87
-      - {a0: 3.87, a1: 6.97, B: 0.11412, tau_a: 0.024}
-      # Another drop (still no jump)
-      - {a0: 6.97, a1: 8.36, B: 0.18852, tau_a: 0.0192}
-      # Larger rise into top bracket region
-      - {a0: 8.36, a1: 12.0, B: 0.215208, tau_a: 0.027}
+      - {a0: 3.87, a1: 6.97, B: 0.11412, tau_a: 0.024, open: true}
+      # Subsidy bracket: larger subsidy (B=0.05), left-closed so a=6.97 uses THIS bracket
+      - {a0: 6.97, a1: 8.36, B: 0.05, tau_a: 0.0192, left_closed: true}
+      # Larger rise into top bracket region (adjusted for subsidy continuity)
+      - {a0: 8.36, a1: 12.0, B: 0.076688, tau_a: 0.027}
       # Kink down at a=12 (no level jump, just marginal rate drops)
-      - {a0: 12.0, a1: 15.0, B: 0.313488, tau_a: 0.018}
+      - {a0: 12.0, a1: 15.0, B: 0.174968, tau_a: 0.018}
       # JUMP #2: +0.15 at a = 15.0
-      - {a0: 15.0, a1: 20.0, B: 0.517488, tau_a: 0.0294}
-      - {a0: 20.0, a1: .inf, B: 0.664488, tau_a: 0.0294}
+      - {a0: 15.0, a1: 20.0, B: 0.378968, tau_a: 0.0294}
+      - {a0: 20.0, a1: .inf, B: 0.525968, tau_a: 0.0294}
 
   Pi:
   - [0.014577399900725561, 0.08746439940435337, 0.21866099851088341, 0.29154799801451126, 0.21866099851088341, 0.08746439940435337,

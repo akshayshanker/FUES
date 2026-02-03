@@ -299,14 +299,23 @@ def calculate_euler_error_gpu(model, sample_size=10000, debug=False):
     return float(np.nanmean(logs_array)) if not np.all(np.isnan(logs_array)) else np.nan
 
 @njit
+def _is_near_kink(a, a0_arr, tol=0.005):
+    """Check if asset value is near a tax bracket boundary (kink point)."""
+    for i in range(len(a0_arr)):
+        if abs(a - a0_arr[i]) < tol:
+            return True
+    return False
+
+
+@njit
 def _calculate_euler_error_jit(
     z_vals, H_grid, w_dcsn_now, c_now, tenure_pol, H_pol, S_pol,
     c_owner_n, c_renter_n, tenure_a_grid, owner_a_grid, renter_a_grid,
     H_nxt_grid, S_grid, w_dcsn_o, w_dcsn_r, Pi, beta, r, Pr, tau_phi,
     uc_owner, uc_rent, uc_inv,
-    use_taxes, a0_arr, a1_arr, B_arr, tau_arr,
+    use_taxes, a0_arr, a1_arr, B_arr, tau_arr, left_closed_arr, open_arr,
     a_grid_min, a_grid_max,
-    c_min=1e-12, a_min=1e-6
+    c_min=1e-12, a_min=1e-6, kink_tol=0.005
 ):
     """
     This is the core numerical kernel, compiled with Numba for high performance (CPU fallback).
@@ -339,10 +348,16 @@ def _calculate_euler_error_jit(
                 # Clip a_next to asset grid bounds to avoid extrapolation
                 a_next_clipped = min(max(a_next, a_grid_min), a_grid_max)
 
+                # Skip states at tax bracket boundaries (kink points)
+                # At kinks, standard Euler doesn't hold - agents may optimally bunch
+                if use_taxes and len(a0_arr) > 0:
+                    if _is_near_kink(a_next_clipped, a0_arr, kink_tol):
+                        continue
+
                 # Compute tax on a_next if taxes are enabled
                 if use_taxes:
-                    T_a_next = total_tax_scalar(a_next_clipped, a0_arr, a1_arr, B_arr, tau_arr)
-                    tau_a_next = marginal_tax_scalar(a_next_clipped, a0_arr, a1_arr, tau_arr)
+                    T_a_next = total_tax_scalar(a_next_clipped, a0_arr, a1_arr, B_arr, tau_arr, left_closed_arr, open_arr)
+                    tau_a_next = marginal_tax_scalar(a_next_clipped, a0_arr, a1_arr, tau_arr, left_closed_arr, open_arr)
                 else:
                     T_a_next = 0.0
                     tau_a_next = 0.0
@@ -488,20 +503,25 @@ def calculate_euler_error_cpu(model, debug=True, sample_size=50000, random_sampl
                 if debug:
                     print(f"  [TAX] Snapped {len(tax_table.get('brackets', []))} bracket boundaries to asset grid")
 
-            a0_arr, a1_arr, B_arr, tau_arr = parse_tax_table(tax_table)
+            a0_arr, a1_arr, B_arr, tau_arr, left_closed_arr, open_arr = parse_tax_table(tax_table)
             if debug:
                 print(f"  Taxes ENABLED: {len(a0_arr)} brackets")
+                print(f"  Skipping Euler errors near kink points: {a0_arr.tolist()} (tol=0.005)")
         else:
             use_taxes = False
             a0_arr = np.zeros(0, dtype=np.float64)
             a1_arr = np.zeros(0, dtype=np.float64)
             B_arr = np.zeros(0, dtype=np.float64)
             tau_arr = np.zeros(0, dtype=np.float64)
+            left_closed_arr = np.zeros(0, dtype=np.int8)
+            open_arr = np.zeros(0, dtype=np.int8)
     else:
         a0_arr = np.zeros(0, dtype=np.float64)
         a1_arr = np.zeros(0, dtype=np.float64)
         B_arr = np.zeros(0, dtype=np.float64)
         tau_arr = np.zeros(0, dtype=np.float64)
+        left_closed_arr = np.zeros(0, dtype=np.int8)
+        open_arr = np.zeros(0, dtype=np.int8)
         if debug:
             print(f"  Taxes DISABLED")
 
@@ -575,10 +595,22 @@ def calculate_euler_error_cpu(model, debug=True, sample_size=50000, random_sampl
             a_grid_min, a_grid_max = owner_a_grid[0], owner_a_grid[-1]
             a_next_clipped = np.clip(a_next, a_grid_min, a_grid_max)
 
+            # Skip states at tax bracket boundaries (kink points)
+            # At kinks, standard Euler doesn't hold - agents may optimally bunch
+            if use_taxes and len(a0_arr) > 0:
+                near_kink = False
+                kink_tol = 0.005
+                for kink_val in a0_arr:
+                    if abs(a_next_clipped - kink_val) < kink_tol:
+                        near_kink = True
+                        break
+                if near_kink:
+                    continue
+
             # Compute tax on a_next if taxes are enabled
             if use_taxes and len(a0_arr) > 0:
-                T_a_next = total_tax_scalar(a_next_clipped, a0_arr, a1_arr, B_arr, tau_arr)
-                tau_a_next = marginal_tax_scalar(a_next_clipped, a0_arr, a1_arr, tau_arr)
+                T_a_next = total_tax_scalar(a_next_clipped, a0_arr, a1_arr, B_arr, tau_arr, left_closed_arr, open_arr)
+                tau_a_next = marginal_tax_scalar(a_next_clipped, a0_arr, a1_arr, tau_arr, left_closed_arr, open_arr)
             else:
                 T_a_next = 0.0
                 tau_a_next = 0.0
@@ -633,7 +665,7 @@ def calculate_euler_error_cpu(model, debug=True, sample_size=50000, random_sampl
             c_owner_n, c_renter_n, tenure_a_grid, owner_a_grid, renter_a_grid,
             H_nxt_grid, S_grid, w_dcsn_o, w_dcsn_r, Pi, beta, r, Pr, tau_phi,
             uc_owner, uc_rent, uc_inv,
-            use_taxes, a0_arr, a1_arr, B_arr, tau_arr,
+            use_taxes, a0_arr, a1_arr, B_arr, tau_arr, left_closed_arr, open_arr,
             a_grid_min, a_grid_max,
             c_min=1e-12, a_min=a_min_threshold
         )
@@ -686,6 +718,8 @@ def precompile_euler_error_cpu():
         'a1_arr': np.zeros(0, dtype=np.float64),
         'B_arr': np.zeros(0, dtype=np.float64),
         'tau_arr': np.zeros(0, dtype=np.float64),
+        'left_closed_arr': np.zeros(0, dtype=np.int8),
+        'open_arr': np.zeros(0, dtype=np.int8),
         # Grid bounds for clipping
         'a_grid_min': 0.0,
         'a_grid_max': 10.0,
@@ -715,7 +749,8 @@ def precompile_euler_error_cpu():
             dummy_data['beta'], dummy_data['r'], dummy_data['Pr'], dummy_data['tau_phi'],
             uc_owner, uc_rent, uc_inv,
             dummy_data['use_taxes'], dummy_data['a0_arr'], dummy_data['a1_arr'],
-            dummy_data['B_arr'], dummy_data['tau_arr'],
+            dummy_data['B_arr'], dummy_data['tau_arr'], dummy_data['left_closed_arr'],
+            dummy_data['open_arr'],
             dummy_data['a_grid_min'], dummy_data['a_grid_max']
         )
         return True

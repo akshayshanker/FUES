@@ -56,30 +56,43 @@ def load_sweep_results(results_path: Path) -> pd.DataFrame:
 
 def generate_accuracy_latex(df: pd.DataFrame, output_path: Path, model_params: str) -> None:
     """Generate LaTeX accuracy table with professional formatting."""
-    
-    # Get unique values - internal names for data lookup
-    methods = ["FUES", "DCEGM", "CONSAV", "VFI"]
+
+    # Get unique values - use methods actually present in data
+    all_methods = ["FUES", "DCEGM", "CONSAV", "VFI"]
+    methods_in_data = [m for m in all_methods if m in df["method"].unique()]
+    methods = methods_in_data if methods_in_data else all_methods
+
     # Display names for table headers
     method_display = {"FUES": "FUES", "DCEGM": "MSS", "CONSAV": "LTM", "VFI": "VFI"}
-    
+
     grids = sorted(df["grid"].unique())
     H_sizes = sorted(df["H"].unique())
-    
+
     # Check if dev_c_L2 is available
     has_dev = "dev_c_L2" in df.columns and df["dev_c_L2"].notna().any()
-    
-    # Build column spec based on available metrics
-    # Use right-aligned columns for numeric data
+
+    # Build column spec dynamically based on methods present
+    n_methods = len(methods)
     if has_dev:
-        col_spec = r"\begin{tabular}{rr|rr|rr|rr|rr}"
-        header1 = r" & & \multicolumn{2}{c|}{FUES} & \multicolumn{2}{c|}{MSS} & \multicolumn{2}{c|}{LTM} & \multicolumn{2}{c}{VFI} \\"
-        cmidrule = r"\cmidrule(lr){3-4} \cmidrule(lr){5-6} \cmidrule(lr){7-8} \cmidrule(lr){9-10}"
-        header2 = r"Asset grid & $H$ & Euler & $L_2$ & Euler & $L_2$ & Euler & $L_2$ & Euler & $L_2$ \\"
+        # 2 columns per method (Euler + L2)
+        col_spec = r"\begin{tabular}{rr" + "|rr" * n_methods + "}"
+        method_headers = [rf"\multicolumn{{2}}{{c|}}{{{method_display.get(m, m)}}}" for m in methods[:-1]]
+        method_headers.append(rf"\multicolumn{{2}}{{c}}{{{method_display.get(methods[-1], methods[-1])}}}")
+        header1 = r" & & " + " & ".join(method_headers) + r" \\"
+        # Build cmidrule for each method pair
+        cmidrules = []
+        for i, _ in enumerate(methods):
+            start = 3 + i * 2
+            end = start + 1
+            cmidrules.append(rf"\cmidrule(lr){{{start}-{end}}}")
+        cmidrule = " ".join(cmidrules)
+        header2 = r"Asset grid & $H$ & " + " & ".join(["Euler & $L_2$"] * n_methods) + r" \\"
     else:
-        col_spec = r"\begin{tabular}{rr|r|r|r|r}"
-        header1 = r" & & FUES & MSS & LTM & VFI \\"
+        # 1 column per method (Euler only)
+        col_spec = r"\begin{tabular}{rr" + "|r" * n_methods + "}"
+        header1 = r" & & " + " & ".join([method_display.get(m, m) for m in methods]) + r" \\"
         cmidrule = ""
-        header2 = r"Asset grid & $H$ & Euler & Euler & Euler & Euler \\"
+        header2 = r"Asset grid & $H$ & " + " & ".join(["Euler"] * n_methods) + r" \\"
     
     # Start building LaTeX with professional formatting
     lines = [
@@ -193,28 +206,63 @@ def _format_float_with_commas(val: float, decimals: int = 2, latex: bool = True)
 
 def generate_timing_latex(df: pd.DataFrame, output_path: Path, model_params: str) -> None:
     """Generate LaTeX timing table with professional formatting.
-    
+
     U.env time is shown in milliseconds (×1000) for better readability.
     Period time remains in seconds.
     Cons. = average consumption stage time per period (shows VFI scaling with grid).
     Euler error is included as a compact accuracy column (replaces U.env%).
-    
+
     Output is wrapped in landscape environment (requires pdflscape package).
     """
-    
-    # Get unique values - internal names for data lookup
-    methods = ["FUES", "DCEGM", "CONSAV", "VFI"]
+
+    # Get unique values - use methods actually present in data
+    all_methods = ["FUES", "DCEGM", "CONSAV", "VFI"]
+    methods_in_data = [m for m in all_methods if m in df["method"].unique()]
+    methods = methods_in_data if methods_in_data else all_methods
+
+    method_display = {"FUES": "FUES", "DCEGM": "MSS", "CONSAV": "LTM", "VFI": "VFI"}
+
     grids = sorted(df["grid"].unique())
     H_sizes = sorted(df["H"].unique())
-    
+
+    # Build column spec dynamically
+    # EGM methods: 4 cols (U.env, Cons., Per., E.Err)
+    # VFI: 3 cols (Cons., Per., E.Err)
+    col_parts = ["@{}rr"]  # Grid columns (W, H)
+    header_parts = [r"\multicolumn{2}{c}{Grid}"]
+    subheader_parts = [r"$W$ & $H$"]
+    cmidrule_parts = [r"\cmidrule(lr){1-2}"]
+
+    col_idx = 3  # Start after W and H columns
+    for method in methods:
+        if method == "VFI":
+            col_parts.append("rrr")
+            header_parts.append(rf"\multicolumn{{3}}{{c}}{{{method_display.get(method, method)}}}")
+            subheader_parts.append("Cons. & Per. & E.Err")
+            cmidrule_parts.append(rf"\cmidrule(lr){{{col_idx}-{col_idx+2}}}")
+            col_idx += 3
+        else:
+            col_parts.append("rrrr")
+            header_parts.append(rf"\multicolumn{{4}}{{c}}{{{method_display.get(method, method)}}}")
+            subheader_parts.append("U.env & Cons. & Per. & E.Err")
+            cmidrule_parts.append(rf"\cmidrule(lr){{{col_idx}-{col_idx+3}}}")
+            col_idx += 4
+    col_parts.append("@{}")
+
+    col_spec = r"\begin{tabular}{" + " ".join(col_parts) + "}"
+
     # Professional LaTeX table with:
-    # - Landscape orientation for wide table
+    # - Landscape orientation for wide table (only if many methods)
     # - W column for asset grid size (compact rows)
     # - Right-aligned numeric columns (r) for better number alignment
     # - Caption width matched to table width
+    use_landscape = len(methods) > 2
     lines = [
         r"% Requires: \usepackage{pdflscape, booktabs, caption}",
-        r"\begin{landscape}",
+    ]
+    if use_landscape:
+        lines.append(r"\begin{landscape}")
+    lines.extend([
         r"\begin{table}[htbp]",
         r"\centering",
         r"\begingroup",
@@ -224,13 +272,13 @@ def generate_timing_latex(df: pd.DataFrame, output_path: Path, model_params: str
         r"\captionsetup{width=0.75\linewidth}",
         r"\caption{Housing-Renting Model: Per-Period Timing and Accuracy}",
         r"\label{tab:housing_timing}",
-        r"\begin{tabular}{@{}rr rrrr rrrr rrrr rrr@{}}",
+        col_spec,
         r"\toprule",
-        r"\multicolumn{2}{c}{Grid} & \multicolumn{4}{c}{FUES} & \multicolumn{4}{c}{MSS} & \multicolumn{4}{c}{LTM} & \multicolumn{3}{c}{VFI} \\",
-        r"\cmidrule(lr){1-2} \cmidrule(lr){3-6} \cmidrule(lr){7-10} \cmidrule(lr){11-14} \cmidrule(lr){15-17}",
-        r"$W$ & $H$ & U.env & Cons. & Per. & E.Err & U.env & Cons. & Per. & E.Err & U.env & Cons. & Per. & E.Err & Cons. & Per. & E.Err \\",
+        " & ".join(header_parts) + r" \\",
+        " ".join(cmidrule_parts),
+        " & ".join(subheader_parts) + r" \\",
         r"\midrule",
-    ]
+    ])
     
     for i, grid in enumerate(grids):
         for j, H in enumerate(H_sizes):
@@ -319,8 +367,9 @@ def generate_timing_latex(df: pd.DataFrame, output_path: Path, model_params: str
         r"\par\small " + notes_text,
         r"\endgroup",
         r"\end{table}",
-        r"\end{landscape}",
     ])
+    if use_landscape:
+        lines.append(r"\end{landscape}")
     
     # Write to file
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -330,30 +379,42 @@ def generate_timing_latex(df: pd.DataFrame, output_path: Path, model_params: str
 
 def generate_accuracy_markdown(df: pd.DataFrame, output_path: Path, model_params: str) -> None:
     """Generate Markdown accuracy table matching retirement format."""
-    
-    # Get unique values - internal names for data lookup
-    methods = ["FUES", "DCEGM", "CONSAV", "VFI"]
+
+    # Get unique values - use methods actually present in data
+    all_methods = ["FUES", "DCEGM", "CONSAV", "VFI"]
+    methods_in_data = [m for m in all_methods if m in df["method"].unique()]
+    methods = methods_in_data if methods_in_data else all_methods
+
+    method_display = {"FUES": "FUES", "DCEGM": "MSS", "CONSAV": "LTM", "VFI": "VFI"}
+
     grids = sorted(df["grid"].unique())
     H_sizes = sorted(df["H"].unique())
-    
+
     # Check if dev_c_L2 is available
     has_dev = "dev_c_L2" in df.columns and df["dev_c_L2"].notna().any()
-    
+
+    # Build header dynamically
     if has_dev:
+        method_headers = [f"    {method_display.get(m, m):^9}     " for m in methods]
+        sub_headers = ["Euler | L2 "] * len(methods)
+        sep_parts = ["------:|----:"] * len(methods)
         lines = [
             "# Housing-Renting Model: Solution Accuracy",
             "",
-            "| Asset grid |    |    FUES     |     MSS     |     LTM     |     VFI     |",
-            "|           | H  | Euler | L2  | Euler | L2  | Euler | L2  | Euler | L2  |",
-            "|----------:|---:|------:|----:|------:|----:|------:|----:|------:|----:|",
+            "| Asset grid |    |" + "|".join(method_headers) + "|",
+            "|           | H  |" + "|".join(sub_headers) + "|",
+            "|----------:|---:|" + "|".join(sep_parts) + "|",
         ]
     else:
+        method_headers = [f" {method_display.get(m, m):^5} " for m in methods]
+        sub_headers = [" Euler "] * len(methods)
+        sep_parts = ["------:"] * len(methods)
         lines = [
             "# Housing-Renting Model: Solution Accuracy",
             "",
-            "| Asset grid |    | FUES  |  MSS  |  LTM   | VFI   |",
-            "|           | H  | Euler | Euler | Euler  | Euler |",
-            "|----------:|---:|------:|------:|-------:|------:|",
+            "| Asset grid |    |" + "|".join(method_headers) + "|",
+            "|           | H  |" + "|".join(sub_headers) + "|",
+            "|----------:|---:|" + "|".join(sep_parts) + "|",
         ]
     
     for grid in grids:
@@ -423,24 +484,44 @@ def _get_avg_ownc_time(row_data: pd.DataFrame) -> float:
 
 def generate_timing_markdown(df: pd.DataFrame, output_path: Path, model_params: str) -> None:
     """Generate Markdown timing table matching retirement format.
-    
+
     U.env time is shown in milliseconds (×1000) for better readability.
     Period time remains in seconds.
     Cons. = average consumption stage time per period (to show VFI scaling).
     Euler error is included as a compact accuracy column (replaces U.env%).
     """
-    
-    # Get unique values - internal names for data lookup
-    methods = ["FUES", "DCEGM", "CONSAV", "VFI"]
+
+    # Get unique values - use methods actually present in data
+    all_methods = ["FUES", "DCEGM", "CONSAV", "VFI"]
+    methods_in_data = [m for m in all_methods if m in df["method"].unique()]
+    methods = methods_in_data if methods_in_data else all_methods
+
+    method_display = {"FUES": "FUES", "DCEGM": "MSS", "CONSAV": "LTM", "VFI": "VFI"}
+
     grids = sorted(df["grid"].unique())
     H_sizes = sorted(df["H"].unique())
-    
+
+    # Build header dynamically
+    header1_parts = []
+    header2_parts = []
+    sep_parts = []
+    for method in methods:
+        disp = method_display.get(method, method)
+        if method == "VFI":
+            header1_parts.append(f"           {disp}            ")
+            header2_parts.append(" Cons.(s) | Period(s) | Euler ")
+            sep_parts.append("--------:|---------:|------:")
+        else:
+            header1_parts.append(f"                    {disp}                   ")
+            header2_parts.append(" U.env(s) | Cons.(s) | Period(s) | Euler ")
+            sep_parts.append("--------:|--------:|---------:|------:")
+
     lines = [
         "# Housing-Renting Model: Per-Period Timing Statistics",
         "",
-        "| Asset grid |    |                    FUES                   |                    MSS                   |                    LTM                   |                    VFI                    |",
-        "|           | H  | U.env(s) | Cons.(s) | Period(s) | Euler | U.env(s) | Cons.(s) | Period(s) | Euler | U.env(s) | Cons.(s) | Period(s) | Euler | Cons.(s) | Period(s) | Euler |",
-        "|----------:|---:|--------:|--------:|---------:|------:|--------:|--------:|---------:|------:|--------:|--------:|---------:|------:|--------:|---------:|------:|",
+        "| Asset grid |    |" + "|".join(header1_parts) + "|",
+        "|           | H  |" + "|".join(header2_parts) + "|",
+        "|----------:|---:|" + "|".join(sep_parts) + "|",
     ]
     
     for grid in grids:

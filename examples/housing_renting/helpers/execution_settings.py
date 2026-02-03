@@ -477,6 +477,48 @@ class ExecutionSettings:
             'assets_y48_h3_zoom2': (4.5, 7.5, None, 12),
             'value_y48_h5_zoom2': (4.5, 7.5, None, None),  # Auto-fit y-axis
             'assets_y48_h5_zoom2': (4.5, 7.5, None, 12),
+            # Zoom3 view (7-10): y_idx=0 (low income)
+            'value_y0_h0_zoom3': (7, 10, None, None),  # Auto-fit y-axis
+            'assets_y0_h0_zoom3': (7, 10, None, 12),
+            'value_y0_h3_zoom3': (7, 10, None, None),  # Auto-fit y-axis
+            'assets_y0_h3_zoom3': (7, 10, None, 12),
+            'value_y0_h5_zoom3': (7, 10, None, None),  # Auto-fit y-axis
+            'assets_y0_h5_zoom3': (7, 10, None, 12),
+            # Zoom3 view (7-10): y_idx=24 (mid income)
+            'value_y24_h0_zoom3': (7, 10, None, None),  # Auto-fit y-axis
+            'assets_y24_h0_zoom3': (7, 10, None, 12),
+            'value_y24_h3_zoom3': (7, 10, None, None),  # Auto-fit y-axis
+            'assets_y24_h3_zoom3': (7, 10, None, 12),
+            'value_y24_h5_zoom3': (7, 10, None, None),  # Auto-fit y-axis
+            'assets_y24_h5_zoom3': (7, 10, None, 12),
+            # Zoom3 view (7-10): y_idx=48 (high income)
+            'value_y48_h0_zoom3': (7, 10, None, None),  # Auto-fit y-axis
+            'assets_y48_h0_zoom3': (7, 10, None, 12),
+            'value_y48_h3_zoom3': (7, 10, None, None),  # Auto-fit y-axis
+            'assets_y48_h3_zoom3': (7, 10, None, 12),
+            'value_y48_h5_zoom3': (7, 10, None, None),  # Auto-fit y-axis
+            'assets_y48_h5_zoom3': (7, 10, None, 12),
+            # Zoom4 view (9-11): y_idx=0 (low income) - saved to subfolder
+            'value_y0_h0_zoom4': (9, 11, None, None),  # LHS: x-axis 9-11, auto-fit y-axis
+            'assets_y0_h0_zoom4': (9, 11, 7, 10),  # RHS: x-axis 9-11, y-axis 7-10
+            'value_y0_h3_zoom4': (9, 11, None, None),  # LHS: x-axis 9-11, auto-fit y-axis
+            'assets_y0_h3_zoom4': (9, 11, 7, 10),  # RHS: x-axis 9-11, y-axis 7-10
+            'value_y0_h5_zoom4': (9, 11, None, None),  # LHS: x-axis 9-11, auto-fit y-axis
+            'assets_y0_h5_zoom4': (9, 11, 7, 10),  # RHS: x-axis 9-11, y-axis 7-10
+            # Zoom4 view (9-11): y_idx=24 (mid income) - saved to subfolder
+            'value_y24_h0_zoom4': (9, 11, None, None),  # LHS: x-axis 9-11, auto-fit y-axis
+            'assets_y24_h0_zoom4': (9, 11, 7, 10),  # RHS: x-axis 9-11, y-axis 7-10
+            'value_y24_h3_zoom4': (9, 11, None, None),  # LHS: x-axis 9-11, auto-fit y-axis
+            'assets_y24_h3_zoom4': (9, 11, 7, 10),  # RHS: x-axis 9-11, y-axis 7-10
+            'value_y24_h5_zoom4': (9, 11, None, None),  # LHS: x-axis 9-11, auto-fit y-axis
+            'assets_y24_h5_zoom4': (9, 11, 7, 10),  # RHS: x-axis 9-11, y-axis 7-10
+            # Zoom4 view (9-11): y_idx=48 (high income) - saved to subfolder
+            'value_y48_h0_zoom4': (9, 11, None, None),  # LHS: x-axis 9-11, auto-fit y-axis
+            'assets_y48_h0_zoom4': (9, 11, 7, 10),  # RHS: x-axis 9-11, y-axis 7-10
+            'value_y48_h3_zoom4': (9, 11, None, None),  # LHS: x-axis 9-11, auto-fit y-axis
+            'assets_y48_h3_zoom4': (9, 11, 7, 10),  # RHS: x-axis 9-11, y-axis 7-10
+            'value_y48_h5_zoom4': (9, 11, None, None),  # LHS: x-axis 9-11, auto-fit y-axis
+            'assets_y48_h5_zoom4': (9, 11, 7, 10),  # RHS: x-axis 9-11, y-axis 7-10
             # Kink points (tax bracket boundaries) for horizontal lines on assets panel
             'kink_points': [2.20, 2.50, 2.75, 3.87, 6.97, 8.36, 12.0, 15.0, 20.0],
         }

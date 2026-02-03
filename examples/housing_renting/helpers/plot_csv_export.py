@@ -142,6 +142,22 @@ def csv_generate_plots(model, method, image_dir, plot_period=0, bounds=None,
                             refined_data, grid_key, H_idx, y_idx,
                             grid.H_nxt[H_idx] if grid.H_nxt is not None else H_idx
                         )
+
+                    # Export constraint star points (c_star, a_star at tax bracket boundaries)
+                    constraint_star_data = egm_data.get('constraint_star', {}) if isinstance(egm_data, dict) else getattr(egm_data, 'constraint_star', {})
+                    # Debug: print what we have
+                    if y_idx == y_idx_list[0] and H_idx == H_indices[0]:
+                        print(f"[DEBUG] constraint_star_data keys: {constraint_star_data.keys() if constraint_star_data else 'None'}")
+                        if constraint_star_data:
+                            a_star_keys = list(constraint_star_data.get('a_star', {}).keys())[:3]
+                            print(f"[DEBUG] a_star grid_keys (first 3): {a_star_keys}")
+                            print(f"[DEBUG] looking for grid_key: {grid_key}")
+                    if constraint_star_data and grid_key in constraint_star_data.get('a_star', {}):
+                        export_constraint_star_csv(
+                            csv_dir / f"egm_constraint_star_y{y_idx}_h{H_idx}.csv",
+                            constraint_star_data, grid_key, H_idx, y_idx,
+                            grid.H_nxt[H_idx] if grid.H_nxt is not None else H_idx
+                        )
     else:
         print(f"[CSV Export] Skipping EGM CSV exports for {method} (--skip-egm-plots enabled)")
     
@@ -208,13 +224,41 @@ def export_egm_grid_csv(filepath, data_dict, grid_key, H_idx, y_idx, h_value):
     with open(filepath, 'w', newline='') as f:
         writer = csv.writer(f)
         writer.writerow(['e', 'value', 'consumption', 'assets', 'H_idx', 'y_idx', 'h_value'])
-        
+
         for i in range(len(e_grid)):
             row = [
                 e_grid[i] if e_grid is not None else '',
                 vf[i] if vf is not None and i < len(vf) else '',
                 c[i] if c is not None and i < len(c) else '',
                 a[i] if a is not None and i < len(a) else '',
+                H_idx,
+                y_idx,
+                h_value
+            ]
+            writer.writerow(row)
+
+
+def export_constraint_star_csv(filepath, data_dict, grid_key, H_idx, y_idx, h_value):
+    """Export constraint star points (c_star, a_star at tax bracket boundaries) to CSV."""
+    # Extract data from dict
+    a_star = data_dict.get('a_star', {}).get(grid_key)
+    c_star = data_dict.get('c_star', {}).get(grid_key)
+    m_star = data_dict.get('m_star', {}).get(grid_key)
+    q_star = data_dict.get('q_star', {}).get(grid_key)
+
+    if a_star is None or len(a_star) == 0:
+        return
+
+    with open(filepath, 'w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(['a_star', 'c_star', 'm_star', 'q_star', 'H_idx', 'y_idx', 'h_value'])
+
+        for i in range(len(a_star)):
+            row = [
+                a_star[i] if a_star is not None else '',
+                c_star[i] if c_star is not None and i < len(c_star) else '',
+                m_star[i] if m_star is not None and i < len(m_star) else '',
+                q_star[i] if q_star is not None and i < len(q_star) else '',
                 H_idx,
                 y_idx,
                 h_value

@@ -66,9 +66,10 @@ def F_t_cntn_to_dcsn(mover):
                 tax_table['_snapped_to_grid'] = True
                 settings['tax_table'] = tax_table
 
-            a0_arr, a1_arr, B_arr, tau_arr = parse_tax_table(tax_table)
+            tax_debug = getattr(model, 'verbose', False)
+            a0_arr, a1_arr, B_arr, tau_arr, left_closed_arr, open_arr = parse_tax_table(tax_table, debug=tax_debug)
             # Compute tax for each asset level
-            T_a = total_tax_array(a_grid, a0_arr, a1_arr, B_arr, tau_arr)
+            T_a = total_tax_array(a_grid, a0_arr, a1_arr, B_arr, tau_arr, left_closed_arr, open_arr)
             # Reshape for broadcasting: (N_a, 1) to match (a, H) mesh
             T_a_2d = T_a[:, np.newaxis]
             w_rent_mesh = w_rent_mesh - T_a_2d

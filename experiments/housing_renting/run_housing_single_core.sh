@@ -31,7 +31,7 @@ fi
 source "$SCRIPT_DIR/configs/pbs_run_presets.sh"
 
 # --- Define the Sequence of Configurations to Run ---
-CONFIG_TO_RUN=("STD_RES_SETTINGS_4")
+CONFIG_TO_RUN=("STD_RES_SETTINGS_4_TAXES")
 
 
 # --- Environment Setup ---
@@ -86,12 +86,19 @@ for CONFIG_NAME in "${CONFIG_TO_RUN[@]}"; do
     
     declare -n CONFIG_REF=$CONFIG_NAME
 
+    # Build tax flag conditionally
+    USE_TAXES_FLAG=""
+    if [[ "${CONFIG_REF[use_taxes]:-0}" == "1" ]]; then
+        USE_TAXES_FLAG="--use-taxes"
+    fi
+
     echo "========================================================"
     echo "Running Configuration: ${CONFIG_NAME} (Single Core)"
     echo "Periods: ${CONFIG_REF[periods]}"
     echo "VFI Grid: ${CONFIG_REF[vfi_ngrid]}"
     echo "HD Points: ${CONFIG_REF[hd_points]}"
     echo "Grid Points: ${CONFIG_REF[grid_points]}"
+    echo "Use Taxes: ${CONFIG_REF[use_taxes]:-0}"
     echo "========================================================"
 
     TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
@@ -109,11 +116,11 @@ for CONFIG_NAME in "${CONFIG_TO_RUN[@]}"; do
     echo "Logs will be saved to: $LOG_DIR"
     echo "NOTE: Baseline (VFI_HDGRID_GPU) will be loaded from existing bundles via --include-baseline"
     echo "NOTE: euler_error metric doesn't require baseline comparison (runs independently)"
-    echo "NOTE: EGM plots ENABLED via --plots and --trace flags"
+    echo "NOTE: EGM plots ENABLED (do not pass --skip-egm-plots)"
 
     python3 -m examples.housing_renting.solve_runner \
       --periods "${CONFIG_REF[periods]}" \
-      --ue-method "FUES, DCEGM,CONSAV" \
+      --ue-method "FUES, VFI" \
       --output-root "$OUTPUT_DIR" \
       --config-id "${VERSION_TAG}" \
       --RUN-ID "${VERSION_TAG}_${TIMESTAMP}" \
@@ -127,6 +134,7 @@ for CONFIG_NAME in "${CONFIG_TO_RUN[@]}"; do
       --csv-export \
       --plots \
       --trace \
+      $USE_TAXES_FLAG \
       2> >(tee "${LOG_DIR}/run_${TIMESTAMP}.err") \
       1> >(tee "${LOG_DIR}/run_${TIMESTAMP}.log")
 

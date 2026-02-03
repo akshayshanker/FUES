@@ -500,9 +500,10 @@ def F_h_cntn_to_dcsn_owner(mover, use_mpi=False, comm=None):
                 settings['tax_table'] = tax_table
                 print(f"[TAX DEBUG] OWNH: Snapped {len(tax_table.get('brackets', []))} brackets to a_grid")
 
-            a0_arr, a1_arr, B_arr, tau_arr = parse_tax_table(tax_table)
+            tax_debug = getattr(model, 'verbose', False)
+            a0_arr, a1_arr, B_arr, tau_arr, left_closed_arr, open_arr = parse_tax_table(tax_table, debug=tax_debug)
             # Compute tax for each asset level
-            T_a = total_tax_array(a_grid, a0_arr, a1_arr, B_arr, tau_arr)
+            T_a = total_tax_array(a_grid, a0_arr, a1_arr, B_arr, tau_arr, left_closed_arr, open_arr)
             print(f"[TAX DEBUG] OWNH: Tax applied! T(a) range: [{T_a.min():.4f}, {T_a.max():.4f}]")
             # Reshape for broadcasting: (N_a, 1, 1) to match (a, H, y) mesh
             T_a_3d = T_a[:, np.newaxis, np.newaxis]
