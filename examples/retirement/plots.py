@@ -16,10 +16,12 @@ import matplotlib.lines as mlines
 from dc_smm.fues.fues import FUES as fues_alg
 
 
-def _style_axis_spines(ax, *, color="0.65", linewidth=0.8) -> None:
-    """Make left/bottom spines lighter (avoid bold black axes)."""
-    for side in ("left", "bottom"):
+def _style_axis_spines(ax, *, color="0.65", linewidth=0.8, all_sides: bool = False) -> None:
+    """Style axes spines (optionally on all four sides)."""
+    sides = ("left", "bottom", "right", "top") if all_sides else ("left", "bottom")
+    for side in sides:
         try:
+            ax.spines[side].set_visible(True)
             ax.spines[side].set_color(color)
             ax.spines[side].set_linewidth(linewidth)
         except Exception:
@@ -96,9 +98,8 @@ def plot_egrids(age, e_grid, vf_work, c_worker, del_a, g_size, cp, save_path, ta
     ax[0].set_ylabel('Value', fontsize=11)
     ax[0].set_ylim(7.6, 8.4)
     ax[0].set_xlim(45, 55)
-    ax[0].spines['right'].set_visible(False)
-    ax[0].spines['top'].set_visible(False)
-    _style_axis_spines(ax[0])
+    # Full dark-grey frame (all four spines) for each panel
+    _style_axis_spines(ax[0], color="0.35", linewidth=0.9, all_sides=True)
     ax[0].legend(frameon=False, prop={'size': 10})
     ax[0].tick_params(axis='y', labelsize=9)
     ax[0].tick_params(axis='x', labelsize=9)
@@ -121,9 +122,7 @@ def plot_egrids(age, e_grid, vf_work, c_worker, del_a, g_size, cp, save_path, ta
     ax[1].set_ylim(20, 40)
     ax[1].set_xlim(45, 55)
     ax[1].set_ylabel('Financial assets at time t+1', fontsize=11)
-    ax[1].spines['right'].set_visible(False)
-    ax[1].spines['top'].set_visible(False)
-    _style_axis_spines(ax[1])
+    _style_axis_spines(ax[1], color="0.35", linewidth=0.9, all_sides=True)
     ax[1].tick_params(axis='y', labelsize=9)
     ax[1].tick_params(axis='x', labelsize=9)
     ax[1].yaxis.set_major_formatter(FormatStrFormatter("%.0f"))
