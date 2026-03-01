@@ -33,7 +33,6 @@ This runs the retirement model benchmark (FUES vs DCEGM vs RFC vs CONSAV) and pr
 ```python
 from dcsmm.fues import FUES                    # Main algorithm
 from dcsmm.uenvelope import EGM_UE             # Unified UE entry point
-from dcsmm.fues.helpers.math_funcs import interp_as  # 1D interpolation
 ```
 
 ## Core Modules
