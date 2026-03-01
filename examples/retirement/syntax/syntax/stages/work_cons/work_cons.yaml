@@ -30,6 +30,8 @@ symbols:
 
   parameters: [beta, r, y]
 
+  settings: [n_w, w_min, w_max, m_bar]
+
 equations:
   arvl_to_dcsn_transition: |
     w = (1 + r) * a + y

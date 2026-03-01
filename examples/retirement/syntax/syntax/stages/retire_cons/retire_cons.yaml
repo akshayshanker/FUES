@@ -30,6 +30,8 @@ symbols:
 
   parameters: [beta, r]
 
+  settings: [n_w_ret, w_ret_min, w_ret_max]
+
 equations:
   arvl_to_dcsn_transition: |
     w_ret = (1 + r) * a_ret

@@ -89,15 +89,26 @@ FUES is 5-20x faster than DC-EGM and 10-20x faster than RFC across all configura
 
 ```
 examples/retirement/
-├── run_experiment.py       # CLI entry point
-├── params/*.yml            # Parameter files
+├── run_experiment.py           # CLI entry point
+├── syntax/syntax/              # dolo-plus YAML declarations
+│   ├── period.yaml             # Period template (stage list)
+│   ├── calibration.yaml        # r, beta, delta, y
+│   ├── settings.yaml           # Grid sizes, m_bar
+│   └── stages/
+│       ├── labour_mkt_decision/  # Branching (max)
+│       ├── work_cons/            # Worker EGM + FUES
+│       └── retire_cons/          # Retiree EGM
 ├── code/
-│   ├── retirement.py       # Model + EGM solver
-│   ├── benchmarks.py       # Timing sweep logic
-│   └── plots/
-│       ├── plots.py        # EGM grid and policy plots
-│       └── tables.py       # LaTeX + Markdown table generation
+│   ├── retirement.py           # Model class + Operator_Factory
+│   ├── solve_block.py          # Nest build + solve pipeline
+│   ├── benchmarks.py           # Timing sweeps
+│   └── helpers/
+│       ├── helpers.py          # Nest accessors, euler, deviation
+│       ├── plots.py            # EGM grid and policy plots
+│       └── tables.py           # LaTeX + Markdown tables
 ```
+
+See [API Reference](retirement-api.md) for detailed function signatures.
 
 ## Parameter files
 

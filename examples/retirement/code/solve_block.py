@@ -1,212 +1,398 @@
 """
-Backward Induction via Stage Accretion: retirement choice (branching)
+Backward induction for the retirement choice model
+(branching stage with discrete work/retire choice).
 
-Period structure (branching DAG):
-  labour_mkt_decision (branching, max)
-    |-- work   -> work_cons   (WorkerConsumption)  -> b
-    +-- retire -> retire_cons (RetireeConsumption)  -> b_ret
+Following the bellman-ddsl canonical pattern:
 
-Inter-period connector: {b: a, b_ret: a_ret}
-  - b     -> a     (worker output -> branching stage arrival)
-  - b_ret -> a_ret (retiree output -> retire_cons direct entry)
-
-Topological solve order (leaves first):
-  1. retire_cons  (leaf -- retiree consumption, EGM)
-  2. work_cons    (leaf -- worker consumption, EGM + UE)
-  3. labour_mkt_decision  (root -- branching max/logit)
-
-Stage solvers (primitives) are built by Operator_Factory in retirement.py.
-This module provides the backward_induction combinator that wires them.
+  Part A -- helpers for building a single period via the
+            dolo-plus pipeline (load -> methodize ->
+            configure -> calibrate).
+  Part B -- accretively build the nest and solve it backward,
+            one period at a time.  Period construction and
+            solving happen in the same loop (no separate
+            build-all-then-solve-all).
 """
 
 import numpy as np
 import time
+import yaml
 from pathlib import Path
+from dolo.compiler.model import SymbolicModel
+from dolo.compiler.calibration import calibrate as calibrate_stage
+from dolo.compiler.calibration import configure as configure_stage
+from dolo.compiler.methodization import methodize as methodize_stage
+from .retirement import Operator_Factory, RetirementModel
+from .retirement import (
+    _default_u, _default_du, _default_uc_inv, _default_ddu,
+)
 
-from .retirement import Operator_Factory, RetirementModel, euler
-
-# ---------------------------------------------------------------------------
-# Paths for YAML stage definitions (structural reference)
-# ---------------------------------------------------------------------------
-
-_EXAMPLE_ROOT = Path(__file__).resolve().parent.parent
-STAGES_PATH = _EXAMPLE_ROOT / "syntax" / "syntax" / "stages"
-MODEL_PATH = _EXAMPLE_ROOT / "syntax" / "syntax"
-
-# ---------------------------------------------------------------------------
-# YAML/dolo structural layer (requires dolo-plus compiler)
-# ---------------------------------------------------------------------------
-
-try:
-    import yaml
-    from dolo.compiler.model import SymbolicModel
-    from dolo.compiler.calibration import calibrate as calibrate_stage, configure as configure_stage
-    from dolo.compiler.methodization import methodize as methodize_stage
-    _HAS_DOLO = True
-except ImportError:
-    _HAS_DOLO = False
+# Inter-period twister (spec 0.1h S3.3): rename at period
+# boundary.  Maps current period's poststate names to next
+# period's prestate names.
+#
+# NOTE: this dict is stored on the nest as declarative
+# metadata.  The actual continuation wiring is performed
+# explicitly in the solve loop (step 3), not by a generic
+# twister-application function.
+INTER_PERIOD_TWISTER = {"b": "a", "b_ret": "a_ret"}
 
 
-def build_syntactic_stage(name: str):
-    """Load stage syntax from YAML file (requires dolo-plus)."""
-    if not _HAS_DOLO:
-        raise ImportError("dolo-plus compiler not available")
-    path = STAGES_PATH / name / f"{name}.yaml"
-    with open(path, 'r') as f:
-        return SymbolicModel(yaml.compose(f.read()), filename=str(path))
+# ============================================================
+# Part A -- Single-period construction helpers
+# ============================================================
 
+def _load_period_template(syntax_dir):
+    """Read *period.yaml* and return the stage list.
 
-def build_period(params: dict) -> dict:
-    """Build a period instance containing the three stages.
+    Parameters
+    ----------
+    syntax_dir : str or Path
+        Root syntax directory (contains ``period.yaml``).
 
-    Pipeline per stage: load YAML -> methodize -> configure -> calibrate.
-    Requires dolo-plus compiler.
+    Returns
+    -------
+    dict
+        ``{"name": <period name>, "stages": [<stage names>]}``.
     """
-    if not _HAS_DOLO:
-        raise ImportError("dolo-plus compiler not available")
+    with open(Path(syntax_dir) / "period.yaml") as f:
+        raw = yaml.safe_load(f)
+    stages = []
+    for entry in raw.get('stages', []):
+        if isinstance(entry, dict):
+            stages.extend(entry.keys())
+        else:
+            stages.append(str(entry))
+    return {"name": raw["name"], "stages": stages}
 
-    settings_path = str(MODEL_PATH / "settings.yaml")
 
-    # Worker Decision (branching stage)
-    wd_syntax = build_syntactic_stage("worker_decision")
-    wd_M = methodize_stage(wd_syntax, str(STAGES_PATH / "worker_decision" / "worker_decision_methods.yml"))
-    wd_cfg = configure_stage(wd_M, settings_path)
-    wd_calib = calibrate_stage(wd_cfg, params)
+def build_period(params, syntax_dir):
+    """Build one period via the dolo-plus pipeline.
 
-    # Worker Consumption (work branch)
-    wc_syntax = build_syntactic_stage("worker_consumption")
-    wc_M = methodize_stage(wc_syntax, str(STAGES_PATH / "worker_consumption" / "worker_consumption_methods.yml"))
-    wc_cfg = configure_stage(wc_M, settings_path)
-    wc_calib = calibrate_stage(wc_cfg, params)
+    For every stage declared in the period template
+    (including the branching root ``labour_mkt_decision``
+    and the two branch leaves ``work_cons``,
+    ``retire_cons``), applies the dolo-plus pipeline:
+    load YAML -> SymbolicModel -> methodize -> configure ->
+    calibrate.
 
-    # Retiree Consumption (retire branch)
-    rc_syntax = build_syntactic_stage("retiree_consumption")
-    rc_M = methodize_stage(rc_syntax, str(STAGES_PATH / "retiree_consumption" / "retiree_consumption_methods.yml"))
-    rc_cfg = configure_stage(rc_M, settings_path)
-    rc_calib = calibrate_stage(rc_cfg, params)
+    Parameters
+    ----------
+    params : dict
+        Calibration parameters (e.g. ``{r, beta, delta, ...}``).
+    syntax_dir : str or Path
+        Root syntax directory containing ``period.yaml``,
+        ``settings.yaml``, and ``stages/``.
 
+    Returns
+    -------
+    dict
+        ``{<stage_name>: <calibrated SymbolicModel>, ...}``.
+        One entry per stage in the period template.
+    """
+    syntax_dir = Path(syntax_dir)
+    stages_dir = syntax_dir / "stages"
+    settings_path = str(syntax_dir / "settings.yaml")
+    template = _load_period_template(syntax_dir)
+
+    period = {}
+    for name in template["stages"]:
+        path = stages_dir / name / f"{name}.yaml"
+        with open(path) as f:
+            s = SymbolicModel(
+                yaml.compose(f.read()), filename=str(path),
+            )
+        s = methodize_stage(
+            s,
+            str(stages_dir / name / f"{name}_methods.yml"),
+        )
+        s = configure_stage(s, settings_path)
+        s = calibrate_stage(s, params)
+        period[name] = s
+    return period
+
+
+def build_period_callables(period):
+    """Return equation callables for a calibrated period.
+
+    For the retirement model (log utility) the callables are
+    the module-level defaults.  A future whisperer would
+    compile these from the YAML equation strings instead.
+
+    NOTE: the *period* argument is currently unused -- the
+    callables are hard-coded defaults.  It is accepted so
+    the signature is ready for whisperer integration.
+
+    Parameters
+    ----------
+    period : dict
+        Calibrated period from :func:`build_period`
+        (unused; reserved for future whisperer).
+
+    Returns
+    -------
+    dict
+        ``{u, du, uc_inv, ddu}`` -- each an ``@njit``
+        callable.
+    """
     return {
-        "labour_mkt_decision": wd_calib,
-        "work_cons": wc_calib,
-        "retire_cons": rc_calib,
+        'u': _default_u, 'du': _default_du,
+        'uc_inv': _default_uc_inv, 'ddu': _default_ddu,
     }
 
 
-# ============================================================================
-# Backward induction combinator
-# ============================================================================
+# ============================================================
+# Part B -- Accretive nest build + solve
+# ============================================================
 
-def backward_induction(cp, movers, method='FUES'):
-    """Solve the retirement model by backward induction.
+def build_and_solve_nest(
+    T, params, syntax_dir, method='FUES',
+    cp=None, stage_ops=None,
+):
+    """Accretively build and solve the nest, one period at
+    a time.
 
-    Single loop in topological order: retiree leaf, worker leaf,
-    branching root.  Two explicit inter-period connectors carry
-    state between periods.
+    The period contains a branching stage
+    (``labour_mkt_decision``) that routes to two branch
+    leaves (``work_cons``, ``retire_cons``) via a discrete
+    max aggregator.
+
+    For each ``h = 0, 1, ..., T-1`` (distance from terminal,
+    where ``t = T-1-h`` is calendar time / age):
+
+    1. Build the period via the dolo-plus pipeline.
+    2. Compile equation callables and build stage operators
+       (only on the first call for stationary models).
+    3. Assemble continuation from the previous solution.
+       At ``h == 0`` the terminal condition is
+       consume-everything: ``v = u(a)``, ``c = a``.
+    4. Solve the period in reverse topological order
+       (leaves first):
+       ``retire_cons`` -> ``work_cons`` ->
+       ``labour_mkt_decision``.
+    5. Append the period and its solution to the nest.
+
+    The two continuation chains have different orderings
+    that match the stage operator signatures::
+
+        cntn_retire: (c, v, ddv)   -- retiree stage expects
+                                      consumption, value,
+                                      second-order marginal
+        cntn_work:   (dv, ddv, v)  -- worker stage expects
+                                      marginal value,
+                                      second-order marginal,
+                                      value
+
+    Parameters
+    ----------
+    T : int
+        Number of periods (horizon).
+    params : dict or list[dict]
+        Single dict for stationary models, or a list indexed
+        by ``h`` for lifecycle models.
+    syntax_dir : str or Path
+        Root syntax directory.
+    method : str
+        Upper-envelope method: ``FUES``, ``DCEGM``, ``RFC``,
+        or ``CONSAV``.
+    cp : RetirementModel, optional
+        Pre-built model instance (reused across periods for
+        stationary models).
+    stage_ops : dict, optional
+        Pre-built stage operators from
+        :func:`Operator_Factory`.
+
+    Returns
+    -------
+    nest : dict
+        ``{"periods": [...], "twisters": [...],
+        "solutions": [...]}``.
+        Each list has length *T*, indexed by *h*.
+        Each solution is a dict keyed by stage name
+        (``retire_cons``, ``work_cons``,
+        ``labour_mkt_decision``) with arrays for values,
+        policies, and diagnostics.
+    cp : RetirementModel
+        The model instance used for solving.
+    """
+    nest = {"periods": [], "twisters": [], "solutions": []}
+    is_schedule = isinstance(params, list)
+
+    for h in range(T):
+        t = T - 1 - h
+
+        # 1. Build period
+        p = params[h] if is_schedule else params
+        period = build_period(p, syntax_dir)
+        nest["periods"].append(period)
+        nest["twisters"].append(
+            None if h == 0 else INTER_PERIOD_TWISTER
+        )
+
+        # 2. Build stage operators
+        if cp is None or stage_ops is None:
+            callables = build_period_callables(period)
+            cp = RetirementModel.from_period(
+                period, equations=callables,
+            )
+            stage_ops = Operator_Factory(
+                cp, equations=callables,
+            )
+
+        # 3. Continuation
+        if h == 0:
+            # Terminal: consume everything, v = u(a)
+            a = cp.asset_grid_A
+            cntn_retire = (
+                np.copy(a),
+                cp.u(a),
+                cp.ddu(a) * cp.R,
+            )
+            cntn_work = (
+                cp.du(a),
+                cp.ddu(a) * cp.R,
+                cp.u(a),
+            )
+        else:
+            prev = nest["solutions"][h - 1]
+            prev_lmkt = prev["labour_mkt_decision"]
+            prev_ret = prev["retire_cons"]
+            cntn_work = (
+                prev_lmkt["dv"],
+                prev_lmkt["ddv"],
+                prev_lmkt["v"],
+            )
+            cntn_retire = (
+                prev_ret["c"],
+                prev_ret["v"],
+                prev_ret["ddv"],
+            )
+
+        # 4. Solve: reverse topological (leaves first)
+        t0 = time.time()
+
+        c_retire, v_retire, da_retire, ddv_retire = \
+            stage_ops['retire_cons'](*cntn_retire, t)
+
+        (v_work, c_work, da_work, ue_elapsed,
+         c_hat, q_hat, egrid, da_pre_ue) = \
+            stage_ops['work_cons'](
+                *cntn_work, method=method,
+            )
+
+        v_lmkt, c_lmkt, dv_lmkt, ddv_lmkt = \
+            stage_ops['labour_mkt_decision'](
+                v_work, v_retire,
+                c_work, c_retire,
+                da_work, da_retire,
+            )
+
+        solve_time = time.time() - t0
+
+        # 5. Store solution
+        nest["solutions"].append({
+            "t": t, "h": h,
+            "retire_cons": {
+                "c": c_retire, "v": v_retire,
+                "da": da_retire, "ddv": ddv_retire,
+            },
+            "work_cons": {
+                "v": v_work, "c": c_work, "da": da_work,
+                "c_hat": c_hat, "q_hat": q_hat,
+                "egrid": egrid, "da_pre_ue": da_pre_ue,
+            },
+            "labour_mkt_decision": {
+                "v": v_lmkt, "c": c_lmkt,
+                "dv": dv_lmkt, "ddv": ddv_lmkt,
+            },
+            "ue_time": ue_elapsed,
+            "solve_time": solve_time,
+        })
+
+    return nest, cp
+
+
+# ============================================================
+# Entry points
+# ============================================================
+
+def backward_induction(cp, stage_ops, syntax_dir,
+                       method='FUES'):
+    """Build and solve a nest from a pre-built model.
+
+    Extracts calibration from *cp*, accretively builds the
+    nest via the dolo-plus pipeline, and solves it using
+    the provided stage operators.
 
     Parameters
     ----------
     cp : RetirementModel
         Model instance with calibrated parameters and grids.
-    movers : dict
-        ``{'retiree': solver_retiree_stage, 'worker': solver_worker_stage,
-           'branch': lab_mkt_choice_stage}``
+    stage_ops : dict
+        Stage operators from :func:`Operator_Factory`
+        (keys: ``retire_cons``, ``work_cons``,
+        ``labour_mkt_decision``).
+    syntax_dir : str or Path
+        Root syntax directory.
     method : str
-        Upper-envelope method passed to the worker solver.
+        Upper-envelope method.
 
     Returns
     -------
-    tuple (7 elements)
-        worker_endog_grid, worker_unrefined_values,
-        worker_refined_values, worker_unrefined_consumption,
-        worker_refined_consumption, asset_pol_derivative_unrefined,
-        average_times
+    dict
+        The full nest dict with keys ``periods``,
+        ``twisters``, ``solutions``.
     """
-    T = cp.T
-    grid_size = cp.grid_size
-    asset_grid_A = cp.asset_grid_A
-
-    # Terminal conditions
-    initial_c = np.copy(asset_grid_A)
-    initial_v = cp.u(asset_grid_A)
-    initial_dlambda = cp.ddu(asset_grid_A) * cp.R
-    initial_lambda = cp.du(asset_grid_A)
-
-    # Diagnostic storage
-    worker_endog_grid = np.empty((T, grid_size))
-    worker_unrefined_values = np.empty((T, grid_size))
-    worker_refined_values = np.empty((T, grid_size))
-    worker_unrefined_consumption = np.empty((T, grid_size))
-    worker_refined_consumption = np.empty((T, grid_size))
-    asset_pol_derivative_unrefined = np.empty((T, grid_size))
-
-    UE_times = np.zeros(T)
-    all_times = np.zeros(T)
-
-    # Retiree chain connector: (c, v, dlambda)
-    ret_c_next = np.copy(initial_c)
-    ret_v_next = np.copy(initial_v)
-    ret_dlambda_next = np.copy(initial_dlambda)
-
-    # Mixed chain connector: (lambda, dlambda, v)
-    mix_lambda_next = np.copy(initial_lambda)
-    mix_dlambda_next = np.copy(initial_dlambda)
-    mix_v_next = np.copy(initial_v)
-
-    for i in range(T):
-        t = T - 1 - i
-
-        time_start = time.time()
-
-        # Stage 1: retiree leaf
-        c_ret, v_ret, da_ret, dlambda_ret = movers['retiree'](
-            ret_c_next, ret_v_next, ret_dlambda_next, t)
-
-        # Stage 2: worker leaf
-        v_work, c_work, da_work, ue_time, \
-            cons_hat, q_hat, egrid, da_unref = movers['worker'](
-                mix_lambda_next, mix_dlambda_next, mix_v_next, method=method)
-
-        # Stage 3: branching root
-        v_mix, c_mix, lambda_mix, dlambda_mix = movers['branch'](
-            v_work, v_ret, c_work, c_ret, da_work, da_ret)
-
-        time_total = time.time() - time_start
-
-        # Store diagnostics
-        worker_endog_grid[t, :] = egrid
-        worker_unrefined_values[t, :] = q_hat
-        worker_refined_values[t, :] = v_work
-        worker_unrefined_consumption[t, :] = cons_hat
-        worker_refined_consumption[t, :] = c_mix
-        asset_pol_derivative_unrefined[t, :] = da_unref
-
-        if i > 2:
-            UE_times[t] = ue_time
-            all_times[t] = time_total
-
-        # Update connectors
-        ret_c_next, ret_v_next, ret_dlambda_next = c_ret, v_ret, dlambda_ret
-        mix_lambda_next, mix_dlambda_next, mix_v_next = lambda_mix, dlambda_mix, v_mix
-
-    mask = UE_times > 0
-    average_times = [
-        np.mean(UE_times[mask]) if np.any(mask) else 0.0,
-        np.mean(all_times[mask]) if np.any(mask) else 0.0,
-    ]
-
-    return (worker_endog_grid, worker_unrefined_values, worker_refined_values,
-            worker_unrefined_consumption, worker_refined_consumption,
-            asset_pol_derivative_unrefined, average_times)
+    params = {
+        'r': cp.r, 'beta': cp.beta, 'delta': cp.delta,
+        'smooth_sigma': cp.smooth_sigma,
+        'y': cp.y, 'b': cp.b,
+        'grid_max_A': cp.grid_max_A,
+        'grid_size': cp.grid_size, 'T': cp.T,
+    }
+    nest, _ = build_and_solve_nest(
+        cp.T, params, syntax_dir,
+        method=method, cp=cp, stage_ops=stage_ops,
+    )
+    return nest
 
 
-# ============================================================================
-# Convenience: build movers + solve in one call
-# ============================================================================
+def solve_canonical(syntax_dir, params_override=None,
+                    method='FUES'):
+    """Canonical pipeline: load YAML, build nest, solve.
 
-def solve(cp, method='FUES'):
-    """Build stage solvers and run backward induction.
+    Reads ``calibration.yaml``, ``settings.yaml``, and
+    ``period.yaml`` from *syntax_dir*, merges any parameter
+    overrides, then accretively builds and solves the nest
+    via the dolo-plus pipeline.
 
-    Composition is explicit:  Operator_Factory -> movers -> backward_induction.
+    Parameters
+    ----------
+    syntax_dir : str or Path
+        Root syntax directory containing ``calibration.yaml``,
+        ``settings.yaml``, ``period.yaml``, and ``stages/``.
+    params_override : dict, optional
+        Override calibration values (e.g.
+        ``{"grid_size": 3000, "delta": 2}``).
+    method : str
+        Upper-envelope method.
+
+    Returns
+    -------
+    nest : dict
+        The solved nest.
+    cp : RetirementModel
+        The model instance used for solving.
     """
-    movers = Operator_Factory(cp)
-    return backward_induction(cp, movers, method)
+    syntax_dir = Path(syntax_dir)
+    with open(syntax_dir / "calibration.yaml") as f:
+        base_params = yaml.safe_load(f)['calibration']
+    if params_override:
+        base_params.update(params_override)
+
+    with open(syntax_dir / "settings.yaml") as f:
+        settings = yaml.safe_load(f)['settings']
+
+    T = base_params.get('T', settings.get('T', 20))
+    return build_and_solve_nest(
+        T, base_params, syntax_dir, method=method,
+    )

@@ -9,17 +9,24 @@ Includes a general-purpose upper envelope class for one-dimensional discrete-con
 ## Installation
 
 ```bash
-git clone https://github.com/akshayshanker/FUES.git
+git clone -b release-prep https://github.com/akshayshanker/FUES.git
 cd FUES
-pip install -e ".[examples]"
+bash setup/setup_venv.sh
+source .venv/bin/activate
 ```
 
-Or on NCI Gadi (creates a venv on scratch):
-```bash
-bash scripts/setup_venv.sh
-```
+This creates a local `.venv`, installs `dcsmm` in editable mode with all dependencies (numba, HARK, consav, dolo-plus), and verifies the install. On NCI Gadi it auto-detects and uses `/scratch/tp66/$USER/venvs/dcsmm` instead.
 
 Requires Python 3.11+.
+
+## Quick test
+
+```bash
+source .venv/bin/activate
+python -m examples.retirement.code.benchmarks
+```
+
+This runs the retirement model benchmark (FUES vs DCEGM vs RFC vs CONSAV) and prints Euler errors + timing.
 
 ## Quick Start
 

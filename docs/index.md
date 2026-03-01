@@ -14,7 +14,7 @@ Existing methods for computing the upper envelope either require monotonicity of
 
 FUES exploits a geometric property of the EGM output: when the endogenous grid points and their associated values are sorted in ascending order, **sub-optimal points create concave right turns** in the value correspondence, while **optimal points create convex left turns**.
 
-<div id="fues-interactive" class="diagram-container"></div>
+<!-- Interactive FUES scan animation (temporarily disabled) -->
 
 The algorithm scans the sorted endogenous grid in a single pass:
 

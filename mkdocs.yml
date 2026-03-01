@@ -89,4 +89,5 @@ nav:
     - Helpers: api/helpers.md
   - Examples:
     - Retirement Choice Model: examples/retirement.md
+    - Retirement API Reference: examples/retirement-api.md
   - Changelog: changelog.md

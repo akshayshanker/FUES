@@ -18,12 +18,17 @@ if _SRC_ROOT not in sys.path:
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
-from .retirement import Operator_Factory, RetirementModel, euler, consumption_deviation
+from pathlib import Path
+from .retirement import Operator_Factory, RetirementModel
 from .solve_block import backward_induction
-from .plots import (
+from .helpers import (
     generate_timing_table_combined, generate_accuracy_table,
     plot_egrids, plot_cons_pol, plot_dcegm_cf,
+    get_policy, get_timing, get_solution_at_age,
+    euler, consumption_deviation,
 )
+
+SYNTAX_DIR = Path(__file__).resolve().parent.parent / "syntax" / "syntax"
 
 
 def test_Timings(grid_sizes, delta_values, n=3, results_dir="results", m_bar=1.2,
@@ -48,6 +53,8 @@ def test_Timings(grid_sizes, delta_values, n=3, results_dir="results", m_bar=1.2
         Method used for computing "true" reference solution. Default is 'DCEGM'.
         Options: 'RFC', 'FUES', 'DCEGM', 'CONSAV'.
     """
+    syntax_dir = SYNTAX_DIR
+
     # Fixed parameters for the benchmark sweep
     benchmark_params = {
         'r': 0.02,
@@ -86,9 +93,10 @@ def test_Timings(grid_sizes, delta_values, n=3, results_dir="results", m_bar=1.2
         )
         movers_true = Operator_Factory(cp_true)
         # Warm-up run
-        _ = backward_induction(cp_true, movers_true, method=true_method)
+        backward_induction(cp_true, movers_true, syntax_dir, method=true_method)
         # Actual run
-        _, _, _, _, c_true, _, _ = backward_induction(cp_true, movers_true, method=true_method)
+        nest_true = backward_induction(cp_true, movers_true, syntax_dir, method=true_method)
+        c_true = get_policy(nest_true, 'c')
         true_solutions[delta] = {
             'c_true': c_true,
             'a_grid': cp_true.asset_grid_A
@@ -138,30 +146,38 @@ def test_Timings(grid_sizes, delta_values, n=3, results_dir="results", m_bar=1.2
 
             for _ in range(n):
                 # Test RFC
-                _, _, _, _, c_refined_RFC, _, iter_time_age = backward_induction(cp, movers, method='RFC')
-                time_end_RFC = np.mean(iter_time_age[0])
-                total_time_RFC = iter_time_age[1]
+                nest_RFC = backward_induction(cp, movers, syntax_dir, method='RFC')
+                c_refined_RFC = get_policy(nest_RFC, 'c')
+                timing_RFC = get_timing(nest_RFC)
+                time_end_RFC = timing_RFC[0]
+                total_time_RFC = timing_RFC[1]
                 Euler_error_RFC = euler(cp, c_refined_RFC)
                 cons_dev_RFC = consumption_deviation(cp, c_refined_RFC, c_true, a_grid_true)
 
                 # Test FUES
-                _, _, _, _, c_refined_FUES, _, iter_time_age = backward_induction(cp, movers, method='FUES')
-                time_end_FUES = np.mean(iter_time_age[0])
-                total_time_FUES = iter_time_age[1]
+                nest_FUES = backward_induction(cp, movers, syntax_dir, method='FUES')
+                c_refined_FUES = get_policy(nest_FUES, 'c')
+                timing_FUES = get_timing(nest_FUES)
+                time_end_FUES = timing_FUES[0]
+                total_time_FUES = timing_FUES[1]
                 Euler_error_FUES = euler(cp, c_refined_FUES)
                 cons_dev_FUES = consumption_deviation(cp, c_refined_FUES, c_true, a_grid_true)
 
                 # Test DCEGM
-                _, _, _, _, c_refined_DCEGM, _, iter_time_age = backward_induction(cp, movers, method='DCEGM')
-                time_end_DCEGM = np.mean(iter_time_age[0])
-                total_time_DCEGM = iter_time_age[1]
+                nest_DCEGM = backward_induction(cp, movers, syntax_dir, method='DCEGM')
+                c_refined_DCEGM = get_policy(nest_DCEGM, 'c')
+                timing_DCEGM = get_timing(nest_DCEGM)
+                time_end_DCEGM = timing_DCEGM[0]
+                total_time_DCEGM = timing_DCEGM[1]
                 Euler_error_DCEGM = euler(cp, c_refined_DCEGM)
                 cons_dev_DCEGM = consumption_deviation(cp, c_refined_DCEGM, c_true, a_grid_true)
 
                 # Test CONSAV
-                _, _, _, _, c_refined_CONSAV, _, iter_time_age = backward_induction(cp, movers, method='CONSAV')
-                time_end_CONSAV = np.mean(iter_time_age[0])
-                total_time_CONSAV = iter_time_age[1]
+                nest_CONSAV = backward_induction(cp, movers, syntax_dir, method='CONSAV')
+                c_refined_CONSAV = get_policy(nest_CONSAV, 'c')
+                timing_CONSAV = get_timing(nest_CONSAV)
+                time_end_CONSAV = timing_CONSAV[0]
+                total_time_CONSAV = timing_CONSAV[1]
                 Euler_error_CONSAV = euler(cp, c_refined_CONSAV)
                 cons_dev_CONSAV = consumption_deviation(cp, c_refined_CONSAV, c_true, a_grid_true)
 
@@ -246,42 +262,43 @@ if __name__ == "__main__":
         grid_size=3000, T=20, smooth_sigma=0
     )
 
-    movers = Operator_Factory(cp)
+    syntax_dir = SYNTAX_DIR
+    stage_ops = Operator_Factory(cp)
 
     # Precompile and run
-    _ = backward_induction(cp, movers, method='RFC')
-    e_grid_worker_unref, vf_work_unref, vf_refined, c_worker_unref, \
-        c_refined_RFC, dela_unrefined, time_end_RFC = backward_induction(cp, movers, method='RFC')
+    backward_induction(cp, stage_ops, syntax_dir, method='RFC')
 
-    _ = backward_induction(cp, movers, method='FUES')
-    _, _, _, _, c_refined_FUES, _, time_end_FUES = backward_induction(cp, movers, method='FUES')
-
-    _ = backward_induction(cp, movers, method='DCEGM')
-    _, _, _, _, c_refined_DCEGM, _, time_end_DCEGM = backward_induction(cp, movers, method='DCEGM')
-
-    _ = backward_induction(cp, movers, method='CONSAV')
-    _, _, _, _, c_refined_CONSAV, _, time_end_CONSAV = backward_induction(cp, movers, method='CONSAV')
-
-    Euler_error_RFC = euler(cp, c_refined_RFC)
-    Euler_error_FUES = euler(cp, c_refined_FUES)
-    Euler_error_DCEGM = euler(cp, c_refined_DCEGM)
-    Euler_error_CONSAV = euler(cp, c_refined_CONSAV)
+    results = {}
+    for method in ['RFC', 'FUES', 'DCEGM', 'CONSAV']:
+        nest = backward_induction(cp, stage_ops, syntax_dir, method=method)
+        results[method] = {
+            'nest': nest,
+            'c': get_policy(nest, 'c'),
+            'timing': get_timing(nest),
+            'euler': euler(cp, get_policy(nest, 'c')),
+        }
 
     print()
     print("| Method | Euler Error    | Avg UE time(ms) | Total time(ms) |")
     print("|--------|----------------|-----------------|----------------|")
-    print(f"| RFC    | {Euler_error_RFC:<14.6f} | {time_end_RFC[0]*1000:<15.3f} | {time_end_RFC[1]*1000:<14.3f} |")
-    print(f"| FUES   | {Euler_error_FUES:<14.6f} | {time_end_FUES[0]*1000:<15.3f} | {time_end_FUES[1]*1000:<14.3f} |")
-    print(f"| DCEGM  | {Euler_error_DCEGM:<14.6f} | {time_end_DCEGM[0]*1000:<15.3f} | {time_end_DCEGM[1]*1000:<14.3f} |")
-    print(f"| CONSAV | {Euler_error_CONSAV:<14.6f} | {time_end_CONSAV[0]*1000:<15.3f} | {time_end_CONSAV[1]*1000:<14.3f} |")
+    for method in ['RFC', 'FUES', 'DCEGM', 'CONSAV']:
+        r = results[method]
+        print(f"| {method:<6} | {r['euler']:<14.6f} | {r['timing'][0]*1000:<15.3f} | {r['timing'][1]*1000:<14.3f} |")
     print()
 
-    # Generate plots
-    plot_egrids(egrid_plot_age, e_grid_worker_unref, vf_work_unref, c_worker_unref,
-                dela_unrefined, g_size_baseline, cp, save_path, tag='sigma0')
+    # Generate plots — read arrays from nest solutions
+    nest_rfc = results['RFC']['nest']
+    sol_age = get_solution_at_age(nest_rfc, egrid_plot_age)
+    e_grid = get_policy(nest_rfc, 'egrid', stage='work_cons')
+    vf_work = get_policy(nest_rfc, 'q_hat', stage='work_cons')
+    c_worker = get_policy(nest_rfc, 'c_hat', stage='work_cons')
+    dela = get_policy(nest_rfc, 'da_pre_ue', stage='work_cons')
 
-    plot_cons_pol(c_refined_FUES, cp, save_path)
+    plot_egrids(egrid_plot_age, e_grid, vf_work, c_worker,
+                dela, g_size_baseline, cp, save_path, tag='sigma0')
 
-    plot_dcegm_cf(egrid_plot_age, g_size_baseline, e_grid_worker_unref, vf_work_unref,
-                  c_worker_unref, dela_unrefined, cp.asset_grid_A, cp, save_path,
+    plot_cons_pol(results['FUES']['c'], cp, save_path)
+
+    plot_dcegm_cf(egrid_plot_age, g_size_baseline, e_grid, vf_work,
+                  c_worker, dela, cp.asset_grid_A, cp, save_path,
                   tag='sigma0', plot=True)
