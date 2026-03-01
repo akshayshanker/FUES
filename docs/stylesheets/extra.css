@@ -1,0 +1,75 @@
+/* Nord-inspired palette matching akshayshanker.net */
+
+:root {
+  /* Nord Frost */
+  --md-primary-fg-color: #5e81ac;
+  --md-primary-fg-color--light: #88c0d0;
+  --md-primary-fg-color--dark: #4c6c91;
+  --md-accent-fg-color: #88c0d0;
+
+  /* Nord Snow Storm for backgrounds */
+  --md-default-bg-color: #ffffff;
+  --md-default-fg-color: #2e3440;
+
+  /* Links */
+  --md-typeset-a-color: #5e81ac;
+}
+
+/* Dark mode: Nord Polar Night */
+[data-md-color-scheme="slate"] {
+  --md-primary-fg-color: #5e81ac;
+  --md-primary-fg-color--light: #88c0d0;
+  --md-primary-fg-color--dark: #4c6c91;
+  --md-accent-fg-color: #88c0d0;
+  --md-default-bg-color: #2e3440;
+  --md-default-fg-color: #d8dee9;
+  --md-typeset-a-color: #88c0d0;
+}
+
+/* Code blocks: Nord dark */
+.md-typeset code {
+  background-color: #eceff4;
+  color: #2e3440;
+}
+
+[data-md-color-scheme="slate"] .md-typeset code {
+  background-color: #3b4252;
+  color: #d8dee9;
+}
+
+/* Admonition accent */
+.md-typeset .admonition.note,
+.md-typeset details.note {
+  border-color: #5e81ac;
+}
+
+.md-typeset .note > .admonition-title,
+.md-typeset .note > summary {
+  background-color: rgba(94, 129, 172, 0.1);
+}
+
+/* Hero section on landing page */
+.md-typeset .hero {
+  margin: 2rem 0;
+  padding: 2rem 0;
+}
+
+.md-typeset .hero h1 {
+  font-weight: 700;
+  color: #2e3440;
+}
+
+[data-md-color-scheme="slate"] .md-typeset .hero h1 {
+  color: #eceff4;
+}
+
+/* SVG diagrams */
+.md-typeset .diagram-container {
+  text-align: center;
+  margin: 2rem 0;
+}
+
+.md-typeset .diagram-container svg {
+  max-width: 100%;
+  height: auto;
+}

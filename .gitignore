@@ -55,6 +55,8 @@ examples/*/images/
 # But allow documentation images if needed
 !docs/images/*.png
 !docs/images/*.jpg
+!docs/images/*.svg
+!docs/images/**/*.svg
 
 # Work-in-progress files
 *_wip.py
