@@ -1,5 +1,8 @@
 # FUES: Fast Upper-Envelope Scan
 
+!!! warning "Under development — do not cite"
+    This documentation and codebase are under active development. Please do not cite until a stable release is published.
+
 **A general method for computing the upper envelope of EGM value correspondences in discrete-continuous dynamic programming.**
 
 Dobrescu and Shanker (2025), "A fast upper envelope scan method for discrete-continuous dynamic programming."
