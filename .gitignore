@@ -79,3 +79,4 @@ dynx_repo/
 # MkDocs build output
 site/
 .DS_Store
+fues-claude.sh
