@@ -71,6 +71,10 @@ temp/
 archive/
 
 # Documentation drafts
+docs/paper/
 docs/*.tex
 docs/*_draft.*
 dynx_repo/
+
+# MkDocs build output
+site/
