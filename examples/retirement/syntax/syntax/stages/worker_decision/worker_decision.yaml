@@ -1,0 +1,51 @@
+name: WorkerDecision
+kind: branching
+branch_control: agent
+
+symbols:
+  spaces:
+    Xa: "@def R+"
+
+  prestate:
+    a: "@in Xa"
+
+  states:
+    a: "@in Xa"           # assets (pass-through)
+
+  poststates:
+    work:
+      a: "@in Xa"         # pass assets to work consumption
+    retire:
+      a_ret: "@in Xa"     # pass assets to retire consumption (distinct namespace)
+
+  controls:
+    d: "@in {work, retire}"
+
+  exogenous: {}
+
+  values:
+    V[<]: "@in [-inf, inf)"
+    V: "@in [-inf, inf)"
+    V_cntn:
+      work: "@in [-inf, inf)"       # Q^work(a) from worker consumption stage
+      retire: "@in [-inf, inf)"     # Q^retire(a) from retiree consumption stage
+
+  parameters: [delta]
+
+equations:
+  arvl_to_dcsn_transition: |
+    a = a[<]
+
+  dcsn_to_cntn_transition:
+    work: |
+      a[>] = a
+    retire: |
+      a_ret[>] = a
+
+  cntn_to_dcsn_mover:
+    Bellman: |
+      V = max_{d}(V_cntn[>][work] - delta, V_cntn[>][retire])
+
+  dcsn_to_arvl_mover:
+    Bellman: |
+      V[<] = V

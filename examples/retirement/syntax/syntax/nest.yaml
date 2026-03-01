@@ -1,0 +1,14 @@
+name: RetirementLifecycle
+
+periods:
+  - lifecycle_period: !period    # index 0
+  - lifecycle_period: !period    # index 1
+  # ... (repeat for T periods)
+  - terminal: !period            # index T
+
+# Inter-period connectors (renaming dicts).
+# b -> a (worker -> branching stage), b_ret -> a_ret (retiree -> retire_cons).
+inter_connectors:
+  - {b: a, b_ret: a_ret}
+  - {b: a, b_ret: a_ret}
+  # ... (one per period boundary)

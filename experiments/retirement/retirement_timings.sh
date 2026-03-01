@@ -63,9 +63,9 @@ if [[ -n "${PBS_JOBFS:-}" ]]; then
     module purge
     module load python3/3.12.1
 
-    # Use public venv on scratch (override with VENV_PUBLIC if needed)
-    VENV_PUBLIC="${VENV_PUBLIC:-/scratch/tp66/${USER}/venvs/fues_public}"
-    source "${VENV_PUBLIC}/bin/activate"
+    # Activate dcsmm venv on scratch
+    DCSMM_VENV="${DCSMM_VENV:-/scratch/tp66/${USER}/venvs/dcsmm}"
+    source "${DCSMM_VENV}/bin/activate"
 
     # Keep Numba cache on scratch (PBS jobfs is usually too small)
     export NUMBA_CACHE_DIR="${NUMBA_CACHE_DIR:-/scratch/tp66/${USER}/numba_cache}"
@@ -101,7 +101,7 @@ else
     REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 fi
 
-SCRIPT_DIR="${REPO_ROOT}/experiments/retirement"
+EXAMPLE_DIR="${REPO_ROOT}/examples/retirement"
 
 if [[ -z "$OUTPUT_DIR" ]]; then
     if [[ -d "${SCRATCH_ROOT}" ]]; then
@@ -114,7 +114,7 @@ fi
 # Ensure outputs directory exists
 mkdir -p "${OUTPUT_DIR}"
 
-# Make repo + src importable (fixes `import dc_smm` without pip install)
+# Make repo + src importable (fixes `import dcsmm` without pip install)
 export PYTHONPATH="${REPO_ROOT}:${REPO_ROOT}/src${PYTHONPATH:+:${PYTHONPATH}}"
 
 # ======================================================================
@@ -140,7 +140,7 @@ echo "========================================================"
 cd "$REPO_ROOT"
 
 # Build command
-CMD="python3 $SCRIPT_DIR/run_experiment.py"
+CMD="python3 $EXAMPLE_DIR/run_experiment.py"
 CMD="$CMD --params $PARAMS_FILE"
 CMD="$CMD --grid-size $GRID_SIZE"
 CMD="$CMD --plot-age $PLOT_AGE"

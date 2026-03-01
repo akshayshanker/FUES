@@ -10,9 +10,9 @@
 #
 # Single-core retirement model runner (NO sweep) that saves ALL outputs to scratch.
 #
-# - Runs `experiments/retirement/run_experiment.py` (baseline solve + plots)
-# - Uses the public venv (defaults to /scratch/tp66/$USER/venvs/fues_public)
-# - Fixes `ModuleNotFoundError: dc_smm` by ensuring repo + src are on PYTHONPATH
+# - Runs `examples/retirement/run_experiment.py` (baseline solve + plots)
+# - Uses the dcsmm venv (defaults to /scratch/tp66/$USER/venvs/dcsmm)
+# - Ensures repo + src are on PYTHONPATH for `dcsmm` imports
 #
 # Usage:
 #   qsub experiments/retirement/run_retirement_single_core.sh
@@ -22,7 +22,7 @@
 #   GRID_SIZE=3000
 #   PLOT_AGE=17
 #   OUTPUT_BASE="/scratch/tp66/$USER/FUES/solutions/retirement"
-#   VENV_PUBLIC="/scratch/tp66/$USER/venvs/fues_public"
+#   DCSMM_VENV="/scratch/tp66/$USER/venvs/dcsmm"
 #
 
 set -euo pipefail
@@ -31,7 +31,7 @@ set -euo pipefail
 # Resolve repo root - FUES project is at fixed location
 # -----------------------------------------------------------------------------
 REPO_ROOT="/home/141/as3442/dev/fues.dev/FUES"
-SCRIPT_DIR="${REPO_ROOT}/experiments/retirement"
+EXAMPLE_DIR="${REPO_ROOT}/examples/retirement"
 
 echo "REPO_ROOT: ${REPO_ROOT}"
 
@@ -68,15 +68,15 @@ echo "========================================================" | tee -a "${LOG_
 # -----------------------------------------------------------------------------
 module load python3/3.12.1
 
-VENV_PUBLIC="${VENV_PUBLIC:-/scratch/tp66/${USER}/venvs/fues_public}"
-if [[ ! -f "${VENV_PUBLIC}/bin/activate" ]]; then
+DCSMM_VENV="${DCSMM_VENV:-/scratch/tp66/${USER}/venvs/dcsmm}"
+if [[ ! -f "${DCSMM_VENV}/bin/activate" ]]; then
   {
-    echo "ERROR: Public venv not found at: ${VENV_PUBLIC}"
-    echo "Set VENV_PUBLIC to the correct path, or create it on scratch."
+    echo "ERROR: dcsmm venv not found at: ${DCSMM_VENV}"
+    echo "Run: bash scripts/setup_venv.sh"
   } | tee -a "${LOG_FILE}" >&2
   exit 1
 fi
-source "${VENV_PUBLIC}/bin/activate"
+source "${DCSMM_VENV}/bin/activate"
 
 # Numba cache on PBS_JOBFS (fast local SSD, fresh each job)
 export NUMBA_CACHE_DIR=$PBS_JOBFS
@@ -90,7 +90,7 @@ export MPLBACKEND=Agg
 export MPLCONFIGDIR="${MPLCONFIGDIR:-/scratch/tp66/${USER}/mplconfig}"
 mkdir -p "${MPLCONFIGDIR}"
 
-# Make repo + src importable (fixes `import dc_smm` without pip install)
+# Make repo + src importable (fixes `import dcsmm` without pip install)
 export PYTHONPATH="${REPO_ROOT}:${REPO_ROOT}/src${PYTHONPATH:+:${PYTHONPATH}}"
 
 cd "${REPO_ROOT}"
@@ -101,13 +101,13 @@ cd "${REPO_ROOT}"
   which python3
   python3 -c "import sys; print('python:', sys.executable); print('sys.path[0]:', sys.path[0])"
   echo ""
-  echo "--- Import check (dc_smm + plotting deps) ---"
-  python3 -c "import dc_smm; import dc_smm.models.retirement.retirement as r; import HARK; print('dc_smm:', dc_smm.__file__)"
+  echo "--- Import check (dcsmm + plotting deps) ---"
+  python3 -c "import dcsmm; from dcsmm.fues import FUES; import HARK; print('dcsmm:', dcsmm.__file__)"
   echo ""
   echo "--- Running retirement baseline + plots ---"
 } | tee -a "${LOG_FILE}"
 
-python3 "${SCRIPT_DIR}/run_experiment.py" \
+python3 "${EXAMPLE_DIR}/run_experiment.py" \
   --params "${PARAMS_FILE}" \
   --grid-size "${GRID_SIZE}" \
   --plot-age "${PLOT_AGE}" \
@@ -120,4 +120,3 @@ echo "========================================================" | tee -a "${LOG_
 echo "Done." | tee -a "${LOG_FILE}"
 echo "Outputs (plots/tables) saved to: ${OUTPUT_DIR}" | tee -a "${LOG_FILE}"
 echo "========================================================" | tee -a "${LOG_FILE}"
-

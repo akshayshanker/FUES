@@ -1,0 +1,51 @@
+name: WorkerConsumption
+
+symbols:
+  spaces:
+    Xa: "@def R+"
+
+  prestate:
+    a: "@in Xa"           # assets (from branching stage)
+
+  states:
+    w: "@in Xa"           # cash-on-hand = (1+r)*a + y
+
+  poststates:
+    b: "@in Xa"           # end-of-period assets
+
+  controls:
+    c: "@in R+"
+
+  exogenous: {}
+
+  values:
+    V[>]: "@in [-inf, inf)"
+    V[<]: "@in [-inf, inf)"
+    V: "@in [-inf, inf)"
+
+  values_marginal:
+    dV[>]: "@in R+"
+    dV: "@in R+"
+
+equations:
+  arvl_to_dcsn_transition: |
+    w = (1 + r) * a + y
+
+  dcsn_to_cntn_transition: |
+    b = w - c
+
+  cntn_to_dcsn_mover:
+    Bellman: |
+      V = max_c{log(c) + beta * V[>]}
+    InvEuler: |
+      c[>] = (beta * dV[>])^(-1)
+    cntn_to_dcsn_transition: |
+      w[>] = b + c[>]
+    MarginalBellman: |
+      dV = 1/c
+
+  dcsn_to_arvl_mover:
+    Bellman: |
+      V[<] = V
+    MarginalBellman: |
+      dV[<] = dV

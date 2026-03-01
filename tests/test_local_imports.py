@@ -16,16 +16,16 @@ if src_dir not in sys.path:
     sys.path.insert(0, src_dir)
 
 # Try importing from uenvelope
-from dc_smm.uenvelope import register, get_engine, available, EGM_UE
+from dcsmm.uenvelope import register, get_engine, available, EGM_UE
 
 # Try importing from fues
-from dc_smm.fues import FUES, FUES_v0dev, dcegm, rfc, interp_as, upper_envelope
+from dcsmm.fues import FUES, FUES_v0dev, dcegm, rfc, interp_as
 
 # Specific sub-module imports for fues
-from dc_smm.fues.helpers import interp_as as fues_interp_as
-from dc_smm.fues.fues_v0dev import FUES as FuesFUES
-from dc_smm.fues.dcegm import dcegm as FuesDCEGM
-from dc_smm.fues.rfc_simple import rfc as FuesRFC
+from dcsmm.fues.helpers import interp_as as fues_interp_as
+from dcsmm.fues.fues_v0dev import FUES as FuesFUES
+from dcsmm.fues.dcegm import dcegm as FuesDCEGM
+from dcsmm.fues.rfc_simple import rfc as FuesRFC
 
 
 class TestLocalImports(unittest.TestCase):
@@ -39,7 +39,7 @@ class TestLocalImports(unittest.TestCase):
         self.assertTrue(callable(FuesDCEGM))
         self.assertTrue(callable(FuesRFC))
         self.assertTrue(callable(FUES_v0dev))
-        self.assertTrue(callable(upper_envelope))
+        self.assertTrue(callable(interp_as))
 
         print("All imports in TestLocalImports successful!")
 
@@ -53,7 +53,7 @@ def test_imports(): # Keep this function for now if other parts of the codebase 
     assert callable(FuesDCEGM)
     assert callable(FuesRFC)
     assert callable(FUES_v0dev)
-    assert callable(upper_envelope)
+    assert callable(interp_as)
     print("test_imports() successful!")
 
 if __name__ == "__main__":

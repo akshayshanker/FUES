@@ -9,51 +9,68 @@ Includes a general-purpose upper envelope class for one-dimensional discrete-con
 ## Installation
 
 ```bash
-# Create and activate virtual environment
-python3 -m venv venv
-source venv/bin/activate  # Linux/macOS
-
-# Install from GitHub
-pip install "git+https://github.com/akshayshanker/FUES.git"
-
-# Or clone and install locally
 git clone https://github.com/akshayshanker/FUES.git
 cd FUES
-pip install .
+pip install -e ".[examples]"
 ```
 
-Requires Python 3.11+. For MPI builds (e.g., mpi4py) install with an OpenMPI toolchain loaded (e.g., `openmpi/4.1.5` on Gadi) so `mpi.h` is available.
+Or on NCI Gadi (creates a venv on scratch):
+```bash
+bash scripts/setup_venv.sh
+```
+
+Requires Python 3.11+.
+
+## Quick Start
+
+```python
+from dcsmm.fues import FUES                    # Main algorithm
+from dcsmm.uenvelope import EGM_UE             # Unified UE entry point
+from dcsmm.fues.helpers.math_funcs import interp_as  # 1D interpolation
+```
 
 ## Core Modules
 
-- **FUES Algorithm**: Fast Upper-Envelope Scan implementation
-- **Upper Envelope Comparison**: Benchmarking framework for DCEGM upper envelope algorithms
+- **FUES Algorithm** (`src/dcsmm/fues/`): Fast Upper-Envelope Scan implementation
+- **UE Registry** (`src/dcsmm/uenvelope/`): Unified entry point comparing FUES, DCEGM, RFC, CONSAV
 - **Example Models**:
-  - Continuous durables model
   - Retirement choice model (Ishkakov et al. 2017)
+  - Continuous durables model
   - Housing-renting model with time-inconsistent preferences
 
 ## External Packages
 
-- **[ConSav](https://github.com/NumEconCopenhagen/ConsumptionSaving)**: G2EGM implementation
-- **[HARK](https://github.com/econ-ark/HARK)**: DCEGM implementation
+- **[ConSav](https://github.com/NumEconCopenhagen/ConsumptionSaving)**: G2EGM upper envelope (used via `consav.upperenvelope`)
+- **[HARK](https://github.com/econ-ark/HARK)**: DCEGM implementation (installed as `econ-ark`)
 
 ## Directory Structure
 
 ```
-├── src/dc_smm/           # Main source code
-│   ├── fues/             # FUES algorithm
-│   ├── uenvelope/        # Upper envelope comparison framework
-│   └── models/           # Model-specific solvers
-├── examples/             # Example implementations
-│   ├── durables/
-│   ├── housing_renting/
-│   └── retirement/       # Plotting, tables, benchmarks
-├── experiments/          # Experiment runners and configs
-│   ├── housing_renting/  # PBS scripts, job configs
-│   └── retirement/       # CLI runner, YAML params
-├── scripts/              # Utility scripts
-│   └── int/              # Interactive session scripts
-├── logs/                 # HPC job logs
+FUES/
+├── src/dcsmm/            # Installable package
+│   ├── fues/             # FUES algorithm + variants
+│   └── uenvelope/        # UE engine registry
+├── examples/             # Self-contained examples
+│   └── retirement/       # Code, params, plots, tables, run_experiment.py
+├── experiments/          # PBS/HPC scripts
+├── scripts/              # Developer utilities (setup_venv.sh, etc.)
 └── tests/
 ```
+
+## Notes
+
+### ConSav loading
+
+`consav` requires `EconModel` at import time (`consav/__init__.py` imports
+`ModelClass`), but we only use `consav.upperenvelope` which has no such
+dependency. To avoid requiring `EconModel` as a dependency, we load the
+submodule directly:
+
+```python
+import importlib
+_consav_ue = importlib.import_module("consav.upperenvelope")
+```
+
+This bypasses `consav/__init__.py` entirely. The `consav.upperenvelope`
+module only depends on `numpy` and `numba`. See
+`src/dcsmm/uenvelope/upperenvelope.py` for the implementation.

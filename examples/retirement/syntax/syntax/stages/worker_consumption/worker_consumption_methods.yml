@@ -1,0 +1,18 @@
+stage: WorkerConsumption
+
+methods:
+  - on: cntn_to_dcsn_mover
+    schemes:
+      - scheme: bellman_backward
+        method: !egm
+
+      - scheme: interpolation
+        method: !Cartesian
+        settings:
+          orders: [n_w]
+          bounds: [[w_min, w_max]]
+
+      - scheme: upper_envelope
+        method: !FUES
+        settings:
+          m_bar: m_bar

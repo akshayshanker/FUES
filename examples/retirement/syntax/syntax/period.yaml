@@ -1,0 +1,6 @@
+name: LifecyclePeriod
+
+stages:
+  - labour_mkt_decision: !stage     # branching: work vs retire (WorkerDecision)
+  - work_cons: !stage               # work-branch (WorkerConsumption)
+  - retire_cons: !stage             # retire-branch (RetireeConsumption)

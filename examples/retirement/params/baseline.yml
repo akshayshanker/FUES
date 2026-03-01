@@ -1,0 +1,17 @@
+# Baseline retirement model parameters
+# Standard parameterization from Ishkakov et al (2017)
+
+model:
+  r: 0.02              # Interest rate
+  beta: 0.96           # Discount factor
+  delta: 1.0           # Utility cost of working
+  y: 20                # Income when working
+  b: 1.0e-10           # Borrowing constraint (near zero)
+  grid_max_A: 500      # Maximum asset level
+  T: 50                # Number of periods
+  smooth_sigma: 0      # Smoothing parameter (0 = no smoothing)
+  m_bar: 1.2           # FUES jump detection threshold
+
+benchmark:
+  true_grid_size: 20000  # Grid size for "true" reference solution
+  true_method: DCEGM     # Method for "true" solution (RFC, FUES, DCEGM, CONSAV)

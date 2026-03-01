@@ -11,7 +11,7 @@ All outputs MUST go to `/scratch/tp66/{user}/` only.
 
 ## Project Structure
 
-- `src/dc_smm/fues/` - FUES algorithm implementation
+- `src/dcsmm/fues/` - FUES algorithm implementation
 - `examples/durable-cons/` - Durable consumption model example
 - `experiments/durables-cons/` - Experiment scripts for HPC
 
@@ -51,7 +51,7 @@ For the EGM method, the shadow value of durables `q_d` requires computing:
 
 ### 1D Interpolation
 
-For 1D interpolation, always use functions from `dc_smm.fues.helpers.math_funcs`:
+For 1D interpolation, always use functions from `dcsmm.fues.helpers.math_funcs`:
 - `interp_as(xp, yp, x)` - array version, `x` is a 1D array
 - `interp_as_scalar(xp, yp, x)` - scalar version, `x` is a float
 

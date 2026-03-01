@@ -1,0 +1,13 @@
+stage: RetireeConsumption
+
+methods:
+  - on: cntn_to_dcsn_mover
+    schemes:
+      - scheme: bellman_backward
+        method: !egm
+
+      - scheme: interpolation
+        method: !Cartesian
+        settings:
+          orders: [n_w_ret]
+          bounds: [[w_ret_min, w_ret_max]]
