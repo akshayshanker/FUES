@@ -25,6 +25,7 @@ symbols:
 
   values_marginal:
     dV[>]: "@in R+"
+    dV[<]: "@in R+"
     dV: "@in R+"
 
   parameters: [beta, r]
@@ -42,7 +43,7 @@ equations:
     InvEuler: |
       c[>] = (beta * dV[>])^(-1)
     cntn_to_dcsn_transition: |
-      w_ret[>] = b_ret[>] + c[>]
+      w_ret[>] = b_ret + c[>]
     MarginalBellman: |
       dV = 1/c
 

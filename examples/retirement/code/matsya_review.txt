@@ -1,0 +1,293 @@
+Loading model...
+Loading index...
+Loaded 59777 chunks, 59777 vectors
+Calling claude-opus-4-6...
+======================================================================
+Query: Review this dev spec for the retirement model canonical Bellman calculus pipeline. The spec proposes refactoring solve_block.py to follow the bellman-ddsl three-layer discipline (syntax/whisperer/solver). Key questions: (1) Is the branching-DAG period operator design correct — two-input two-connector signature for a topology with WorkerDecision branching to WorkerConsumption and RetireeConsumption? (2) How should compiled callables from the whisperer interface with existing numba njit solvers — should the whisperer produce njit callables, Python callables bridged via arrays, or recipe expression strings? (3) Should the ValueFn carry (V, lambda, dlambda) or just (V, dV) for the retirement model where EGM needs second-order marginals from the branching stage? (4) Should the period solve order be derived from the symbol graph or declared in period.yaml? (5) Any violations of the three-layer discipline in the proposed architecture? The model has three stages per period: WorkerDecision (branching max over work/retire), WorkerConsumption (EGM plus FUES upper envelope), RetireeConsumption (standard EGM). Inter-period connector is b to a and b_ret to a_ret. The existing njit solvers in retirement.py are validated and should be kept as the horse layer. The whisperer would compile YAML equations into callables that drive the operator factories.
+======================================================================
+
+# Review: Retirement Model Bellman Calculus Pipeline
+
+This is a detailed review of the five design questions, grounded in the branching spec (0.1l), the retirement choice canonical YAML, and the three-layer discipline.
+
+---
+
+## (1) Branching-DAG Period Operator: Two-Input Two-Connector Signature
+
+**The design is correct in topology but the signature description needs refinement.**
+
+The period DAG from the canonical example and `lifecycle_retirement_branching.py` is:
+
+```
+WorkerDecision (branching, max)
+  ├── work   → WorkerConsumption   → b
+  └── retire → RetireeConsumption  → b_ret
+```
+
+**Backward solve order** (topological, leaves first):
+
+1. **WorkerConsumption**: takes $\mathrm{v}_{\succ,\text{work}}(b)$ from the next period, produces $\mathrm{v}_{\prec,\text{work}}(a)$
+2. **RetireeConsumption**: takes $\mathrm{v}_{\succ,\text{retire}}(b_{\text{ret}})$ from the next period, produces $\mathrm{v}_{\prec,\text{retire}}(a_{\text{ret}})$
+3. **WorkerDecision**: takes the two branch arrival values, applies $\max$, produces $\mathrm{v}_{\prec}(a)$
+
+The period operator is therefore:
+
+$$
+\mathbb{T} = \mathbb{S}_{\text{decision}} \circ \mathcal{A}_{\max}\!\bigl(\mathbb{S}_{\text{work\_cons}},\; \mathbb{S}_{\text{retire\_cons}}\bigr)
+$$
+
+**The external signature is two-input, two-output** — not two-input one-output. Here's why: retirement is absorbing. The inter-period connector from the context is `{b: a, b_ret: a_ret}`, meaning the period emits *two* continuation streams:
+
+| Output stream | Connector | Next-period entry point |
+|---|---|---|
+| $b$ (workers who keep working) | $b \mapsto a$ | WorkerDecision (re-enters branching) |
+| $b_{\text{ret}}$ (retirees, new and continuing) | $b_{\text{ret}} \mapsto a_{\text{ret}}$ | RetireeConsumption (bypasses branching) |
+
+So the period's backward operator maps:
+
+$$
+\mathbb{T}: \bigl(\mathrm{v}_{\text{next,worker}}(a),\; \mathrm{v}_{\text{next,retiree}}(a_{\text{ret}})\bigr) \;\longmapsto\; \bigl(\mathrm{v}_{\text{this,worker}}(a),\; \mathrm{v}_{\text{this,retiree}}(a_{\text{ret}})\bigr)
+$$
+
+The two connectors are the inter-period renames. The two *intra*-period connectors (WorkerDecision branches → leaf stages) are handled by namespace matching within the period — consistent with the canonical YAML:
+
+> *"The three stages are wired by namespace matching — the branching stage's branch-keyed `poststates` fields match successor stages' `prestate` fields by name. No explicit connectors are needed."*
+
+**Recommendation:** Implement the period operator with a `ValueBundle` type that carries branch-keyed value functions, not a single `ValueFn`. The operator factory should accept and return `Dict[str, ValueFn]` keyed by branch label (`work`, `retire`). This matches the coproduct structure from the branching spec §1.1.
+
+**One subtlety to get right:** The RetireeConsumption stage serves *double duty* — it receives both (a) workers who choose to retire (via the branching stage within the period) and (b) continuing retirees (via the inter-period connector from the previous period's $b_{\text{ret}}$). These two entry paths share the same stage but originate from different period-level inputs. The period operator must handle this fan-in correctly: the retiree branch's arrival value feeds into WorkerDecision's max *and* is also emitted as the period's retiree output.
+
+---
+
+## (2) Whisperer → Solver Interface
+
+**Recommended: the whisperer produces `@njit` callables with standardized signatures.**
+
+The three options, evaluated against the architecture:
+
+| Option | Pros | Cons | Verdict |
+|---|---|---|---|
+| **(a) njit callables** | Zero bridging overhead; solvers call directly; Matsya precedent | Compilation cost at parse time; njit signature rigidity | **Best** |
+| **(b) Python callables + array bridge** | Flexible; easy to debug | Per-call overhead inside inner loops; breaks numba pipeline | Reject for inner loops |
+| **(c) Recipe expression strings** | Deferred compilation; portable | Requires eval at solve time; breaks three-layer separation | Reject |
+
+**Concrete interface design:**
+
+The whisperer should compile each equation block to a njit callable with a *canonical signature* determined by the equation's role:
+
+```python
+# Transition callables: (state_vec, control_vec, params) -> state_vec
+@njit
+def g_dcsn_to_cntn(m, c, params) -> float:  # a = m - c
+    return m - c
+
+# Reward callables: (state_vec, control_vec, params) -> float  
+@njit
+def reward(c, params) -> float:  # log(c)
+    return np.log(c)
+
+# InvEuler callables: (dV_cntn, params) -> float
+@njit  
+def inv_euler(dV_succ, params) -> float:  # c = (β * dV)^(-1)
+    return 1.0 / (params.beta * dV_succ)
+
+# MarginalBellman callables: (state_vec, control_vec, params) -> float
+@njit
+def marginal_bellman(c, params) -> float:  # dV = 1/c
+    return 1.0 / c
+```
+
+The solver factories (EGM, FUES, branching aggregator) accept these callables as arguments. The existing njit solvers in `retirement.py` become the *reference implementation* of these factories — the horse layer stays untouched, but the callables it consumes are now produced by the whisperer rather than hand-written.
+
+**Migration path:** Start by having the whisperer produce callables with identical signatures to what the existing solvers already expect. Verify numerical equivalence. Then gradually generalize the signatures.
+
+**Key principle:** The whisperer *never* knows about grids, interpolation, or convergence. It produces pure mathematical functions. The solver layer handles all numerical representation.
+
+---
+
+## (3) ValueFn Tuple: `(V, dV)` Is Sufficient
+
+**Use `(V, dV)`. The `(V, λ, dλ)` triple is unnecessary for this model.**
+
+The reasoning:
+
+**What EGM needs from continuation:** The InvEuler equation in the canonical YAML is:
+
+```yaml
+InvEuler: |
+  c[>] = (beta * dV[>])^(-1)
+```
+
+This requires only $\mathrm{v}'_{\succ}$ (first-order marginal of continuation value). No second derivatives appear anywhere in the model specification.
+
+**What FUES needs:** The FUES upper envelope (Dobrescu & Shanker 2024) detects and resolves non-concavities in the *endogenous grid* — it operates on the $(a_i, c_i, v_i)$ triples produced by EGM, detecting non-monotone segments by examining grid ordering. It does **not** use second-order value function derivatives. The non-concavity arises from the branching stage's max aggregator creating kinks in $\mathrm{v}_{\succ}$, but FUES handles this geometrically, not analytically.
+
+**What the branching max produces:** WorkerDecision computes:
+
+$$
+\mathrm{v}(a) = \max\bigl\{\mathrm{v}_{\succ,\text{work}}(a) - \delta,\; \mathrm{v}_{\succ,\text{retire}}(a)\bigr\}
+$$
+
+The marginal value at the decision perch is:
+
+$$
+\mathrm{v}'(a) = \begin{cases} \mathrm{v}'_{\succ,\text{work}}(a) & \text{if work chosen} \\ \mathrm{v}'_{\succ,\text{retire}}(a) & \text{if retire chosen} \end{cases}
+$$
+
+This is piecewise selection of first-order marginals — no second-order terms. The max aggregator passes through the marginal value of the winning branch.
+
+**ValueFn definition:**
+
+```python
+@dataclass
+class ValueFn:
+    V: np.ndarray    # value function on grid
+    dV: np.ndarray   # marginal value (envelope theorem) on grid
+```
+
+For the branching period, extend to:
+
+```python
+@dataclass  
+class BranchValueBundle:
+    work: ValueFn     # worker branch
+    retire: ValueFn   # retiree branch
+```
+
+**When would you need `(V, λ, dλ)`?** Only if the model had a *second-order EGM* (e.g., portfolio choice with wealth-dependent risk aversion requiring curvature of the value function for the FOC). The retirement model does not have this structure.
+
+---
+
+## (4) Period Solve Order: Derive from the Symbol Graph
+
+**Derive the topological order from the wiring graph. Do not declare it in `period.yaml`.**
+
+**Arguments for derivation:**
+
+1. **DRY principle.** The DAG is fully determined by namespace matching — the branching stage's branch-keyed `poststates` field names match successor stages' `prestate` field names. Declaring the order separately creates a redundancy that can become inconsistent.
+
+2. **Canonical precedent.** The period YAML in the retirement example:
+   ```yaml
+   stages:
+     - labour_mkt_decision: !stage
+     - work_cons: !stage
+     - retire_cons: !stage
+   ```
+   This is a *listing*, not an ordering. The solve order is an implementation concern, not a model specification concern.
+
+3. **Robustness.** For more complex DAGs (housing model has two stages but could extend to deeper trees), manual ordering is fragile. The symbol graph makes it mechanical.
+
+**Algorithm:** At period-parse time (Υ layer responsibility):
+
+1. Build the directed wiring graph from namespace matching: for each branch label in the branching stage's `poststates`, find the successor stage whose `prestate` field names match.
+2. Compute the topological sort (reverse for backward induction: leaves first, root last).
+3. Assert acyclicity (cycles are a schema error).
+4. Store the topological order as a derived attribute of the period, not a user declaration.
+
+**Optional declared check:** Allow an optional `solve_order:` field in `period.yaml` that, if present, is validated against the derived order. This serves as documentation and a consistency check without being the source of truth.
+
+```yaml
+name: LifecyclePeriod
+stages:
+  - labour_mkt_decision: !stage
+  - work_cons: !stage
+  - retire_cons: !stage
+# Optional: validated against derived DAG, never authoritative
+solve_order_check: [work_cons, retire_cons, labour_mkt_decision]
+```
+
+---
+
+## (5) Three-Layer Discipline Violations
+
+I identify four potential violations and one structural risk:
+
+### Violation 1: Equation Logic Baked into the Horse Layer
+
+**Risk:** The existing njit solvers in `retirement.py` likely have hard-coded utility functions (`np.log(c)`), transition equations (`a = m - c`), and marginal value formulas (`1/c`). If the refactored architecture keeps these hard-coded while *also* having the whisperer compile them from YAML, you get duplication and the horse layer is doing Ρ-layer work.
+
+**Fix:** The horse layer should be *generic* EGM/FUES/max-aggregator algorithms parameterized by callables. The specific `log`, `1/c`, `m - c` come exclusively from the whisperer. The migration sequence:
+
+1. Extract equation-specific code from `retirement.py` into standalone callables
+2. Verify the generic solver + extracted callables reproduces the original results
+3. Replace extracted callables with whisperer-compiled callables
+4. Verify numerical equivalence again
+
+### Violation 2: Branching Aggregator Placement
+
+**Risk:** If the `max` aggregator for WorkerDecision is implemented as a solver-layer algorithm, it conflates Ρ and Σ. The `max` operation is *mathematically* trivial (pointwise max over branch values) — it's a composition rule, not a numerical algorithm.
+
+**Fix:** The branching aggregator belongs at the **Ρ layer** (whisperer/operator composition), not the Σ layer (solver). It should be an operator combinator:
+
+```python
+# Ρ layer: operator composition
+def branching_max(branch_operators: Dict[str, StageOperator]) -> PeriodOperator:
+    """Compose branch stage operators via max aggregation."""
+    def T(v_cont_bundle):
+        branch_values = {k: op(v_cont_bundle[k]) for k, op in branch_operators.items()}
+        return pointwise_max(branch_values)  # trivial, not a "solver"
+    return T
+```
+
+The individual `StageOperator`s (WorkerConsumption, RetireeConsumption) are Σ-layer objects. The composition via max is Ρ-layer.
+
+### Violation 3: Grid Decisions in the Whisperer
+
+**Risk:** If the whisperer knows about grid sizes, interpolation methods, or endogenous grid bounds, it's doing Σ-layer work.
+
+**Fix:** The whisperer produces callables and *space metadata* (domain type, dimension). Grid construction (linspace, endogenous grid from EGM, FUES filtering) is exclusively Σ-layer. The `@def R+` space annotation tells the whisperer the domain is $\mathbb{R}_+$; the solver decides how to discretize it.
+
+### Violation 4: Method-Specific Equations in Stage YAML
+
+**Non-violation, but worth noting:** The stage YAML contains *all* equation blocks (Bellman, InvEuler, MarginalBellman, cntn_to_dcsn_transition) — this is correct per the spec. The methodization YAML *selects* which ones are compiled. This is clean separation:
+
+- Υ layer: parses all equations
+- Ρ layer: consults methodization, compiles only the selected sub-equations
+- Σ layer: receives only the callables it needs
+
+The canonical YAML confirms this:
+```yaml
+methods:
+  - on: cntn_to_dcsn_mover
+    schemes:
+      - scheme: bellman_backward
+        method: !egm
+```
+
+### Structural Risk: Period-Level vs Stage-Level State Routing
+
+**Risk in forward operator:** The forward operator (population dynamics) for a branching period must *partition* the population measure across branches based on the discrete choice. If the forward operator is implemented as a monolithic period-level function, it bypasses the stage-level composition and violates the principle that stages are the atomic units.
+
+**Fix:** Each stage's forward operator handles its own measure transformation:
+- WorkerDecision forward: split measure into work/retire based on policy $d^*(a)$
+- WorkerConsumption forward: evolve worker sub-measure through savings/consumption
+- RetireeConsumption forward: evolve retiree sub-measure through savings/consumption
+
+The period forward operator composes these stage-level forwards in topological order (root first for forward: WorkerDecision → {WorkerConsumption, RetireeConsumption}).
+
+---
+
+## Summary Table
+
+| Question | Recommendation |
+|---|---|
+| (1) Period operator signature | Two-input, **two-output** (not one-output); use `BranchValueBundle` |
+| (2) Whisperer output format | `@njit` callables with canonical signatures per equation role |
+| (3) ValueFn tuple | `(V, dV)` — no second-order marginals needed; FUES is geometric |
+| (4) Solve order | **Derive** from symbol graph; optional declared check |
+| (5) Discipline violations | (a) Extract equations from horse layer, (b) branching max is Ρ-layer, (c) no grids in whisperer, (d) forward operator must be stage-compositional |
+
+======================================================================
+Sources (12 chunks):
+  [0.637] project/repos/bellman-ddsl/docs/examples/index.md
+  [0.633] project/repos/bellman-ddsl/AI/working/dolo-plus.md
+  [0.633] project/repos/bellman-ddsl/docs/examples/retirement_choice.md
+  [0.633] project/repos/bellman-ddsl/explore/retirement-choice/lifecycle_retirement_branching.py
+  [0.627] project/repos/bellman-ddsl/docs/development/dolo-plus-impl/spec_0.1l-branching.md
+  [0.626] project/repos/bellman-ddsl/docs/examples/retirement_choice.md
+  [0.621] project/repos/bellman-ddsl/docs/development/dolo-plus-impl/spec_0.1l-branching-theory.md
+  [0.614] project/repos/bellman-ddsl/docs/examples/retirement_choice.md
+  [0.613] project/repos/bellman-ddsl/docs/overview/index.md
+  [0.612] project/repos/bellman-ddsl/docs/overview/meaning-map-to-code.md
+  [0.610] project/repos/bellman-ddsl/AI/working/AAS/18112025/update-stage-contract.md
+  [0.610] project/repos/bellman-ddsl/docs/examples/retirement_choice.md

@@ -17,9 +17,6 @@ import numpy as np
 import time
 from numba import njit, types
 from numba.typed import Dict
-import matplotlib.pyplot as plt
-
-
 from dcsmm.fues.helpers.math_funcs import interp_as, correct_jumps1d
 from dcsmm.uenvelope import EGM_UE as egm_ue_global
 
@@ -198,120 +195,88 @@ def consumption_deviation(cp, c_solution, c_true, a_grid_true):
 
 
 def Operator_Factory(cp):
-    """
-    Operator takes in a RetirementModel and returns functions
-    to solve the model.
+    """Build stage solvers (movers) for the retirement model.
 
     Parameters
     ----------
-    rm: RetirementModel
-                    instance of retirement model
+    cp : RetirementModel
+        Model instance with calibrated parameters and grids.
 
     Returns
     -------
-
-    Ts_ret: callabe
-                    Solver for retirees using EGM
-    Ts_work: callable
-                    Solver for workers using EGM
-
+    dict
+        ``{'retiree': solver_retiree_stage,
+           'worker':  solver_worker_stage,
+           'branch':  lab_mkt_choice_stage}``
     """
 
     # unpack parameters from class
     beta, delta = cp.beta, cp.delta
     asset_grid_A = cp.asset_grid_A
-    grid_max_A = cp.grid_max_A
     u, du, uc_inv = cp.u, cp.du, cp.uc_inv
     ddu = cp.ddu
     y = cp.y
     smooth_sigma = cp.smooth_sigma
     grid_size = cp.grid_size
-
     R = cp.R
-    b = cp.b
-    T = cp.T
     m_bar = cp.m_bar
-    padding_mbar = cp.padding_mbar
-
-    def EGM_UE(endog_grid,
-                q_cntn_hat,
-                v_cntn,
-                c_cntn_hat,
-                a_hat,
-                del_a_unrefined,
-                m_bar=2,
-                method='DCEGM', padding_mbar=0):
-        """Call the shared `helpers.egm_upper_envelope.EGM_UE`.
-        """
-
-        @njit(cache=True)
-        def u_interp(c, *args):  # Accept and ignore any extra arguments passed by the solver
-            return u(c)
-
-        refined, _, _ = egm_ue_global(
-            endog_grid,                # x_dcsn_hat
-            q_cntn_hat,             # qf_hat
-            v_cntn,             # v_nxt_raw (unused for FUES/DCEGM/RFC)
-            c_cntn_hat,                 # c_hat
-            a_hat,                      # a_hat
-            asset_grid_A,              # w_grid (evaluation grid)
-            du,                        # uc_func_partial
-            {"func": u, "args": {}}, # u_func placeholder
-            ue_method=method.upper(),
-            m_bar=m_bar,
-            lb=20,
-            rfc_radius=0.75,
-            rfc_n_iter=40,
-        )
-
-        m_ref = refined["x_dcsn_ref"]
-        v_ref = refined["v_dcsn_ref"]
-        c_ref = refined["kappa_ref"]
-        a_ref = refined["x_cntn_ref"]
-
-        if len(m_ref) > 1:
-            del_a_ref = np.gradient(a_ref, m_ref)
-        else:
-            del_a_ref = np.zeros_like(a_ref)
-
-        return m_ref, v_ref, c_ref, a_ref, del_a_ref
 
     @njit
-    def retiree_solver(sigma_prime_ret,
-            VF_prime_ret,
-            uc_pprime_dcp_ret,
-            t):
+    def solver_retiree_stage(c_cntn,        # c[>]: consumption at continuation perch
+                             v_cntn,        # V[>]: value at continuation perch
+                             dlambda_cntn,  # dlambda[>]: second-order marginal at cntn
+                             t):
+        """Retiree consumption stage solver (EGM, no upper envelope).
+
+        Implements the RetireeConsumption stage:
+          InvEuler:                c = (beta * R * du(c[>]))^{-1}
+          cntn_to_dcsn_transition: a_ret = (c + b_ret) / R
+          Bellman:                 V = u(c) + beta * V[>]
+          MarginalBellman:         dlambda = ddu(c) * (R - da)
+
+        Returns
+        -------
+        c_arvl       : consumption on arrival grid
+        v_arvl       : value on arrival grid
+        da_arvl      : da'/da on arrival grid
+        dlambda_arvl : second-order marginal for upstream connector
         """
-        Generates time t policy for retiree. JIT-compiled.
-        """
-        sigma_ret_t_inv = np.zeros(grid_size)
-        vf_ret_t_inv = np.zeros(grid_size)
+        c_dcsn_hat = np.zeros(grid_size)
+        v_dcsn_hat = np.zeros(grid_size)
         endog_grid = np.zeros(grid_size)
-        dela_a_ret_t_inv = np.zeros(grid_size)
+        da_dcsn_hat = np.zeros(grid_size)
 
         for i in range(len(asset_grid_A)):
-            a_prime = asset_grid_A[i]
-            c_prime = sigma_prime_ret[i]
-            uc_prime = beta * R * du(c_prime)
-            c_t = uc_inv(uc_prime)
-            a_t = (c_t + a_prime) / R
-            endog_grid[i] = a_t
-            sigma_ret_t_inv[i] = c_t
-            vf_ret_t_inv[i] = u(c_t) + beta * VF_prime_ret[i]
-            dela_a_ret_t_inv[i] = R*ddu(c_t)/(ddu(c_t) + beta * R*uc_pprime_dcp_ret[i])
+            b_ret = asset_grid_A[i]              # poststate grid point
+            c_next = c_cntn[i]
+            # InvEuler
+            uc_cntn = beta * R * du(c_next)
+            c_dcsn = uc_inv(uc_cntn)
+            # cntn_to_dcsn_transition: a_ret = (c + b_ret) / R
+            a_ret_hat = (c_dcsn + b_ret) / R
+            endog_grid[i] = a_ret_hat
+            c_dcsn_hat[i] = c_dcsn
+            # Bellman
+            v_dcsn_hat[i] = u(c_dcsn) + beta * v_cntn[i]
+            # Asset derivative
+            da_dcsn_hat[i] = R * ddu(c_dcsn) / (ddu(c_dcsn) + beta * R * dlambda_cntn[i])
 
+        # Interpolate from endogenous to exogenous arrival grid
         min_a_val = endog_grid[0]
-        sigma_ret_t = interp_as(endog_grid, sigma_ret_t_inv, asset_grid_A)
-        vf_ret_t = interp_as(endog_grid, vf_ret_t_inv, asset_grid_A)
-        del_a_ret_t = interp_as(endog_grid, dela_a_ret_t_inv, asset_grid_A)
+        c_arvl = interp_as(endog_grid, c_dcsn_hat, asset_grid_A)
+        v_arvl = interp_as(endog_grid, v_dcsn_hat, asset_grid_A)
+        da_arvl = interp_as(endog_grid, da_dcsn_hat, asset_grid_A)
 
+        # Constrained region: consume everything
         constrained_idx = np.where(asset_grid_A <= min_a_val)
-        sigma_ret_t[constrained_idx] = asset_grid_A[constrained_idx]
-        vf_ret_t[constrained_idx] = u(asset_grid_A[constrained_idx]) + beta * VF_prime_ret[0]
-        del_a_ret_t[constrained_idx] = 0
-        uc_pprime_dcp_ret = ddu(sigma_ret_t)*(R - del_a_ret_t)
+        c_arvl[constrained_idx] = asset_grid_A[constrained_idx]
+        v_arvl[constrained_idx] = u(asset_grid_A[constrained_idx]) + beta * v_cntn[0]
+        da_arvl[constrained_idx] = 0
 
-        return sigma_ret_t, vf_ret_t, del_a_ret_t, uc_pprime_dcp_ret
+        # MarginalBellman: dlambda = ddu(c) * (R - da)
+        dlambda_arvl = ddu(c_arvl) * (R - da_arvl)
+
+        return c_arvl, v_arvl, da_arvl, dlambda_arvl
 
     @njit
     def _invert_euler(lambda_worker_cntn, dlambda_worker_cntn, v_worker_cntn):
@@ -339,8 +304,7 @@ def Operator_Factory(cp):
 
     @njit
     def _approx_dcsn_state_functions(egrid1, vf_clean, sigma_clean, dela_clean,
-                                      min_a_val, VF_prime_work,
-                                      sigma_ret_t, vf_ret_t, dela_ret_t):
+                                      min_a_val, VF_prime_work):
 
         asset_grid_wealth = R * asset_grid_A + y
         
@@ -387,10 +351,10 @@ def Operator_Factory(cp):
 
         Returns
         -------
-        v   : value at decision perch (Bellman)
-        c   : mixed consumption policy
-        dv  : marginal value du(c) (MarginalBellman)
-        ddv : ddu(c)*(R - da), second-order marginal for upstream EGM
+        v       : value at decision perch (Bellman)
+        c       : mixed consumption policy
+        lambda_ : marginal value du(c) (MarginalBellman)
+        dlambda : ddu(c)*(R - da), second-order marginal for upstream EGM
         """
 
         if smooth_sigma == 0:
@@ -407,10 +371,10 @@ def Operator_Factory(cp):
         v = work_prob * v_cntn_work + (1 - work_prob) * v_cntn_ret
         da = work_prob * da_cntn_work + (1 - work_prob) * da_cntn_ret
 
-        dv = du(c)
-        ddv = ddu(c) * (R - da)
+        lambda_arvl = du(c)
+        dlambda_arvl = ddu(c) * (R - da)
 
-        return v, c, dv, ddv
+        return v, c, lambda_arvl, dlambda_arvl
 
     def solver_worker_stage(lambda_worker_cntn, #lambda_worker[>]
                             dlambda_worker_cntn,  #dlambda_worker[>]
@@ -427,11 +391,29 @@ def Operator_Factory(cp):
         
         min_a_val = endog_grid[0]
 
-        # Step 2: Upper-envelope (remains in Python mode)
+        # Step 2: Upper-envelope via egm_ue_global
         time_start_fues = time.time()
-        egrid1, q_cntn, c_cntn, a_prime_clean, dela_clean = EGM_UE(
-            endog_grid, q_cntn_hat, beta * v_worker_cntn - delta, cons_cntn_hat,
-            asset_grid_A, del_a_unrefined, m_bar=m_bar, method=method, padding_mbar=padding_mbar)
+        refined, _, _ = egm_ue_global(
+            endog_grid,                          # x_dcsn_hat
+            q_cntn_hat,                          # qf_hat
+            beta * v_worker_cntn - delta,        # v_nxt_raw
+            cons_cntn_hat,                       # c_hat
+            asset_grid_A,                        # a_hat
+            asset_grid_A,                        # w_grid (evaluation grid)
+            du,                                  # uc_func_partial
+            {"func": u, "args": {}},             # u_func placeholder
+            ue_method=method.upper(),
+            m_bar=m_bar,
+            lb=20,
+            rfc_radius=0.75,
+            rfc_n_iter=40,
+        )
+        egrid1 = refined["x_dcsn_ref"]
+        q_cntn = refined["v_dcsn_ref"]
+        c_cntn = refined["kappa_ref"]
+        a_prime_clean = refined["x_cntn_ref"]
+        dela_clean = np.gradient(a_prime_clean, egrid1) if len(egrid1) > 1 \
+            else np.zeros_like(a_prime_clean)
         time_end_fues = time.time()
         
         # Step 3: Approximate worker policy and VF on arvl grid
@@ -441,85 +423,18 @@ def Operator_Factory(cp):
 
         ue_time = time.time() - time_start_fues
 
-        return (v_worker_arvl,   # v_worker[>]
-                c_worker_arvl,   # c_worker[>]
-                dela_work_t,     # dela_work[>]
-                ue_time)         # time taken to solve EGM
+        return (v_worker_arvl,        # v_worker[>]
+                c_worker_arvl,        # c_worker[>]
+                dela_work_t,          # dela_work[>]
+                ue_time,              # time taken for UE step
+                cons_cntn_hat,        # unrefined consumption (pre-UE)
+                q_cntn_hat,           # unrefined value (pre-UE)
+                endog_grid,           # endogenous grid (pre-UE)
+                del_a_unrefined)      # unrefined asset derivative
 
 
-    def iter_bell(policy_params, method  = 'FUES'):
-        max_age = policy_params.T
-        grid_len = policy_params.grid_size
-
-        initial_asset_grid = np.copy(policy_params.asset_grid_A)
-        initial_value_func = policy_params.u(initial_asset_grid)
-        consumption_derivative_terminal = ddu(initial_asset_grid) * R
-
-        retiree_consumption = np.empty((max_age, grid_len))
-        retiree_values = np.empty((max_age, grid_len))
-        retiree_asset_derivatives = np.empty((max_age, grid_len))
-
-        worker_unrefined_values = np.empty((max_age, grid_len))
-        worker_refined_values = np.empty((max_age, grid_len))
-        worker_unrefined_consumption = np.empty((max_age, grid_len))
-        worker_endog_grid = np.empty((max_age, grid_len))
-        worker_refined_consumption = np.empty((max_age, grid_len))
-        asset_pol_derivative_unrefined = np.empty((max_age, grid_len))
-
-        UE_times = np.zeros(max_age)
-        all_times = np.zeros(max_age)
-
-        next_consumption, next_value_func, next_cons_derivative = (
-            np.copy(initial_asset_grid),
-            np.copy(initial_value_func),
-            np.copy(consumption_derivative_terminal))
-
-        for i in range(max_age):
-            age = int(max_age - i - 1)
-            consumption, value, asset_derivative, cons_derivative = (
-                retiree_solver(next_consumption, next_value_func, next_cons_derivative, age))
-            
-            retiree_consumption[age, :] = consumption
-            retiree_values[age, :] = value
-            retiree_asset_derivatives[age, :] = asset_derivative
-
-            next_consumption, next_value_func, next_cons_derivative = (
-                consumption, value, cons_derivative)
-
-        next_worker_value = policy_params.u(initial_asset_grid)
-        next_worker_cons_derivative = policy_params.du(initial_asset_grid)
-        next_euler_derivative = ddu(initial_asset_grid) * R
-
-        for i in range(max_age):
-            age = int(max_age - i - 1)
-            results = solver_worker_stage(
-                next_worker_cons_derivative, next_euler_derivative, next_worker_value,
-                retiree_consumption[age, :], retiree_values[age, :],
-                retiree_asset_derivatives[age, :], age, policy_params.m_bar, method=method)
-            
-            (worker_cons_derivative, unrefined_consumption, worker_value, 
-            unrefined_worker_value, endogenous_grid, refined_consumption, 
-            euler_derivative, unrefined_asset_derivative, EU_time, total_time) = results
-
-            worker_unrefined_values[age, :] = unrefined_worker_value
-            worker_refined_values[age, :] = worker_value
-            worker_unrefined_consumption[age, :] = unrefined_consumption
-            worker_endog_grid[age, :] = endogenous_grid
-            worker_refined_consumption[age, :] = refined_consumption
-            asset_pol_derivative_unrefined[age, :] = unrefined_asset_derivative
-
-            next_worker_cons_derivative = worker_cons_derivative
-            next_worker_value = worker_value
-            next_euler_derivative = euler_derivative
-            if i>2:
-                UE_times[age] = EU_time
-                all_times[age] = total_time
-
-        mask = UE_times > 0
-        average_times = [np.mean(UE_times[mask]), np.mean(all_times[mask])]
-
-        return (worker_endog_grid, worker_unrefined_values, worker_refined_values, 
-                worker_unrefined_consumption, worker_refined_consumption, 
-                asset_pol_derivative_unrefined, average_times)
-
-    return retiree_solver, solver_worker_stage, iter_bell
+    return {
+        'retiree': solver_retiree_stage,
+        'worker':  solver_worker_stage,
+        'branch':  lab_mkt_choice_stage,
+    }

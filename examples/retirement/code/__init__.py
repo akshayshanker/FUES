@@ -1,6 +1,7 @@
 """Retirement model code — FUES vs DC-EGM comparison."""
 
 from .retirement import Operator_Factory, RetirementModel, euler, consumption_deviation
+from .solve_block import backward_induction, solve
 from .benchmarks import test_Timings
 from .plots import (
     plot_egrids, plot_cons_pol, plot_dcegm_cf,
@@ -12,6 +13,8 @@ __all__ = [
     "RetirementModel",
     "euler",
     "consumption_deviation",
+    "backward_induction",
+    "solve",
     "test_Timings",
     "plot_egrids",
     "plot_cons_pol",

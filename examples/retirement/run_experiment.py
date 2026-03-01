@@ -20,6 +20,7 @@ sys.path.insert(0, REPO_ROOT)
 sys.path.insert(0, SRC_ROOT)
 
 from code.retirement import Operator_Factory, RetirementModel, euler
+from code.solve_block import backward_induction
 from code.plots import plot_egrids, plot_cons_pol, plot_dcegm_cf
 from code.benchmarks import test_Timings
 
@@ -45,10 +46,10 @@ def load_params(params_file):
     return model_params, benchmark_params
 
 
-def solve_method(backward_induction, cp, method):
+def solve_method(movers, cp, method):
     """Warmup (JIT compile) then timed solve. Returns named dict."""
-    backward_induction(cp, method=method)              # warmup
-    result = backward_induction(cp, method=method)     # timed
+    backward_induction(cp, movers, method=method)              # warmup
+    result = backward_induction(cp, movers, method=method)     # timed
     return {
         'endog_grid':     result[0],
         'vf_unrefined':   result[1],
@@ -142,13 +143,13 @@ def main():
         m_bar=params.get('m_bar', 1.2),
     )
 
-    # ── Build operators ──
-    _, _, backward_induction = Operator_Factory(cp)
+    # ── Build stage solvers ──
+    movers = Operator_Factory(cp)
 
     # ── Solve (compare 4 UE methods) ──
     solutions = {}
     for method in UE_METHODS:
-        solutions[method] = solve_method(backward_induction, cp, method)
+        solutions[method] = solve_method(movers, cp, method)
 
     # ── Evaluate (Euler errors) ──
     errors = {}

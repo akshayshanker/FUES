@@ -25,7 +25,10 @@ symbols:
 
   values_marginal:
     dV[>]: "@in R+"
+    dV[<]: "@in R+"
     dV: "@in R+"
+
+  parameters: [beta, r, y]
 
 equations:
   arvl_to_dcsn_transition: |

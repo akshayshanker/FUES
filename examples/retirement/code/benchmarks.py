@@ -19,6 +19,7 @@ if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
 from .retirement import Operator_Factory, RetirementModel, euler, consumption_deviation
+from .solve_block import backward_induction
 from .plots import (
     generate_timing_table_combined, generate_accuracy_table,
     plot_egrids, plot_cons_pol, plot_dcegm_cf,
@@ -83,11 +84,11 @@ def test_Timings(grid_sizes, delta_values, n=3, results_dir="results", m_bar=1.2
             m_bar=benchmark_params['m_bar'],
             padding_mbar=-0.011,
         )
-        _, _, iter_bell_true = Operator_Factory(cp_true)
+        movers_true = Operator_Factory(cp_true)
         # Warm-up run
-        _ = iter_bell_true(cp_true, method=true_method)
+        _ = backward_induction(cp_true, movers_true, method=true_method)
         # Actual run
-        _, _, _, _, c_true, _, _ = iter_bell_true(cp_true, method=true_method)
+        _, _, _, _, c_true, _, _ = backward_induction(cp_true, movers_true, method=true_method)
         true_solutions[delta] = {
             'c_true': c_true,
             'a_grid': cp_true.asset_grid_A
@@ -112,7 +113,7 @@ def test_Timings(grid_sizes, delta_values, n=3, results_dir="results", m_bar=1.2
                 padding_mbar=-0.011,
             )
 
-            Ts_ret, Ts_work, iter_bell = Operator_Factory(cp)
+            movers = Operator_Factory(cp)
 
             best_time_RFC = float('inf')
             best_time_FUES = float('inf')
@@ -137,28 +138,28 @@ def test_Timings(grid_sizes, delta_values, n=3, results_dir="results", m_bar=1.2
 
             for _ in range(n):
                 # Test RFC
-                _, _, _, _, c_refined_RFC, _, iter_time_age = iter_bell(cp, method='RFC')
+                _, _, _, _, c_refined_RFC, _, iter_time_age = backward_induction(cp, movers, method='RFC')
                 time_end_RFC = np.mean(iter_time_age[0])
                 total_time_RFC = iter_time_age[1]
                 Euler_error_RFC = euler(cp, c_refined_RFC)
                 cons_dev_RFC = consumption_deviation(cp, c_refined_RFC, c_true, a_grid_true)
 
                 # Test FUES
-                _, _, _, _, c_refined_FUES, _, iter_time_age = iter_bell(cp, method='FUES')
+                _, _, _, _, c_refined_FUES, _, iter_time_age = backward_induction(cp, movers, method='FUES')
                 time_end_FUES = np.mean(iter_time_age[0])
                 total_time_FUES = iter_time_age[1]
                 Euler_error_FUES = euler(cp, c_refined_FUES)
                 cons_dev_FUES = consumption_deviation(cp, c_refined_FUES, c_true, a_grid_true)
 
                 # Test DCEGM
-                _, _, _, _, c_refined_DCEGM, _, iter_time_age = iter_bell(cp, method='DCEGM')
+                _, _, _, _, c_refined_DCEGM, _, iter_time_age = backward_induction(cp, movers, method='DCEGM')
                 time_end_DCEGM = np.mean(iter_time_age[0])
                 total_time_DCEGM = iter_time_age[1]
                 Euler_error_DCEGM = euler(cp, c_refined_DCEGM)
                 cons_dev_DCEGM = consumption_deviation(cp, c_refined_DCEGM, c_true, a_grid_true)
 
                 # Test CONSAV
-                _, _, _, _, c_refined_CONSAV, _, iter_time_age = iter_bell(cp, method='CONSAV')
+                _, _, _, _, c_refined_CONSAV, _, iter_time_age = backward_induction(cp, movers, method='CONSAV')
                 time_end_CONSAV = np.mean(iter_time_age[0])
                 total_time_CONSAV = iter_time_age[1]
                 Euler_error_CONSAV = euler(cp, c_refined_CONSAV)
@@ -245,21 +246,21 @@ if __name__ == "__main__":
         grid_size=3000, T=20, smooth_sigma=0
     )
 
-    Ts_ret, Ts_work, iter_bell = Operator_Factory(cp)
+    movers = Operator_Factory(cp)
 
     # Precompile and run
-    _ = iter_bell(cp, method='RFC')
+    _ = backward_induction(cp, movers, method='RFC')
     e_grid_worker_unref, vf_work_unref, vf_refined, c_worker_unref, \
-        c_refined_RFC, dela_unrefined, time_end_RFC = iter_bell(cp, method='RFC')
+        c_refined_RFC, dela_unrefined, time_end_RFC = backward_induction(cp, movers, method='RFC')
 
-    _ = iter_bell(cp, method='FUES')
-    _, _, _, _, c_refined_FUES, _, time_end_FUES = iter_bell(cp, method='FUES')
+    _ = backward_induction(cp, movers, method='FUES')
+    _, _, _, _, c_refined_FUES, _, time_end_FUES = backward_induction(cp, movers, method='FUES')
 
-    _ = iter_bell(cp, method='DCEGM')
-    _, _, _, _, c_refined_DCEGM, _, time_end_DCEGM = iter_bell(cp, method='DCEGM')
+    _ = backward_induction(cp, movers, method='DCEGM')
+    _, _, _, _, c_refined_DCEGM, _, time_end_DCEGM = backward_induction(cp, movers, method='DCEGM')
 
-    _ = iter_bell(cp, method='CONSAV')
-    _, _, _, _, c_refined_CONSAV, _, time_end_CONSAV = iter_bell(cp, method='CONSAV')
+    _ = backward_induction(cp, movers, method='CONSAV')
+    _, _, _, _, c_refined_CONSAV, _, time_end_CONSAV = backward_induction(cp, movers, method='CONSAV')
 
     Euler_error_RFC = euler(cp, c_refined_RFC)
     Euler_error_FUES = euler(cp, c_refined_FUES)
