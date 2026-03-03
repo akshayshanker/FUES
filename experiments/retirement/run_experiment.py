@@ -12,16 +12,16 @@ import os
 import sys
 import yaml
 
-# Add repo root + src/ to path so `dc_smm` imports work without installation
+# Add repo root + src/ to path so `dcsmm` imports work without installation
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(os.path.dirname(SCRIPT_DIR))
 SRC_ROOT = os.path.join(REPO_ROOT, "src")
 sys.path.insert(0, REPO_ROOT)
 sys.path.insert(0, SRC_ROOT)
 
-from examples.retirement.plots import plot_egrids, plot_cons_pol, plot_dcegm_cf
-from examples.retirement.benchmarks import test_Timings
-from dc_smm.models.retirement.retirement import Operator_Factory, RetirementModel, euler
+from examples.retirement import plot_egrids, plot_cons_pol, plot_dcegm_cf, test_Timings
+from examples.retirement.code.retirement import Operator_Factory, RetirementModel
+from examples.retirement.code.helpers import euler
 
 
 def parse_list(s, dtype=float):

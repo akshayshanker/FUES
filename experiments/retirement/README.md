@@ -71,12 +71,14 @@ examples/retirement/
 ├── params/*.yml               # Parameter files
 ├── code/
 │   ├── retirement.py          # Model (RetirementModel, Operator_Factory)
-│   ├── benchmarks.py          # Timing sweep logic
-│   └── plots/
+│   ├── solve_block.py         # backward_induction (dolo-plus pipeline)
+│   ├── benchmarks.py          # Timing sweep (test_Timings)
+│   └── helpers/
+│       ├── helpers.py         # euler(), get_policy(), get_timing(), consumption_deviation()
 │       ├── plots.py           # Plotting functions
 │       └── tables.py          # Table generation (LaTeX + Markdown)
-├── figures/                   # Saved plots
-└── tables/                    # Saved tables
+├── syntax/                    # Stage YAML declarations (dolo-plus)
+└── ...
 
 experiments/retirement/
 ├── retirement_timings.sh      # PBS wrapper (batch submission)

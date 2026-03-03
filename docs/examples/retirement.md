@@ -36,16 +36,17 @@ The worker's value function is the upper envelope of multiple concave functions,
 
 ## Running benchmarks
 
+All commands run from the repo root (`FUES/`). `--output-dir` is relative to cwd.
+
 ```bash
 # Single run (baseline parameters, grid size 3000)
-python examples/retirement/run_experiment.py \
-    --params params/baseline.yml --grid-size 3000
+PYTHONPATH=".:src" python examples/retirement/run_experiment.py \
+    --grid-size 3000 --output-dir results/retirement
 
 # Full timing sweep across grid sizes and delta values
-python examples/retirement/run_experiment.py \
-    --params params/baseline.yml --run-timings \
-    --sweep-grids 500,1000,2000,3000,10000 \
-    --sweep-deltas 0.25,0.5,1,2
+PYTHONPATH=".:src" python examples/retirement/run_experiment.py \
+    --run-timings --sweep-grids 500,1000,2000,3000,10000 \
+    --sweep-deltas 0.25,0.5,1,2 --output-dir results/retirement
 ```
 
 ## Benchmark results
@@ -114,7 +115,7 @@ See [API Reference](retirement-api.md) for detailed function signatures.
 
 | File | Description |
 |------|-------------|
-| `baseline.yml` | \(\beta=0.96\), \(T=50\), \(\delta=1.0\), \(\bar{s}=0\) |
+| `baseline.yml` | \(\beta=0.98\), \(T=20\), \(\delta=1.0\), \(\bar{s}=0\) |
 | `high_beta.yml` | Higher discount factor |
 | `low_delta.yml` | Lower cost of working |
 | `long_horizon.yml` | More periods |

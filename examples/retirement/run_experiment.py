@@ -11,6 +11,7 @@ import argparse
 import os
 import sys
 import yaml
+from pathlib import Path
 
 # Add repo root + src/ to path so `dcsmm` imports work without installation
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -19,10 +20,15 @@ SRC_ROOT = os.path.join(REPO_ROOT, "src")
 sys.path.insert(0, REPO_ROOT)
 sys.path.insert(0, SRC_ROOT)
 
-from code.retirement import Operator_Factory, RetirementModel, euler
+from code.retirement import Operator_Factory, RetirementModel
 from code.solve_block import backward_induction
-from code.plots import plot_egrids, plot_cons_pol, plot_dcegm_cf
+from code.helpers import (
+    plot_egrids, plot_cons_pol, plot_dcegm_cf,
+    euler, get_policy, get_timing,
+)
 from code.benchmarks import test_Timings
+
+SYNTAX_DIR = Path(__file__).resolve().parent / "syntax" / "syntax"
 
 UE_METHODS = ('RFC', 'FUES', 'DCEGM', 'CONSAV')
 
@@ -48,16 +54,16 @@ def load_params(params_file):
 
 def solve_method(movers, cp, method):
     """Warmup (JIT compile) then timed solve. Returns named dict."""
-    backward_induction(cp, movers, method=method)              # warmup
-    result = backward_induction(cp, movers, method=method)     # timed
+    backward_induction(cp, movers, SYNTAX_DIR, method=method)              # warmup
+    nest = backward_induction(cp, movers, SYNTAX_DIR, method=method)       # timed
     return {
-        'endog_grid':     result[0],
-        'vf_unrefined':   result[1],
-        'vf_refined':     result[2],
-        'c_unrefined':    result[3],
-        'c_refined':      result[4],
-        'dela_unrefined': result[5],
-        'timing':         result[6],   # [avg_ue_time, avg_total_time]
+        'endog_grid':     get_policy(nest, 'egrid',      stage='work_cons'),
+        'vf_unrefined':   get_policy(nest, 'q_hat',      stage='work_cons'),
+        'c_unrefined':    get_policy(nest, 'c_hat',      stage='work_cons'),
+        'dela_unrefined': get_policy(nest, 'da_pre_ue',  stage='work_cons'),
+        'c_refined':      get_policy(nest, 'c',          stage='labour_mkt_decision'),
+        'c_worker':       get_policy(nest, 'c',          stage='work_cons'),
+        'timing':         get_timing(nest),
     }
 
 
@@ -171,7 +177,7 @@ def main():
     plot_egrids(args.plot_age, rfc['endog_grid'], rfc['vf_unrefined'],
                 rfc['c_unrefined'], rfc['dela_unrefined'],
                 grid_size, cp, save_path, tag=sigma_tag)
-    plot_cons_pol(solutions['FUES']['c_refined'], cp, save_path)
+    plot_cons_pol(solutions['FUES']['c_worker'], cp, save_path)
     plot_dcegm_cf(args.plot_age, grid_size, rfc['endog_grid'], rfc['vf_unrefined'],
                   rfc['c_unrefined'], rfc['dela_unrefined'],
                   cp.asset_grid_A, cp, save_path, tag=sigma_tag)

@@ -3,6 +3,7 @@
 from .code.helpers import (
     plot_egrids, plot_cons_pol, plot_dcegm_cf,
     generate_timing_table_combined, generate_accuracy_table,
+    euler, consumption_deviation,
 )
 from .code.benchmarks import test_Timings
 
@@ -12,5 +13,7 @@ __all__ = [
     'plot_dcegm_cf',
     'generate_timing_table_combined',
     'generate_accuracy_table',
+    'euler',
+    'consumption_deviation',
     'test_Timings',
 ]

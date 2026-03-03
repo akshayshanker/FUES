@@ -24,18 +24,43 @@ examples/
 
 ## Running Examples
 
-To generate the outputs:
+### Retirement
+
+From the repo root:
 
 ```bash
-# Housing/Renting example
+# Baseline single run (solve + plots)
+PYTHONPATH=".:src" python examples/retirement/run_experiment.py \
+    --grid-size 3000 --output-dir results/retirement
+
+# With a specific params file
+PYTHONPATH=".:src" python examples/retirement/run_experiment.py \
+    --params params/sigma05.yml --grid-size 3000 --output-dir results/retirement
+
+# Full timing sweep (FUES vs DCEGM vs RFC vs CONSAV)
+PYTHONPATH=".:src" python examples/retirement/run_experiment.py \
+    --run-timings --sweep-grids 500,1000,2000,3000,10000 \
+    --sweep-deltas 0.25,0.5,1,2 --output-dir results/retirement
+```
+
+All commands assume you run from the repo root (`FUES/`). The `--output-dir` path is relative to cwd.
+
+Outputs go to `--output-dir`:
+- `plots/` — consumption policy, EGM grids, DCEGM comparison (PNG)
+- `tables/` — timing and accuracy tables (LaTeX + Markdown, when `--run-timings`)
+
+Parameter files live in `examples/retirement/params/` (baseline, sigma05, high_beta, low_delta, long_horizon).
+
+### Housing/Renting
+
+```bash
 cd examples/housing_renting
 python solve_runner.py --method FUES
+```
 
-# Retirement example  
-cd examples/retirement
-python retirement_plot.py
+### Durables
 
-# Durables example
+```bash
 cd examples/durables
 python durables_plot.py
 ```
