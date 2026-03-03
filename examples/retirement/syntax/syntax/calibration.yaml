@@ -1,5 +1,0 @@
-calibration:
-  r: 0.02           # interest rate
-  beta: 0.98         # discount factor
-  delta: 1.0         # utility cost of working
-  y: 20              # wage income

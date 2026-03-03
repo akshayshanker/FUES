@@ -443,7 +443,7 @@ def FUES(
     policy_1 = np.asarray(policy_1, dtype=np.float64)
     policy_2 = np.asarray(policy_2, dtype=np.float64)
     del_a = np.asarray(del_a, dtype=np.float64)
-    
+
     idx = np.argsort(e_grid)
     e_grid = e_grid[idx]
     vlu = vlu[idx]

@@ -1,6 +1,6 @@
 # Retirement Example — API Reference
 
-API documentation for `examples/retirement/code/`.
+API documentation for `examples/retirement/`.
 
 ---
 
@@ -8,15 +8,16 @@ API documentation for `examples/retirement/code/`.
 
 ### `solve_canonical`
 
-::: examples.retirement.code.solve_block.solve_canonical
+::: examples.retirement.solve.solve_canonical
 
 ```python
-from examples.retirement.code import solve_canonical
+from examples.retirement.solve import solve_canonical
 
-nest, cp = solve_canonical(
-    syntax_dir="examples/retirement/syntax/syntax",
-    params_override={"grid_size": 3000, "delta": 1.0},
+nest, model, stage_ops = solve_canonical(
+    syntax_dir="examples/retirement/syntax",
     method="FUES",
+    calib_overrides={"beta": 0.96},
+    config_overrides={"grid_size": 5000, "T": 50},
 )
 ```
 
@@ -25,51 +26,23 @@ nest, cp = solve_canonical(
 | Name | Type | Description |
 |------|------|-------------|
 | `syntax_dir` | `str` or `Path` | Root syntax directory containing `calibration.yaml`, `settings.yaml`, `period.yaml`, and `stages/`. |
-| `params_override` | `dict`, optional | Override calibration values (e.g. `{"grid_size": 3000}`). |
 | `method` | `str` | Upper-envelope method: `FUES`, `DCEGM`, `RFC`, or `CONSAV`. |
+| `calib_overrides` | `dict`, optional | Override economic parameters (e.g. `{"beta": 0.96}`). |
+| `config_overrides` | `dict`, optional | Override numerical settings (e.g. `{"grid_size": 5000}`). |
 
 **Returns**
 
 | Name | Type | Description |
 |------|------|-------------|
 | `nest` | `dict` | Solved nest with keys `periods`, `twisters`, `solutions`. |
-| `cp` | `RetirementModel` | Model instance used for solving. |
+| `model` | `RetirementModel` | Model instance used for solving. |
+| `stage_ops` | `dict` | Stage operators used for solving. |
 
 ---
 
-### `backward_induction`
+### `_build_and_solve_nest`
 
-```python
-from examples.retirement.code import (
-    backward_induction, Operator_Factory, RetirementModel,
-)
-
-cp = RetirementModel(r=0.02, beta=0.98, delta=1.0,
-                     y=20, grid_size=3000, T=20)
-stage_ops = Operator_Factory(cp)
-nest = backward_induction(
-    cp, stage_ops,
-    syntax_dir="examples/retirement/syntax/syntax",
-    method="FUES",
-)
-```
-
-**Parameters**
-
-| Name | Type | Description |
-|------|------|-------------|
-| `cp` | `RetirementModel` | Model instance with calibrated parameters and grids. |
-| `stage_ops` | `dict` | Stage operators from `Operator_Factory`. |
-| `syntax_dir` | `str` or `Path` | Root syntax directory. |
-| `method` | `str` | Upper-envelope method. |
-
-**Returns** — `dict`: the solved nest.
-
----
-
-### `build_and_solve_nest`
-
-The core function.  Accretively builds and solves the nest one period at a time.
+The core function (internal).  Accretively builds and solves the nest one period at a time.
 
 For each \(h = 0, 1, \ldots, T{-}1\) (distance from terminal):
 
@@ -78,6 +51,8 @@ For each \(h = 0, 1, \ldots, T{-}1\) (distance from terminal):
 3. Assemble continuation from the previous solution (terminal condition at \(h = 0\)).
 4. Solve the period in reverse topological order: `retire_cons` → `work_cons` → `labour_mkt_decision`.
 5. Append solution to the nest.
+
+**Note:** For stationary models, model and stage operators are built once (on the first period) and reused. This is an explicit stationarity assumption.
 
 ---
 
@@ -135,7 +110,7 @@ Read from `nest["solutions"]` without manual indexing.
 ### `get_policy`
 
 ```python
-from examples.retirement.code import get_policy
+from examples.retirement.outputs import get_policy
 
 # Consumption policy (T x n), from branching stage
 c = get_policy(nest, "c")
@@ -155,7 +130,7 @@ Returns `ndarray` of shape `(T, n)`, indexed by age \(t\).
 ### `get_timing`
 
 ```python
-from examples.retirement.code import get_timing
+from examples.retirement.outputs import get_timing
 
 ue_time, solve_time = get_timing(nest)
 ```
@@ -165,7 +140,7 @@ Returns `[mean_ue_time, mean_solve_time]` (skipping first 3 warmup periods).
 ### `get_solution_at_age`
 
 ```python
-from examples.retirement.code import get_solution_at_age
+from examples.retirement.outputs import get_solution_at_age
 
 sol = get_solution_at_age(nest, t=17)
 ```
@@ -178,29 +153,32 @@ Returns the solution dict for calendar age \(t\).
 
 ### `RetirementModel`
 
-```python
-from examples.retirement.code import RetirementModel
+All parameters are required — canonical values live in `syntax/calibration.yaml` and `syntax/settings.yaml`.
 
-cp = RetirementModel(
-    r=0.02, beta=0.98, delta=1.0, smooth_sigma=0,
-    y=20, b=1e-10, grid_max_A=500, grid_size=3000,
-    T=20, m_bar=1.2,
-)
+```python
+from examples.retirement.model import RetirementModel
+
+# Via canonical pipeline (preferred):
+nest, model, stage_ops = solve_canonical("examples/retirement/syntax")
+
+# Via test defaults (for unit tests only):
+model = RetirementModel.with_test_defaults(grid_size=500)
 ```
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `r` | `float` | 0.02 | Interest rate |
-| `beta` | `float` | 0.945 | Discount factor |
-| `delta` | `float` | 1 | Fixed utility cost of working |
-| `smooth_sigma` | `float` | 0 | Logit smoothing (0 = hard max) |
-| `y` | `float` | 1 | Wage income |
-| `b` | `float` | 0.01 | Asset grid lower bound |
-| `grid_max_A` | `float` | 50 | Asset grid upper bound |
-| `grid_size` | `int` | 50 | Number of grid points |
-| `T` | `int` | 60 | Horizon (periods) |
-| `m_bar` | `float` | 1.2 | FUES jump detection threshold |
-| `equations` | `dict` | `None` | Override `{u, du, uc_inv, ddu}` |
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `r` | `float` | Interest rate |
+| `beta` | `float` | Discount factor |
+| `delta` | `float` | Fixed utility cost of working |
+| `smooth_sigma` | `float` | Logit smoothing (0 = hard max) |
+| `y` | `float` | Wage income |
+| `b` | `float` | Asset grid lower bound |
+| `grid_max_A` | `float` | Asset grid upper bound |
+| `grid_size` | `int` | Number of grid points |
+| `T` | `int` | Horizon (periods) |
+| `m_bar` | `float` | FUES jump detection threshold |
+| `padding_mbar` | `float` | Padding for m_bar (default: 0) |
+| `equations` | `dict` | Override `{u, du, uc_inv, ddu}` (default: log utility) |
 
 #### `RetirementModel.from_period`
 
@@ -208,7 +186,15 @@ Construct from a dolo-plus calibrated period dict:
 
 ```python
 period = build_period(params, syntax_dir)
-cp = RetirementModel.from_period(period)
+model = RetirementModel.from_period(period)
+```
+
+#### `RetirementModel.with_test_defaults`
+
+Construct with canonical defaults (for unit tests only):
+
+```python
+model = RetirementModel.with_test_defaults(grid_size=500, T=10)
 ```
 
 ---
@@ -218,9 +204,9 @@ cp = RetirementModel.from_period(period)
 ### `Operator_Factory`
 
 ```python
-from examples.retirement.code import Operator_Factory
+from examples.retirement.model import Operator_Factory
 
-stage_ops = Operator_Factory(cp)
+stage_ops = Operator_Factory(model)
 ```
 
 Returns a dict with three stage operators:
@@ -272,19 +258,19 @@ Hard max (`smooth_sigma=0`) or logit-smoothed aggregation over work/retire branc
 ### `euler`
 
 ```python
-from examples.retirement.code import euler
+from examples.retirement.outputs import euler
 
 c = get_policy(nest, "c")
-error = euler(cp, c)  # mean log10 Euler error
+error = euler(model, c)  # mean log10 Euler error
 ```
 
 ### `consumption_deviation`
 
 ```python
-from examples.retirement.code import consumption_deviation
+from examples.retirement.outputs import consumption_deviation
 
 c_true = get_policy(nest_true, "c")
-dev = consumption_deviation(cp, c, c_true, a_grid_true)
+dev = consumption_deviation(model, c, c_true, a_grid_true)
 ```
 
 Mean log10 deviation from a high-resolution reference solution.
@@ -296,20 +282,20 @@ Mean log10 deviation from a high-resolution reference solution.
 ### `build_period`
 
 ```python
-from examples.retirement.code.solve_block import build_period
+from examples.retirement.solve import build_period
 
 period = build_period(
     params={"r": 0.02, "beta": 0.98, "delta": 1.0, ...},
-    syntax_dir="examples/retirement/syntax/syntax",
+    syntax_dir="examples/retirement/syntax",
 )
 ```
 
-Loads each stage from YAML via the dolo-plus pipeline: load → SymbolicModel → methodize → configure → calibrate.
+Loads each stage from YAML via the dolo-plus pipeline: parse → methodize → configure → calibrate.
 
 ### `build_period_callables`
 
 ```python
-from examples.retirement.code.solve_block import build_period_callables
+from examples.retirement.solve import build_period_callables
 
 callables = build_period_callables(period)
 # {"u": @njit, "du": @njit, "uc_inv": @njit, "ddu": @njit}
@@ -321,7 +307,7 @@ Returns equation callables for the period.  Currently returns log-utility defaul
 
 ## YAML Syntax
 
-Stage declarations live in `examples/retirement/syntax/syntax/stages/`:
+Stage declarations live in `examples/retirement/syntax/stages/`:
 
 ```
 stages/
@@ -331,6 +317,33 @@ stages/
 ```
 
 Period template: `period.yaml`
-Calibration: `calibration.yaml`
-Settings (grids, m_bar): `settings.yaml`
+Calibration: `calibration.yaml` (economic params — consumed by calibrate functor)
+Settings: `settings.yaml` (numerical settings — consumed by configure functor)
 Inter-period twister: `{"b": "a", "b_ret": "a_ret"}`
+
+---
+
+## CLI
+
+```bash
+# Baseline (uses syntax/ defaults)
+python examples/retirement/run.py --output-dir results/retirement
+
+# Override economic params
+python examples/retirement/run.py --calib-override beta=0.96 --calib-override delta=0.5
+
+# Override numerical settings
+python examples/retirement/run.py --config-override grid_size=5000 --config-override T=50
+
+# Shorthand for grid size
+python examples/retirement/run.py --grid-size 5000
+
+# Use override file from experiments/
+python examples/retirement/run.py --override-file ../../experiments/retirement/params/long_horizon.yml
+
+# Run timing benchmarks
+python examples/retirement/run.py --run-timings
+
+# Choose method
+python examples/retirement/run.py --method DCEGM
+```

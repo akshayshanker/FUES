@@ -19,13 +19,13 @@ import time  # Add time module for timing measurements
 import gc  # For garbage collection after freeing memory
 
 # Import operator factories directly from their modules
-from dc_smm.models.housing_renting.horses_h import F_shocks_dcsn_to_arvl, F_h_cntn_to_dcsn_owner, F_h_cntn_to_dcsn_renter
-from dc_smm.models.housing_renting.horses_c import (
+from dcsmm.models.housing_renting.horses_h import F_shocks_dcsn_to_arvl, F_h_cntn_to_dcsn_owner, F_h_cntn_to_dcsn_renter
+from dcsmm.models.housing_renting.horses_c import (
     F_ownc_cntn_to_dcsn, F_rntc_cntn_to_dcsn, F_ownc_cntn_to_dcsn_gpu,
     F_rntc_cntn_to_dcsn_gpu
 )
-from dc_smm.models.housing_renting.horses_common import F_id
-from dc_smm.models.housing_renting.horses_t import F_t_cntn_to_dcsn, F_t_cntn_to_dcsn_owner_only
+from dcsmm.models.housing_renting.horses_common import F_id
+from dcsmm.models.housing_renting.horses_t import F_t_cntn_to_dcsn, F_t_cntn_to_dcsn_owner_only
 from dynx.stagecraft.solmaker import Solution
 # MPI utilities are now handled by circuit_runner
 

@@ -6,15 +6,15 @@ using the StageCraft and Heptapod-B architecture.
 """
 
 # Absolute imports for modules from the main package
-from dc_smm.models.housing_renting.horses_h import (
+from dcsmm.models.housing_renting.horses_h import (
     F_shocks_dcsn_to_arvl,
     F_h_cntn_to_dcsn_owner,
     F_h_cntn_to_dcsn_renter
 )
 
-from dc_smm.models.housing_renting.horses_common import F_id
+from dcsmm.models.housing_renting.horses_common import F_id
 
-from dc_smm.models.housing_renting.horses_t import (
+from dcsmm.models.housing_renting.horses_t import (
     F_t_cntn_to_dcsn
 )
 

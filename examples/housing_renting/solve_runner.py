@@ -626,7 +626,7 @@ def make_housing_solver(args, use_mpi: bool, comm, baseline_method=None):
         
         if solver_method.endswith("_GPU") and (comm is None or comm.rank == 0):
             try:
-                from src.dc_smm.models.housing_renting.horses_c_gpu import warmup_gpu_kernels
+                from src.dcsmm.models.housing_renting.horses_c_gpu import warmup_gpu_kernels
                 warmup_gpu_kernels()
             except ImportError:
                 pass  # GPU module not available
@@ -803,7 +803,7 @@ def main(argv=None):
     trace_print("2: Args parsed", detail=True)
 
     #  MPI communicator
-    from dc_smm.helpers.mpi_utils import get_comm
+    from dcsmm.helpers.mpi_utils import get_comm
     comm = get_comm(args.mpi)
     mpi_rank = comm.rank if comm else 0
     set_mpi_rank(mpi_rank)  # Set rank for trace_print filtering

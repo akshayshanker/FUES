@@ -10,7 +10,7 @@
 #
 # Single-core retirement model runner (NO sweep) that saves ALL outputs to scratch.
 #
-# - Runs `examples/retirement/run_experiment.py` (baseline solve + plots)
+# - Runs `examples/retirement/run.py` (baseline solve + plots)
 # - Uses the dcsmm venv (defaults to /scratch/tp66/$USER/venvs/dcsmm)
 # - Ensures repo + src are on PYTHONPATH for `dcsmm` imports
 #
@@ -107,7 +107,7 @@ cd "${REPO_ROOT}"
   echo "--- Running retirement baseline + plots ---"
 } | tee -a "${LOG_FILE}"
 
-python3 "${EXAMPLE_DIR}/run_experiment.py" \
+python3 "${EXAMPLE_DIR}/run.py" \
   --params "${PARAMS_FILE}" \
   --grid-size "${GRID_SIZE}" \
   --plot-age "${PLOT_AGE}" \

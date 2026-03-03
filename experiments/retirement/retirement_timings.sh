@@ -140,7 +140,7 @@ echo "========================================================"
 cd "$REPO_ROOT"
 
 # Build command
-CMD="python3 $EXAMPLE_DIR/run_experiment.py"
+CMD="python3 $EXAMPLE_DIR/run.py"
 CMD="$CMD --params $PARAMS_FILE"
 CMD="$CMD --grid-size $GRID_SIZE"
 CMD="$CMD --plot-age $PLOT_AGE"

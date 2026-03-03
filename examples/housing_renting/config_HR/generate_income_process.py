@@ -18,7 +18,7 @@ SRC_DIR = REPO_ROOT / "src"
 sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(SRC_DIR))
 
-from dc_smm.shocks import create_income_shock_decomposition
+from dcsmm.shocks import create_income_shock_decomposition
 
 
 def generate_fella_income_process():

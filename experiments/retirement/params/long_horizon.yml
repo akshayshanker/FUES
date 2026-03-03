@@ -1,18 +1,6 @@
-# Long horizon variant
-# 50 period model for timing benchmarks
-
-model:
-  r: 0.02
-  beta: 0.96           # Lower beta for stability over longer horizon
-  delta: 1.0
-  y: 20
-  b: 1.0e-100          # Tighter borrowing constraint
-  grid_max_A: 500
-  T: 50                # Longer horizon
-  smooth_sigma: 0
-  m_bar: 1.2           # FUES jump detection threshold
-  padding_mbar: -0.011 # For timing benchmarks
-
-benchmark:
-  true_grid_size: 20000  # Grid size for "true" reference solution
-  true_method: DCEGM     # Method for "true" solution (RFC, FUES, DCEGM, CONSAV)
+# Long horizon variant (50 period model for timing benchmarks)
+# Sparse overrides — only values that differ from syntax/ defaults.
+beta: 0.96
+T: 50
+b: 1.0e-100
+padding_mbar: -0.011

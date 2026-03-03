@@ -24,9 +24,9 @@ from consav import golden_section_search
 cwd = os.getcwd()
 sys.path.append('..')
 os.chdir(cwd)
-from dc_smm.fues import FUES_jit_core, get_fues_defaults  # JIT-compiled core
-from dc_smm.fues.fues_v0dev import uniqueEG  # Duplicate removal utility
-from dc_smm.fues.helpers.math_funcs import interp_as_scalar  # 1D scalar interpolation
+from dcsmm.fues import FUES_jit_core, get_fues_defaults  # JIT-compiled core
+from dcsmm.fues.fues_v0dev import uniqueEG  # Duplicate removal utility
+from dcsmm.fues.helpers.math_funcs import interp_as_scalar  # 1D scalar interpolation
 
 # Extract FUES defaults as module-level constants for numba compatibility
 _fd = get_fues_defaults()
@@ -46,8 +46,8 @@ _FUES_EPS_SEP = _fd['eps_sep']
 _FUES_EPS_FWD = _fd['eps_fwd_back']
 _FUES_PAR_GUARD = _fd['parallel_guard']
 del _fd
-from dc_smm.fues.rfc_simple import rfc
-from dc_smm.fues.helpers.math_funcs import (interp_as, rootsearch, rootsearch_wf,
+from dcsmm.fues.rfc_simple import rfc
+from dcsmm.fues.helpers.math_funcs import (interp_as, rootsearch, rootsearch_wf,
                                              bisect_wf, correct_jumps1d_arr,
                                              find_roots_piecewise_linear)
 

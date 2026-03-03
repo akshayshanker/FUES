@@ -40,11 +40,11 @@ All commands run from the repo root (`FUES/`). `--output-dir` is relative to cwd
 
 ```bash
 # Single run (baseline parameters, grid size 3000)
-PYTHONPATH=".:src" python examples/retirement/run_experiment.py \
+PYTHONPATH=".:src" python examples/retirement/run.py \
     --grid-size 3000 --output-dir results/retirement
 
 # Full timing sweep across grid sizes and delta values
-PYTHONPATH=".:src" python examples/retirement/run_experiment.py \
+PYTHONPATH=".:src" python examples/retirement/run.py \
     --run-timings --sweep-grids 500,1000,2000,3000,10000 \
     --sweep-deltas 0.25,0.5,1,2 --output-dir results/retirement
 ```
@@ -90,23 +90,22 @@ FUES is 5-20x faster than DC-EGM and 10-20x faster than RFC across all configura
 
 ```
 examples/retirement/
-├── run_experiment.py           # CLI entry point
-├── syntax/syntax/              # dolo-plus YAML declarations
+├── run.py           # CLI entry point (uses solve_canonical)
+├── syntax/                     # dolo-plus YAML declarations (single source of truth)
 │   ├── period.yaml             # Period template (stage list)
-│   ├── calibration.yaml        # r, beta, delta, y
-│   ├── settings.yaml           # Grid sizes, m_bar
+│   ├── calibration.yaml        # r, beta, delta, y, b, smooth_sigma
+│   ├── settings.yaml           # grid_size, grid_max_A, T, m_bar
 │   └── stages/
 │       ├── labour_mkt_decision/  # Branching (max)
 │       ├── work_cons/            # Worker EGM + FUES
 │       └── retire_cons/          # Retiree EGM
-├── code/
-│   ├── retirement.py           # Model class + Operator_Factory
-│   ├── solve_block.py          # Nest build + solve pipeline
-│   ├── benchmarks.py           # Timing sweeps
-│   └── helpers/
-│       ├── helpers.py          # Nest accessors, euler, deviation
-│       ├── plots.py            # EGM grid and policy plots
-│       └── tables.py           # LaTeX + Markdown tables
+├── model.py                    # Model class + Operator_Factory
+├── solve.py                    # Canonical pipeline (solve_canonical)
+├── benchmark.py                # Timing sweeps (via solve_canonical)
+└── outputs/
+    ├── diagnostics.py          # Nest accessors, euler, deviation
+    ├── plots.py                # EGM grid and policy plots
+    └── tables.py               # LaTeX + Markdown tables
 ```
 
 See [API Reference](retirement-api.md) for detailed function signatures.

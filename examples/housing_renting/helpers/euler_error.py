@@ -49,7 +49,7 @@ def _get_bool_setting(model, key: str, default: bool = False) -> bool:
     return bool(val)
 
 # Import non-GPU functions unconditionally
-from dc_smm.models.housing_renting.horses_common import interp_as
+from dcsmm.models.housing_renting.horses_common import interp_as
 
 # Import tax functions for capital income tax adjustment
 from examples.housing_renting.helpers.asset_tax import (
@@ -58,7 +58,7 @@ from examples.housing_renting.helpers.asset_tax import (
 
 # Import GPU functions only if CUDA is available
 if CUDA_AVAILABLE:
-    from dc_smm.models.housing_renting.horses_common import (
+    from dcsmm.models.housing_renting.horses_common import (
         interp_gpu, uc_owner_gpu, uc_renter_gpu, inv_uc_owner_gpu
     )
 
@@ -419,7 +419,7 @@ def calculate_euler_error_cpu(model, debug=True, sample_size=50000, random_sampl
     sample_size : int
         Maximum number of states to compute. If grid is larger, will sample uniformly.
     """
-    from dc_smm.models.housing_renting.horses_common import build_njit_utility
+    from dcsmm.models.housing_renting.horses_common import build_njit_utility
 
     # Handle infinite horizon (single period) vs finite horizon (multiple periods)
     n_periods = len(model.periods_list)
@@ -684,7 +684,7 @@ def precompile_euler_error_cpu():
     Precompile the CPU Euler error calculation functions to avoid JIT overhead.
     This creates dummy data and runs the jitted functions once to compile them.
     """
-    from dc_smm.models.housing_renting.horses_common import build_njit_utility
+    from dcsmm.models.housing_renting.horses_common import build_njit_utility
     
     # Create minimal dummy data matching expected shapes
     n_a, n_h, n_y = 10, 5, 3  # Small sizes for fast compilation

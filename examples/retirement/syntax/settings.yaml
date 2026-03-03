@@ -1,0 +1,23 @@
+# Numerical / structural settings (consumed by configure functor)
+# Single source of truth — no Python-side defaults.
+settings:
+  # Lifecycle
+  T: 20                  # number of periods
+
+  # Asset grid (used by RetirementModel to construct arrival grid)
+  grid_size: 3000        # number of asset grid points
+  grid_max_A: 500        # upper bound for asset grid
+
+  # Worker grids (work branch — used by dolo-plus configure)
+  n_w: 300               # grid points for worker cash-on-hand
+  w_min: 1.0e-10         # borrowing constraint (near zero)
+  w_max: 520             # max cash-on-hand ~ (1+r)*grid_max_A + y
+
+  # Retiree grids (retire branch — used by dolo-plus configure)
+  n_w_ret: 300           # grid points for retiree cash-on-hand
+  w_ret_min: 1.0e-10
+  w_ret_max: 510         # max cash-on-hand ~ (1+r)*grid_max_A
+
+  # FUES
+  m_bar: 1.01            # jump detection threshold (work branch only)
+  padding_mbar: 0        # padding for m_bar

@@ -66,6 +66,11 @@ markdown_extensions:
   - toc:
       permalink: true
 
+plugins:
+  - search
+  - mkdocs-jupyter:
+      include_source: true
+
 extra_javascript:
   - javascripts/mathjax.js
   - javascripts/fues-interactive.js
@@ -90,4 +95,6 @@ nav:
   - Examples:
     - Retirement Choice Model: examples/retirement.md
     - Retirement API Reference: examples/retirement-api.md
+  - Notebooks:
+    - Retirement Model with FUES: notebooks/retirement_fues.ipynb
   - Changelog: changelog.md

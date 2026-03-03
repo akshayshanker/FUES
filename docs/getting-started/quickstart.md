@@ -53,9 +53,8 @@ refined, raw, interpolated = EGM_UE(
 ## Running the retirement example
 
 ```bash
-python examples/retirement/run_experiment.py \
-    --params params/baseline.yml \
-    --grid-size 3000
+python examples/retirement/run.py \
+    --grid-size 3000 --output-dir results/retirement
 ```
 
 This solves the Iskhakov et al. (2017) retirement model with all four upper envelope methods and prints timing and Euler error comparisons.

@@ -14,6 +14,10 @@ bash setup/setup_venv.sh
 
 ## Running
 
+All runs go through the **canonical pipeline** (`solve_canonical`).
+Baseline calibration lives in `examples/retirement/syntax/` — override
+individual parameters via CLI flags or YAML files.
+
 ### On Gadi
 
 Start an interactive session, load the environment, then run:
@@ -21,13 +25,13 @@ Start an interactive session, load the environment, then run:
 ```bash
 qsub -I -q expresssr -P tp66 -l ncpus=1,mem=8GB,walltime=01:00:00,storage=scratch/tp66,wd
 source setup/load_env.sh
-python examples/retirement/run_experiment.py --params params/baseline.yml --grid-size 3000
+python examples/retirement/run.py --grid-size 3000 --output-dir results/retirement
 ```
 
 Full timing sweep:
 
 ```bash
-python examples/retirement/run_experiment.py --params params/baseline.yml --run-timings
+python examples/retirement/run.py --run-timings
 ```
 
 Or use the PBS wrapper:
@@ -40,7 +44,20 @@ qsub experiments/retirement/retirement_timings.sh
 
 ```bash
 source .venv/bin/activate
-python examples/retirement/run_experiment.py --params params/baseline.yml --grid-size 1000
+python examples/retirement/run.py --grid-size 1000
+```
+
+### Override parameters
+
+```bash
+# Override economic params
+python examples/retirement/run.py --calib-override beta=0.96
+
+# Override numerical settings
+python examples/retirement/run.py --config-override grid_size=5000 --config-override T=50
+
+# Use an override file (sparse, flat key-value YAML)
+python examples/retirement/run.py --override-file experiments/retirement/params/long_horizon.yml
 ```
 
 ## Output
@@ -53,34 +70,44 @@ Results are saved to the `--output-dir` path (default: `results/retirement/`):
 
 ## Parameters
 
-Model and benchmark settings are in YAML files under `examples/retirement/params/`:
+Canonical calibration and settings live in `examples/retirement/syntax/`:
 
 | File | Description |
 |------|-------------|
-| `baseline.yml` | Standard Ishkakov et al (2017) parameterisation |
-| `high_beta.yml` | Higher discount factor |
-| `low_delta.yml` | Lower cost of working |
-| `long_horizon.yml` | More periods |
-| `sigma05.yml` | Smoothed discrete choice |
+| `calibration.yaml` | Economic params: r, beta, delta, y, b, smooth_sigma |
+| `settings.yaml` | Numerical settings: grid_size, grid_max_A, T, m_bar |
+
+Sparse override files live in `experiments/retirement/params/`:
+
+| File | Description |
+|------|-------------|
+| `baseline.yml` | Benchmark config (beta=0.96, T=50) |
+| `high_beta.yml` | Higher discount factor (beta=0.99) |
+| `low_delta.yml` | Lower cost of working (delta=0.5) |
+| `long_horizon.yml` | Longer horizon (T=50, padding_mbar) |
+
+Override files contain only values that differ from the canonical `syntax/` defaults.
 
 ## File Layout
 
 ```
 examples/retirement/
-├── run_experiment.py          # Main entry point
-├── params/*.yml               # Parameter files
-├── code/
-│   ├── retirement.py          # Model (RetirementModel, Operator_Factory)
-│   ├── solve_block.py         # backward_induction (dolo-plus pipeline)
-│   ├── benchmarks.py          # Timing sweep (test_Timings)
-│   └── helpers/
-│       ├── helpers.py         # euler(), get_policy(), get_timing(), consumption_deviation()
-│       ├── plots.py           # Plotting functions
-│       └── tables.py          # Table generation (LaTeX + Markdown)
-├── syntax/                    # Stage YAML declarations (dolo-plus)
-└── ...
+├── run.py          # CLI entry point (uses solve_canonical)
+├── model.py                   # Model (RetirementModel, Operator_Factory)
+├── solve.py                   # Canonical pipeline (solve_canonical)
+├── benchmark.py               # Timing sweep (via solve_canonical)
+├── outputs/
+│   ├── diagnostics.py         # euler(), get_policy(), get_timing()
+│   ├── plots.py               # Plotting functions
+│   └── tables.py              # Table generation (LaTeX + Markdown)
+└── syntax/                    # dolo-plus YAML (single source of truth)
+    ├── calibration.yaml       # Economic params
+    ├── settings.yaml          # Numerical settings
+    ├── period.yaml            # Stage topology
+    └── stages/                # Per-stage YAML + methods
 
 experiments/retirement/
+├── params/                    # Sparse override files
 ├── retirement_timings.sh      # PBS wrapper (batch submission)
 ├── run_retirement_single_core.sh
 └── README.md                  # This file

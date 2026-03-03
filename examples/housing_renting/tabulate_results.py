@@ -26,7 +26,7 @@ import sys
 from pathlib import Path
 
 # IMPORTANT: do NOT import `examples.housing_renting` as a package here.
-# Its `__init__.py` pulls in the full solver stack (dc_smm, numba.cuda, mpi4py),
+# Its `__init__.py` pulls in the full solver stack (dcsmm, numba.cuda, mpi4py),
 # which is unnecessary for table generation and can fail on login nodes.
 SCRIPT_DIR = Path(__file__).resolve().parent  # .../examples/housing_renting
 # Repo root is two levels up: .../FUES

@@ -29,7 +29,7 @@ os.chdir(cwd)
 from examples.durables.durables import ConsumerProblem, Operator_Factory
 from examples.durables.plot import plot_pols, plot_grids, plot_wage_profile
 from examples.durables.simulate import euler_errors, compute_euler_stats, print_euler_stats
-from dc_smm.fues.helpers.math_funcs import f, interp_as
+from dcsmm.fues.helpers.math_funcs import f, interp_as
 
 # Plot styling (matching durable-cons/figs.py)
 plt.rcParams.update({"axes.grid": True, "grid.color": "black", "grid.alpha": "0.25", "grid.linestyle": "--"})

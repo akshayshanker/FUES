@@ -152,13 +152,12 @@ Two-asset model with liquid financial assets and illiquid housing. The discrete 
 source setup/load_env.sh   # on Gadi
 # or: source .venv/bin/activate  # locally
 
-# Single run with baseline parameters
-python examples/retirement/run_experiment.py \
-    --params params/baseline.yml --grid-size 3000
+# Single run with baseline parameters (from syntax/ config)
+python examples/retirement/run.py \
+    --grid-size 3000 --output-dir results/retirement
 
 # Full timing sweep (all methods, grid sizes, delta values)
-python examples/retirement/run_experiment.py \
-    --params params/baseline.yml --run-timings
+python examples/retirement/run.py --run-timings
 ```
 
 Output: timing and accuracy tables (LaTeX + Markdown) and EGM grid plots in the output directory.
