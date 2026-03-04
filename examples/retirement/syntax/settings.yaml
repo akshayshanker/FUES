@@ -19,5 +19,5 @@ settings:
   w_ret_max: 510         # max cash-on-hand ~ (1+r)*grid_max_A
 
   # FUES
-  m_bar: 1.01            # jump detection threshold (work branch only)
+  m_bar: 1.21            # jump detection threshold (work branch only)
   padding_mbar: 0        # padding for m_bar
