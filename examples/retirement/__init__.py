@@ -5,7 +5,7 @@ from .outputs import (
     generate_timing_table_combined, generate_accuracy_table,
     euler, consumption_deviation,
 )
-from .solve import solve_canonical
+from .solve import solve_nest
 from .benchmark import test_Timings
 
 __all__ = [
@@ -16,6 +16,6 @@ __all__ = [
     'generate_accuracy_table',
     'euler',
     'consumption_deviation',
-    'solve_canonical',
+    'solve_nest',
     'test_Timings',
 ]

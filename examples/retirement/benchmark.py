@@ -1,7 +1,7 @@
 """Benchmarking functions for retirement model - timing sweeps and comparisons.
 
 Compares FUES vs DC-EGM vs RFC vs CONSAV across grid sizes and delta values.
-Uses the canonical pipeline (solve_canonical) for all runs.
+Uses the canonical pipeline (solve_nest) for all runs.
 
 Author: Akshay Shanker, University of New South Wales, akshay.shanker@me.com
 """
@@ -21,7 +21,7 @@ if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
 from pathlib import Path
-from .solve import solve_canonical
+from .solve import solve_nest
 from .outputs import (
     generate_timing_table_combined, generate_accuracy_table,
     plot_egrids, plot_cons_pol, plot_dcegm_cf,
@@ -49,7 +49,7 @@ def test_Timings(grid_sizes, delta_values, n=3, results_dir="results",
                  true_grid_size=20000, true_method='DCEGM'):
     """Run timing benchmarks across grid sizes and delta values.
 
-    All runs go through the canonical pipeline (solve_canonical).
+    All runs go through the canonical pipeline (solve_nest).
 
     Parameters
     ----------
@@ -85,7 +85,7 @@ def test_Timings(grid_sizes, delta_values, n=3, results_dir="results",
               f"with {true_grid_size} grid points using {true_method}...")
 
         # Warmup
-        solve_canonical(
+        solve_nest(
             SYNTAX_DIR, method=true_method,
             calib_overrides={'delta': delta},
             config_overrides={
@@ -94,7 +94,7 @@ def test_Timings(grid_sizes, delta_values, n=3, results_dir="results",
             },
         )
         # Actual run
-        nest_true, model_true, _ = solve_canonical(
+        nest_true, model_true, _ = solve_nest(
             SYNTAX_DIR, method=true_method,
             calib_overrides={'delta': delta},
             config_overrides={
@@ -122,7 +122,7 @@ def test_Timings(grid_sizes, delta_values, n=3, results_dir="results",
 
             for _ in range(n):
                 for method in ('RFC', 'FUES', 'DCEGM', 'CONSAV'):
-                    nest, model, _ = solve_canonical(
+                    nest, model, _ = solve_nest(
                         SYNTAX_DIR, method=method,
                         calib_overrides={'delta': delta},
                         config_overrides={
@@ -204,11 +204,11 @@ if __name__ == "__main__":
     test_Timings(grid_sizes, delta_values)
 
     # Generate baseline solution and plots via canonical pipeline
-    nest, model, _ = solve_canonical(SYNTAX_DIR, method='RFC')
+    nest, model, _ = solve_nest(SYNTAX_DIR, method='RFC')
 
     results = {}
     for method in ['RFC', 'FUES', 'DCEGM', 'CONSAV']:
-        nest, model, _ = solve_canonical(SYNTAX_DIR, method=method)
+        nest, model, _ = solve_nest(SYNTAX_DIR, method=method)
         results[method] = {
             'nest': nest,
             'c': get_policy(nest, 'c'),

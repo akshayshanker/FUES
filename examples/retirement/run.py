@@ -22,7 +22,7 @@ SRC_ROOT = os.path.join(REPO_ROOT, "src")
 sys.path.insert(0, REPO_ROOT)
 sys.path.insert(0, SRC_ROOT)
 
-from examples.retirement.solve import solve_canonical
+from examples.retirement.solve import solve_nest
 from examples.retirement.outputs import (
     plot_egrids, plot_cons_pol, plot_dcegm_cf,
     euler, get_policy, get_timing,
@@ -162,13 +162,13 @@ def main():
     solutions = {}
     for method in UE_METHODS:
         # Warmup (JIT compile)
-        solve_canonical(
+        solve_nest(
             SYNTAX_DIR, method=method,
             calib_overrides=calib_overrides,
             config_overrides=config_overrides,
         )
         # Timed run
-        nest, model, _ = solve_canonical(
+        nest, model, _ = solve_nest(
             SYNTAX_DIR, method=method,
             calib_overrides=calib_overrides,
             config_overrides=config_overrides,

@@ -14,7 +14,7 @@ bash setup/setup_venv.sh
 
 ## Running
 
-All runs go through the **canonical pipeline** (`solve_canonical`).
+All runs go through the **canonical pipeline** (`solve_nest`).
 Baseline calibration lives in `examples/retirement/syntax/` — override
 individual parameters via CLI flags or YAML files.
 
@@ -92,10 +92,10 @@ Override files contain only values that differ from the canonical `syntax/` defa
 
 ```
 examples/retirement/
-├── run.py          # CLI entry point (uses solve_canonical)
+├── run.py          # CLI entry point (uses solve_nest)
 ├── model.py                   # Model (RetirementModel, Operator_Factory)
-├── solve.py                   # Canonical pipeline (solve_canonical)
-├── benchmark.py               # Timing sweep (via solve_canonical)
+├── solve.py                   # Canonical pipeline (solve_nest)
+├── benchmark.py               # Timing sweep (via solve_nest)
 ├── outputs/
 │   ├── diagnostics.py         # euler(), get_policy(), get_timing()
 │   ├── plots.py               # Plotting functions

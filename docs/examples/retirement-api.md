@@ -6,14 +6,14 @@ API documentation for `examples/retirement/`.
 
 ## Canonical Pipeline
 
-### `solve_canonical`
+### `solve_nest`
 
-::: examples.retirement.solve.solve_canonical
+::: examples.retirement.solve.solve_nest
 
 ```python
-from examples.retirement.solve import solve_canonical
+from examples.retirement.solve import solve_nest
 
-nest, model, stage_ops = solve_canonical(
+nest, model, stage_ops = solve_nest(
     syntax_dir="examples/retirement/syntax",
     method="FUES",
     calib_overrides={"beta": 0.96},
@@ -40,13 +40,13 @@ nest, model, stage_ops = solve_canonical(
 
 ---
 
-### `_build_and_solve_nest`
+### `_accrete_nest`
 
 The core function (internal).  Accretively builds and solves the nest one period at a time.
 
 For each \(h = 0, 1, \ldots, T{-}1\) (distance from terminal):
 
-1. Build the period via the dolo-plus pipeline (`build_period`).
+1. Build the period via the dolo-plus pipeline (`instantiate_period`).
 2. Compile equation callables + build stage operators.
 3. Assemble continuation from the previous solution (terminal condition at \(h = 0\)).
 4. Solve the period in reverse topological order: `retire_cons` → `work_cons` → `labour_mkt_decision`.
@@ -159,7 +159,7 @@ All parameters are required — canonical values live in `syntax/calibration.yam
 from examples.retirement.model import RetirementModel
 
 # Via canonical pipeline (preferred):
-nest, model, stage_ops = solve_canonical("examples/retirement/syntax")
+nest, model, stage_ops = solve_nest("examples/retirement/syntax")
 
 # Via test defaults (for unit tests only):
 model = RetirementModel.with_test_defaults(grid_size=500)
@@ -185,7 +185,7 @@ model = RetirementModel.with_test_defaults(grid_size=500)
 Construct from a dolo-plus calibrated period dict:
 
 ```python
-period = build_period(params, syntax_dir)
+period = instantiate_period(params, syntax_dir)
 model = RetirementModel.from_period(period)
 ```
 
@@ -279,12 +279,12 @@ Mean log10 deviation from a high-resolution reference solution.
 
 ## Period Construction
 
-### `build_period`
+### `instantiate_period`
 
 ```python
-from examples.retirement.solve import build_period
+from examples.retirement.solve import instantiate_period
 
-period = build_period(
+period = instantiate_period(
     params={"r": 0.02, "beta": 0.98, "delta": 1.0, ...},
     syntax_dir="examples/retirement/syntax",
 )

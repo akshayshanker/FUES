@@ -90,7 +90,7 @@ FUES is 5-20x faster than DC-EGM and 10-20x faster than RFC across all configura
 
 ```
 examples/retirement/
-├── run.py           # CLI entry point (uses solve_canonical)
+├── run.py           # CLI entry point (uses solve_nest)
 ├── syntax/                     # dolo-plus YAML declarations (single source of truth)
 │   ├── period.yaml             # Period template (stage list)
 │   ├── calibration.yaml        # r, beta, delta, y, b, smooth_sigma
@@ -100,8 +100,8 @@ examples/retirement/
 │       ├── work_cons/            # Worker EGM + FUES
 │       └── retire_cons/          # Retiree EGM
 ├── model.py                    # Model class + Operator_Factory
-├── solve.py                    # Canonical pipeline (solve_canonical)
-├── benchmark.py                # Timing sweeps (via solve_canonical)
+├── solve.py                    # Canonical pipeline (solve_nest)
+├── benchmark.py                # Timing sweeps (via solve_nest)
 └── outputs/
     ├── diagnostics.py          # Nest accessors, euler, deviation
     ├── plots.py                # EGM grid and policy plots

@@ -67,7 +67,7 @@ def _load_yaml(path):
         return yaml.safe_load(f)
 
 
-def build_period(params, syntax_dir):
+def instantiate_period(params, syntax_dir):
     """Build one period via the dolo-plus three-functor pipeline.
 
     For every stage declared in the period template,
@@ -123,7 +123,7 @@ def build_period_callables(period):
     Parameters
     ----------
     period : dict
-        Calibrated period from :func:`build_period`
+        Calibrated period from :func:`instantiate_period`
         (unused; reserved for future whisperer).
 
     Returns
@@ -142,7 +142,7 @@ def build_period_callables(period):
 # Part B -- Accretive nest build + solve
 # ============================================================
 
-def _build_and_solve_nest(
+def _accrete_nest(
     T, params, syntax_dir, method='FUES',
     model=None, stage_ops=None,
 ):
@@ -190,7 +190,7 @@ def _build_and_solve_nest(
 
         # 1. Build period via three-functor pipeline
         p = params[h] if is_schedule else params
-        period = build_period(p, syntax_dir)
+        period = instantiate_period(p, syntax_dir)
         nest["periods"].append(period)
         nest["twisters"].append(
             None if h == 0 else INTER_PERIOD_TWISTER
@@ -283,7 +283,7 @@ def _build_and_solve_nest(
 # Entry point
 # ============================================================
 
-def solve_canonical(syntax_dir, method='FUES',
+def solve_nest(syntax_dir, method='FUES',
                     calib_overrides=None, config_overrides=None):
     """Canonical pipeline: load config, build nest, solve.
 
@@ -293,12 +293,12 @@ def solve_canonical(syntax_dir, method='FUES',
        ``settings.yaml`` (numerical/structural settings).
     2. Apply overrides at the correct abstraction level.
     3. Build and solve the nest via
-       :func:`_build_and_solve_nest`.
+       :func:`_accrete_nest`.
 
     The ``method`` parameter (FUES/DCEGM/RFC/CONSAV) is a
     methodization concern -- it selects the upper-envelope
     algorithm.  Method overrides per stage are bound during
-    the methodize functor in :func:`build_period` via the
+    the methodize functor in :func:`instantiate_period` via the
     ``*_methods.yml`` files.
 
     Parameters
@@ -340,7 +340,7 @@ def solve_canonical(syntax_dir, method='FUES',
     if config_overrides:
         settings.update(config_overrides)
 
-    # Merge into a single params dict for build_period.
+    # Merge into a single params dict for instantiate_period.
     # calibrate_stage only picks params declared in each
     # stage's parameters: list; extra keys are ignored.
     # Settings are consumed by configure_stage via the
@@ -349,6 +349,6 @@ def solve_canonical(syntax_dir, method='FUES',
 
     T = int(settings.get('T', calibration.get('T', 20)))
 
-    return _build_and_solve_nest(
+    return _accrete_nest(
         T, merged_params, syntax_dir, method=method,
     )
