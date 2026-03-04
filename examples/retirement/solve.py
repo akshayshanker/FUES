@@ -25,12 +25,34 @@ from .model import (
     _default_u, _default_du, _default_uc_inv, _default_ddu,
 )
 
-# Inter-period twister (spec 0.1h S3.3): rename at period
-# boundary.  Maps cntn-perch poststates to arvl-perch prestates.
-# This is a two-track state space: the worker track (b -> a)
-# and the retiree track (b_ret -> a_ret) persist independently
-# because retirement is an absorbing state.
-INTER_PERIOD_TWISTER = {"b": "a", "b_ret": "a_ret"}
+def _load_twister(syntax_dir):
+    """Load the inter-period twister from ``nest.yaml``.
+
+    The twister maps cntn-perch poststates to arvl-perch
+    prestates across period boundaries (spec 0.1h S3.3).
+
+    Returns the first ``inter_connectors`` entry (all are
+    identical for stationary models).
+    """
+    path = Path(syntax_dir) / "nest.yaml"
+
+    # nest.yaml uses custom tags (!period) — add a
+    # pass-through constructor so safe_load doesn't choke.
+    class _Loader(yaml.SafeLoader):
+        pass
+    _Loader.add_multi_constructor(
+        '', lambda loader, suffix, node:
+        loader.construct_mapping(node)
+        if isinstance(node, yaml.MappingNode)
+        else None,
+    )
+
+    with open(path) as f:
+        nest_yaml = yaml.load(f, Loader=_Loader)
+    connectors = nest_yaml.get('inter_connectors', [])
+    if connectors:
+        return connectors[0]
+    return {}
 
 
 # ============================================================
@@ -184,6 +206,7 @@ def _accrete_nest(
     """
     nest = {"periods": [], "twisters": [], "solutions": []}
     is_schedule = isinstance(params, list)
+    twister = _load_twister(syntax_dir)
 
     for h in range(T):
         t = T - 1 - h
@@ -192,9 +215,7 @@ def _accrete_nest(
         p = params[h] if is_schedule else params
         period = instantiate_period(p, syntax_dir)
         nest["periods"].append(period)
-        nest["twisters"].append(
-            None if h == 0 else INTER_PERIOD_TWISTER
-        )
+        nest["twisters"].append(None if h == 0 else twister)
 
         # 2. Build model + stage operators (once for stationary)
         if model is None or stage_ops is None:
