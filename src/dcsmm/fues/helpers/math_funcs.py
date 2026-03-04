@@ -973,11 +973,95 @@ def _forced_intersection_twopoint(
 
 # ============== Circular Buffer Utilities ==============
 
-@njit
+@njit(cache=True)
 def circ_put(buf, head, value):
     """Write *value* at *head* position, return new head index."""
     buf[head] = value
     return (head + 1) % buf.size
+
+
+@njit(cache=True)
+def _merge_sorted_with_few(
+    main_e, main_v, main_p1, main_p2, main_d,
+    few_e, few_v, few_p1, few_p2, few_d,
+):
+    """Merge sorted main arrays with a small secondary set via linear merge.
+
+    Parameters
+    ----------
+    main_e, main_v, main_p1, main_p2, main_d : 1d arrays
+        Sorted main (kept) arrays.
+    few_e, few_v, few_p1, few_p2, few_d : 1d arrays
+        Small unsorted intersection arrays (typically 2-6 points).
+
+    Returns
+    -------
+    out_e, out_v, out_p1, out_p2, out_d : 1d arrays
+        Merged sorted arrays.
+    is_inter : 1d bool array
+        True for elements originating from the few (intersection) arrays.
+    """
+    K = main_e.size
+    J = few_e.size
+    N = K + J
+
+    out_e = np.empty(N)
+    out_v = np.empty(N)
+    out_p1 = np.empty(N)
+    out_p2 = np.empty(N)
+    out_d = np.empty(N)
+    is_inter = np.zeros(N, dtype=np.bool_)
+
+    # Sort the few (intersection) arrays — typically J <= 6, argsort is fine
+    si = np.argsort(few_e)
+    f_e = few_e[si]
+    f_v = few_v[si]
+    f_p1 = few_p1[si]
+    f_p2 = few_p2[si]
+    f_d = few_d[si]
+
+    # Linear merge
+    i = 0
+    j = 0
+    k = 0
+    while i < K and j < J:
+        if main_e[i] <= f_e[j]:
+            out_e[k] = main_e[i]
+            out_v[k] = main_v[i]
+            out_p1[k] = main_p1[i]
+            out_p2[k] = main_p2[i]
+            out_d[k] = main_d[i]
+            i += 1
+        else:
+            out_e[k] = f_e[j]
+            out_v[k] = f_v[j]
+            out_p1[k] = f_p1[j]
+            out_p2[k] = f_p2[j]
+            out_d[k] = f_d[j]
+            is_inter[k] = True
+            j += 1
+        k += 1
+
+    while i < K:
+        out_e[k] = main_e[i]
+        out_v[k] = main_v[i]
+        out_p1[k] = main_p1[i]
+        out_p2[k] = main_p2[i]
+        out_d[k] = main_d[i]
+        i += 1
+        k += 1
+
+    while j < J:
+        out_e[k] = f_e[j]
+        out_v[k] = f_v[j]
+        out_p1[k] = f_p1[j]
+        out_p2[k] = f_p2[j]
+        out_d[k] = f_d[j]
+        is_inter[k] = True
+        j += 1
+        k += 1
+
+    return out_e, out_v, out_p1, out_p2, out_d, is_inter
 
 
 # ============== Post-Interpolation Jump Correction ==============

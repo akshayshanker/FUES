@@ -329,7 +329,7 @@ def _fues_engine(
         k: v for k, v in kwargs.items()
         if k in ('endog_mbar', 'padding_mbar', 'single_intersection',
                  'no_double_jumps', 'disable_jump_checks',
-                 'return_intersections_separately',
+                 'return_intersections_separately', 'assume_sorted',
                  'eps_d', 'eps_sep', 'eps_fwd_back', 'parallel_guard')
     }
 

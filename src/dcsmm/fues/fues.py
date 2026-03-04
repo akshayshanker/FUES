@@ -12,6 +12,7 @@ from .helpers.math_funcs import (
     circ_put,
     _forced_intersection_twopoint,
     _force_crossing_inside,
+    _merge_sorted_with_few,
 )
 
 # Constants - adjusted for float64 numerical stability
@@ -86,7 +87,7 @@ def make_pair_from_indices_or_fallback(e, v, a, p2, d, lo_idx, hi_idx, fb_lo, fb
                 e[fb_hi], v[fb_hi], a[fb_hi], p2[fb_hi], d[fb_hi])
 
 
-@njit
+@njit(cache=True)
 def backward_scan_combined(
     m_buf, m_head, LB,
     x_dcsn_hat, vlu, kappa,
@@ -136,7 +137,7 @@ def backward_scan_combined(
 
 
 
-@njit
+@njit(cache=True)
 def find_forward_same_branch(e_grid, a_prime, start_idx, j_idx, N, LB, m_bar, eps_d=EPS_D, eps_fwd_back=EPS_fwd_back):
     """Find the first point in forward scan that's on same branch.
 
@@ -152,7 +153,7 @@ def find_forward_same_branch(e_grid, a_prime, start_idx, j_idx, N, LB, m_bar, ep
     return False, -1
 
 
-@njit
+@njit(cache=True)
 def check_intersection_within_bounds(e_grid, vlu, j, idx_f, i_plus_1, idx_b, eps_d=EPS_D, parallel_guard=PARALLEL_GUARD):
     """
     Check if the natural intersection of segment [j, idx_f] with segment [i+1, idx_b] 
@@ -217,7 +218,7 @@ def check_intersection_within_bounds(e_grid, vlu, j, idx_f, i_plus_1, idx_b, eps
     else:
         return False
 
-@njit
+@njit(cache=True)
 def forward_scan_case_a(e_grid, vlu, a_prime, i, j, N, LB, m_bar, g_1, eps_d=EPS_D, eps_fwd_back=EPS_fwd_back):
     """Forward scan validation for Case A (right-turn jump).
 
@@ -270,9 +271,8 @@ def forward_scan_case_a(e_grid, vlu, a_prime, i, j, N, LB, m_bar, g_1, eps_d=EPS
             
             found_forward_same_branch = True
             idx_f_return = idx_f
-            # Compute g_f_vlu for this point
-            de_1 = max(eps_d, e_grid[i + 2 + f] - e_grid[j])
-            g_f_vlu_at_idx = (vlu[i + 2 + f] - vlu[j]) / de_1
+            # Compute g_f_vlu for this point (de already equals max(eps_d, e_grid[i+2+f]-e_grid[j]))
+            g_f_vlu_at_idx = (vlu[i + 2 + f] - vlu[j]) / de
             if g_1 > g_f_vlu_at_idx:
                 keep_i1 = True
                 break
@@ -283,7 +283,7 @@ def forward_scan_case_a(e_grid, vlu, a_prime, i, j, N, LB, m_bar, g_1, eps_d=EPS
     return keep_i1, idx_f_return, found_forward_same_branch
 
 
-@njit
+@njit(cache=True)
 def _postclean_double_jump_mask(e_grid, a_prime, m_bar, skip_mask, eps_d=EPS_D):
     """
     Keep[i] == False  iff BOTH neighbors of i are policy jumps > m_bar.
@@ -337,7 +337,8 @@ def FUES(
     return_intersections_separately=False,
     single_intersection=False,
     no_double_jumps=True,
-    disable_jump_checks=False,  # NEW: Control manual overrides for jump checks
+    disable_jump_checks=False,
+    assume_sorted=False,
     eps_d=None, eps_sep=None, eps_fwd_back=None, parallel_guard=None,
 ):
     """
@@ -444,12 +445,13 @@ def FUES(
     policy_2 = np.asarray(policy_2, dtype=np.float64)
     del_a = np.asarray(del_a, dtype=np.float64)
 
-    idx = np.argsort(e_grid)
-    e_grid = e_grid[idx]
-    vlu = vlu[idx]
-    policy_1 = policy_1[idx]
-    policy_2 = policy_2[idx]
-    del_a = del_a[idx]
+    if not assume_sorted and not np.all(np.diff(e_grid) >= 0):
+        idx = np.argsort(e_grid)
+        e_grid = e_grid[idx]
+        vlu = vlu[idx]
+        policy_1 = policy_1[idx]
+        policy_2 = policy_2[idx]
+        del_a = del_a[idx]
 
     e_out, keep_scan, intersections = _scan(
         e_grid, vlu, policy_1, policy_2, del_a,
@@ -478,43 +480,16 @@ def FUES(
             fues_result = (e_kept, v_kept, p1_kept, p2_kept, d_kept)
             return fues_result, inter_tuple
         
-        n_kept = e_kept.size
-        n_inter = intersections.shape[0]
-        n_total = n_kept + n_inter
-
-        all_e = np.empty(n_total, dtype=e_kept.dtype)
-        all_v = np.empty(n_total, dtype=v_kept.dtype)
-        all_p1 = np.empty(n_total, dtype=p1_kept.dtype)
-        all_p2 = np.empty(n_total, dtype=p2_kept.dtype)
-        all_d = np.empty(n_total, dtype=d_kept.dtype)
-        is_inter = np.zeros(n_total, dtype=np.bool_)
-
-        all_e[:n_kept] = e_kept
-        all_e[n_kept:] = intersections[:, 0]
-        all_v[:n_kept] = v_kept
-        all_v[n_kept:] = intersections[:, 1]
-        all_p1[:n_kept] = p1_kept
-        all_p1[n_kept:] = intersections[:, 2]
-        all_p2[:n_kept] = p2_kept
-        all_p2[n_kept:] = intersections[:, 3]
-        all_d[:n_kept] = d_kept
-        all_d[n_kept:] = intersections[:, 4]
-        is_inter[n_kept:] = True
-
-        sort_idx = np.argsort(all_e)
-        all_e = all_e[sort_idx]
-        all_v = all_v[sort_idx]
-        all_p1 = all_p1[sort_idx]
-        all_p2 = all_p2[sort_idx]
-        all_d = all_d[sort_idx]
-        is_inter = is_inter[sort_idx]
+        all_e, all_v, all_p1, all_p2, all_d, is_inter = _merge_sorted_with_few(
+            e_kept, v_kept, p1_kept, p2_kept, d_kept,
+            intersections[:, 0], intersections[:, 1], intersections[:, 2],
+            intersections[:, 3], intersections[:, 4],
+        )
 
         post_mask = _postclean_double_jump_mask(all_e, all_p2, m_bar, is_inter, eps_d)
 
-        final_mask = post_mask
-
-        return (all_e[final_mask], all_v[final_mask],
-                all_p1[final_mask], all_p2[final_mask], all_d[final_mask])
+        return (all_e[post_mask], all_v[post_mask],
+                all_p1[post_mask], all_p2[post_mask], all_d[post_mask])
 
     is_inter = np.zeros(e_kept.size, dtype=np.bool_)
     post_mask = _postclean_double_jump_mask(e_kept, p2_kept, m_bar, is_inter, eps_d)
@@ -535,7 +510,7 @@ def FUES(
             p1_kept[post_mask], p2_kept[post_mask], d_kept[post_mask])
 
 
-@njit
+@njit(cache=True)
 def _scan(
     e_grid,
     vlu,
@@ -610,7 +585,7 @@ def _scan(
 
     # Adjust capacity based on whether we're using single or double intersections
     max_inter = (N - 1) if single_intersection else 2 * (N - 1)
-    intersections = np.full((max_inter, 5), np.nan)
+    intersections = np.empty((max_inter, 5))
     n_inter = 0
 
     use_intersection_as_k = False
@@ -626,6 +601,8 @@ def _scan(
     last_was_jump = False
     prev_j = 0
 
+    # Pre-compute abs(del_a) for endogenous m_bar (avoids per-iteration np.abs)
+    abs_del_a = np.abs(del_a) if endog_mbar else del_a
 
     for i in range(N - 2):
 
@@ -661,37 +638,20 @@ def _scan(
         inv_de_lead = 1.0 / de_lead
         g_1 = (vlu[i + 1] - vlu[j]) * inv_de_lead
 
-        M_max = max(np.abs(del_a[j]), np.abs(del_a[i + 1])) + padding_mbar
-        
-        if not endog_mbar:
+        if endog_mbar:
+            M_max = max(abs_del_a[j], abs_del_a[i + 1]) + padding_mbar
+        else:
             M_max = m_bar
-            
-
 
         del_pol = a_prime[i + 1] - a_prime[j]
-        #del_pol_2 = policy_2[i + 1] - policy_2[j]
         g_tilde_a = np.abs(del_pol * inv_de_lead)
-        #g_tilde_a_2 = np.abs(del_pol_2 * inv_de_lead)
-
-        #del_pol_a = (e_grid[i + 1] - a_prime[i + 1]) - (e_grid[j] - a_prime[j])
-        
-        #del_pol_2 = policy_2[i + 1] - policy_2[j]
 
         # Classify turn direction and jump status
         left_turn_any = g_1 > g_jm1
-        jump_now = (g_tilde_a > M_max) #or (g_tilde_a_2 > M_max)
-        #jump_now = g_tilde_a > M_max
+        jump_now = g_tilde_a > M_max
 
-        #if del_pol_2> eps_d:
-        #    if g_tilde_a_2 > M_max:
-        #        jump_now = True
-
-        
-        
         left_turn_jump = left_turn_any and jump_now
-        left_turn_no_jump = left_turn_any and (not jump_now)
         right_turn_jump = (not left_turn_any) and jump_now
-        right_turn_no_jump = (not left_turn_any) and (not jump_now)
 
 
 
@@ -902,8 +862,8 @@ def _scan(
             last_was_jump = jump_now
             continue
 
-        # Case R: Right turn without jump
-        if right_turn_no_jump or left_turn_no_jump:
+        # Case R: No jump (right or left turn without policy jump)
+        if not jump_now:
             k = j
             prev_j = j
             j = i + 1
