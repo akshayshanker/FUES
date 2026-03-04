@@ -625,12 +625,6 @@ def Operator_Factory(cp, equations=None):
             egrid1, q_cntn, c_cntn, dela_clean, min_a_val, v_worker_cntn)
         t_approx = time.time() - t_s3
 
-        # Debug: print fine-grained timing
-        print(f"  [work_cons] invert={t_invert*1000:.3f}ms "
-              f"ue={ue_time*1000:.3f}ms unpack={t_unpack*1000:.3f}ms "
-              f"approx={t_approx*1000:.3f}ms "
-              f"n_ref={len(egrid1)}")
-
         return (v_worker_arvl,        # v_worker[<] (arrival)
                 c_worker_arvl,        # c_worker[<] (arrival)
                 dela_work_t,          # da[<] (arrival)
