@@ -13,9 +13,8 @@ Author: Akshay Shanker, akshay.shanker@me.com.
 
 import numpy as np
 import time
-from numba import njit, types
-from numba.typed import Dict
-from dcsmm.fues.helpers.math_funcs import interp_as, correct_jumps1d
+from numba import njit
+from dcsmm.fues.helpers.math_funcs import interp_as, interp_as_2, interp_as_3
 from dcsmm.uenvelope import EGM_UE as egm_ue_global
 
 
@@ -341,9 +340,8 @@ def Operator_Factory(cp, equations=None):
 
         # Interpolate from endogenous to exogenous arrival grid
         min_a_val = endog_grid[0]
-        c_arvl = interp_as(endog_grid, c_dcsn_hat, asset_grid_A)
-        v_arvl = interp_as(endog_grid, v_dcsn_hat, asset_grid_A)
-        da_arvl = interp_as(endog_grid, da_dcsn_hat, asset_grid_A)
+        c_arvl, v_arvl, da_arvl = interp_as_3(
+            endog_grid, c_dcsn_hat, v_dcsn_hat, da_dcsn_hat, asset_grid_A)
 
         # Constrained region: consume down to borrowing constraint
         constrained_idx = np.where(asset_grid_A <= min_a_val)
@@ -452,31 +450,14 @@ def Operator_Factory(cp, equations=None):
 
         asset_grid_wealth = R * asset_grid_A + y
 
-        vf_work_t = interp_as(egrid1, vf_clean, asset_grid_wealth)
-        sigma_work_t = interp_as(egrid1, sigma_clean, asset_grid_wealth)
-        dela_work_t = interp_as(egrid1, dela_clean, asset_grid_wealth)
-
-        # Apply jump correction to smooth out discontinuities
-        gradient_jump_threshold = 2  # This threshold can be adjusted
-        policy_value_dict = Dict.empty(
-            key_type=types.unicode_type,
-            value_type=types.float64[:]
-        )
-        policy_value_dict['sigma'] = sigma_work_t
-        policy_value_dict['dela'] = dela_work_t
-
-        vf_work_t_corrected, corrected_policies = correct_jumps1d(
-            vf_work_t, asset_grid_wealth, gradient_jump_threshold, policy_value_dict
-        )
-        vf_work_t = vf_work_t_corrected
-        sigma_work_t = corrected_policies['sigma']
-        dela_work_t = corrected_policies['dela']
+        vf_work_t, sigma_work_t = interp_as_2(
+            egrid1, vf_clean, sigma_clean, asset_grid_wealth)
+        dela_work_t = np.zeros(grid_size)
 
         constrained_indices = np.where(asset_grid_wealth < min_a_val)
         sigma_work_t[constrained_indices] = asset_grid_wealth[constrained_indices] - asset_grid_A[0]
         vf_work_t[constrained_indices] = u(
             asset_grid_wealth[constrained_indices]) + beta * VF_prime_work[0] - delta
-        dela_work_t[constrained_indices] = 0
 
         return vf_work_t, sigma_work_t, dela_work_t
 
@@ -599,19 +580,19 @@ def Operator_Factory(cp, equations=None):
             Unrefined asset derivative (pre-UE, diagnostics).
         """
 
-        # Step 1: Invert Euler equation to get unrefined consumption, q function,
-        # dcsn state and derivative of asset function defined on continuation
-        # state
+        # Step 1: Invert Euler
+        t_s1 = time.time()
         cons_cntn_hat, q_cntn_hat, endog_grid, del_a_unrefined = \
             _invert_euler(
                 lambda_worker_cntn,
                 dlambda_worker_cntn,
                 v_worker_cntn)
+        t_invert = time.time() - t_s1
 
         min_a_val = endog_grid[0]
 
         # Step 2: Upper-envelope via egm_ue_global
-        time_start_fues = time.time()
+        t_s2 = time.time()
         refined, _, _ = egm_ue_global(
             endog_grid,                          # x_dcsn_hat
             q_cntn_hat,                          # qf_hat
@@ -623,25 +604,32 @@ def Operator_Factory(cp, equations=None):
             {"func": u, "args": {}},             # u_func placeholder
             ue_method=method.upper(),
             m_bar=m_bar,
-            lb=20,
+            lb=10,
             rfc_radius=0.75,
             rfc_n_iter=40,
         )
+        ue_time = time.time() - t_s2
+
+        # Step 2b: Unpack refined dict
+        t_s2b = time.time()
         egrid1 = refined["x_dcsn_ref"]
         q_cntn = refined["v_dcsn_ref"]
         c_cntn = refined["kappa_ref"]
         a_prime_clean = refined["x_cntn_ref"]
-        dela_clean = np.gradient(a_prime_clean, egrid1) if len(egrid1) > 1 \
-            else np.zeros_like(a_prime_clean)
-        time_end_fues = time.time()
+        dela_clean = np.zeros_like(a_prime_clean)
+        t_unpack = time.time() - t_s2b
 
         # Step 3: Approximate worker policy and VF on arvl grid
-        # Note we interopolate directly on arvl grid since there is no shock
-
+        t_s3 = time.time()
         v_worker_arvl, c_worker_arvl, dela_work_t = _approx_dcsn_state_functions(
             egrid1, q_cntn, c_cntn, dela_clean, min_a_val, v_worker_cntn)
+        t_approx = time.time() - t_s3
 
-        ue_time = time.time() - time_start_fues
+        # Debug: print fine-grained timing
+        print(f"  [work_cons] invert={t_invert*1000:.3f}ms "
+              f"ue={ue_time*1000:.3f}ms unpack={t_unpack*1000:.3f}ms "
+              f"approx={t_approx*1000:.3f}ms "
+              f"n_ref={len(egrid1)}")
 
         return (v_worker_arvl,        # v_worker[<] (arrival)
                 c_worker_arvl,        # c_worker[<] (arrival)

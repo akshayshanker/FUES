@@ -1502,6 +1502,8 @@ def main(argv=None):
 
                             # Generate consumption policy comparison plot (FUES vs VFI side-by-side)
                             # Only for EGM-based methods when baseline is available
+                            # NOTE: For simpler comparison plotting, use scripts/plot_policy_comparison.py
+                            # which reads from CSV exports and doesn't require loading models.
                             print(f"  [DEBUG] Checking comparison plot: method={method}, needs_baseline={settings.needs_baseline}, has_ref_params={hasattr(runner, 'ref_params')}")
                             if method in ['FUES', 'CONSAV', 'DCEGM']:
                                 try:

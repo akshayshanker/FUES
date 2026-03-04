@@ -162,7 +162,7 @@ def csv_generate_plots(model, method, image_dir, plot_period=0, bounds=None,
         print(f"[CSV Export] Skipping EGM CSV exports for {method} (--skip-egm-plots enabled)")
     
     # Export policy function data to appropriate directory
-    if image_dir.name == "images" and "bundles" in str(image_dir):
+    if image_dir.name.startswith("images") and "bundles" in str(image_dir):
         export_policy_data_csv(policy_csv_dir, sol, grid, H_indices, y_idx_list)
     else:
         export_policy_data_csv(csv_dir, sol, grid, H_indices, y_idx_list)
@@ -268,8 +268,12 @@ def export_constraint_star_csv(filepath, data_dict, grid_key, H_idx, y_idx, h_va
 
 def export_policy_data_csv(csv_dir, sol, grid, H_indices, y_idx_list):
     """Export policy function data to CSV."""
-    
+    from pathlib import Path
+    csv_dir = Path(csv_dir)
+    csv_dir.mkdir(parents=True, exist_ok=True)
+
     # Export consumption policy
+    exported_count = 0
     if hasattr(sol, 'policy') and hasattr(sol.policy, 'c'):
         for y_idx in y_idx_list:
             data_rows = []
@@ -278,11 +282,14 @@ def export_policy_data_csv(csv_dir, sol, grid, H_indices, y_idx_list):
                     h_val = grid.H_nxt[H_idx] if grid.H_nxt is not None else H_idx
                     c_val = sol.policy.c[w_idx, H_idx, y_idx]
                     data_rows.append([w, h_val, H_idx, y_idx, c_val])
-            
-            with open(csv_dir / f'policy_c_y{y_idx}.csv', 'w', newline='') as f:
+
+            out_path = csv_dir / f'policy_c_y{y_idx}.csv'
+            with open(out_path, 'w', newline='') as f:
                 writer = csv.writer(f)
                 writer.writerow(['w', 'h_value', 'H_idx', 'y_idx', 'consumption'])
                 writer.writerows(data_rows)
+            exported_count += 1
+        print(f"[Policy CSV] Exported {exported_count} consumption policy files to {csv_dir}")
     
     # Export value function
     if hasattr(sol, 'vlu'):

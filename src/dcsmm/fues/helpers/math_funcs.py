@@ -1,6 +1,7 @@
 import math
 from numba import njit
 import numpy as np
+from dcsmm.fues.constants import EPS_D, EPS_FWD_BACK
 
 @njit
 def rootsearch(f,a,b,dx, h_prime,z, Ud_prime_a, Ud_prime_h,t):
@@ -185,7 +186,10 @@ def f(x):
 
 @njit(cache=True)
 def interp_as(xp, yp, x, extrap=False):
-    """Function interpolates 1D (array version) with linear extrapolation.
+    """Interpolate 1D with linear extrapolation.
+
+    When *x* is sorted (ascending), uses a linear walk instead of
+    binary search per point, giving O(n + m) instead of O(n log m).
 
     Parameters
     ----------
@@ -195,6 +199,8 @@ def interp_as(xp, yp, x, extrap=False):
         y coordinates of data points
     x : 1D array
         points to interpolate
+    extrap : bool
+        If True, linearly extrapolate beyond xp bounds.
 
     Returns
     -------
@@ -215,54 +221,65 @@ def interp_as(xp, yp, x, extrap=False):
             evals[i] = yp[0]
         return evals
 
-    # Pre-compute bounds and extrapolation slopes
     x_lo, x_hi = xp[0], xp[-1]
-    y_lo, y_hi = yp[0], yp[-1]
 
-    # Left extrapolation slope
+    # Extrapolation slopes
     dx_left = xp[1] - xp[0]
-    if dx_left != 0.0:
-        slope_left = (yp[1] - yp[0]) / dx_left
-    else:
-        slope_left = 0.0
-
-    # Right extrapolation slope
+    slope_left = (yp[1] - yp[0]) / dx_left if dx_left != 0.0 else 0.0
     dx_right = xp[-1] - xp[-2]
-    if dx_right != 0.0:
-        slope_right = (yp[-1] - yp[-2]) / dx_right
-    else:
-        slope_right = 0.0
+    slope_right = (yp[-1] - yp[-2]) / dx_right if dx_right != 0.0 else 0.0
 
-    for i in range(n_x):
-        xi = x[i]
+    # Detect whether x is sorted (check first few + last)
+    x_sorted = True
+    check_n = min(n_x, 8)
+    for i in range(1, check_n):
+        if x[i] < x[i - 1]:
+            x_sorted = False
+            break
+    if x_sorted and n_x > check_n and x[-1] < x[-2]:
+        x_sorted = False
 
-        if xi <= x_lo:
-            if extrap:
-                evals[i] = y_lo + (xi - x_lo) * slope_left
+    if x_sorted:
+        # Linear walk: O(n + m)
+        j = 0  # current interval in xp
+        for i in range(n_x):
+            xi = x[i]
+            if xi <= x_lo:
+                evals[i] = yp[0] + (xi - x_lo) * slope_left if extrap else yp[0]
+            elif xi >= x_hi:
+                evals[i] = yp[-1] + (xi - x_hi) * slope_right if extrap else yp[-1]
             else:
-                evals[i] = y_lo
-        elif xi >= x_hi:
-            if extrap:
-                evals[i] = y_hi + (xi - x_hi) * slope_right
-            else:
-                evals[i] = y_hi
-        else:
-            # Binary search for interval: find j such that xp[j] <= xi < xp[j+1]
-            lo, hi = 0, n_xp - 1
-            while hi - lo > 1:
-                mid = (lo + hi) >> 1
-                if xp[mid] <= xi:
-                    lo = mid
+                # Walk j forward until xp[j+1] > xi
+                while j < n_xp - 2 and xp[j + 1] <= xi:
+                    j += 1
+                dx = xp[j + 1] - xp[j]
+                if dx != 0.0:
+                    t = (xi - xp[j]) / dx
+                    evals[i] = yp[j] + t * (yp[j + 1] - yp[j])
                 else:
-                    hi = mid
-
-            # Linear interpolation
-            dx = xp[hi] - xp[lo]
-            if dx != 0.0:
-                t = (xi - xp[lo]) / dx
-                evals[i] = yp[lo] + t * (yp[hi] - yp[lo])
+                    evals[i] = yp[j]
+    else:
+        # Fallback: binary search per point
+        for i in range(n_x):
+            xi = x[i]
+            if xi <= x_lo:
+                evals[i] = yp[0] + (xi - x_lo) * slope_left if extrap else yp[0]
+            elif xi >= x_hi:
+                evals[i] = yp[-1] + (xi - x_hi) * slope_right if extrap else yp[-1]
             else:
-                evals[i] = yp[lo]
+                lo, hi = 0, n_xp - 1
+                while hi - lo > 1:
+                    mid = (lo + hi) >> 1
+                    if xp[mid] <= xi:
+                        lo = mid
+                    else:
+                        hi = mid
+                dx = xp[hi] - xp[lo]
+                if dx != 0.0:
+                    t = (xi - xp[lo]) / dx
+                    evals[i] = yp[lo] + t * (yp[hi] - yp[lo])
+                else:
+                    evals[i] = yp[lo]
 
     return evals
 
@@ -1030,3 +1047,265 @@ def correct_jumps1d_arr(data, x, gradient_jump_threshold, v_arr, d_arr, a_arr):
             corrected_a[i] = 0.5 * (a_arr[i - 1] + a_arr[i + 1])
 
     return corrected_data, corrected_v, corrected_d, corrected_a
+
+
+@njit(cache=True)
+def correct_jumps_vf_pol(vf, x, threshold, pol1, pol2):
+    """Correct jump discontinuities in value function and two policy arrays.
+
+    Uses slope extrapolation from the left neighbour (same algorithm as
+    ``correct_jumps1d``), but takes explicit arrays instead of a typed
+    Dict to avoid construction overhead in the caller.
+
+    Parameters
+    ----------
+    vf : np.ndarray
+        Value function array (corrected in-place copy).
+    x : np.ndarray
+        Grid coordinates.
+    threshold : float
+        Gradient magnitude above which a jump is flagged.
+    pol1, pol2 : np.ndarray
+        Two policy arrays corrected alongside *vf*.
+
+    Returns
+    -------
+    corrected_vf, corrected_pol1, corrected_pol2 : np.ndarray
+    """
+    n = len(vf)
+    corrected_vf = np.copy(vf)
+    corrected_p1 = np.copy(pol1)
+    corrected_p2 = np.copy(pol2)
+
+    gradients = calculate_gradient_1d(vf, x)
+
+    for i in range(2, n - 1):
+        left_jump = np.abs(gradients[i]) > threshold
+        right_jump = np.abs(gradients[i + 1]) > threshold
+
+        if left_jump and right_jump:
+            dx = x[i - 1] - x[i - 2]
+            if dx != 0.0:
+                step = x[i] - x[i - 1]
+                corrected_vf[i] = corrected_vf[i - 1] + \
+                    (corrected_vf[i - 1] - corrected_vf[i - 2]) / dx * step
+                corrected_p1[i] = corrected_p1[i - 1] + \
+                    (corrected_p1[i - 1] - corrected_p1[i - 2]) / dx * step
+                corrected_p2[i] = corrected_p2[i - 1] + \
+                    (corrected_p2[i - 1] - corrected_p2[i - 2]) / dx * step
+
+        elif np.isnan(corrected_vf[i]) and i >= 3:
+            dx = x[i - 2] - x[i - 3]
+            if dx != 0.0:
+                step = x[i] - x[i - 2]
+                corrected_vf[i] = corrected_vf[i - 2] + \
+                    (corrected_vf[i - 2] - corrected_vf[i - 3]) / dx * step
+                corrected_p1[i] = corrected_p1[i - 2] + \
+                    (corrected_p1[i - 2] - corrected_p1[i - 3]) / dx * step
+                corrected_p2[i] = corrected_p2[i - 2] + \
+                    (corrected_p2[i - 2] - corrected_p2[i - 3]) / dx * step
+
+    return corrected_vf, corrected_p1, corrected_p2
+
+
+# ============== Fused Multi-Array Interpolation ==============
+
+
+@njit(cache=True)
+def interp_as_3(xp, yp1, yp2, yp3, x):
+    """Interpolate three y-arrays on the same (xp, x) grids in one walk.
+
+    Both xp and x must be sorted ascending. Avoids tripling the walk
+    cost when interpolating multiple policies on the same grid.
+
+    Returns
+    -------
+    out1, out2, out3 : 1D arrays
+    """
+    n_x = len(x)
+    n_xp = len(xp)
+    out1 = np.empty(n_x)
+    out2 = np.empty(n_x)
+    out3 = np.empty(n_x)
+
+    if n_xp == 0:
+        for i in range(n_x):
+            out1[i] = 0.0
+            out2[i] = 0.0
+            out3[i] = 0.0
+        return out1, out2, out3
+
+    if n_xp == 1:
+        for i in range(n_x):
+            out1[i] = yp1[0]
+            out2[i] = yp2[0]
+            out3[i] = yp3[0]
+        return out1, out2, out3
+
+    x_lo, x_hi = xp[0], xp[-1]
+
+    j = 0
+    for i in range(n_x):
+        xi = x[i]
+        if xi <= x_lo:
+            out1[i] = yp1[0]
+            out2[i] = yp2[0]
+            out3[i] = yp3[0]
+        elif xi >= x_hi:
+            out1[i] = yp1[-1]
+            out2[i] = yp2[-1]
+            out3[i] = yp3[-1]
+        else:
+            while j < n_xp - 2 and xp[j + 1] <= xi:
+                j += 1
+            dx = xp[j + 1] - xp[j]
+            if dx != 0.0:
+                t = (xi - xp[j]) / dx
+                out1[i] = yp1[j] + t * (yp1[j + 1] - yp1[j])
+                out2[i] = yp2[j] + t * (yp2[j + 1] - yp2[j])
+                out3[i] = yp3[j] + t * (yp3[j + 1] - yp3[j])
+            else:
+                out1[i] = yp1[j]
+                out2[i] = yp2[j]
+                out3[i] = yp3[j]
+
+    return out1, out2, out3
+
+
+@njit(cache=True)
+def interp_as_2(xp, yp1, yp2, x):
+    """Interpolate two y-arrays on the same (xp, x) grids in one walk.
+
+    Both xp and x must be sorted ascending.
+
+    Returns
+    -------
+    out1, out2 : 1D arrays
+    """
+    n_x = len(x)
+    n_xp = len(xp)
+    out1 = np.empty(n_x)
+    out2 = np.empty(n_x)
+
+    if n_xp == 0:
+        for i in range(n_x):
+            out1[i] = 0.0
+            out2[i] = 0.0
+        return out1, out2
+
+    if n_xp == 1:
+        for i in range(n_x):
+            out1[i] = yp1[0]
+            out2[i] = yp2[0]
+        return out1, out2
+
+    x_lo, x_hi = xp[0], xp[-1]
+
+    j = 0
+    for i in range(n_x):
+        xi = x[i]
+        if xi <= x_lo:
+            out1[i] = yp1[0]
+            out2[i] = yp2[0]
+        elif xi >= x_hi:
+            out1[i] = yp1[-1]
+            out2[i] = yp2[-1]
+        else:
+            while j < n_xp - 2 and xp[j + 1] <= xi:
+                j += 1
+            dx = xp[j + 1] - xp[j]
+            if dx != 0.0:
+                t = (xi - xp[j]) / dx
+                out1[i] = yp1[j] + t * (yp1[j + 1] - yp1[j])
+                out2[i] = yp2[j] + t * (yp2[j + 1] - yp2[j])
+            else:
+                out1[i] = yp1[j]
+                out2[i] = yp2[j]
+
+    return out1, out2
+
+
+# ============== Scan Helper Utilities ==============
+
+
+@njit(inline="always")
+def check_same_seg(e_grid, kappa_hat, idx1, idx2, m_bar,
+                   eps_d=EPS_D, eps_fwd_back=EPS_FWD_BACK):
+    """Check if two points are on the same segment (no jump in policy)."""
+    if idx1 < 0 or idx2 < 0 or idx1 >= len(e_grid) or idx2 >= len(e_grid):
+        return False
+    de = max(eps_d, e_grid[idx2] - e_grid[idx1])
+    if de < eps_d * 10:
+        return False
+    g_a = np.abs((kappa_hat[idx2] - kappa_hat[idx1]) / de)
+    return g_a < m_bar and de < eps_fwd_back
+
+
+@njit(inline="always")
+def find_safe_extrapolation_point(e_grid, a_prime, base_idx, N, m_bar,
+                                  forward=True, eps_d=EPS_D,
+                                  eps_fwd_back=EPS_FWD_BACK):
+    """Find a safe point for extrapolation on the same segment as base_idx.
+
+    Returns the index of a point that doesn't jump from base_idx,
+    or base_idx if none found.
+    """
+    if forward:
+        for offset in range(1, min(4, N - base_idx)):
+            test_idx = base_idx + offset
+            if test_idx < N and check_same_seg(
+                e_grid, a_prime, base_idx, test_idx, m_bar, eps_d, eps_fwd_back,
+            ):
+                return test_idx
+    else:
+        for offset in range(1, min(4, base_idx + 1)):
+            test_idx = base_idx - offset
+            if test_idx >= 0 and check_same_seg(
+                e_grid, a_prime, test_idx, base_idx, m_bar, eps_d, eps_fwd_back,
+            ):
+                return test_idx
+    return base_idx
+
+
+@njit(inline="always")
+def make_pair_from_indices_or_fallback(e, v, a, p2, d,
+                                       lo_idx, hi_idx, fb_lo, fb_hi, N):
+    """Build a segment pair from two indices, falling back if either is -1."""
+    fb_lo = max(0, min(fb_lo, N - 1))
+    fb_hi = max(0, min(fb_hi, N - 1))
+
+    if lo_idx != -1 and hi_idx != -1:
+        return (e[lo_idx], v[lo_idx], a[lo_idx], p2[lo_idx], d[lo_idx],
+                e[hi_idx], v[hi_idx], a[hi_idx], p2[hi_idx], d[hi_idx])
+    else:
+        return (e[fb_lo], v[fb_lo], a[fb_lo], p2[fb_lo], d[fb_lo],
+                e[fb_hi], v[fb_hi], a[fb_hi], p2[fb_hi], d[fb_hi])
+
+
+@njit(cache=True)
+def postclean_double_jump_mask(e_grid, a_prime, m_bar, skip_mask, eps_d=EPS_D):
+    """Remove isolated points where both neighbours are policy jumps.
+
+    Keep[i] == False iff BOTH neighbors of i are policy jumps > m_bar.
+    First and last points are always kept.
+    """
+    N = e_grid.size
+    keep = np.ones(N, dtype=np.bool_)
+    if N <= 2:
+        return keep
+
+    for i in range(1, N - 1):
+        deL = e_grid[i] - e_grid[i - 1]
+        deR = e_grid[i + 1] - e_grid[i]
+        if np.abs(deL) < eps_d:
+            deL = eps_d if deL >= 0.0 else -eps_d
+        if np.abs(deR) < eps_d:
+            deR = eps_d if deR >= 0.0 else -eps_d
+
+        gL = np.abs((a_prime[i] - a_prime[i - 1]) / deL)
+        gR = np.abs((a_prime[i + 1] - a_prime[i]) / deR)
+
+        if (gL > m_bar) and (gR > m_bar):
+            keep[i] = False
+
+    return keep

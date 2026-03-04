@@ -2,7 +2,7 @@
 #PBS -N fues-single-core
 #PBS -P tp66
 #PBS -q expresssr
-#PBS -l ncpus=1,mem=30GB,walltime=04:00:00
+#PBS -l ncpus=1,mem=100GB,walltime=04:00:00
 #PBS -l storage=scratch/tp66
 #PBS -l wd
 #PBS -j oe
@@ -120,7 +120,7 @@ for CONFIG_NAME in "${CONFIG_TO_RUN[@]}"; do
 
     python3 -m examples.housing_renting.solve_runner \
       --periods "${CONFIG_REF[periods]}" \
-      --ue-method "FUES, VFI" \
+      --ue-method "FUES, VFI, DCEGM, CONSAV" \
       --output-root "$OUTPUT_DIR" \
       --config-id "${VERSION_TAG}" \
       --RUN-ID "${VERSION_TAG}_${TIMESTAMP}" \
@@ -128,7 +128,7 @@ for CONFIG_NAME in "${CONFIG_TO_RUN[@]}"; do
       --HD-points "${CONFIG_REF[hd_points]}" \
       --grid-points "${CONFIG_REF[grid_points]}" \
       --delta-pb "${CONFIG_REF[delta_pb]}" \
-      --baseline-method "VFI_HDGRID_GPU" \
+      --baseline-method "VFI" \
       --metrics "euler_error" \
       --fresh-fast \
       --csv-export \

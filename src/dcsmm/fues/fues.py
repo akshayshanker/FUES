@@ -669,13 +669,13 @@ def _scan(
 
 
         del_pol = a_prime[i + 1] - a_prime[j]
-        del_pol_2 = policy_2[i + 1] - policy_2[j]
+        #del_pol_2 = policy_2[i + 1] - policy_2[j]
         g_tilde_a = np.abs(del_pol * inv_de_lead)
-        g_tilde_a_2 = np.abs(del_pol_2 * inv_de_lead)
+        #g_tilde_a_2 = np.abs(del_pol_2 * inv_de_lead)
 
-        del_pol_a = (e_grid[i + 1] - a_prime[i + 1]) - (e_grid[j] - a_prime[j])
+        #del_pol_a = (e_grid[i + 1] - a_prime[i + 1]) - (e_grid[j] - a_prime[j])
         
-        del_pol_2 = policy_2[i + 1] - policy_2[j]
+        #del_pol_2 = policy_2[i + 1] - policy_2[j]
 
         # Classify turn direction and jump status
         left_turn_any = g_1 > g_jm1
