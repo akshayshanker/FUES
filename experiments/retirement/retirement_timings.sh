@@ -67,8 +67,8 @@ if [[ -n "${PBS_JOBFS:-}" ]]; then
     DCSMM_VENV="${DCSMM_VENV:-/scratch/tp66/${USER}/venvs/dcsmm}"
     source "${DCSMM_VENV}/bin/activate"
 
-    # Keep Numba cache on scratch (PBS jobfs is usually too small)
-    export NUMBA_CACHE_DIR="${NUMBA_CACHE_DIR:-/scratch/tp66/${USER}/numba_cache}"
+    # Use PBS_JOBFS (fast local SSD on compute node)
+    export NUMBA_CACHE_DIR="${NUMBA_CACHE_DIR:-${PBS_JOBFS}}"
 else
     export NUMBA_CACHE_DIR="${NUMBA_CACHE_DIR:-${BASE_OUT}/numba_cache}"
 fi
