@@ -2,6 +2,43 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.0dev4] - 2026-03-04 – Retirement Pipeline-First Restructure
+
+### Pipeline restructure (matsya-reviewed)
+
+- **`solve_nest`** (was `solve_canonical`) is the single entry point — three-functor override mechanism (`calib_overrides`, `config_overrides`)
+- **`_accrete_nest`** (was `_build_and_solve_nest`) — backward induction loop, named per DDSL accretion convention
+- **`instantiate_period`** (was `build_period`) — dolo-plus pipeline: parse, methodize, configure, calibrate
+- `RetirementModel`: all params required (no defaults), added `with_test_defaults()` classmethod
+- `from_period` reads from both `.calibration` and `.settings` via `_get()` helper
+- Inter-period twister loaded from `syntax/nest.yaml` (was hardcoded)
+
+### Cleanup
+
+- Removed stale `src/dc_smm/` duplicate package; all imports updated to `dcsmm`
+- Flattened `syntax/syntax/` to `syntax/`
+- `calibration.yaml` + `settings.yaml` are the single source of truth for all parameters
+- Deleted `backward_induction()` bypass pattern
+- Removed `examples/retirement/params/` (replaced by syntax/ + experiments/)
+- Removed `examples/retirement/code/` (empty stale directory)
+- Renamed `run_experiment.py` to `run.py`
+
+### New CLI
+
+- `run.py`: `--calib-override key=value`, `--config-override key=value`, `--override-file path.yml`, `--method`
+- `benchmark.py`: uses `solve_nest` throughout
+
+### Notebook
+
+- Added `docs/notebooks/retirement_fues.ipynb` — interactive walkthrough with plotly zoom, Nord theme, scaling sweep 1k-15k
+- `mkdocs.yml`: added `mkdocs-jupyter` plugin + Notebooks nav section
+
+### Experiment overrides
+
+- `experiments/retirement/params/*.yml` rewritten as sparse key-value overrides (only values differing from syntax/ defaults)
+
+---
+
 ## [0.5.0dev3] - 2025-12-16 – EGM Loop Memory and Compute Optimizations
 
 ### Memory Optimizations
