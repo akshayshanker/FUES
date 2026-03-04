@@ -13,16 +13,13 @@ from .helpers.math_funcs import (
     _forced_intersection_twopoint,
     _force_crossing_inside,
 )
+from .constants import (
+    EPS_D, EPS_SEP, EPS_FWD_BACK, PARALLEL_GUARD,
+    TURN_LEFT, TURN_RIGHT, JUMP_YES, JUMP_NO,
+)
 
-# Constants - adjusted for float64 numerical stability
-EPS_D = 1e-14  # Machine epsilon for float64 is ~2.2e-16, so 1e-14 is safe
-EPS_SEP = 1e-08
-EPS_fwd_back = 0.5
-PARALLEL_GUARD = 1e-10  # Increased for better parallel line detection
-TURN_LEFT = 1
-TURN_RIGHT = 0
-JUMP_YES = 1
-JUMP_NO = 0
+# Alias for backward compatibility with internal references
+EPS_fwd_back = EPS_FWD_BACK
 
 
 @njit(inline="always")
