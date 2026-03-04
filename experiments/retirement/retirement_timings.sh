@@ -21,7 +21,7 @@ set -euo pipefail
 # ======================================================================
 
 # Parameter file (in params/ folder)
-PARAMS_FILE="params/sigma05.yml"   # Options: baseline.yml, high_beta.yml, low_delta.yml, long_horizon.yml
+PARAMS_FILE="params/baseline.yml"   # Options: baseline.yml, high_beta.yml, low_delta.yml, long_horizon.yml
 
 # Baseline model settings
 GRID_SIZE=2000              # Baseline grid size for plots (overrides params file)
@@ -139,9 +139,15 @@ echo "========================================================"
 
 cd "$REPO_ROOT"
 
+# Resolve params file relative to experiments/retirement/
+TIMINGS_SCRIPT_DIR="${REPO_ROOT}/experiments/retirement"
+if [[ ! -f "${PARAMS_FILE}" ]]; then
+    PARAMS_FILE="${TIMINGS_SCRIPT_DIR}/${PARAMS_FILE}"
+fi
+
 # Build command
 CMD="python3 $EXAMPLE_DIR/run.py"
-CMD="$CMD --params $PARAMS_FILE"
+CMD="$CMD --override-file $PARAMS_FILE"
 CMD="$CMD --grid-size $GRID_SIZE"
 CMD="$CMD --plot-age $PLOT_AGE"
 CMD="$CMD --output-dir $OUTPUT_DIR"

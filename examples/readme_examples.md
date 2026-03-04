@@ -30,7 +30,7 @@ From the repo root:
 
 ```bash
 # Baseline single run (solve + plots)
-PYTHONPATH=".:src" python examples/retirement/run_experiment.py \
+PYTHONPATH=".:src" python3 examples/retirement/run.py \
     --grid-size 3000 --output-dir results/retirement
 
 # With a specific params file

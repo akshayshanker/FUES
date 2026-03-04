@@ -2,8 +2,8 @@
 # Single source of truth — no Python-side defaults.
 calibration:
   r: 0.02              # interest rate
-  beta: 0.96           # discount factor
-  delta: 1.5           # utility cost of working
+  beta: 0.98           # discount factor
+  delta: 1           # utility cost of working
   y: 20                # wage income for workers
   b: 1.0e-10           # borrowing constraint (near zero)
   smooth_sigma: 0      # logit smoothing (0 = hard max)

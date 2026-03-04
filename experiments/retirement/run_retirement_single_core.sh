@@ -2,7 +2,7 @@
 #PBS -N fues-retirement-sc
 #PBS -P tp66
 #PBS -q expresssr
-#PBS -l ncpus=1,mem=10GB,walltime=01:00:00
+#PBS -l ncpus=1,mem=5GB,walltime=01:00:00
 #PBS -l storage=scratch/tp66
 #PBS -j oe
 #PBS -o /dev/null
@@ -107,8 +107,13 @@ cd "${REPO_ROOT}"
   echo "--- Running retirement baseline + plots ---"
 } | tee -a "${LOG_FILE}"
 
+# Resolve params file relative to experiments/retirement/
+if [[ ! -f "${PARAMS_FILE}" ]]; then
+    PARAMS_FILE="${REPO_ROOT}/experiments/retirement/${PARAMS_FILE}"
+fi
+
 python3 "${EXAMPLE_DIR}/run.py" \
-  --params "${PARAMS_FILE}" \
+  --override-file "${PARAMS_FILE}" \
   --grid-size "${GRID_SIZE}" \
   --plot-age "${PLOT_AGE}" \
   --output-dir "${OUTPUT_DIR}" \

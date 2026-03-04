@@ -261,19 +261,24 @@ def _accrete_nest(
 
         c_retire, v_retire, da_retire, ddv_retire = \
             stage_ops['retire_cons'](*cntn_retire, t)
+        t_retire = time.time() - t0
 
+        t1 = time.time()
         (v_work, c_work, da_work, ue_elapsed,
          c_hat, q_hat, egrid, da_pre_ue) = \
             stage_ops['work_cons'](
                 *cntn_work, method=method,
             )
+        t_work = time.time() - t1
 
+        t2 = time.time()
         v_lmkt, c_lmkt, dv_lmkt, ddv_lmkt = \
             stage_ops['labour_mkt_decision'](
                 v_work, v_retire,
                 c_work, c_retire,
                 da_work, da_retire,
             )
+        t_lmkt = time.time() - t2
 
         solve_time = time.time() - t0
 
@@ -295,7 +300,23 @@ def _accrete_nest(
             },
             "ue_time": ue_elapsed,
             "solve_time": solve_time,
+            "t_retire": t_retire,
+            "t_work": t_work,
+            "t_lmkt": t_lmkt,
         })
+
+    # Print per-stage timing summary (skip first period — cold JIT)
+    if len(nest["solutions"]) > 1:
+        sols = nest["solutions"][1:]  # skip h=0
+        import numpy as _np
+        avg_ret = _np.mean([s["t_retire"] for s in sols]) * 1000
+        avg_work = _np.mean([s["t_work"] for s in sols]) * 1000
+        avg_lmkt = _np.mean([s["t_lmkt"] for s in sols]) * 1000
+        avg_ue = _np.mean([s["ue_time"] for s in sols]) * 1000
+        avg_total = _np.mean([s["solve_time"] for s in sols]) * 1000
+        print(f"  Stage timing (avg ms, excl h=0): "
+              f"retire={avg_ret:.3f} work={avg_work:.3f} "
+              f"lmkt={avg_lmkt:.3f} ue={avg_ue:.3f} total={avg_total:.3f}")
 
     return nest, model, stage_ops
 
