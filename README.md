@@ -1,16 +1,20 @@
 # Fast Upper-Envelope Scan (FUES)
 
-This repo contains the core implementation of the fast upper envelope scan (FUES) method and examples for Dobrescu and Shanker (2026). FUES retrieves the upper envelope of the value correspondence when the Euler equation is inverted (the EGM) in a problem with non-convexities (such as discrete choices). FUES does not require restrictions on monotonicity of the optimal policy function.
+Implementation of the fast upper-envelope scan (FUES) method for discrete-continuous dynamic programming, as described in:
 
-The repo also includes a general-purpose upper envelope interface (`uenvelope`) for discrete-continuous EGM problems with single dimensional decisions states; the interface allows a unified entry point for the key alternative `python` implementations of upper envelope methods.
+> Dobrescu, L.I. and Shanker, A. (2026). "A fast upper envelope scan method for discrete-continuous dynamic programming."
+
+FUES recovers the upper envelope of the EGM value correspondence in problems with non-convexities arising from discrete choices. Unlike existing methods (DC-EGM/MSS by [Iskhakov et al. 2017](https://doi.org/10.3982/QE533); LTM by [Druedahl 2017](https://doi.org/10.1016/j.econlet.2017.09.013); NEGM by [Druedahl 2021](https://doi.org/10.1016/j.jedc.2021.104133)), FUES does not require monotonicity of the optimal policy function or numerical optimisation, and scales sub-linearly with grid size.
+
+This repo also provides a unified upper-envelope interface (`uenvelope`) for one-dimensional discrete-continuous EGM problems, with a single entry point for FUES, DC-EGM, RFC, and CONSAV.
 
 ## Installation
 
-The installable package is called `dcsmm`. Requires Python 3.11+. Each option below is self-contained -- pick one.
+The installable package is called `dcsmm`. Requires Python 3.11+. Each option below is self-contained — pick one.
 
 ### Option 1: Library only
 
-Use `fues` or `uenvelope` in your own models. Installs `dcsmm` into an existing environment. No repo clone, no examples.
+Use FUES or the upper-envelope registry in your own models. No repo clone, no examples.
 
 ```bash
 pip install git+https://github.com/akshayshanker/FUES.git@release-prep
@@ -21,14 +25,7 @@ from dcsmm.fues import FUES
 from dcsmm.uenvelope import EGM_UE
 ```
 
-This also installs the runtime dependencies: numba, numpy, scipy, [econ-ark](https://github.com/econ-ark/HARK) (DCEGM), [ConSav](https://github.com/NumEconCopenhagen/ConsumptionSaving) (G2EGM), and interpolation. See `pyproject.toml` for the full list and version pins.
-
-Quick start:
-
-```python
-from dcsmm.fues import FUES                    # Main algorithm
-from dcsmm.uenvelope import EGM_UE             # Unified UE entry point
-```
+This also installs the runtime dependencies: numba, numpy, scipy, [econ-ark](https://github.com/econ-ark/HARK) (DC-EGM), [ConSav](https://github.com/NumEconCopenhagen/ConsumptionSaving) (G2EGM/LTM), and interpolation. See `pyproject.toml` for the full list and version pins.
 
 ### Option 2: With examples
 
@@ -65,49 +62,55 @@ Run the benchmark:
 python -m examples.retirement.code.benchmarks
 ```
 
-## Core Modules
+## `dcsmm` package structure
 
-- **FUES Algorithm** (`src/dcsmm/fues/`): Fast Upper-Envelope Scan implementation
-- **UE Registry** (`src/dcsmm/uenvelope/`): Unified entry point comparing FUES, DCEGM, RFC, CONSAV
-- **Example Models**:
-  - Retirement choice model (Iskhakov et al. 2017)
-  - Continuous durables model
-  - Housing-renting model with time-inconsistent preferences
+### Core modules
 
-## External Packages
+- **FUES** (`src/dcsmm/fues/`): Fast Upper-Envelope Scan implementation + rooftop-cut method (Dobrescu and Shanker, 2024).
+- **Upper-envelope registry** (`src/dcsmm/uenvelope/`): Unified entry point dispatching to FUES, DC-EGM, RFC, or CONSAV.
 
-- **[ConSav](https://github.com/NumEconCopenhagen/ConsumptionSaving)**: G2EGM upper envelope (used via `consav.upperenvelope`)
-- **[HARK](https://github.com/econ-ark/HARK)**: DCEGM implementation (installed as `econ-ark`)
+### Example models
 
-## Directory Structure
+| Model | Reference | Key feature |
+|-------|-----------|-------------|
+| Retirement choice | [Iskhakov et al. (2017)](https://doi.org/10.3982/QE533) | Discrete work/retire + continuous consumption; monotone policy (speed benchmark) |
+| Continuous durables | [Kaplan and Violante (2014)](https://doi.org/10.1257/aer.104.7.2110); [Yogo (2016)](https://doi.org/10.1093/rfs/hhw009) | Housing adjustment costs; non-monotone policy (existing methods fail) |
+| Housing-renting | [Fella (2014)](https://doi.org/10.1016/j.jmoneco.2014.04.008) | Discrete housing tenure + non-linear taxation; inaction regions break monotonicity |
+
+### External upper-envelope methods
+
+In addition to the native FUES and rooftop-cut (RFC) implementations, `uenvelope` provides interfaces for:
+
+| Package | Method | Algorithm | Reference |
+|---------|--------|-----------|-----------|
+| [econ-ark/HARK](https://github.com/econ-ark/HARK) | DC-EGM | Monotone segment selection (MSS) | [Iskhakov et al. (2017)](https://doi.org/10.3982/QE533) |
+| [ConSav](https://github.com/NumEconCopenhagen/ConsumptionSaving) | G2EGM | Local triangulation (LTM) | [Druedahl (2017)](https://doi.org/10.1016/j.econlet.2017.09.013) |
+
+### Directory structure
 
 ```
 FUES/
 ├── src/dcsmm/            # Installable package
 │   ├── fues/             # FUES algorithm + variants
-│   └── uenvelope/        # UE engine registry
-├── examples/             # Self-contained examples
-│   └── retirement/       # Retirement choice model
+│   └── uenvelope/        # Upper-envelope registry
+├── examples/             # Self-contained example models
+│   ├── retirement/       # Iskhakov et al. (2017)
+│   ├── durables/         # Kaplan & Violante (2014)
+│   └── housing_renting/  # Fella (2014)
 ├── experiments/          # PBS/HPC scripts
 ├── setup/                # setup_venv.sh, load_env.sh
 ├── docs/                 # mkdocs documentation site
 └── tests/
 ```
 
-## Notes
+## References
 
-### ConSav loading
-
-`consav` requires `EconModel` at import time (`consav/__init__.py` imports
-`ModelClass`), but we only use `consav.upperenvelope` which has no such
-dependency. To avoid requiring `EconModel` as a dependency, we load the
-submodule directly:
-
-```python
-import importlib
-_consav_ue = importlib.import_module("consav.upperenvelope")
-```
-
-This bypasses `consav/__init__.py` entirely. The `consav.upperenvelope`
-module only depends on `numpy` and `numba`. See
-`src/dcsmm/uenvelope/upperenvelope.py` for the implementation.
+- Carroll, C.D. (2006). "The method of endogenous gridpoints for solving dynamic stochastic optimization problems." *Economics Letters*, 91(3), 312–320.
+- 
+- Dobrescu, L.I. and Shanker, A. (2026). "A fast upper envelope scan method for discrete-continuous dynamic programming."
+- Druedahl, J. (2017). "Upper envelope fancier tricks." *Economics Letters*, 159, 62–64.
+- Druedahl, J. (2021). "A guide on solving non-convex consumption-savings models." *Computational Economics*, 58, 747–775.
+- Fella, G. (2014). "A generalized endogenous grid method for non-smooth and non-concave problems." *Review of Economic Dynamics*, 17(2), 329–344.
+- Iskhakov, F., Jørgensen, T.H., Rust, J. and Schjerning, B. (2017). "The endogenous grid method for discrete-continuous dynamic choice models with (or without) taste shocks." *Quantitative Economics*, 8(2), 317–365.
+- Kaplan, G. and Violante, G.L. (2014). "A model of the consumption response to fiscal stimulus payments." *Econometrica*, 82(4), 1199–1239.
+- Yogo, M. (2016). "Portfolio choice in retirement: Health risk and the demand for annuities, housing, and risky assets." *Journal of Monetary Economics*, 80, 17–34.
