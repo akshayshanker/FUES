@@ -655,7 +655,7 @@ def nb_plot_scaling(grid_sizes, scaling, methods=None):
     return fig
 
 
-def nb_plot_egrids(nest, model, age):
+def nb_plot_egrids(nest, model, age, pad=10, xlim=None, ylim_v=None, ylim_s=None):
     """Static EGM grid plot for notebook (value + savings policy).
 
     Runs FUES with intersection points and plots:
@@ -672,6 +672,14 @@ def nb_plot_egrids(nest, model, age):
         Model instance.
     age : int
         Age (calendar time t) to plot.
+    pad : float
+        Padding around median crossing for auto x-range.
+    xlim : tuple of (lo, hi), optional
+        Override x-axis range. If None, auto-centers on crossings.
+    ylim_v : tuple of (lo, hi), optional
+        Override y-axis range for value panel.
+    ylim_s : tuple of (lo, hi), optional
+        Override y-axis range for savings panel.
 
     Returns
     -------
@@ -706,10 +714,31 @@ def nb_plot_egrids(nest, model, age):
     sav_clean = x_clean - c_clean
     sav_inter = inter_e - inter_p1 if len(inter_e) > 0 else np.array([])
 
-    # Auto x-range: center on median crossing with padding
-    pad = 10
-    center = np.median(inter_e) if len(inter_e) > 0 else np.median(x_raw)
-    x_lo, x_hi = center - pad, center + pad
+    # x-range: user override or auto-center on median crossing
+    if xlim is not None:
+        x_lo, x_hi = xlim
+    else:
+        center = np.median(inter_e) if len(inter_e) > 0 else np.median(x_raw)
+        x_lo, x_hi = center - pad, center + pad
+
+    # Auto y-ranges from visible data (5% padding)
+    def _auto_ylim(x_arr, y_arr, x_lo, x_hi):
+        in_view = (x_arr >= x_lo) & (x_arr <= x_hi)
+        if not in_view.any():
+            return None, None
+        y_vis = y_arr[in_view]
+        span = max(y_vis.max() - y_vis.min(), 1e-6)
+        return y_vis.min() - 0.05 * span, y_vis.max() + 0.05 * span
+
+    if ylim_v is None:
+        v_lo, v_hi = _auto_ylim(x_raw, v_raw, x_lo, x_hi)
+    else:
+        v_lo, v_hi = ylim_v
+
+    if ylim_s is None:
+        s_lo, s_hi = _auto_ylim(x_raw, sav_raw, x_lo, x_hi)
+    else:
+        s_lo, s_hi = ylim_s
 
     fig, (ax1, ax2) = pl.subplots(1, 2, figsize=(10, 4))
 
@@ -726,6 +755,8 @@ def nb_plot_egrids(nest, model, age):
                     edgecolors=_NORD['fg'], linewidths=0.5,
                     label='Crossing points', zorder=4)
     ax1.set_xlim(x_lo, x_hi)
+    if v_lo is not None:
+        ax1.set_ylim(v_lo, v_hi)
     ax1.set_xlabel('Endogenous grid (assets)')
     ax1.set_ylabel('Value')
     ax1.set_title(f'Value correspondence (age {age})')
@@ -745,6 +776,8 @@ def nb_plot_egrids(nest, model, age):
                     marker='*', edgecolors=_NORD['fg'], linewidths=0.5,
                     label='Crossing points', zorder=4)
     ax2.set_xlim(x_lo, x_hi)
+    if s_lo is not None:
+        ax2.set_ylim(s_lo, s_hi)
     ax2.set_xlabel('Endogenous grid (assets)')
     ax2.set_ylabel('Next-period assets')
     ax2.set_title(f'Savings policy (age {age})')
