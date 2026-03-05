@@ -305,19 +305,6 @@ def _accrete_nest(
             "t_lmkt": t_lmkt,
         })
 
-    # Print per-stage timing summary (skip first period — cold JIT)
-    if len(nest["solutions"]) > 1:
-        sols = nest["solutions"][1:]  # skip h=0
-        import numpy as _np
-        avg_ret = _np.mean([s["t_retire"] for s in sols]) * 1000
-        avg_work = _np.mean([s["t_work"] for s in sols]) * 1000
-        avg_lmkt = _np.mean([s["t_lmkt"] for s in sols]) * 1000
-        avg_ue = _np.mean([s["ue_time"] for s in sols]) * 1000
-        avg_total = _np.mean([s["solve_time"] for s in sols]) * 1000
-        print(f"  Stage timing (avg ms, excl h=0): "
-              f"retire={avg_ret:.3f} work={avg_work:.3f} "
-              f"lmkt={avg_lmkt:.3f} ue={avg_ue:.3f} total={avg_total:.3f}")
-
     return nest, model, stage_ops
 
 
