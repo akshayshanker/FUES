@@ -22,14 +22,28 @@ from dcsmm.uenvelope import EGM_UE
 ```
 
 This also installs the runtime dependencies: numba, numpy, scipy, [econ-ark](https://github.com/econ-ark/HARK) (DCEGM), [ConSav](https://github.com/NumEconCopenhagen/ConsumptionSaving) (G2EGM), and interpolation. See `pyproject.toml` for the full list and version pins.
+
+Quick start:
+
+```python
+from dcsmm.fues import FUES                    # Main algorithm
+from dcsmm.uenvelope import EGM_UE             # Unified UE entry point
+```
+
 ### Option 2: With examples
 
-Clone the repo and install with example dependencies (matplotlib, pyyaml, seaborn). Includes everything in Option 1 plus the example models in the repo checkout.
+Clone the repo and install with example dependencies (`matplotlib`, `pyyaml`, `seaborn`). Includes everything in Option 1 plus the example models in the repo checkout.
 
 ```bash
 git clone -b release-prep https://github.com/akshayshanker/FUES.git
 cd FUES
 pip install ".[examples]"
+```
+
+Run the retirement model benchmark:
+
+```bash
+python -m examples.retirement.code.benchmarks
 ```
 
 ### Option 3: Developer (editable)
@@ -45,19 +59,10 @@ source .venv/bin/activate
 
 This creates a local `.venv`, installs `dcsmm` in editable mode, and verifies the install.
 
-## Quick test
+Run the benchmark:
 
 ```bash
 python -m examples.retirement.code.benchmarks
-```
-
-Runs the retirement model benchmark (FUES vs DCEGM vs RFC vs CONSAV) and prints Euler errors and timing. Requires Option 2 or 3.
-
-## Quick start
-
-```python
-from dcsmm.fues import FUES                    # Main algorithm
-from dcsmm.uenvelope import EGM_UE             # Unified UE entry point
 ```
 
 ## Core Modules
