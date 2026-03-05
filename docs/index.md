@@ -11,7 +11,7 @@ Dobrescu and Shanker (2025), "A fast upper envelope scan method for discrete-con
 
 The endogenous grid method (EGM, Carroll 2006) solves dynamic programming problems by analytically inverting the Euler equation, avoiding costly numerical optimisation. However, when a model features both discrete and continuous choices, the value function is the upper envelope of multiple concave functions — one for each future sequence of discrete choices. The EGM step produces a *value correspondence* that contains sub-optimal points. These must be removed to recover the true value function.
 
-Existing methods for computing the upper envelope either require monotonicity of the policy function (DC-EGM, Iskhakov et al. 2017; Fella 2014) or rely on numerical optimisation combined with EGM (NEGM, Druedahl 2021). FUES removes both requirements.
+Existing methods for computing the upper envelope either require monotonicity of the policy function (MSS, Iskhakov et al. 2017; Fella 2014) or rely on numerical optimisation combined with EGM (NEGM, Druedahl 2021). FUES removes both requirements.
 
 ## How FUES works
 
@@ -37,7 +37,7 @@ FUES also incorporates forward and backward scans around crossing points to impr
 | Method | Time | Monotone policy? | Gradient info? |
 |--------|------|-----------------|----------------|
 | **FUES** | \(O(N)\) | No | No |
-| DC-EGM | \(O(N \log N)\) | Yes | No |
+| MSS | \(O(N \log N)\) | Yes | No |
 | RFC | \(O(Nk)\) | No | Yes |
 | NEGM | \(O(N \cdot \text{opt})\) | N/A | N/A |
 
@@ -109,7 +109,7 @@ refined, raw, interpolated = EGM_UE(
 
 Available methods:
 - `"FUES"` — Fast Upper-Envelope Scan (Dobrescu and Shanker, 2025)
-- `"DCEGM"` — DC-EGM (Iskhakov et al., 2017), via [HARK](https://github.com/econ-ark/HARK)
+- `"DCEGM"` — MSS (Iskhakov et al., 2017), via [HARK](https://github.com/econ-ark/HARK)
 - `"RFC"` — Rooftop-Cut (Dobrescu and Shanker, 2024), requires `pykdtree`
 - `"CONSAV"` — G2EGM upper envelope (Druedahl, 2021), via [ConSav](https://github.com/NumEconCopenhagen/ConsumptionSaving)
 
@@ -121,7 +121,7 @@ Finite-horizon model with discrete retirement choice and continuous consumption-
 
 **Upper envelope computation time (ms per period):**
 
-| Grid |  delta | RFC | FUES | DC-EGM |
+| Grid |  delta | RFC | FUES | MSS |
 |------|--------|-----|------|--------|
 |  500 |   0.25 | 1.2 |  0.1 |    0.4 |
 |  500 |   1.00 | 1.4 |  0.1 |    0.7 |
@@ -132,16 +132,18 @@ Finite-horizon model with discrete retirement choice and continuous consumption-
 | 3000 |   0.25 | 8.4 |  0.6 |    2.0 |
 | 3000 |   1.00 | 12.8 | 0.6 |    6.6 |
 
-FUES is 5-20x faster than DC-EGM and RFC across all grid sizes and parameter values. Euler equation errors are comparable across methods.
+FUES is 5-20x faster than MSS and RFC across all grid sizes and parameter values. Euler equation errors are comparable across methods.
 
 **Key observations:**
-- FUES timing is stable across delta values; DC-EGM degrades as the endogenous grid becomes more irregular
+- FUES timing is stable across delta values; MSS degrades as the endogenous grid becomes more irregular
 - FUES does not require monotonicity of the policy function
-- With taste shocks (logit smoothing), the endogenous grid becomes non-monotone; DC-EGM slows by an order of magnitude while FUES remains stable
+- With taste shocks (logit smoothing), the endogenous grid becomes non-monotone; MSS slows by an order of magnitude while FUES remains stable
+
+For a full interactive walkthrough, see the [**Retirement Model Notebook**](notebooks/retirement_fues.ipynb). For details on replicating paper results, see [Retirement Choice Model](examples/retirement.md).
 
 ### Continuous housing investment (Dobrescu et al. 2024)
 
-Two-asset model with liquid financial assets and illiquid housing. The discrete choice of whether to adjust housing creates a non-monotone endogenous grid where DC-EGM cannot be applied. FUES and RFC are the only applicable upper envelope methods. FUES is faster than RFC with comparable accuracy.
+Two-asset model with liquid financial assets and illiquid housing. The discrete choice of whether to adjust housing creates a non-monotone endogenous grid where MSS cannot be applied. FUES and RFC are the only applicable upper envelope methods. FUES is faster than RFC with comparable accuracy.
 
 ## Running the examples
 
@@ -169,7 +171,7 @@ src/dcsmm/
   fues/
     fues.py         # FUES algorithm (Numba JIT-compiled)
     fues_v0dev.py   # Original paper version
-    dcegm.py        # DC-EGM wrapper (via HARK)
+    dcegm.py        # MSS wrapper (via HARK)
     rfc_simple.py   # RFC wrapper (via pykdtree)
     helpers/
       math_funcs.py # 1D interpolation, jump correction
