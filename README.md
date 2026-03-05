@@ -1,12 +1,39 @@
 # Fast Upper-Envelope Scan (FUES)
 
-Core FUES implementation and examples for Dobrescu and Shanker (2025).
+This repo contains the core implementation of the fast upper envelope scan (FUES) method and examples for Dobrescu and Shanker (2026). FUES retrieves the upper envelope of the value correspondence when the Euler equation is inverted (the EGM) in a problem with non-convexities (such as discrete choices). FUES does not require restrictions on monotonicity of the optimal policy function.
 
-Includes a general-purpose upper envelope class for one-dimensional discrete-continuous EGM problems.
-
-**Work in progress.**
+The repo also includes a general-purpose upper envelope interface (`uenvelope`) for discrete-continuous EGM problems with single dimensional decisions states; the interface allows a unified entry point for the key alternative `python` implementations of upper envelope methods.
 
 ## Installation
+
+The installable package is called `dcsmm`. Requires Python 3.11+.
+
+### Option 1: Library only
+
+Install `dcsmm` (FUES + upper envelope registry) into an existing environment. No examples, no dev tools.
+
+```bash
+pip install git+https://github.com/akshayshanker/FUES.git@release-prep
+```
+
+```python
+from dcsmm.fues import FUES
+from dcsmm.uenvelope import EGM_UE
+```
+
+### Option 2: With examples
+
+Clone the repo and install with example dependencies (matplotlib, pyyaml, seaborn). Use this to run the benchmark models.
+
+```bash
+git clone -b release-prep https://github.com/akshayshanker/FUES.git
+cd FUES
+pip install ".[examples]"
+```
+
+### Option 3: Developer (editable)
+
+Full setup with editable install, dolo-plus compiler, and all dependencies. Use this if you are modifying the source code.
 
 ```bash
 git clone -b release-prep https://github.com/akshayshanker/FUES.git
@@ -15,20 +42,17 @@ bash setup/setup_venv.sh
 source .venv/bin/activate
 ```
 
-This creates a local `.venv`, installs `dcsmm` in editable mode with all dependencies (numba, HARK, consav, dolo-plus), and verifies the install. On NCI Gadi it auto-detects and uses `/scratch/tp66/$USER/venvs/dcsmm` instead.
-
-Requires Python 3.11+.
+This creates a local `.venv`, installs `dcsmm` in editable mode with all dependencies (numba, HARK, consav, dolo-plus), and verifies the install.
 
 ## Quick test
 
 ```bash
-source .venv/bin/activate
 python -m examples.retirement.code.benchmarks
 ```
 
-This runs the retirement model benchmark (FUES vs DCEGM vs RFC vs CONSAV) and prints Euler errors + timing.
+Runs the retirement model benchmark (FUES vs DCEGM vs RFC vs CONSAV) and prints Euler errors and timing. Requires Option 2 or 3.
 
-## Quick Start
+## Quick start
 
 ```python
 from dcsmm.fues import FUES                    # Main algorithm
@@ -40,7 +64,7 @@ from dcsmm.uenvelope import EGM_UE             # Unified UE entry point
 - **FUES Algorithm** (`src/dcsmm/fues/`): Fast Upper-Envelope Scan implementation
 - **UE Registry** (`src/dcsmm/uenvelope/`): Unified entry point comparing FUES, DCEGM, RFC, CONSAV
 - **Example Models**:
-  - Retirement choice model (Ishkakov et al. 2017)
+  - Retirement choice model (Iskhakov et al. 2017)
   - Continuous durables model
   - Housing-renting model with time-inconsistent preferences
 
@@ -57,9 +81,10 @@ FUES/
 │   ├── fues/             # FUES algorithm + variants
 │   └── uenvelope/        # UE engine registry
 ├── examples/             # Self-contained examples
-│   └── retirement/       # Code, params, plots, tables, run_experiment.py
+│   └── retirement/       # Retirement choice model
 ├── experiments/          # PBS/HPC scripts
-├── scripts/              # Developer utilities (setup_venv.sh, etc.)
+├── setup/                # setup_venv.sh, load_env.sh
+├── docs/                 # mkdocs documentation site
 └── tests/
 ```
 
