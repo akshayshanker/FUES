@@ -8,7 +8,7 @@ FUES recovers the upper envelope of the EGM ([Carroll 2006](https://doi.org/10.1
 
 This repo also provides a unified upper-envelope interface (`uenvelope`) for one-dimensional discrete-continuous EGM problems, with a single entry point for discrete-continuous problems to use FUES, MSS, rooftop-cut (RFC), and CONSAV.
 
-Complete documentation and notebooks are here. 
+**[Documentation](https://akshayshanker.github.io/FUES/)** · **[Interactive Notebook](https://akshayshanker.github.io/FUES/notebooks/retirement_fues/)** · **[Examples](https://akshayshanker.github.io/FUES/examples/retirement/)**
 
 ## Installation
 
@@ -29,11 +29,9 @@ from dcsmm.uenvelope import EGM_UE
 
 This also installs the runtime dependencies: numba, numpy, scipy, [econ-ark](https://github.com/econ-ark/HARK) (DC-EGM), [ConSav](https://github.com/NumEconCopenhagen/ConsumptionSaving) (G2EGM/LTM), and interpolation. See `pyproject.toml` for the full list and version pins.
 
-View notebook demo of interface.here 
-
 ### Option 2: With examples
 
-Clone the repo and install with example dependencies (`matplotlib`, `pyyaml`, `seaborn`). Includes everything in Option 1 plus the example models in the repo checkout.
+Clone the repo and install with example dependencies (`matplotlib`, `pyyaml`, `seaborn`). Includes everything in Option 1 plus the example models.
 
 ```bash
 git clone -b release-prep https://github.com/akshayshanker/FUES.git
@@ -44,13 +42,14 @@ pip install ".[examples]"
 Run the retirement model benchmark:
 
 ```bash
-python -m examples.retirement.code.benchmarks
+python examples/retirement/run.py --grid-size 3000
 ```
 
-Example notebooks are here 
+See the [interactive notebook](examples/retirement/notebooks/retirement_fues.ipynb) for a step-by-step walkthrough.
+
 ### Option 3: Developer (editable)
 
-Full setup with editable install, examples, and all dependencies including the dolo-plus compiler. Use this if you are modifying the source code. Includes everything in Option 2.
+Full setup with editable install, examples, and all dependencies including the dolo-plus compiler.
 
 ```bash
 git clone -b release-prep https://github.com/akshayshanker/FUES.git
@@ -59,12 +58,10 @@ bash setup/setup_venv.sh
 source .venv/bin/activate
 ```
 
-This creates a local `.venv`, installs `dcsmm` in editable mode, and verifies the install.
-
 Run the benchmark:
 
 ```bash
-python -m examples.retirement.code.benchmarks
+python examples/retirement/run.py --run-timings
 ```
 
 ## `dcsmm` package structure
@@ -78,7 +75,7 @@ python -m examples.retirement.code.benchmarks
 
 | Model               | Key feature                                                                                                                                                                     |
 | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Retirement choice   | Discrete work/retire + continuous consumption; monotone policy (speed benchmark) a la [Iskhakov et al. (2017)](https://doi.org/10.3982/QE643)                                   |
+| Retirement choice   | Discrete work/retire + continuous consumption; monotone policy (speed benchmark) à la [Iskhakov et al. (2017)](https://doi.org/10.3982/QE643)                                   |
 | Continuous durables | Housing adjustment costs; non-monotone policy (existing methods fail)                                                                                                           |
 | Housing-renting     | Discrete housing tenure + non-linear taxation; inaction regions break monotonicity ([Fella (2014)](https://doi.org/10.1016/j.red.2013.07.001) with added renting and taxes) |
 
@@ -101,9 +98,10 @@ FUES/
 │   └── uenvelope/        # Upper-envelope registry
 ├── examples/             # Self-contained example models
 │   ├── retirement/       # Simple retirement choice
-│   ├── durables/         # Durabls with adj. frictions
+│   │   └── notebooks/    # Interactive Jupyter notebooks
+│   ├── durables/         # Durables with adj. frictions
 │   └── housing_renting/  # Discrete housing choice and capital tax
-├── experiments/          # PBS/HPC scripts
+├── experiments/          # PBS/HPC scripts + sparse override files
 ├── setup/                # setup_venv.sh, load_env.sh
 ├── docs/                 # mkdocs documentation site
 └── tests/
