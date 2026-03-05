@@ -343,3 +343,269 @@ def plot_dcegm_cf(age, g_size, e_grid, vf_work, c_worker, dela_worker, a_prime, 
         fig.savefig(os.path.join(save_path, f'ret_vf_aprime_all_{g_size}_cf_{age}_{tag}.png'))
 
     return v_upper, v_env2, vf_clean, a_prime_clean, m_upper2, a1_env2
+
+
+# ====================================================================
+# Notebook plotting functions (interactive / exploratory)
+#
+# These are for the Jupyter notebook walkthrough, NOT for paper
+# figures.  They use plotly for interactivity and matplotlib for
+# static panels.  The paper-quality functions (plot_egrids,
+# plot_cons_pol, plot_dcegm_cf) are above.
+# ====================================================================
+
+# Nord palette (matches MkDocs site theme)
+_NORD = {
+    'frost':  ['#5e81ac', '#81a1c1', '#88c0d0', '#8fbcbb'],
+    'aurora': ['#bf616a', '#d08770', '#ebcb8b', '#a3be8c', '#b48ead'],
+    'fg':     '#2e3440',
+    'bg':     '#ffffff',
+    'grid':   '#d8dee9',
+    'spine':  '#d8dee9',
+}
+_METHOD_COLORS = {
+    'FUES': _NORD['frost'][0],
+    'DCEGM': _NORD['aurora'][1],
+    'RFC': _NORD['aurora'][3],
+    'CONSAV': _NORD['aurora'][4],
+}
+_METHOD_MARKERS = {'FUES': 'o', 'DCEGM': 's', 'RFC': '^', 'CONSAV': 'D'}
+
+
+def _style_nb_ax(ax):
+    """Apply Nord styling to a matplotlib axes (notebook style)."""
+    for s in ax.spines.values():
+        s.set_color(_NORD['spine'])
+        s.set_linewidth(0.6)
+    ax.tick_params(colors=_NORD['fg'], labelsize=8)
+
+
+def nb_plot_egm_interactive(nest, model, age, pad=10):
+    """Interactive plotly EGM grid plot, auto-centered on crossings.
+
+    Shows raw EGM points, FUES-refined points, value function
+    line, and crossing points.  Auto-pans to the median crossing.
+
+    Parameters
+    ----------
+    nest : dict
+        Solved nest from :func:`solve_nest`.
+    model : RetirementModel
+        Model instance.
+    age : int
+        Age (calendar time t) to plot.
+    pad : float
+        Padding around the median crossing point (grid units).
+
+    Returns
+    -------
+    plotly.graph_objects.Figure
+    """
+    import plotly.graph_objects as go
+    from plotly.subplots import make_subplots
+    from dcsmm.fues.fues import FUES as fues_alg
+    from .diagnostics import get_policy
+
+    e_grid = get_policy(nest, 'egrid', stage='work_cons')
+    vf_unref = get_policy(nest, 'q_hat', stage='work_cons')
+    c_unref = get_policy(nest, 'c_hat', stage='work_cons')
+    da_unref = get_policy(nest, 'da_pre_ue', stage='work_cons')
+
+    x_raw = np.array(e_grid[age])
+    q_raw = np.array(vf_unref[age])
+    c_raw = np.array(c_unref[age])
+    da_raw = np.array(da_unref[age])
+
+    fues_result, intersections = fues_alg(
+        x_raw, q_raw, c_raw, model.asset_grid_A, da_raw,
+        m_bar=1.0001, include_intersections=True,
+        return_intersections_separately=True,
+    )
+    x_clean, vf_clean, c_clean, _, _ = fues_result
+    inter_e, inter_v, inter_p1, _, _ = intersections
+
+    v_raw = q_raw * model.beta - model.delta
+    v_clean = vf_clean * model.beta - model.delta
+    v_inter = inter_v * model.beta - model.delta if len(inter_e) > 0 else np.array([])
+
+    sav_raw = x_raw - c_raw
+    sav_clean = x_clean - c_clean
+    sav_inter = inter_e - inter_p1 if len(inter_e) > 0 else np.array([])
+
+    center = np.median(inter_e) if len(inter_e) > 0 else np.median(x_raw)
+    x_lo, x_hi = center - pad, center + pad
+
+    fig = make_subplots(rows=1, cols=2,
+        subplot_titles=[f'Value (age {age})', f'Savings policy (age {age})'])
+
+    # Value panel
+    fig.add_trace(go.Scattergl(
+        x=x_raw, y=v_raw, mode='markers',
+        marker=dict(size=4, color='red', opacity=0.3, symbol='circle-open'),
+        name='Raw EGM',
+    ), row=1, col=1)
+    fig.add_trace(go.Scattergl(
+        x=x_clean, y=v_clean, mode='markers',
+        marker=dict(size=5, color='blue', symbol='x'),
+        name='FUES optimal',
+    ), row=1, col=1)
+    sort_idx = np.argsort(x_clean)
+    fig.add_trace(go.Scattergl(
+        x=x_clean[sort_idx], y=v_clean[sort_idx],
+        mode='lines', line=dict(color='black', width=1),
+        name='Value function',
+    ), row=1, col=1)
+    if len(inter_e) > 0:
+        fig.add_trace(go.Scattergl(
+            x=inter_e, y=v_inter, mode='markers',
+            marker=dict(size=10, color='green', symbol='star',
+                        line=dict(width=1, color='black')),
+            name='Crossing points',
+        ), row=1, col=1)
+
+    # Savings panel
+    sort_raw = np.argsort(x_raw)
+    fig.add_trace(go.Scattergl(
+        x=x_raw[sort_raw], y=sav_raw[sort_raw], mode='markers',
+        marker=dict(size=4, color='red', opacity=0.3, symbol='circle-open'),
+        showlegend=False,
+    ), row=1, col=2)
+    fig.add_trace(go.Scattergl(
+        x=x_clean[sort_idx], y=sav_clean[sort_idx], mode='markers',
+        marker=dict(size=5, color='blue', symbol='x'),
+        showlegend=False,
+    ), row=1, col=2)
+    if len(inter_e) > 0:
+        si = np.argsort(inter_e)
+        fig.add_trace(go.Scattergl(
+            x=inter_e[si], y=sav_inter[si], mode='markers',
+            marker=dict(size=10, color='green', symbol='star',
+                        line=dict(width=1, color='black')),
+            showlegend=False,
+        ), row=1, col=2)
+
+    # Auto y-axis ranges from data visible in the x-window
+    y_pad_frac = 0.05  # 5% padding
+    in_view = (x_raw >= x_lo) & (x_raw <= x_hi)
+    if in_view.any():
+        v_vis = v_raw[in_view]
+        v_span = max(v_vis.max() - v_vis.min(), 1e-6)
+        v_lo = v_vis.min() - y_pad_frac * v_span
+        v_hi = v_vis.max() + y_pad_frac * v_span
+        s_vis = sav_raw[in_view]
+        s_span = max(s_vis.max() - s_vis.min(), 1e-6)
+        s_lo = s_vis.min() - y_pad_frac * s_span
+        s_hi = s_vis.max() + y_pad_frac * s_span
+    else:
+        v_lo, v_hi, s_lo, s_hi = None, None, None, None
+
+    fig.update_xaxes(title_text='Endogenous grid (assets)', range=[x_lo, x_hi])
+    fig.update_yaxes(title_text='Value', range=[v_lo, v_hi], row=1, col=1)
+    fig.update_yaxes(title_text='Next-period assets', range=[s_lo, s_hi], row=1, col=2)
+    fig.update_layout(
+        height=450, dragmode='zoom', template='plotly_white',
+        margin=dict(t=40, b=40),
+        legend=dict(x=0.01, y=0.99, font=dict(size=9)),
+    )
+    return fig
+
+
+def nb_plot_cons_ages(nest, model, ages=(10, 30, 40)):
+    """Plot consumption policy at multiple ages (notebook style).
+
+    Parameters
+    ----------
+    nest : dict
+        Solved nest.
+    model : RetirementModel
+        Model instance.
+    ages : tuple of int
+        Ages to plot.
+
+    Returns
+    -------
+    matplotlib.figure.Figure
+    """
+    from .diagnostics import get_policy
+
+    c_worker = get_policy(nest, 'c', stage='work_cons')
+    colors = [_NORD['frost'][0], _NORD['aurora'][1], _NORD['aurora'][3]]
+
+    fig, axes = pl.subplots(1, len(ages), figsize=(13, 4))
+    if len(ages) == 1:
+        axes = [axes]
+
+    for ax, age, col in zip(axes, ages, colors):
+        cons = np.copy(c_worker[age])
+        jumps = np.where(
+            np.abs(np.diff(cons)) / np.diff(model.asset_grid_A) > 0.3
+        )[0] + 1
+        y = np.insert(cons, jumps, np.nan)
+        x = np.insert(model.asset_grid_A, jumps, np.nan)
+        ax.plot(x, y, color=col, linewidth=1.4)
+        ax.set_xlabel('Assets $a$')
+        ax.set_ylabel('Consumption $c$')
+        ax.set_title(f'Age $t = {age}$', fontweight='600')
+        ax.set_xlim(0, 300)
+        ax.set_ylim(0, 40)
+        _style_nb_ax(ax)
+
+    fig.tight_layout()
+    return fig
+
+
+def nb_plot_scaling(grid_sizes, scaling, methods=None):
+    """Plot UE scaling across grid sizes (notebook style).
+
+    Parameters
+    ----------
+    grid_sizes : list of int
+        Grid sizes swept.
+    scaling : dict
+        ``{method_name: [ue_time_ms, ...]}``.
+    methods : list of str, optional
+        Methods to plot (default: all keys in ``scaling``).
+
+    Returns
+    -------
+    matplotlib.figure.Figure
+    """
+    if methods is None:
+        methods = list(scaling.keys())
+
+    fig, ax = pl.subplots(figsize=(7, 4.5))
+    ns = np.array(grid_sizes, dtype=float)
+
+    for m in methods:
+        ax.loglog(ns, scaling[m],
+                  f'-{_METHOD_MARKERS.get(m, "o")}',
+                  color=_METHOD_COLORS.get(m, 'gray'),
+                  label=m, markersize=5, linewidth=1.6)
+
+    # O(n) reference anchored at DCEGM midpoint
+    mid = len(grid_sizes) // 2
+    if 'DCEGM' in scaling:
+        t_lin = scaling['DCEGM'][mid]
+        ax.loglog(ns, t_lin * (ns / ns[mid]), '--',
+                  color='#9ca3af', linewidth=0.8, label='$O(n)$')
+
+    # O(n²) reference anchored at CONSAV midpoint
+    if 'CONSAV' in scaling:
+        t_quad = scaling['CONSAV'][mid]
+        ax.loglog(ns, t_quad * (ns / ns[mid])**2, ':',
+                  color='#9ca3af', linewidth=0.8, label='$O(n^2)$')
+
+    # O(n) at FUES (shows sub-linearity)
+    if 'FUES' in scaling:
+        t_fues = scaling['FUES'][mid]
+        ax.loglog(ns, t_fues * (ns / ns[mid]), '--',
+                  color=_METHOD_COLORS['FUES'], linewidth=0.7,
+                  alpha=0.4, label='$O(n)$ at FUES')
+
+    ax.set_xlabel('Grid size $n$')
+    ax.set_ylabel('Upper envelope time (ms)')
+    ax.set_title('UE scaling (log-log)')
+    _style_nb_ax(ax)
+    ax.legend(fontsize=8, framealpha=0.7, edgecolor='none', ncol=2)
+    fig.tight_layout()
+    return fig
