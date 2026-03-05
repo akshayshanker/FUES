@@ -46,7 +46,8 @@ def _load_baseline():
 
 
 def test_Timings(grid_sizes, delta_values, n=3, results_dir="results",
-                 true_grid_size=20000, true_method='DCEGM'):
+                 true_grid_size=20000, true_method='DCEGM',
+                 calib_overrides=None, config_overrides=None):
     """Run timing benchmarks across grid sizes and delta values.
 
     All runs go through the canonical pipeline (solve_nest).
@@ -65,8 +66,19 @@ def test_Timings(grid_sizes, delta_values, n=3, results_dir="results",
         Grid size for computing "true" reference solution. Default is 20000.
     true_method : str
         Method used for "true" reference solution. Default is 'DCEGM'.
+    calib_overrides : dict, optional
+        Extra calibration overrides (e.g. from --override-file).
+        ``delta`` is always overridden per sweep row.
+    config_overrides : dict, optional
+        Extra config overrides (e.g. from --override-file).
+        ``grid_size`` and ``padding_mbar`` are always overridden per sweep row.
     """
+    extra_calib = dict(calib_overrides or {})
+    extra_config = dict(config_overrides or {})
     base_cal, base_settings = _load_baseline()
+    # Merge CLI overrides into baseline for metadata
+    base_cal.update(extra_calib)
+    base_settings.update(extra_config)
 
     # Build a benchmark params dict for table metadata
     benchmark_params = {**base_cal, **base_settings,
@@ -84,23 +96,20 @@ def test_Timings(grid_sizes, delta_values, n=3, results_dir="results",
         print(f"\nComputing true solution for delta={delta} "
               f"with {true_grid_size} grid points using {true_method}...")
 
+        cal_ov = {**extra_calib, 'delta': delta}
+        cfg_ov = {**extra_config, 'grid_size': true_grid_size,
+                  'padding_mbar': -0.011}
         # Warmup
         solve_nest(
             SYNTAX_DIR, method=true_method,
-            calib_overrides={'delta': delta},
-            config_overrides={
-                'grid_size': true_grid_size,
-                'padding_mbar': -0.011,
-            },
+            calib_overrides=cal_ov,
+            config_overrides=cfg_ov,
         )
         # Actual run
         nest_true, model_true, _ = solve_nest(
             SYNTAX_DIR, method=true_method,
-            calib_overrides={'delta': delta},
-            config_overrides={
-                'grid_size': true_grid_size,
-                'padding_mbar': -0.011,
-            },
+            calib_overrides=cal_ov,
+            config_overrides=cfg_ov,
         )
         c_true = get_policy(nest_true, 'c')
         true_solutions[delta] = {
@@ -124,11 +133,9 @@ def test_Timings(grid_sizes, delta_values, n=3, results_dir="results",
                 for method in ('RFC', 'FUES', 'DCEGM', 'CONSAV'):
                     nest, model, _ = solve_nest(
                         SYNTAX_DIR, method=method,
-                        calib_overrides={'delta': delta},
-                        config_overrides={
-                            'grid_size': g_size,
-                            'padding_mbar': -0.011,
-                        },
+                        calib_overrides={**extra_calib, 'delta': delta},
+                        config_overrides={**extra_config, 'grid_size': g_size,
+                                          'padding_mbar': -0.011},
                     )
                     c_refined = get_policy(nest, 'c')
                     timing = get_timing(nest)

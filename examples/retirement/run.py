@@ -124,10 +124,17 @@ def main():
     calib_overrides = parse_overrides(args.calib_override)
     config_overrides = parse_overrides(args.config_override)
 
-    # Override file merges into calib overrides
+    # Override file: split keys into calib vs config based on settings.yaml keys
     if args.override_file:
         file_overrides = load_override_file(args.override_file)
-        calib_overrides.update(file_overrides)
+        settings_path = SYNTAX_DIR / 'settings.yaml'
+        with open(settings_path) as f:
+            settings_keys = set(yaml.safe_load(f).get('settings', {}).keys())
+        for k, v in file_overrides.items():
+            if k in settings_keys:
+                config_overrides[k] = v
+            else:
+                calib_overrides[k] = v
 
     # Convenience: --grid-size N -> config override
     if args.grid_size is not None:
@@ -155,6 +162,8 @@ def main():
         test_Timings(
             grid_sizes, delta_values, n=args.sweep_runs,
             results_dir=args.output_dir,
+            calib_overrides=calib_overrides,
+            config_overrides=config_overrides,
         )
 
     # ── Solve via canonical pipeline (compare 4 UE methods) ──
