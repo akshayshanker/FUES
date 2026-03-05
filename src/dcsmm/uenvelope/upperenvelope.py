@@ -52,6 +52,16 @@ try:
 except ImportError:
     fues_current = None
 
+try:
+    from dcsmm.fues.fues_v0_1dev import FUES as fues_v0_1dev
+except ImportError:
+    fues_v0_1dev = None
+
+try:
+    from dcsmm.fues.fues_v0_2dev import FUES as fues_v0_2dev
+except ImportError:
+    fues_v0_2dev = None
+
 # Common post-processing helpers import
 from dcsmm.fues.helpers import interp_as
 
@@ -334,6 +344,92 @@ def _fues_engine(
     }
 
     x_dcsn_ref, qf_ref, kappa_ref, x_cntn_ref, _ = fues_current(
+        x_dcsn_hat, qf_hat, kappa_hat, X_cntn, X_cntn,
+        m_bar=m_bar, LB=lb_int, include_intersections=include_intersections,
+        **fues_kwargs
+    )
+
+    return {
+        "x_dcsn_ref": x_dcsn_ref,
+        "v_dcsn_ref": qf_ref,
+        "kappa_ref": kappa_ref,
+        "x_cntn_ref": x_cntn_ref,
+        "lambda_ref": uc_func_partial(kappa_ref),
+    }
+
+
+@register("FUES_V0_1DEV")
+def _fues_v0_1dev_engine(
+    x_dcsn_hat: np.ndarray,
+    qf_hat: np.ndarray,
+    kappa_hat: np.ndarray,
+    X_cntn: np.ndarray,
+    *,
+    uc_func_partial: Callable[[np.ndarray], np.ndarray],
+    m_bar: float = 1.0,
+    lb: int = 4,
+    include_intersections: bool = True,
+    **kwargs: Any,
+) -> Dict[str, np.ndarray]:
+    """Wrapper around FUES v0.1dev (release-prep baseline)."""
+
+    if fues_v0_1dev is None:
+        raise ImportError("FUES v0.1dev not importable")
+
+    lb_int = int(lb[0]) if isinstance(lb, (list, tuple)) else int(lb)
+
+    fues_kwargs = {
+        k: v for k, v in kwargs.items()
+        if k in ('endog_mbar', 'padding_mbar', 'single_intersection',
+                 'no_double_jumps', 'disable_jump_checks',
+                 'return_intersections_separately',
+                 'eps_d', 'eps_sep', 'eps_fwd_back', 'parallel_guard')
+    }
+
+    x_dcsn_ref, qf_ref, kappa_ref, x_cntn_ref, _ = fues_v0_1dev(
+        x_dcsn_hat, qf_hat, kappa_hat, X_cntn, X_cntn,
+        m_bar=m_bar, LB=lb_int, include_intersections=include_intersections,
+        **fues_kwargs
+    )
+
+    return {
+        "x_dcsn_ref": x_dcsn_ref,
+        "v_dcsn_ref": qf_ref,
+        "kappa_ref": kappa_ref,
+        "x_cntn_ref": x_cntn_ref,
+        "lambda_ref": uc_func_partial(kappa_ref),
+    }
+
+
+@register("FUES_V0_2DEV")
+def _fues_v0_2dev_engine(
+    x_dcsn_hat: np.ndarray,
+    qf_hat: np.ndarray,
+    kappa_hat: np.ndarray,
+    X_cntn: np.ndarray,
+    *,
+    uc_func_partial: Callable[[np.ndarray], np.ndarray],
+    m_bar: float = 1.0,
+    lb: int = 4,
+    include_intersections: bool = True,
+    **kwargs: Any,
+) -> Dict[str, np.ndarray]:
+    """Wrapper around FUES v0.2dev (fues-experiments optimizations)."""
+
+    if fues_v0_2dev is None:
+        raise ImportError("FUES v0.2dev not importable")
+
+    lb_int = int(lb[0]) if isinstance(lb, (list, tuple)) else int(lb)
+
+    fues_kwargs = {
+        k: v for k, v in kwargs.items()
+        if k in ('endog_mbar', 'padding_mbar', 'single_intersection',
+                 'no_double_jumps', 'disable_jump_checks',
+                 'return_intersections_separately', 'assume_sorted',
+                 'eps_d', 'eps_sep', 'eps_fwd_back', 'parallel_guard')
+    }
+
+    x_dcsn_ref, qf_ref, kappa_ref, x_cntn_ref, _ = fues_v0_2dev(
         x_dcsn_hat, qf_hat, kappa_hat, X_cntn, X_cntn,
         m_bar=m_bar, LB=lb_int, include_intersections=include_intersections,
         **fues_kwargs

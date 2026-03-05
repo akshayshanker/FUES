@@ -1133,65 +1133,6 @@ def correct_jumps1d_arr(data, x, gradient_jump_threshold, v_arr, d_arr, a_arr):
     return corrected_data, corrected_v, corrected_d, corrected_a
 
 
-@njit(cache=True)
-def correct_jumps_vf_pol(vf, x, threshold, pol1, pol2):
-    """Correct jump discontinuities in value function and two policy arrays.
-
-    Uses slope extrapolation from the left neighbour (same algorithm as
-    ``correct_jumps1d``), but takes explicit arrays instead of a typed
-    Dict to avoid construction overhead in the caller.
-
-    Parameters
-    ----------
-    vf : np.ndarray
-        Value function array (corrected in-place copy).
-    x : np.ndarray
-        Grid coordinates.
-    threshold : float
-        Gradient magnitude above which a jump is flagged.
-    pol1, pol2 : np.ndarray
-        Two policy arrays corrected alongside *vf*.
-
-    Returns
-    -------
-    corrected_vf, corrected_pol1, corrected_pol2 : np.ndarray
-    """
-    n = len(vf)
-    corrected_vf = np.copy(vf)
-    corrected_p1 = np.copy(pol1)
-    corrected_p2 = np.copy(pol2)
-
-    gradients = calculate_gradient_1d(vf, x)
-
-    for i in range(2, n - 1):
-        left_jump = np.abs(gradients[i]) > threshold
-        right_jump = np.abs(gradients[i + 1]) > threshold
-
-        if left_jump and right_jump:
-            dx = x[i - 1] - x[i - 2]
-            if dx != 0.0:
-                step = x[i] - x[i - 1]
-                corrected_vf[i] = corrected_vf[i - 1] + \
-                    (corrected_vf[i - 1] - corrected_vf[i - 2]) / dx * step
-                corrected_p1[i] = corrected_p1[i - 1] + \
-                    (corrected_p1[i - 1] - corrected_p1[i - 2]) / dx * step
-                corrected_p2[i] = corrected_p2[i - 1] + \
-                    (corrected_p2[i - 1] - corrected_p2[i - 2]) / dx * step
-
-        elif np.isnan(corrected_vf[i]) and i >= 3:
-            dx = x[i - 2] - x[i - 3]
-            if dx != 0.0:
-                step = x[i] - x[i - 2]
-                corrected_vf[i] = corrected_vf[i - 2] + \
-                    (corrected_vf[i - 2] - corrected_vf[i - 3]) / dx * step
-                corrected_p1[i] = corrected_p1[i - 2] + \
-                    (corrected_p1[i - 2] - corrected_p1[i - 3]) / dx * step
-                corrected_p2[i] = corrected_p2[i - 2] + \
-                    (corrected_p2[i - 2] - corrected_p2[i - 3]) / dx * step
-
-    return corrected_vf, corrected_p1, corrected_p2
-
-
 # ============== Fused Multi-Array Interpolation ==============
 
 
