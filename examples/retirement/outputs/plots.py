@@ -582,23 +582,20 @@ def nb_plot_scaling(grid_sizes, scaling, methods=None):
                   color=_METHOD_COLORS.get(m, 'gray'),
                   label=m, markersize=5, linewidth=1.6)
 
-    # O(n) reference anchored at DCEGM midpoint
-    mid = len(grid_sizes) // 2
+    # Reference lines anchored at first data point
     if 'DCEGM' in scaling:
-        t_lin = scaling['DCEGM'][mid]
-        ax.loglog(ns, t_lin * (ns / ns[mid]), '--',
+        t0 = scaling['DCEGM'][0]
+        ax.loglog(ns, t0 * (ns / ns[0]), '--',
                   color='#9ca3af', linewidth=0.8, label='$O(n)$')
 
-    # O(n²) reference anchored at CONSAV midpoint
     if 'CONSAV' in scaling:
-        t_quad = scaling['CONSAV'][mid]
-        ax.loglog(ns, t_quad * (ns / ns[mid])**2, ':',
+        t0 = scaling['CONSAV'][0]
+        ax.loglog(ns, t0 * (ns / ns[0])**2, ':',
                   color='#9ca3af', linewidth=0.8, label='$O(n^2)$')
 
-    # O(n) at FUES (shows sub-linearity)
     if 'FUES' in scaling:
-        t_fues = scaling['FUES'][mid]
-        ax.loglog(ns, t_fues * (ns / ns[mid]), '--',
+        t0 = scaling['FUES'][0]
+        ax.loglog(ns, t0 * (ns / ns[0]), '--',
                   color=_METHOD_COLORS['FUES'], linewidth=0.7,
                   alpha=0.4, label='$O(n)$ at FUES')
 
