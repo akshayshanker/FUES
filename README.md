@@ -4,7 +4,7 @@ Implementation of the fast upper-envelope scan (FUES) method for discrete-contin
 
 > Dobrescu, L.I. and Shanker, A. (2026). "A fast upper envelope scan method for discrete-continuous dynamic programming."
 
-FUES recovers the upper envelope of the EGM value correspondence in problems with non-convexities arising from discrete choices. Unlike existing methods (DC-EGM/MSS by [Iskhakov et al. 2017](https://doi.org/10.3982/QE533); LTM by [Druedahl 2017](https://doi.org/10.1016/j.econlet.2017.09.013); NEGM by [Druedahl 2021](https://doi.org/10.1016/j.jedc.2021.104133)), FUES does not require monotonicity of the optimal policy function or numerical optimisation, and scales sub-linearly with grid size.
+FUES recovers the upper envelope of the EGM ([Carroll 2006](https://doi.org/10.1016/j.econlet.2005.09.013)) value correspondence in problems with non-convexities arising from discrete choices. Unlike existing methods (DC-EGM/MSS by [Iskhakov et al. 2017](https://doi.org/10.3982/QE533); LTM by [Druedahl 2017](https://doi.org/10.1016/j.econlet.2017.09.013); NEGM by [Druedahl 2021](https://doi.org/10.1016/j.jedc.2021.104133)), FUES does not require monotonicity of the optimal policy function or numerical optimisation, and scales sub-linearly with grid size.
 
 This repo also provides a unified upper-envelope interface (`uenvelope`) for one-dimensional discrete-continuous EGM problems, with a single entry point for FUES, DC-EGM, RFC, and CONSAV.
 
@@ -66,7 +66,7 @@ python -m examples.retirement.code.benchmarks
 
 ### Core modules
 
-- **FUES** (`src/dcsmm/fues/`): Fast Upper-Envelope Scan implementation + rooftop-cut method (Dobrescu and Shanker, 2024).
+- **FUES** (`src/dcsmm/fues/`): Fast Upper-Envelope Scan implementation + rooftop-cut method.
 - **Upper-envelope registry** (`src/dcsmm/uenvelope/`): Unified entry point dispatching to FUES, DC-EGM, RFC, or CONSAV.
 
 ### Example models
@@ -106,7 +106,6 @@ FUES/
 ## References
 
 - Carroll, C.D. (2006). "The method of endogenous gridpoints for solving dynamic stochastic optimization problems." *Economics Letters*, 91(3), 312–320.
-- 
 - Dobrescu, L.I. and Shanker, A. (2026). "A fast upper envelope scan method for discrete-continuous dynamic programming."
 - Druedahl, J. (2017). "Upper envelope fancier tricks." *Economics Letters*, 159, 62–64.
 - Druedahl, J. (2021). "A guide on solving non-convex consumption-savings models." *Computational Economics*, 58, 747–775.
