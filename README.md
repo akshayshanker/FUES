@@ -21,6 +21,7 @@ from dcsmm.fues import FUES
 from dcsmm.uenvelope import EGM_UE
 ```
 
+This also installs the runtime dependencies: numba, numpy, scipy, [econ-ark](https://github.com/econ-ark/HARK) (DCEGM), [ConSav](https://github.com/NumEconCopenhagen/ConsumptionSaving) (G2EGM), and interpolation. See `pyproject.toml` for the full list and version pins.
 ### Option 2: With examples
 
 Clone the repo and install with example dependencies (matplotlib, pyyaml, seaborn). Includes everything in Option 1 plus the example models in the repo checkout.
