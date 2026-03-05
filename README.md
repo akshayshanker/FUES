@@ -2,11 +2,13 @@
 
 Implementation of the fast upper-envelope scan (FUES) method for discrete-continuous dynamic programming, as described in:
 
-> Dobrescu, L.I. and Shanker, A. (2026). "A fast upper envelope scan method for discrete-continuous dynamic programming."
+> Dobrescu, L.I. and Shanker, A. (2026). "A fast upper envelope scan method for discrete-continuous dynamic programming." [SSRN Working Paper.](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=4181302)
 
-FUES recovers the upper envelope of the EGM ([Carroll 2006](https://doi.org/10.1016/j.econlet.2005.09.013)) value correspondence in problems with non-convexities arising from discrete choices. Unlike existing methods (DC-EGM/MSS by [Iskhakov et al. 2017](https://doi.org/10.3982/QE533); LTM by [Druedahl 2017](https://doi.org/10.1016/j.econlet.2017.09.013); NEGM by [Druedahl 2021](https://doi.org/10.1016/j.jedc.2021.104133)), FUES does not require monotonicity of the optimal policy function or numerical optimisation, and scales sub-linearly with grid size.
+FUES recovers the upper envelope of the EGM ([Carroll 2006](https://doi.org/10.1016/j.econlet.2005.09.013)) value correspondence in problems in discrete-continuous problems. Unlike existing methods (DC-EGM/MSS by [Iskhakov et al. 2017](https://doi.org/10.3982/QE533); LTM by [Druedahl and Jørgensen 2017](https://doi.org/10.1016/j.jedc.2016.11.005); NEGM by [Druedahl 2021](https://doi.org/10.1007/s10614-020-10045-x)), FUES does not require monotonicity of the optimal policy function or numerical optimisation, and scales sub-linearly with grid size.
 
-This repo also provides a unified upper-envelope interface (`uenvelope`) for one-dimensional discrete-continuous EGM problems, with a single entry point for FUES, DC-EGM, RFC, and CONSAV.
+This repo also provides a unified upper-envelope interface (`uenvelope`) for one-dimensional discrete-continuous EGM problems, with a single entry point for discrete-continuous problems to use FUES, MSS, roof-top-cut (RFC), and CONSAV.
+
+Complete documentation and notebooks are here. 
 
 ## Installation
 
@@ -27,6 +29,8 @@ from dcsmm.uenvelope import EGM_UE
 
 This also installs the runtime dependencies: numba, numpy, scipy, [econ-ark](https://github.com/econ-ark/HARK) (DC-EGM), [ConSav](https://github.com/NumEconCopenhagen/ConsumptionSaving) (G2EGM/LTM), and interpolation. See `pyproject.toml` for the full list and version pins.
 
+View notebook demo of interface.here 
+
 ### Option 2: With examples
 
 Clone the repo and install with example dependencies (`matplotlib`, `pyyaml`, `seaborn`). Includes everything in Option 1 plus the example models in the repo checkout.
@@ -43,6 +47,7 @@ Run the retirement model benchmark:
 python -m examples.retirement.code.benchmarks
 ```
 
+Example notebooks are here 
 ### Option 3: Developer (editable)
 
 Full setup with editable install, examples, and all dependencies including the dolo-plus compiler. Use this if you are modifying the source code. Includes everything in Option 2.
@@ -71,20 +76,21 @@ python -m examples.retirement.code.benchmarks
 
 ### Example models
 
-| Model | Reference | Key feature |
-|-------|-----------|-------------|
-| Retirement choice | [Iskhakov et al. (2017)](https://doi.org/10.3982/QE533) | Discrete work/retire + continuous consumption; monotone policy (speed benchmark) |
-| Continuous durables | [Kaplan and Violante (2014)](https://doi.org/10.1257/aer.104.7.2110); [Yogo (2016)](https://doi.org/10.1093/rfs/hhw009) | Housing adjustment costs; non-monotone policy (existing methods fail) |
-| Housing-renting | [Fella (2014)](https://doi.org/10.1016/j.jmoneco.2014.04.008) | Discrete housing tenure + non-linear taxation; inaction regions break monotonicity |
+| Model               | Key feature                                                                                                                                                                     |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Retirement choice   | Discrete work/retire + continuous consumption; monotone policy (speed benchmark) a la [Iskhakov et al. (2017)](https://doi.org/10.3982/QE533)                                   |
+| Continuous durables | Housing adjustment costs; non-monotone policy (existing methods fail)                                                                                                           |
+| Housing-renting     | Discrete housing tenure + non-linear taxation; inaction regions break monotonicity ([Fella (2014)](https://doi.org/10.1016/j.jmoneco.2014.04.008) with added renting and taxes) |
 
 ### External upper-envelope methods
 
 In addition to the native FUES and rooftop-cut (RFC) implementations, `uenvelope` provides interfaces for:
 
-| Package | Method | Algorithm | Reference |
-|---------|--------|-----------|-----------|
-| [econ-ark/HARK](https://github.com/econ-ark/HARK) | DC-EGM | Monotone segment selection (MSS) | [Iskhakov et al. (2017)](https://doi.org/10.3982/QE533) |
-| [ConSav](https://github.com/NumEconCopenhagen/ConsumptionSaving) | G2EGM | Local triangulation (LTM) | [Druedahl (2017)](https://doi.org/10.1016/j.econlet.2017.09.013) |
+| Package                                                          | Method     | Algorithm                        | Reference                                                        |
+| ---------------------------------------------------------------- | ---------- | -------------------------------- | ---------------------------------------------------------------- |
+| [econ-ark/HARK](https://github.com/econ-ark/HARK)                | DC-EGM/MSS | Monotone segment selection (MSS) | [Iskhakov et al. (2017)](https://doi.org/10.3982/QE533)          |
+| [ConSav](https://github.com/NumEconCopenhagen/ConsumptionSaving) | G2EGM      | Local triangulation (LTM)        | [Druedahl and Jørgensen (2017)](https://doi.org/10.1016/j.jedc.2016.11.005) |
+| Roof-top-cut                                                     | RFC        |                                  |                                                                  |
 
 ### Directory structure
 
@@ -107,9 +113,8 @@ FUES/
 
 - Carroll, C.D. (2006). "The method of endogenous gridpoints for solving dynamic stochastic optimization problems." *Economics Letters*, 91(3), 312–320.
 - Dobrescu, L.I. and Shanker, A. (2026). "A fast upper envelope scan method for discrete-continuous dynamic programming."
-- Druedahl, J. (2017). "Upper envelope fancier tricks." *Economics Letters*, 159, 62–64.
-- Druedahl, J. (2021). "A guide on solving non-convex consumption-savings models." *Computational Economics*, 58, 747–775.
+- Druedahl, J. and Jørgensen, T.H. (2017). "A general endogenous grid method for multi-dimensional models with non-convexities and constraints." *Journal of Economic Dynamics and Control*, 74, 87–107.
+- Druedahl, J. (2021). "A guide on solving non-convex consumption-saving models." *Computational Economics*, 58, 747–775.
 - Fella, G. (2014). "A generalized endogenous grid method for non-smooth and non-concave problems." *Review of Economic Dynamics*, 17(2), 329–344.
 - Iskhakov, F., Jørgensen, T.H., Rust, J. and Schjerning, B. (2017). "The endogenous grid method for discrete-continuous dynamic choice models with (or without) taste shocks." *Quantitative Economics*, 8(2), 317–365.
 - Kaplan, G. and Violante, G.L. (2014). "A model of the consumption response to fiscal stimulus payments." *Econometrica*, 82(4), 1199–1239.
-- Yogo, M. (2016). "Portfolio choice in retirement: Health risk and the demand for annuities, housing, and risky assets." *Journal of Monetary Economics*, 80, 17–34.
