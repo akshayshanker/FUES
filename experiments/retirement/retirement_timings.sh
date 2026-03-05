@@ -30,9 +30,10 @@ OUTPUT_DIR=""               # Leave empty for default (results/retirement)
 
 # Timing sweep settings
 RUN_TIMINGS=true           # Run full timing comparison (slow)
-SWEEP_GRIDS="1000,2000,3000,6000,10000"   # Grid sizes for sweep
+SWEEP_GRIDS="1000,2000,3000,4000,5000,6000,7000,8000,9000,10000,11000,12000,13000,14000,15000"
 SWEEP_DELTAS="0.25,0.5,1,2"              # Delta values for sweep
 SWEEP_RUNS=3                            # Number of runs per config (best of n)
+LATEX_GRIDS="1000,2000,3000,6000,10000"  # Subset for paper LaTeX tables (md gets all)
 
 # ======================================================================
 #  ENVIRONMENT SETUP
@@ -157,6 +158,7 @@ if [[ "$RUN_TIMINGS" == "true" ]]; then
     CMD="$CMD --sweep-grids $SWEEP_GRIDS"
     CMD="$CMD --sweep-deltas $SWEEP_DELTAS"
     CMD="$CMD --sweep-runs $SWEEP_RUNS"
+    CMD="$CMD --latex-grids $LATEX_GRIDS"
 fi
 
 # Run

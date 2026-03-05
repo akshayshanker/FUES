@@ -47,7 +47,8 @@ def _load_baseline():
 
 def test_Timings(grid_sizes, delta_values, n=3, results_dir="results",
                  true_grid_size=20000, true_method='DCEGM',
-                 calib_overrides=None, config_overrides=None):
+                 calib_overrides=None, config_overrides=None,
+                 latex_grids=None):
     """Run timing benchmarks across grid sizes and delta values.
 
     All runs go through the canonical pipeline (solve_nest).
@@ -72,6 +73,9 @@ def test_Timings(grid_sizes, delta_values, n=3, results_dir="results",
     config_overrides : dict, optional
         Extra config overrides (e.g. from --override-file).
         ``grid_size`` and ``padding_mbar`` are always overridden per sweep row.
+    latex_grids : list of int, optional
+        Subset of grid_sizes to include in LaTeX tables.
+        Markdown tables always include all grid sizes.
     """
     extra_calib = dict(calib_overrides or {})
     extra_config = dict(config_overrides or {})
@@ -191,12 +195,12 @@ def test_Timings(grid_sizes, delta_values, n=3, results_dir="results",
     generate_timing_table_combined(
         latex_timings_data, latex_total_timing_data,
         "timing", "Retirement model", results_dir,
-        params=benchmark_params,
+        params=benchmark_params, latex_grids=latex_grids,
     )
     generate_accuracy_table(
         latex_errors_data, latex_cdev_data,
         "accuracy", "Retirement model", results_dir,
-        params=benchmark_params,
+        params=benchmark_params, latex_grids=latex_grids,
     )
 
 

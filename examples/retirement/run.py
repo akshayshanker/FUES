@@ -113,6 +113,10 @@ def parse_cli():
         '--sweep-runs', type=int, default=3,
         help='Number of runs per config (best of n)',
     )
+    parser.add_argument(
+        '--latex-grids', type=str, default=None,
+        help='Comma-separated grid sizes for LaTeX tables (subset of sweep-grids)',
+    )
 
     return parser.parse_args()
 
@@ -159,11 +163,14 @@ def main():
         print(f'  Grid sizes: {grid_sizes}')
         print(f'  Delta values: {delta_values}')
         print(f'  Runs per config: {args.sweep_runs}')
+        latex_grids = [int(x) for x in args.latex_grids.split(',')] \
+            if args.latex_grids else None
         test_Timings(
             grid_sizes, delta_values, n=args.sweep_runs,
             results_dir=args.output_dir,
             calib_overrides=calib_overrides,
             config_overrides=config_overrides,
+            latex_grids=latex_grids,
         )
 
     # ── Solve via canonical pipeline (compare 4 UE methods) ──

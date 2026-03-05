@@ -82,7 +82,8 @@ def _format_params_list(params, latex=False):
 
 
 def generate_timing_table_combined(ue_data, total_data, table_type, caption,
-                                   results_dir="results", params=None):
+                                   results_dir="results", params=None,
+                                   latex_grids=None):
     """Generate timing table with UE and Total sub-columns per method.
 
     Parameters
@@ -141,7 +142,8 @@ def generate_timing_table_combined(ue_data, total_data, table_type, caption,
         f.write("\n".join(md_lines))
     print(f"Markdown table saved to: {md_path}")
 
-    # --- LaTeX output ---
+    # --- LaTeX output (filtered by latex_grids if provided) ---
+    latex_grid_set = set(latex_grids) if latex_grids else None
     tex_lines = []
     tex_lines.append(r"\begin{table}[htbp]")
     tex_lines.append(r"\centering")
@@ -156,6 +158,8 @@ def generate_timing_table_combined(ue_data, total_data, table_type, caption,
     tex_lines.append(r"\midrule")
 
     for grid in sorted(grid_groups.keys()):
+        if latex_grid_set and grid not in latex_grid_set:
+            continue
         rows = grid_groups[grid]
         for i, (ue_row, tot_row) in enumerate(rows):
             delta = ue_row[1]
@@ -186,7 +190,8 @@ def generate_timing_table_combined(ue_data, total_data, table_type, caption,
 
 
 def generate_accuracy_table(euler_data, cdev_data, table_type, caption,
-                            results_dir="results", params=None):
+                            results_dir="results", params=None,
+                            latex_grids=None):
     """Generate accuracy table with Euler and Cons.Dev sub-columns per method.
 
     Parameters
@@ -245,7 +250,8 @@ def generate_accuracy_table(euler_data, cdev_data, table_type, caption,
         f.write("\n".join(md_lines))
     print(f"Markdown table saved to: {md_path}")
 
-    # --- LaTeX output ---
+    # --- LaTeX output (filtered by latex_grids if provided) ---
+    latex_grid_set = set(latex_grids) if latex_grids else None
     tex_lines = []
     tex_lines.append(r"\begin{table}[htbp]")
     tex_lines.append(r"\centering")
@@ -260,6 +266,8 @@ def generate_accuracy_table(euler_data, cdev_data, table_type, caption,
     tex_lines.append(r"\midrule")
 
     for grid in sorted(grid_groups.keys()):
+        if latex_grid_set and grid not in latex_grid_set:
+            continue
         rows = grid_groups[grid]
         for i, (euler_row, cdev_row) in enumerate(rows):
             delta = euler_row[1]
