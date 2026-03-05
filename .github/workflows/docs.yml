@@ -19,4 +19,9 @@ jobs:
 
       - run: pip install mkdocs-material mkdocs-jupyter
 
+      # Sync notebook into docs/ (symlinks don't survive git checkout)
+      - run: |
+          mkdir -p docs/notebooks
+          cp examples/retirement/notebooks/retirement_fues.ipynb docs/notebooks/
+
       - run: mkdocs gh-deploy --force
