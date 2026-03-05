@@ -83,6 +83,7 @@ def plot_pbs_scaling(path, ax=None):
     grid_sizes, means = parse_timing_md(path)
     ns = np.array(grid_sizes, dtype=float)
     methods = ['FUES', 'DCEGM', 'CONSAV', 'RFC']
+    _labels = {'FUES': 'FUES', 'DCEGM': 'MSS', 'CONSAV': 'LTM', 'RFC': 'RFC'}
 
     if ax is None:
         fig, ax = plt.subplots(figsize=(7, 4.5))
@@ -92,7 +93,7 @@ def plot_pbs_scaling(path, ax=None):
     for m in methods:
         ax.loglog(ns, means[m], f'-{_METHOD_MARKERS.get(m, "o")}',
                   color=_METHOD_COLORS.get(m, 'gray'),
-                  label=m, markersize=6, linewidth=1.8)
+                  label=_labels.get(m, m), markersize=6, linewidth=1.8)
 
     # Reference lines anchored at first point
     t0_lin = means['DCEGM'][0]

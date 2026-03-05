@@ -370,6 +370,8 @@ _METHOD_COLORS = {
     'CONSAV': _NORD['aurora'][4],
 }
 _METHOD_MARKERS = {'FUES': 'o', 'DCEGM': 's', 'RFC': '^', 'CONSAV': 'D'}
+# Display labels for plots (API uses DCEGM/CONSAV, paper uses MSS/LTM)
+_METHOD_LABELS = {'FUES': 'FUES', 'DCEGM': 'MSS', 'RFC': 'RFC', 'CONSAV': 'LTM'}
 
 # Plotly template matching the matplotlib style
 _PLOTLY_TEMPLATE = dict(
@@ -627,7 +629,7 @@ def nb_plot_scaling(grid_sizes, scaling, methods=None):
         ax.loglog(ns, scaling[m],
                   f'-{_METHOD_MARKERS.get(m, "o")}',
                   color=_METHOD_COLORS.get(m, 'gray'),
-                  label=m, markersize=5, linewidth=1.6)
+                  label=_METHOD_LABELS.get(m, m), markersize=5, linewidth=1.6)
 
     # Reference lines anchored at first data point
     if 'DCEGM' in scaling:
