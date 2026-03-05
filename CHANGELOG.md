@@ -2,6 +2,32 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.0dev5] - 2026-03-05 – Versioned FUES & Scaling Optimisations
+
+### FUES versioning
+
+- `fues.py` is now a thin re-export from `fues_v0_2dev` (the default).
+- `fues_v0_1dev.py`: release-prep baseline (v0.1dev).
+- `fues_v0_2dev.py`: optimised version (v0.2dev) — see below.
+- UE engine registry: `FUES` (default=v0.2dev), `FUES_V0_1DEV`, `FUES_V0_2DEV`.
+
+### FUES v0.2dev optimisations
+
+- `np.empty` for intersection buffer (was `np.full(..., np.nan)`).
+- Conditional `m_bar`: skip `max(abs,abs)` when `endog_mbar=False`.
+- `assume_sorted` param + auto-detection to skip `argsort` + 5 fancy-index copies.
+- Linear O(K+J) merge via `_merge_sorted_with_few` (was O(N log N) `argsort`).
+- `cache=True` on all scan helpers (faster Numba cold starts).
+- Pre-computed `abs(del_a)` array (avoid per-iteration `np.abs`).
+- Dead code removal: commented-out variables, redundant `de_1`, simplified dispatch.
+
+### Cleanup
+
+- Removed unused `correct_jumps_vf_pol` from `math_funcs.py`.
+- Moved `examples/durables/plot.py` and `helpers/metrics_fast.py` to `superseeded/`.
+- Deleted stray `examples/durables/Untitled`.
+- Trimmed `experiments/retirement/README.md`.
+
 ## [0.5.0dev4] - 2026-03-04 – Retirement Pipeline-First Restructure
 
 ### Pipeline restructure (matsya-reviewed)
