@@ -6,11 +6,11 @@ The repo also includes a general-purpose upper envelope interface (`uenvelope`) 
 
 ## Installation
 
-The installable package is called `dcsmm`. Requires Python 3.11+.
+The installable package is called `dcsmm`. Requires Python 3.11+. Each option below is self-contained -- pick one.
 
 ### Option 1: Library only
 
-Install `dcsmm` (FUES + upper envelope registry) into an existing environment. No examples, no dev tools.
+Use `fues` or `uenvelope` in your own models. Installs `dcsmm` into an existing environment. No repo clone, no examples.
 
 ```bash
 pip install git+https://github.com/akshayshanker/FUES.git@release-prep
@@ -23,7 +23,7 @@ from dcsmm.uenvelope import EGM_UE
 
 ### Option 2: With examples
 
-Clone the repo and install with example dependencies (matplotlib, pyyaml, seaborn). Use this to run the benchmark models.
+Clone the repo and install with example dependencies (matplotlib, pyyaml, seaborn). Includes everything in Option 1 plus the example models in the repo checkout.
 
 ```bash
 git clone -b release-prep https://github.com/akshayshanker/FUES.git
@@ -33,7 +33,7 @@ pip install ".[examples]"
 
 ### Option 3: Developer (editable)
 
-Full setup with editable install, dolo-plus compiler, and all dependencies. Use this if you are modifying the source code.
+Full setup with editable install, examples, and all dependencies including the dolo-plus compiler. Use this if you are modifying the source code. Includes everything in Option 2.
 
 ```bash
 git clone -b release-prep https://github.com/akshayshanker/FUES.git
@@ -42,7 +42,7 @@ bash setup/setup_venv.sh
 source .venv/bin/activate
 ```
 
-This creates a local `.venv`, installs `dcsmm` in editable mode with all dependencies (numba, HARK, consav, dolo-plus), and verifies the install.
+This creates a local `.venv`, installs `dcsmm` in editable mode, and verifies the install.
 
 ## Quick test
 
