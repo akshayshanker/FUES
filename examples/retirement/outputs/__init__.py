@@ -12,6 +12,9 @@ from .plots import (
     plot_egrids, plot_cons_pol, plot_dcegm_cf,
     # Notebook (interactive / exploratory)
     nb_plot_egm_interactive, nb_plot_cons_ages, nb_plot_scaling,
+    nb_plot_egrids,
+    # Style
+    setup_nb_style,
 )
 from .tables import generate_timing_table_combined, generate_accuracy_table
 
@@ -24,6 +27,8 @@ __all__ = [
     "nb_plot_egm_interactive",
     "nb_plot_cons_ages",
     "nb_plot_scaling",
+    "nb_plot_egrids",
+    "setup_nb_style",
     # Tables
     "generate_timing_table_combined",
     "generate_accuracy_table",

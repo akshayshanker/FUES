@@ -354,14 +354,14 @@ def plot_dcegm_cf(age, g_size, e_grid, vf_work, c_worker, dela_worker, a_prime, 
 # plot_cons_pol, plot_dcegm_cf) are above.
 # ====================================================================
 
-# Nord palette (matches MkDocs site theme)
+# ── Nord palette (matches MkDocs Material theme) ──
 _NORD = {
     'frost':  ['#5e81ac', '#81a1c1', '#88c0d0', '#8fbcbb'],
     'aurora': ['#bf616a', '#d08770', '#ebcb8b', '#a3be8c', '#b48ead'],
     'fg':     '#2e3440',
     'bg':     '#ffffff',
-    'grid':   '#d8dee9',
-    'spine':  '#d8dee9',
+    'grid':   '#e5e7eb',
+    'spine':  '#d1d5db',
 }
 _METHOD_COLORS = {
     'FUES': _NORD['frost'][0],
@@ -371,13 +371,60 @@ _METHOD_COLORS = {
 }
 _METHOD_MARKERS = {'FUES': 'o', 'DCEGM': 's', 'RFC': '^', 'CONSAV': 'D'}
 
+# Plotly template matching the matplotlib style
+_PLOTLY_TEMPLATE = dict(
+    layout=dict(
+        font=dict(family='Source Sans Pro, Helvetica Neue, Arial', size=11,
+                  color=_NORD['fg']),
+        plot_bgcolor=_NORD['bg'],
+        paper_bgcolor=_NORD['bg'],
+        xaxis=dict(gridcolor=_NORD['grid'], gridwidth=0.5,
+                   linecolor=_NORD['spine'], linewidth=0.6),
+        yaxis=dict(gridcolor=_NORD['grid'], gridwidth=0.5,
+                   linecolor=_NORD['spine'], linewidth=0.6),
+    )
+)
+
+
+def setup_nb_style():
+    """Apply notebook rcParams globally. Call once at notebook top."""
+    import matplotlib
+    matplotlib.rcParams.update({
+        'font.family': 'sans-serif',
+        'font.sans-serif': ['Source Sans Pro', 'Helvetica Neue', 'Arial'],
+        'font.size': 10,
+        'axes.titlesize': 11,
+        'axes.titleweight': '600',
+        'axes.labelsize': 10,
+        'figure.facecolor': _NORD['bg'],
+        'axes.facecolor': _NORD['bg'],
+        'axes.grid': True,
+        'grid.alpha': 0.4,
+        'grid.linewidth': 0.5,
+        'grid.color': _NORD['grid'],
+        'axes.edgecolor': _NORD['spine'],
+        'axes.linewidth': 0.6,
+        'text.color': _NORD['fg'],
+        'axes.labelcolor': _NORD['fg'],
+        'xtick.color': _NORD['fg'],
+        'ytick.color': _NORD['fg'],
+        'xtick.labelsize': 9,
+        'ytick.labelsize': 9,
+        'legend.fontsize': 9,
+        'legend.framealpha': 0.7,
+        'legend.edgecolor': 'none',
+        'figure.dpi': 150,
+        'savefig.dpi': 150,
+        'savefig.bbox': 'tight',
+    })
+
 
 def _style_nb_ax(ax):
-    """Apply Nord styling to a matplotlib axes (notebook style)."""
+    """Apply Nord styling to a single matplotlib axes."""
     for s in ax.spines.values():
         s.set_color(_NORD['spine'])
         s.set_linewidth(0.6)
-    ax.tick_params(colors=_NORD['fg'], labelsize=8)
+    ax.tick_params(colors=_NORD['fg'], labelsize=9)
 
 
 def nb_plot_egm_interactive(nest, model, age, pad=10):
@@ -604,5 +651,105 @@ def nb_plot_scaling(grid_sizes, scaling, methods=None):
     ax.set_title('UE scaling (log-log)')
     _style_nb_ax(ax)
     ax.legend(fontsize=8, framealpha=0.7, edgecolor='none', ncol=2)
+    fig.tight_layout()
+    return fig
+
+
+def nb_plot_egrids(nest, model, age):
+    """Static EGM grid plot for notebook (value + savings policy).
+
+    Runs FUES with intersection points and plots:
+    - Red open circles: raw EGM points
+    - Blue crosses: FUES-refined optimal points
+    - Black line: value function through optimal points
+    - Green stars: estimated crossing points
+
+    Parameters
+    ----------
+    nest : dict
+        Solved nest.
+    model : RetirementModel
+        Model instance.
+    age : int
+        Age (calendar time t) to plot.
+
+    Returns
+    -------
+    matplotlib.figure.Figure
+    """
+    from dcsmm.fues.fues import FUES as fues_alg
+    from .diagnostics import get_policy
+
+    e_grid = get_policy(nest, 'egrid', stage='work_cons')
+    vf_unref = get_policy(nest, 'q_hat', stage='work_cons')
+    c_unref = get_policy(nest, 'c_hat', stage='work_cons')
+    da_unref = get_policy(nest, 'da_pre_ue', stage='work_cons')
+
+    x_raw = np.array(e_grid[age])
+    q_raw = np.array(vf_unref[age])
+    c_raw = np.array(c_unref[age])
+    da_raw = np.array(da_unref[age])
+
+    fues_result, intersections = fues_alg(
+        x_raw, q_raw, c_raw, model.asset_grid_A, da_raw,
+        m_bar=1.0001, include_intersections=True,
+        return_intersections_separately=True,
+    )
+    x_clean, vf_clean, c_clean, _, _ = fues_result
+    inter_e, inter_v, inter_p1, _, _ = intersections
+
+    v_raw = q_raw * model.beta - model.delta
+    v_clean = vf_clean * model.beta - model.delta
+    v_inter = inter_v * model.beta - model.delta if len(inter_e) > 0 else np.array([])
+
+    sav_raw = x_raw - c_raw
+    sav_clean = x_clean - c_clean
+    sav_inter = inter_e - inter_p1 if len(inter_e) > 0 else np.array([])
+
+    # Auto x-range: center on median crossing with padding
+    pad = 10
+    center = np.median(inter_e) if len(inter_e) > 0 else np.median(x_raw)
+    x_lo, x_hi = center - pad, center + pad
+
+    fig, (ax1, ax2) = pl.subplots(1, 2, figsize=(10, 4))
+
+    # Value panel
+    ax1.scatter(x_raw, v_raw, s=12, facecolors='none', edgecolors=_NORD['aurora'][0],
+                linewidths=0.5, alpha=0.4, label='Raw EGM', zorder=1)
+    sort_idx = np.argsort(x_clean)
+    ax1.plot(x_clean[sort_idx], v_clean[sort_idx], color=_NORD['fg'],
+             linewidth=1, label='Value function', zorder=2)
+    ax1.scatter(x_clean, v_clean, s=15, color=_NORD['frost'][0], marker='x',
+                linewidths=0.8, label='FUES optimal', zorder=3)
+    if len(inter_e) > 0:
+        ax1.scatter(inter_e, v_inter, s=60, color=_NORD['aurora'][3], marker='*',
+                    edgecolors=_NORD['fg'], linewidths=0.5,
+                    label='Crossing points', zorder=4)
+    ax1.set_xlim(x_lo, x_hi)
+    ax1.set_xlabel('Endogenous grid (assets)')
+    ax1.set_ylabel('Value')
+    ax1.set_title(f'Value correspondence (age {age})')
+    ax1.legend(fontsize=8, framealpha=0.7, edgecolor='none')
+    _style_nb_ax(ax1)
+
+    # Savings panel
+    ax2.scatter(np.sort(x_raw), np.take(sav_raw, np.argsort(x_raw)),
+                s=12, facecolors='none', edgecolors=_NORD['aurora'][0],
+                linewidths=0.5, alpha=0.4, label='Raw EGM', zorder=1)
+    ax2.scatter(x_clean[sort_idx], sav_clean[sort_idx],
+                s=15, color=_NORD['frost'][0], marker='x',
+                linewidths=0.8, label='FUES optimal', zorder=3)
+    if len(inter_e) > 0:
+        si = np.argsort(inter_e)
+        ax2.scatter(inter_e[si], sav_inter[si], s=60, color=_NORD['aurora'][3],
+                    marker='*', edgecolors=_NORD['fg'], linewidths=0.5,
+                    label='Crossing points', zorder=4)
+    ax2.set_xlim(x_lo, x_hi)
+    ax2.set_xlabel('Endogenous grid (assets)')
+    ax2.set_ylabel('Next-period assets')
+    ax2.set_title(f'Savings policy (age {age})')
+    ax2.legend(fontsize=8, framealpha=0.7, edgecolor='none')
+    _style_nb_ax(ax2)
+
     fig.tight_layout()
     return fig
