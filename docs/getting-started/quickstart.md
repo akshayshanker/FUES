@@ -1,32 +1,30 @@
 # Quick Start
 
-## Using FUES directly
+## Drop-in FUES
 
-FUES takes the raw output of an EGM step — endogenous grid, values, and policies — and returns the refined arrays with sub-optimal points removed.
+After your EGM step produces arrays of endogenous grid points, values, and policies, pass them to FUES:
 
 ```python
-import numpy as np
 from dcsmm.fues import FUES
 
-# Suppose EGM has produced:
-#   e_grid  : endogenous grid points (N,)
-#   vlu     : value at each point (N,)
-#   c_hat   : consumption policy (N,)
-#   a_hat   : next-period assets / secondary policy (N,)
-#   del_a   : policy gradient da'/de (N,)
-
-e_clean, v_clean, c_clean, a_clean, d_clean = FUES(
-    e_grid, vlu, c_hat, a_hat, del_a,
-    m_bar=1.2,    # jump detection threshold
-    LB=4,         # look-back buffer length
+e_clean, v_clean, c_clean, a_clean, _ = FUES(
+    e_grid,     # endogenous grid (N,) — unsorted is fine
+    vlu,        # value at each point (N,)
+    c_hat,      # consumption policy (N,)
+    a_hat,      # next-period assets (N,)
+    del_a,      # policy gradient da'/de (N,)
+    m_bar=1.2,  # jump detection threshold (≈ max MPC)
+    LB=4,       # look-back buffer for forward/backward scans
 )
 ```
 
-The returned arrays contain only the optimal points. Interpolate over `(e_clean, v_clean)` and `(e_clean, c_clean)` to evaluate the value function and policy on any target grid.
+The returned arrays contain only the optimal (upper-envelope) points. Interpolate `(e_clean, c_clean)` onto your target grid.
 
-## Using the upper envelope registry
+**Setting `m_bar`**: use the maximum marginal propensity to consume in your model. For log utility, `m_bar ≈ 1.0`–`1.2` works well. If unsure, set `endog_mbar=True` to let FUES compute it from `del_a`.
 
-To compare FUES against other methods (DC-EGM, RFC, CONSAV) on the same problem:
+## Upper-envelope registry
+
+To compare FUES against MSS, RFC, and LTM on the same problem, use the unified `EGM_UE` interface:
 
 ```python
 from dcsmm.uenvelope import EGM_UE
@@ -38,23 +36,29 @@ refined, raw, interpolated = EGM_UE(
     kappa_hat=c_hat,
     X_cntn=a_hat,
     X_dcsn=target_grid,
-    uc_func_partial=marginal_utility,
+    uc_func_partial=marginal_utility,   # u'(c)
     u_func={"func": utility_fn, "args": {}},
-    ue_method="FUES",    # or "DCEGM", "RFC", "CONSAV"
+    ue_method="FUES",                   # or "DCEGM", "RFC", "CONSAV"
     m_bar=1.2,
 )
 
-# refined["x_dcsn_ref"]  — refined endogenous grid
-# refined["v_dcsn_ref"]  — refined values
-# refined["kappa_ref"]   — refined consumption
-# refined["x_cntn_ref"]  — refined next-period assets
+# Results
+refined["x_dcsn_ref"]   # refined endogenous grid
+refined["v_dcsn_ref"]   # refined values
+refined["kappa_ref"]    # refined consumption
+refined["ue_time"]      # wall-clock time (seconds)
 ```
 
-## Running the retirement example
+Switch `ue_method` to `"DCEGM"`, `"RFC"`, or `"CONSAV"` to run the same problem with a different algorithm. All methods return the same dict structure.
+
+See [API Reference](../api/fues.md) for full parameter documentation.
+
+## Try the notebook
+
+For a complete worked example solving the [Iskhakov et al. (2017)](https://doi.org/10.3982/QE643) retirement model:
 
 ```bash
-python examples/retirement/run.py \
-    --grid-size 3000 --output-dir results/retirement
+jupyter lab examples/retirement/notebooks/retirement_fues.ipynb
 ```
 
-This solves the Iskhakov et al. (2017) retirement model with all four upper envelope methods and prints timing and Euler error comparisons.
+Or view the [rendered notebook](../notebooks/retirement_fues.ipynb) in the docs.

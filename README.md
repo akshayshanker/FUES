@@ -2,19 +2,18 @@
 
 > Dobrescu, L.I. and Shanker, A. (2026). "A fast upper envelope scan method for discrete-continuous dynamic programming." [SSRN Working Paper.](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=4181302)
 
-FUES recovers the upper envelope of the EGM ([Carroll 2006](https://doi.org/10.1016/j.econlet.2005.09.013)) value correspondence in discrete-continuous problems. Unlike MSS ([Iskhakov et al. 2017](https://doi.org/10.3982/QE643)), LTM ([Druedahl & Jørgensen 2017](https://doi.org/10.1016/j.jedc.2016.11.005)), and NEGM ([Druedahl 2021](https://doi.org/10.1007/s10614-020-10045-x)), it does not require monotonicity of the optimal policy function or numerical optimisation.
+FUES recovers the upper envelope of the EGM ([Carroll 2006](https://doi.org/10.1016/j.econlet.2005.09.013)) value correspondence in discrete-continuous problems. Unlike monotone segment selection (MSS, algorithm by [Iskhakov et al. 2017](https://doi.org/10.3982/QE643)), local triangulation (LTM, [Druedahl & Jørgensen 2017](https://doi.org/10.1016/j.jedc.2016.11.005)), and NEGM ([Druedahl 2021](https://doi.org/10.1007/s10614-020-10045-x)), FUES does not require monotonicity of the optimal policy function or numerical optimisation. FUES is also orders of magnitude faster than existing upper envelope methods. 
 
-The repo also ships a unified upper-envelope interface (`uenvelope`) that dispatches to FUES, MSS, RFC, or CONSAV/LTM through a single call.
+This repo also ships a unified upper-envelope interface (`uenvelope`) that dispatches to FUES, MSS, RFC, or CONSAV/LTM through a single call.
 
-**[Docs](https://akshayshanker.github.io/FUES/)** · **[Notebook](https://akshayshanker.github.io/FUES/notebooks/retirement_fues/)** · **[Examples](https://akshayshanker.github.io/FUES/examples/retirement/)**
+**[Docs](https://akshayshanker.github.io/FUES/)** · **[Notebooks](https://akshayshanker.github.io/FUES/notebooks/retirement_fues/)** 
 
 ## Install
 
-The installable package is `dcsmm`. Requires Python 3.11+.
-
+The installable package containing `fues` and `uenvelope` modules is `dcsmm`. Requires Python 3.11+.
 ### Option 1: Library only
 
-Install FUES and the upper-envelope registry without cloning the repo.
+Install FUES and the upper-envelope interface without cloning the repo. Lets you use `fues` and all other benchmark upper envelope methods in your own applications. 
 
 ```bash
 pip install git+https://github.com/akshayshanker/FUES.git@release-prep
@@ -37,13 +36,18 @@ cd FUES
 pip install ".[examples]"
 ```
 
-Run the retirement model benchmark:
+
+Each example can be run as a simple single solve via `run.py`
 
 ```bash
 python examples/retirement/run.py --grid-size 3000
 ```
 
-The [interactive notebook](examples/retirement/notebooks/retirement_fues.ipynb) walks through the retirement model step by step.
+See docs(link) for details on the bash args. 
+
+Formal benchmarking tests and parameter sweeps are performed on a HPC cluster, scripts are in (link). The results are saved in replication//(link) 
+
+The [interactive notebooks](examples/retirement/notebooks/retirement_fues.ipynb) walks through the retirement model and other examples step by step.
 
 ### Option 3: Developer (editable)
 
@@ -70,14 +74,6 @@ python examples/retirement/run.py --run-timings
 
 - **FUES** (`src/dcsmm/fues/`) — Fast Upper-Envelope Scan algorithm + rooftop-cut (RFC).
 - **Upper-envelope registry** (`src/dcsmm/uenvelope/`) — unified entry point dispatching to FUES, MSS, RFC, or LTM.
-
-### Example models
-
-| Model | What it tests |
-|-------|--------------|
-| Retirement choice | Discrete work/retire + continuous consumption; monotone policy ([Iskhakov et al. 2017](https://doi.org/10.3982/QE643)) |
-| Continuous durables | Housing adjustment costs; non-monotone policy where MSS/LTM fail |
-| Housing-renting | Discrete tenure + capital income tax; inaction regions ([Fella 2014](https://doi.org/10.1016/j.red.2013.07.001)) |
 
 ### External methods wrapped by `uenvelope`
 

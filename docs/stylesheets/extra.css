@@ -1,43 +1,68 @@
-/* Nord-inspired palette matching akshayshanker.net */
+/* FUES docs — Nord palette with polished Material tweaks */
 
 :root {
-  /* Nord Frost */
-  --md-primary-fg-color: #5e81ac;
-  --md-primary-fg-color--light: #88c0d0;
-  --md-primary-fg-color--dark: #4c6c91;
-  --md-accent-fg-color: #88c0d0;
-
-  /* Nord Snow Storm for backgrounds */
+  --md-primary-fg-color: #4c566a;
+  --md-primary-fg-color--light: #5e81ac;
+  --md-primary-fg-color--dark: #3b4252;
+  --md-accent-fg-color: #81a1c1;
   --md-default-bg-color: #ffffff;
   --md-default-fg-color: #2e3440;
-
-  /* Links */
   --md-typeset-a-color: #5e81ac;
+  --md-code-bg-color: #f8f9fb;
 }
 
-/* Dark mode: Nord Polar Night */
 [data-md-color-scheme="slate"] {
-  --md-primary-fg-color: #5e81ac;
-  --md-primary-fg-color--light: #88c0d0;
-  --md-primary-fg-color--dark: #4c6c91;
+  --md-primary-fg-color: #4c566a;
+  --md-primary-fg-color--light: #5e81ac;
+  --md-primary-fg-color--dark: #2e3440;
   --md-accent-fg-color: #88c0d0;
   --md-default-bg-color: #2e3440;
   --md-default-fg-color: #d8dee9;
   --md-typeset-a-color: #88c0d0;
+  --md-code-bg-color: #3b4252;
 }
 
-/* Code blocks: Nord dark */
+/* Header: subtle gradient, slightly taller */
+.md-header {
+  background: linear-gradient(135deg, #3b4252 0%, #4c566a 50%, #5e81ac 100%);
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.12);
+}
+
+/* Tabs under header */
+.md-tabs {
+  background: #434c5e;
+}
+
+/* Content max-width for readability */
+.md-content {
+  max-width: 52rem;
+}
+
+/* Code blocks */
 .md-typeset code {
-  background-color: #eceff4;
+  background-color: var(--md-code-bg-color);
   color: #2e3440;
+  border-radius: 3px;
+  padding: 0.1em 0.3em;
+  font-size: 0.85em;
 }
 
 [data-md-color-scheme="slate"] .md-typeset code {
-  background-color: #3b4252;
   color: #d8dee9;
 }
 
-/* Admonition accent */
+.md-typeset pre > code {
+  padding: 0.8em 1em;
+  border-radius: 6px;
+}
+
+/* Admonitions: cleaner */
+.md-typeset .admonition,
+.md-typeset details {
+  border-radius: 6px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+
 .md-typeset .admonition.note,
 .md-typeset details.note {
   border-color: #5e81ac;
@@ -45,10 +70,66 @@
 
 .md-typeset .note > .admonition-title,
 .md-typeset .note > summary {
-  background-color: rgba(94, 129, 172, 0.1);
+  background-color: rgba(94, 129, 172, 0.08);
 }
 
-/* Hero section on landing page */
+.md-typeset .admonition.warning,
+.md-typeset details.warning {
+  border-color: #d08770;
+}
+
+.md-typeset .admonition.tip,
+.md-typeset details.tip {
+  border-color: #a3be8c;
+}
+
+/* Tables: tighter, subtle borders */
+.md-typeset table:not([class]) {
+  font-size: 0.85rem;
+  border-collapse: collapse;
+}
+
+.md-typeset table:not([class]) th {
+  background-color: #f0f2f5;
+  font-weight: 600;
+  border-bottom: 2px solid #d8dee9;
+}
+
+[data-md-color-scheme="slate"] .md-typeset table:not([class]) th {
+  background-color: #3b4252;
+  border-bottom-color: #4c566a;
+}
+
+.md-typeset table:not([class]) td {
+  border-bottom: 1px solid #e5e9f0;
+}
+
+[data-md-color-scheme="slate"] .md-typeset table:not([class]) td {
+  border-bottom-color: #434c5e;
+}
+
+/* Links: subtle underline on hover */
+.md-typeset a {
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  transition: border-color 0.15s;
+}
+
+.md-typeset a:hover {
+  border-bottom-color: var(--md-accent-fg-color);
+}
+
+/* Navigation: tighter sidebar */
+.md-nav__link {
+  font-size: 0.82rem;
+}
+
+/* Footer: match header gradient */
+.md-footer {
+  background: linear-gradient(135deg, #3b4252 0%, #4c566a 100%);
+}
+
+/* Hero section */
 .md-typeset .hero {
   margin: 2rem 0;
   padding: 2rem 0;

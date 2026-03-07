@@ -1,12 +1,12 @@
-# `FUES` — Fast Upper-Envelope Scan
+# API Reference — Core Library
 
-::: dcsmm.fues.fues.FUES
+## `FUES` — Fast Upper-Envelope Scan
 
 ```python
 from dcsmm.fues import FUES
 ```
 
-## Signature
+### Signature
 
 ```python
 FUES(
@@ -18,7 +18,7 @@ FUES(
 )
 ```
 
-## Parameters
+### Parameters
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
@@ -28,13 +28,13 @@ FUES(
 | `policy_2` | ndarray (N,) | — | Secondary policy (e.g. next-period assets). Used for jump classification. |
 | `del_a` | ndarray (N,) | — | Policy gradient series for endogenous jump thresholds. |
 | `m_bar` | float | 1.0 | Jump detection threshold. Set to the maximum marginal propensity to save, or slightly above. |
-| `LB` | int | 4 | Look-back/forward buffer length for forward and backward scans near crossing points. |
-| `endog_mbar` | bool | False | If True, compute an endogenous jump threshold at each grid point using `del_a` and `padding_mbar`. |
-| `padding_mbar` | float | 0.0 | Additional padding added to the endogenous threshold when `endog_mbar=True`. |
-| `include_intersections` | bool | True | If True, interpolate crossing points at retained jumps and include them in the output. |
-| `return_intersections_separately` | bool | False | If True, return intersections as a separate tuple (see Returns). |
+| `LB` | int | 4 | Look-back/forward buffer length for forward and backward scans. |
+| `endog_mbar` | bool | False | If True, compute endogenous jump threshold using `del_a`. |
+| `padding_mbar` | float | 0.0 | Additional padding for the endogenous threshold. |
+| `include_intersections` | bool | True | Interpolate crossing points at retained jumps. |
+| `return_intersections_separately` | bool | False | Return intersections as a separate tuple. |
 
-## Returns
+### Returns
 
 **Default** (`return_intersections_separately=False`):
 
@@ -42,42 +42,118 @@ FUES(
 (e_kept, v_kept, p1_kept, p2_kept, d_kept)
 ```
 
-All arrays contain only the retained (optimal) points, with crossing-point interpolants merged in if `include_intersections=True`.
-
 **With** `return_intersections_separately=True`:
 
 ```python
 (fues_result, intersections)
 ```
 
-where `fues_result = (e_kept, v_kept, p1_kept, p2_kept, d_kept)` contains only the scan-retained points, and `intersections = (inter_e, inter_v, inter_p1, inter_p2, inter_d)` contains the interpolated crossing points separately.
+### Implementation notes
 
-## Example
+- Core scan is `@njit` (Numba JIT-compiled)
+- Input arrays sorted internally — no pre-sorting required
+- \(O(N)\) time with fixed look-back window of size `LB`
+- Sub-optimal = policy jump **and** concave right turn
+- Crossing points computed via two-point linear interpolation
+
+---
+
+## `EGM_UE` — Upper Envelope Registry
 
 ```python
-import numpy as np
-from dcsmm.fues import FUES
-
-# Simulate EGM output for a simple problem
-N = 500
-a_grid = np.linspace(0.01, 100, N)
-
-# ... (run your EGM step to produce e_grid, vlu, c_hat, a_hat, del_a)
-
-# Apply FUES
-e_clean, v_clean, c_clean, a_clean, d_clean = FUES(
-    e_grid, vlu, c_hat, a_hat, del_a,
-    m_bar=1.2,
-    LB=4,
-)
-
-print(f"Input: {N} points, Output: {len(e_clean)} points")
+from dcsmm.uenvelope import EGM_UE
 ```
 
-## Implementation notes
+Unified entry point for all upper envelope algorithms. Wraps FUES, MSS, RFC, and LTM behind a common interface.
 
-- The core scan is Numba JIT-compiled (`@njit`) for performance
-- Input arrays are sorted internally by `e_grid` — no pre-sorting required
-- The scan operates in \(O(N)\) time with a fixed look-back window of size `LB`
-- Sub-optimal points are identified by the conjunction of a policy jump (exceeding `m_bar`) and a concave right turn in the value correspondence
-- Intersection points are computed via two-point linear interpolation between the last retained point and the first point on the new branch
+### Signature
+
+```python
+EGM_UE(
+    x_dcsn_hat, qf_hat, v_cntn_hat, kappa_hat,
+    X_cntn, X_dcsn, uc_func_partial, u_func,
+    ue_method="FUES", m_bar=1.0, lb=4,
+    rfc_radius=0.75, rfc_n_iter=20,
+    interpolate=False, include_intersections=True,
+    ue_kwargs=None,
+)
+```
+
+### Returns
+
+```python
+(refined, raw, interpolated)
+```
+
+- `refined` — dict: `x_dcsn_ref`, `v_dcsn_ref`, `kappa_ref`, `x_cntn_ref`, `lambda_ref`, `ue_time`
+- `raw` — dict: original inputs
+- `interpolated` — dict: values on `X_dcsn` (if `interpolate=True`)
+
+### Available methods
+
+| `ue_method` | Algorithm | Source |
+|-------------|-----------|--------|
+| `"FUES"` | Fast Upper-Envelope Scan | Dobrescu & Shanker (2026) |
+| `"DCEGM"` | Monotone segment selection (MSS) | Iskhakov et al. (2017), via [HARK](https://github.com/econ-ark/HARK) |
+| `"RFC"` | Rooftop-cut | Dobrescu & Shanker (2024) |
+| `"CONSAV"` | Local triangulation (LTM) | Druedahl (2021), via [ConSav](https://github.com/NumEconCopenhagen/ConsumptionSaving) |
+| `"FUES_V0DEV"` | Original paper FUES | — |
+| `"SIMPLE"` | Monotonicity filter | — |
+
+### Registering custom engines
+
+```python
+from dcsmm.uenvelope.upperenvelope import register
+
+@register("MY_METHOD")
+def my_engine(x_dcsn_hat, qf_hat, kappa_hat, X_cntn, *,
+              uc_func_partial, **kwargs):
+    return {
+        "x_dcsn_ref": ..., "v_dcsn_ref": ...,
+        "kappa_ref": ..., "x_cntn_ref": ...,
+        "lambda_ref": uc_func_partial(...),
+    }
+```
+
+---
+
+## Helpers
+
+```python
+from dcsmm.fues.helpers.math_funcs import interp_as, interp_as_scalar
+```
+
+### `interp_as` — 1D array interpolation
+
+```python
+interp_as(xp, yp, x, extrap=False)
+```
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `xp` | ndarray (M,) | Grid points (sorted ascending) |
+| `yp` | ndarray (M,) | Values at grid points |
+| `x` | ndarray (N,) | Evaluation points |
+| `extrap` | bool | Extrapolate beyond grid bounds (default: False, clamp) |
+
+Returns ndarray (N,). Numba JIT-compiled.
+
+### `interp_as_scalar` — 1D scalar interpolation
+
+```python
+interp_as_scalar(xp, yp, x)
+```
+
+Same as `interp_as` for a single float `x`. Numba JIT-compiled.
+
+### `correct_jumps1d` — jump correction
+
+```python
+correct_jumps1d(values, grid, threshold, policy_dict)
+```
+
+Detects and corrects spurious jumps in interpolated functions by checking gradient against threshold and re-interpolating. Numba JIT-compiled.
+
+### Convention
+
+All 1D interpolation in `dcsmm` uses `interp_as` / `interp_as_scalar`. Do not use `np.interp` directly.

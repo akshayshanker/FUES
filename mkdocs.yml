@@ -86,15 +86,15 @@ nav:
   - Getting Started:
     - Installation: getting-started/installation.md
     - Quick Start: getting-started/quickstart.md
-  - Algorithm:
-    - How FUES Works: algorithm/fues-algorithm.md
-  - API Reference:
-    - FUES: api/fues.md
-    - EGM_UE Registry: api/egm-ue.md
-    - Helpers: api/helpers.md
+  - Algorithm: algorithm/fues-algorithm.md
   - Examples:
-    - Retirement Choice Model: examples/retirement.md
-    - Retirement API Reference: examples/retirement-api.md
+    - Overview: examples/index.md
+    - Retirement Choice: examples/retirement.md
+    - Housing Investment: examples/housing.md
+    - Housing-Renting: examples/housing-renting.md
   - Notebooks:
-    - Retirement Model with FUES: notebooks/retirement_fues.ipynb
+    - Retirement: notebooks/retirement_fues.ipynb
+  - API Reference:
+    - FUES & EGM_UE: api/fues.md
+    - Retirement Example: api/retirement.md
   - Changelog: changelog.md

@@ -161,7 +161,7 @@ examples/retirement/
     └── tables.py               # LaTeX + Markdown tables
 ```
 
-See [API Reference](retirement-api.md) for detailed function signatures.
+See [API Reference](../api/retirement.md) for detailed function signatures.
 
 ## References
 

@@ -1,6 +1,6 @@
 # Retirement Example — API Reference
 
-Auto-generated from docstrings. See [Retirement Choice Model](retirement.md) for usage and the [notebook](../notebooks/retirement_fues.ipynb) for a walkthrough.
+Auto-generated from docstrings. See [Retirement Choice Model](../examples/retirement.md) for usage and the [notebook](../notebooks/retirement_fues.ipynb) for a walkthrough.
 
 ---
 
