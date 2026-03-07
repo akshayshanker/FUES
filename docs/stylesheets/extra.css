@@ -1,156 +1,228 @@
-/* FUES docs — Nord palette with polished Material tweaks */
+/* FUES docs — Frost-inspired: bold type, generous space, high contrast
+   + Material Design 2 elevation/shadows */
 
 :root {
-  --md-primary-fg-color: #4c566a;
-  --md-primary-fg-color--light: #5e81ac;
-  --md-primary-fg-color--dark: #3b4252;
-  --md-accent-fg-color: #81a1c1;
-  --md-default-bg-color: #ffffff;
-  --md-default-fg-color: #2e3440;
-  --md-typeset-a-color: #5e81ac;
-  --md-code-bg-color: #f8f9fb;
+  /* Near-black header, crisp blue accent (Frost: high contrast, few colors) */
+  --md-primary-fg-color: #1a1a2e;
+  --md-primary-fg-color--light: #2d3561;
+  --md-primary-fg-color--dark: #0f0f1a;
+  --md-accent-fg-color: #4361ee;
+
+  /* Clean backgrounds */
+  --md-default-bg-color: #fafafa;
+  --md-default-fg-color: #1a1a2e;
+  --md-typeset-a-color: #4361ee;
+  --md-code-bg-color: #f4f4f8;
+
+  /* Material 2 elevation colors */
+  --elevation-1: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.06);
+  --elevation-2: 0 3px 6px rgba(0,0,0,0.1), 0 2px 4px rgba(0,0,0,0.06);
 }
 
 [data-md-color-scheme="slate"] {
-  --md-primary-fg-color: #4c566a;
-  --md-primary-fg-color--light: #5e81ac;
-  --md-primary-fg-color--dark: #2e3440;
-  --md-accent-fg-color: #88c0d0;
-  --md-default-bg-color: #2e3440;
-  --md-default-fg-color: #d8dee9;
-  --md-typeset-a-color: #88c0d0;
-  --md-code-bg-color: #3b4252;
+  --md-primary-fg-color: #0f0f1a;
+  --md-primary-fg-color--light: #1a1a2e;
+  --md-primary-fg-color--dark: #080810;
+  --md-accent-fg-color: #7b8cde;
+  --md-default-bg-color: #16161e;
+  --md-default-fg-color: #e8e8ed;
+  --md-typeset-a-color: #7b8cde;
+  --md-code-bg-color: #1e1e2a;
+  --elevation-1: 0 1px 3px rgba(0,0,0,0.3);
+  --elevation-2: 0 3px 6px rgba(0,0,0,0.4);
 }
 
-/* Header: subtle gradient, slightly taller */
+/* ── Header: dark, authoritative (Frost: strong masthead) ── */
 .md-header {
-  background: linear-gradient(135deg, #3b4252 0%, #4c566a 50%, #5e81ac 100%);
-  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.12);
+  background: #1a1a2e;
+  box-shadow: var(--elevation-2);
+  letter-spacing: 0.02em;
 }
 
-/* Tabs under header */
+.md-header__title {
+  font-weight: 700;
+}
+
 .md-tabs {
-  background: #434c5e;
+  background: #1a1a2e;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
 }
 
-/* Content max-width for readability */
+/* ── Typography: Frost-style bold hierarchy ── */
+.md-typeset h1 {
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  margin-top: 1.5em;
+  color: #1a1a2e;
+}
+
+[data-md-color-scheme="slate"] .md-typeset h1 {
+  color: #f0f0f5;
+}
+
+.md-typeset h2 {
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  margin-top: 2em;
+  padding-bottom: 0.3em;
+  border-bottom: 2px solid #4361ee;
+}
+
+.md-typeset h3 {
+  font-weight: 600;
+}
+
+/* ── Content: generous whitespace (Frost: let it breathe) ── */
 .md-content {
-  max-width: 52rem;
+  max-width: 50rem;
+  padding: 0 1.5rem;
 }
 
-/* Code blocks */
+.md-typeset {
+  line-height: 1.7;
+}
+
+.md-typeset p {
+  margin-bottom: 1.2em;
+}
+
+/* ── Code: Material 2 elevation, rounded corners ── */
 .md-typeset code {
   background-color: var(--md-code-bg-color);
-  color: #2e3440;
-  border-radius: 3px;
-  padding: 0.1em 0.3em;
-  font-size: 0.85em;
+  color: #1a1a2e;
+  border-radius: 4px;
+  padding: 0.15em 0.4em;
+  font-size: 0.84em;
+  font-weight: 500;
 }
 
 [data-md-color-scheme="slate"] .md-typeset code {
-  color: #d8dee9;
+  color: #e8e8ed;
+}
+
+.md-typeset pre {
+  border-radius: 8px;
+  box-shadow: var(--elevation-1);
+  overflow: hidden;
 }
 
 .md-typeset pre > code {
-  padding: 0.8em 1em;
-  border-radius: 6px;
+  padding: 1em 1.2em;
+  font-weight: 400;
 }
 
-/* Admonitions: cleaner */
+/* ── Admonitions: Material 2 cards ── */
 .md-typeset .admonition,
 .md-typeset details {
-  border-radius: 6px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+  border-radius: 8px;
+  box-shadow: var(--elevation-1);
+  border-left-width: 4px;
 }
 
 .md-typeset .admonition.note,
 .md-typeset details.note {
-  border-color: #5e81ac;
+  border-color: #4361ee;
 }
 
 .md-typeset .note > .admonition-title,
 .md-typeset .note > summary {
-  background-color: rgba(94, 129, 172, 0.08);
+  background: rgba(67, 97, 238, 0.06);
 }
 
 .md-typeset .admonition.warning,
 .md-typeset details.warning {
-  border-color: #d08770;
+  border-color: #e07c3e;
 }
 
 .md-typeset .admonition.tip,
 .md-typeset details.tip {
-  border-color: #a3be8c;
+  border-color: #2ec4b6;
 }
 
-/* Tables: tighter, subtle borders */
+/* ── Tables: clean, tight, Material elevation ── */
 .md-typeset table:not([class]) {
-  font-size: 0.85rem;
+  font-size: 0.84rem;
   border-collapse: collapse;
+  box-shadow: var(--elevation-1);
+  border-radius: 6px;
+  overflow: hidden;
 }
 
 .md-typeset table:not([class]) th {
-  background-color: #f0f2f5;
+  background: #f0f0f5;
   font-weight: 600;
-  border-bottom: 2px solid #d8dee9;
+  text-transform: uppercase;
+  font-size: 0.75rem;
+  letter-spacing: 0.05em;
+  padding: 0.8em 1em;
+  border-bottom: 2px solid #ddd;
 }
 
 [data-md-color-scheme="slate"] .md-typeset table:not([class]) th {
-  background-color: #3b4252;
-  border-bottom-color: #4c566a;
+  background: #1e1e2a;
+  border-bottom-color: #333;
 }
 
 .md-typeset table:not([class]) td {
-  border-bottom: 1px solid #e5e9f0;
+  padding: 0.6em 1em;
+  border-bottom: 1px solid #eee;
 }
 
 [data-md-color-scheme="slate"] .md-typeset table:not([class]) td {
-  border-bottom-color: #434c5e;
+  border-bottom-color: #2a2a3a;
 }
 
-/* Links: subtle underline on hover */
+/* ── Links: Frost-style – no underline, accent on hover ── */
 .md-typeset a {
   text-decoration: none;
-  border-bottom: 1px solid transparent;
-  transition: border-color 0.15s;
+  font-weight: 500;
+  transition: color 0.15s;
 }
 
 .md-typeset a:hover {
-  border-bottom-color: var(--md-accent-fg-color);
+  color: #2d3561;
 }
 
-/* Navigation: tighter sidebar */
+[data-md-color-scheme="slate"] .md-typeset a:hover {
+  color: #a0b0ee;
+}
+
+/* ── Navigation: tight, lightweight ── */
 .md-nav__link {
   font-size: 0.82rem;
+  font-weight: 500;
 }
 
-/* Footer: match header gradient */
+.md-nav__item--active > .md-nav__link {
+  font-weight: 700;
+  color: var(--md-accent-fg-color);
+}
+
+/* ── Footer: match header ── */
 .md-footer {
-  background: linear-gradient(135deg, #3b4252 0%, #4c566a 100%);
+  background: #1a1a2e;
 }
 
-/* Hero section */
+/* ── Blockquotes: Frost-style pull quote feel ── */
+.md-typeset blockquote {
+  border-left: 4px solid #4361ee;
+  padding: 0.5em 1.2em;
+  margin: 1.5em 0;
+  background: rgba(67, 97, 238, 0.03);
+  font-style: italic;
+}
+
+[data-md-color-scheme="slate"] .md-typeset blockquote {
+  background: rgba(67, 97, 238, 0.06);
+}
+
+/* ── Hero section ── */
 .md-typeset .hero {
   margin: 2rem 0;
   padding: 2rem 0;
 }
 
 .md-typeset .hero h1 {
-  font-weight: 700;
-  color: #2e3440;
-}
-
-[data-md-color-scheme="slate"] .md-typeset .hero h1 {
-  color: #eceff4;
-}
-
-/* SVG diagrams */
-.md-typeset .diagram-container {
-  text-align: center;
-  margin: 2rem 0;
-}
-
-.md-typeset .diagram-container svg {
-  max-width: 100%;
-  height: auto;
+  font-weight: 800;
+  letter-spacing: -0.03em;
 }
