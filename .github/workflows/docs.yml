@@ -17,11 +17,13 @@ jobs:
         with:
           python-version: '3.12'
 
-      - run: pip install mkdocs-material mkdocs-jupyter
+      - run: pip install mkdocs-material mkdocs-jupyter mkdocstrings[python]
 
       # Sync notebook into docs/ (symlinks don't survive git checkout)
       - run: |
           mkdir -p docs/notebooks
           cp examples/retirement/notebooks/retirement_fues.ipynb docs/notebooks/
+
+      - run: pip install -e ".[examples]"
 
       - run: mkdocs gh-deploy --force
