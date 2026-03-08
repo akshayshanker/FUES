@@ -911,14 +911,14 @@ def nb_plot_scaling(grid_sizes, scaling, methods=None):
                     color=method_colors.get('FUES', t['accent']),
                     va='center', ha='left', clip_on=False)
 
-        # Small note at the top of the factor labels
+        # Reference grid size note — placed in figure coords above the axis
         n_ref = int(ns[-1])
         n_label = f'{n_ref // 1000}k' if n_ref >= 1000 else str(n_ref)
-        ax.text(ns[-1] * 1.09, ylim[1] * 0.85,
-                f'at $n$={n_label}',
-                fontsize=6, color='#9ca3af',
-                va='top', ha='left', clip_on=False,
-                style='italic')
+        ax.annotate(f'at $n$={n_label}',
+                    xy=(1.09, 1.02), xycoords='axes fraction',
+                    fontsize=6, color='#9ca3af',
+                    va='bottom', ha='left',
+                    style='italic', annotation_clip=False)
 
     ax.set_xlabel('Grid size $n$')
     ax.set_ylabel('Upper envelope time (ms)')
