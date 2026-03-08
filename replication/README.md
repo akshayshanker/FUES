@@ -1,6 +1,6 @@
 # Replication
 
-Paper artifacts for Dobrescu and Shanker (2026), "A fast upper envelope scan method for discrete-continuous dynamic programming."
+Paper artifacts for Dobrescu and Shanker (2022), "A fast upper envelope scan method for discrete-continuous dynamic programming."
 
 Each subdirectory corresponds to a paper application. Figures and tables are committed outputs from PBS cluster runs.
 

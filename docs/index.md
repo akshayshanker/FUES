@@ -5,7 +5,7 @@
 
 **A general method for computing the upper envelope of EGM value correspondences in discrete-continuous dynamic programming.**
 
-> Dobrescu, L.I. and Shanker, A. (2026). "A fast upper envelope scan method for discrete-continuous dynamic programming." [SSRN.](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=4181302)
+> Dobrescu, L.I. and Shanker, A. (2022). "A fast upper envelope scan method for discrete-continuous dynamic programming." [SSRN.](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=4181302)
 
 FUES scans the sorted endogenous grid in a single pass, detecting sub-optimal points by the conjunction of a policy jump and a concave right turn in the value correspondence. Unlike existing upper envelope methods, it does not require monotonicity of the policy function or numerical optimisation. It is also orders of magnitude faster.
 

@@ -584,7 +584,7 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 * **Intersection point tracking in FUES algorithm**
-  - Implemented intersection point detection as described in Dobrescu & Shanker (2023) Section 2.1.3
+  - Implemented intersection point detection as described in Dobrescu & Shanker (2022) Section 2.1.3
   - Added `add_intersections` parameter to `FUES()` function (default: True) for enhanced accuracy around crossing points
   - Forward scan intersection detection during right-turn jumps identifies where choice-specific value functions cross
   - Backward scan intersection storage during left-turn elimination captures suboptimal point intersections

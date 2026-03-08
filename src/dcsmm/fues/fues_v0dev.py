@@ -1,5 +1,5 @@
 """Functions to implement fast upper-envelope scan by
-Dobrescu and Shanker (2023)
+Dobrescu and Shanker (2022)
 
 Author: Akshay Shanker, University of Sydney, akshay.shanker@me.com.
 

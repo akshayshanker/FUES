@@ -2,8 +2,8 @@
 Author: Akshay Shanker, University of New South Wales, 
 a.shanker@unsw.edu.au
 
-Script to plot NEGM and RFC solutions for Application 3 in Dobrescu and 
-Shanker (2024) (FUES). Model with a durable and non-durable continuous asset. 
+Script to plot NEGM and RFC solutions for Application 3 in Dobrescu and
+Shanker (2022) (FUES). Model with a durable and non-durable continuous asset. 
 
 Todo
 ----

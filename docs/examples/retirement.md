@@ -1,6 +1,6 @@
 # Retirement Choice Model
 
-Implementation of the Iskhakov, Jorgensen, Rust, and Schjerning (2017) retirement choice model, used as the primary benchmark in Dobrescu and Shanker (2026). Demonstrates speed and lower complexity of FUES.
+Implementation of the Iskhakov, Jorgensen, Rust, and Schjerning (2017) retirement choice model, used as the primary benchmark in Dobrescu and Shanker (2022). Demonstrates speed and lower complexity of FUES.
 
 !!! tip "Interactive notebook"
     For interactive run of scaling compared to benchmarks, see the **[Retirement Model Notebook](../notebooks/retirement_fues.ipynb)**.
@@ -233,7 +233,7 @@ See [API Reference](../api/retirement.md) for detailed function signatures.
 ## References
 
 - Iskhakov, F., Jorgensen, T.H., Rust, J., and Schjerning, B. (2017). "The endogenous grid method for discrete-continuous dynamic choice models with (or without) taste shocks." *Quantitative Economics*, 8(2), 317-365.
-- Dobrescu, L.I. and Shanker, A. (2026). "A fast upper envelope scan method for discrete-continuous dynamic programming."
+- Dobrescu, L.I. and Shanker, A. (2022). "A fast upper envelope scan method for discrete-continuous dynamic programming."
 - Druedahl, J. (2021). "A guide to solve non-convex consumption-saving models." *Computational Economics*, 58, 747-775.
 - Dobrescu, L.I. and Shanker, A. (2024). "RFC: A rooftop-cut method for upper envelopes." Working paper.
 

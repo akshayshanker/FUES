@@ -116,7 +116,7 @@ EGM_UE(
 
 | `ue_method` | Algorithm | Source |
 |-------------|-----------|--------|
-| `"FUES"` | Fast Upper-Envelope Scan | Dobrescu & Shanker (2026) |
+| `"FUES"` | Fast Upper-Envelope Scan | Dobrescu & Shanker (2022) |
 | `"DCEGM"` | Monotone segment selection (MSS) | Iskhakov et al. (2017), via [HARK](https://github.com/econ-ark/HARK) |
 | `"RFC"` | Rooftop-cut | Dobrescu & Shanker (2024) |
 | `"CONSAV"` | Local triangulation (LTM) | Druedahl (2021), via [ConSav](https://github.com/NumEconCopenhagen/ConsumptionSaving) |

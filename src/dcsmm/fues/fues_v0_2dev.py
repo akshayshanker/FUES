@@ -1,6 +1,6 @@
 """Fast Upper-Envelope Scan (FUES) Algorithm Implementation
 
-This module implements the FUES algorithm from Dobrescu & Shanker (2025) for solving 
+This module implements the FUES algorithm from Dobrescu & Shanker (2022) for solving 
 discrete-continuous dynamic programming problems using Carroll's endogenous grid method.
 
 Author: Akshay Shanker, 2025, a.shanker@unsw.edu.au

@@ -5,7 +5,7 @@ allocations.
 
 Implements speed ideas **#1** and **#2** from the tuning menu while
 keeping logic, comments and notation identical to Dobrescu & Shanker
-(2023).
+(2022).
 
 NB: Generators are not supported in Numba nopython mode.  The previous
 commit used a `circ_iter_last()` generator which caused a typing error.
