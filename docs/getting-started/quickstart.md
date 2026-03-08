@@ -80,3 +80,7 @@ jupyter lab examples/retirement/notebooks/retirement_fues.ipynb
 ```
 
 Or view the [rendered notebook](../notebooks/retirement_fues.ipynb) in the docs.
+
+---
+
+*(c) Akshay Shanker*

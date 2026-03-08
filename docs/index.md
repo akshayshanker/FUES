@@ -53,3 +53,7 @@ refined, _, _ = EGM_UE(
 | **[Examples](examples/index.md)** | Retirement, housing, durables — with notebooks |
 | **[API Reference](api/fues.md)** | Full signatures and docstrings |
 | **[Algorithm](algorithm/fues-algorithm.md)** | How FUES works, forward/backward scans |
+
+---
+
+*(c) Akshay Shanker*

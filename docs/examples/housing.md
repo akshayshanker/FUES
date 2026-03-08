@@ -18,3 +18,7 @@ python examples/durables/durables.py
 ```bash
 qsub experiments/durables/durables_timings.sh
 ```
+
+---
+
+*(c) Akshay Shanker*

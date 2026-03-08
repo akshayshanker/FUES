@@ -9,3 +9,7 @@ Three benchmark applications from the paper. Each page covers the model, how to 
 | [Housing-renting](housing-renting.md) | Section 2.3 | Inaction regions; tax kinks | — |
 
 All examples use the canonical pipeline (`solve_nest`) and can be run locally or on PBS. Paper results are in [`replication/`](https://github.com/akshayshanker/FUES/tree/release-prep/replication).
+
+---
+
+*(c) Akshay Shanker*

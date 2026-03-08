@@ -16,3 +16,7 @@ python examples/housing_renting/run.py
 ```bash
 qsub experiments/housing_renting/run_housing_single_core.sh
 ```
+
+---
+
+*(c) Akshay Shanker*

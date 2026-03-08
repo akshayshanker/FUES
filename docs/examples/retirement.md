@@ -236,3 +236,7 @@ See [API Reference](../api/retirement.md) for detailed function signatures.
 - Dobrescu, L.I. and Shanker, A. (2026). "A fast upper envelope scan method for discrete-continuous dynamic programming."
 - Druedahl, J. (2021). "A guide to solve non-convex consumption-saving models." *Computational Economics*, 58, 747-775.
 - Dobrescu, L.I. and Shanker, A. (2024). "RFC: A rooftop-cut method for upper envelopes." Working paper.
+
+---
+
+*(c) Akshay Shanker*

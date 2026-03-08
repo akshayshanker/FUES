@@ -128,3 +128,7 @@ These refinements are local, inexpensive, and mainly matter near closely spaced 
 - Iskhakov, F. et al. (2017). "The endogenous grid method for discrete-continuous dynamic choice models with (or without) taste shocks." *Quantitative Economics*, 8(2).
 - Druedahl, J. (2021). "A guide on solving non-convex consumption-saving models." *Computational Economics*, 58.
 - Fella, G. (2014). "A generalized endogenous grid method for non-smooth and non-concave problems." *Review of Economic Dynamics*, 17(2).
+
+---
+
+*(c) Akshay Shanker*

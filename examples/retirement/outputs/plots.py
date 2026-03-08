@@ -878,6 +878,32 @@ def nb_plot_scaling(grid_sizes, scaling, methods=None):
                   color=method_colors['FUES'], linewidth=0.7,
                   alpha=0.4, label='$O(n)$ at FUES')
 
+    # Speedup reference lines: horizontal lines at multiples of FUES,
+    # labeled 5×, 10×, 20×, 50× on the right margin.
+    if 'FUES' in scaling:
+        fues_arr = np.array(scaling['FUES'])
+        fues_ref = fues_arr[len(fues_arr) // 2]  # value at median grid size
+        ylim = ax.get_ylim()
+        for factor in [5, 10, 20, 50]:
+            y = fues_ref * factor
+            if y < ylim[0] or y > ylim[1]:
+                continue
+            ax.axhline(y, color=t['muted'], linewidth=0.5,
+                       linestyle=(0, (4, 4)), zorder=0, alpha=0.5)
+            ax.annotate(f'{factor}$\\times$',
+                        xy=(ns[-1], y), xytext=(5, 0),
+                        textcoords='offset points',
+                        fontsize=7, color=t['muted'],
+                        va='center', ha='left')
+        # Mark FUES baseline (1×)
+        ax.axhline(fues_ref, color=method_colors.get('FUES', t['accent']),
+                   linewidth=0.6, linestyle=(0, (4, 4)), alpha=0.4, zorder=0)
+        ax.annotate('1$\\times$ (FUES)',
+                    xy=(ns[-1], fues_ref), xytext=(5, 0),
+                    textcoords='offset points',
+                    fontsize=7, color=method_colors.get('FUES', t['accent']),
+                    va='center', ha='left', alpha=0.7)
+
     ax.set_xlabel('Grid size $n$')
     ax.set_ylabel('Upper envelope time (ms)')
     ax.set_title('UE scaling (log-log)')
