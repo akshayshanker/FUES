@@ -331,8 +331,8 @@ def _postclean_double_jump_mask(e_grid, a_prime, m_bar, skip_mask, eps_d=EPS_D):
 
 
 def FUES(
-    e_grid, vlu, policy_1, policy_2, del_a,
-    b=1e-10, m_bar=1.0, LB=4, endog_mbar=False, padding_mbar=0.0,
+    e_grid, vlu, policy_1, policy_2, del_a=None,
+    m_bar=1.0, LB=4, endog_mbar=False, padding_mbar=0.0,
     include_intersections=True,
     return_intersections_separately=False,
     single_intersection=False,
@@ -366,11 +366,10 @@ def FUES(
     policy_2 : ndarray, shape (N,)
         Secondary policy aligned with `e_grid` (e.g., asset policy a'). Used
         in jump classification and as payload in intersections.
-    del_a : ndarray, shape (N,)
+    del_a : ndarray, shape (N,), optional
         Policy-gradient-like series used for endogenous jump thresholds.
+        Required when ``endog_mbar=True``; defaults to zeros otherwise.
 
-    b : float, default 1e-10
-        Legacy argument retained for signature stability. Not used.
     m_bar : float, default 1.0
         Jump threshold for same-branch tests. If `endog_mbar=True`, the
         threshold adapts using `del_a` with `padding_mbar`.
@@ -443,7 +442,13 @@ def FUES(
     vlu = np.asarray(vlu, dtype=np.float64)
     policy_1 = np.asarray(policy_1, dtype=np.float64)
     policy_2 = np.asarray(policy_2, dtype=np.float64)
-    del_a = np.asarray(del_a, dtype=np.float64)
+
+    if del_a is None:
+        if endog_mbar:
+            raise ValueError("del_a is required when endog_mbar=True")
+        del_a = np.zeros_like(e_grid)
+    else:
+        del_a = np.asarray(del_a, dtype=np.float64)
 
     if not assume_sorted and not np.all(np.diff(e_grid) >= 0):
         idx = np.argsort(e_grid)
