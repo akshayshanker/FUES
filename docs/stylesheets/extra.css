@@ -226,3 +226,55 @@
   font-weight: 800;
   letter-spacing: -0.03em;
 }
+
+/* ═══════════════════════════════════════════════════════════════════
+   Jupyter notebook styling (mkdocs-jupyter)
+   Adapts cell backgrounds and plot images to light/dark scheme.
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* ── Input cells ── */
+.jupyter-wrapper .jp-InputArea-editor,
+.jupyter-wrapper .highlight {
+  background-color: #f4f4f8;
+  border-radius: 6px;
+}
+
+[data-md-color-scheme="slate"] .jupyter-wrapper .jp-InputArea-editor,
+[data-md-color-scheme="slate"] .jupyter-wrapper .highlight {
+  background-color: #1e1e2a !important;
+  border-radius: 6px;
+}
+
+/* ── Output cells ── */
+.jupyter-wrapper .jp-OutputArea-output {
+  background-color: transparent;
+}
+
+[data-md-color-scheme="slate"] .jupyter-wrapper .jp-OutputArea-output pre {
+  color: #e8e8ed;
+}
+
+[data-md-color-scheme="slate"] .jupyter-wrapper .jp-OutputArea-output {
+  color: #e8e8ed;
+}
+
+/* ── Plot images: invert in dark mode for white-background matplotlib plots ── */
+[data-md-color-scheme="slate"] .jupyter-wrapper .jp-OutputArea-output img,
+[data-md-color-scheme="slate"] .md-content img:not(.emojione):not(.twemoji):not(.gemoji) {
+  filter: invert(0.88) hue-rotate(180deg);
+}
+
+/* ── Plotly outputs & SVG icons: exempt from inversion ── */
+[data-md-color-scheme="slate"] .jupyter-wrapper .jp-OutputArea-output .plotly,
+[data-md-color-scheme="slate"] .md-content .md-typeset .twemoji,
+[data-md-color-scheme="slate"] .md-header img,
+[data-md-color-scheme="slate"] .md-footer img {
+  filter: none;
+}
+
+/* ── Notebook cell spacing ── */
+.jupyter-wrapper .jp-OutputArea-output img {
+  display: block;
+  margin: 0.4rem auto;
+  max-width: 100%;
+}

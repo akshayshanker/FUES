@@ -77,13 +77,14 @@ def plot_pbs_scaling(path, ax=None):
     """
     import matplotlib.pyplot as plt
     from examples.retirement.outputs.plots import (
-        _NORD, _METHOD_COLORS, _METHOD_MARKERS, _style_nb_ax,
+        _method_colors, _METHOD_MARKERS, _METHOD_LABELS, _style_nb_ax,
     )
+
+    mc = _method_colors()
 
     grid_sizes, means = parse_timing_md(path)
     ns = np.array(grid_sizes, dtype=float)
     methods = ['FUES', 'DCEGM', 'CONSAV', 'RFC']
-    _labels = {'FUES': 'FUES', 'DCEGM': 'MSS', 'CONSAV': 'LTM', 'RFC': 'RFC'}
 
     if ax is None:
         fig, ax = plt.subplots(figsize=(7, 4.5))
@@ -92,8 +93,8 @@ def plot_pbs_scaling(path, ax=None):
 
     for m in methods:
         ax.loglog(ns, means[m], f'-{_METHOD_MARKERS.get(m, "o")}',
-                  color=_METHOD_COLORS.get(m, 'gray'),
-                  label=_labels.get(m, m), markersize=6, linewidth=1.8)
+                  color=mc.get(m, 'gray'),
+                  label=_METHOD_LABELS.get(m, m), markersize=6, linewidth=1.8)
 
     # Reference lines anchored at first point
     t0_lin = means['DCEGM'][0]
@@ -106,7 +107,7 @@ def plot_pbs_scaling(path, ax=None):
 
     t0_fues = means['FUES'][0]
     ax.loglog(ns, t0_fues * (ns / ns[0]), '--',
-              color=_METHOD_COLORS['FUES'], linewidth=0.7,
+              color=mc['FUES'], linewidth=0.7,
               alpha=0.4, label='$O(n)$ at FUES')
 
     ax.set_xlabel('Grid size $n$')

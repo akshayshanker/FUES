@@ -2,7 +2,7 @@
 
 ## The problem in one picture
 
-In discrete-continuous problems, the Euler equation delivers a **value correspondence** rather than a globally optimal value function. After EGM, we therefore have candidate points on a non-uniform endogenous grid: some lie on the upper envelope, while others solve only a local first-order condition and are sub-optimal. FUES recovers the upper envelope by scanning the sorted candidate points once from left to right.
+In discrete-continuous problems, the Euler equation delivers a **value correspondence** rather than a globally optimal value function. After EGM inverts the Euler, we therefore have candidate points on a non-uniform endogenous grid: some lie on the upper envelope, while others solve only a local first-order condition and are sub-optimal. FUES recovers the upper envelope by scanning the sorted candidate points once from left to right along the endogenous grid.
 
 <div class="diagram-container">
   <img src="../images/fues-scan.svg" alt="FUES scan diagram" />
