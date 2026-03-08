@@ -1,5 +1,7 @@
 # Fast Upper-Envelope Scan (FUES)
 
+> **Pre-release (v0.6.0dev1)** — Under active development. The API and docs may change.
+
 > Dobrescu, L.I. and Shanker, A. (2026). "A fast upper envelope scan method for discrete-continuous dynamic programming." [SSRN Working Paper.](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=4181302)
 
 FUES recovers the upper envelope of the EGM ([Carroll 2006](https://doi.org/10.1016/j.econlet.2005.09.013)) value correspondence in discrete-continuous problems. FUES does not require monotonicity of the optimal policy function or numerical optimisation. FUES is also orders of magnitude faster than existing upper envelope methods. 
