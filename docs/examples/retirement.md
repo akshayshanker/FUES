@@ -1,41 +1,42 @@
 # Retirement Choice Model
 
-Implementation of the Iskhakov, Jorgensen, Rust, and Schjerning (2017) retirement choice model, used as the primary benchmark in Dobrescu and Shanker (2026).
+Implementation of the Iskhakov, Jorgensen, Rust, and Schjerning (2017) retirement choice model, used as the primary benchmark in Dobrescu and Shanker (2026). Demonstrates speed and lower complexity of FUES.
 
 !!! tip "Interactive notebook"
-    For a step-by-step walkthrough with interactive plots, see the **[Retirement Model Notebook](../notebooks/retirement_fues.ipynb)**.
+    For interactive run of scaling compared to benchmarks, see the **[Retirement Model Notebook](../notebooks/retirement_fues.ipynb)**.
 
 ## Model
 
-A finite-horizon agent chooses consumption \(c_t\) and whether to work (\(d_{t+1} = 1\)) or retire (\(d_{t+1} = 0\)) each period. Retirement is absorbing: once retired, the agent cannot return to work.
+Each period, a finite-horizon agent chooses consumption $c_t$ and whether to *continue* work ($d_{t+1} = 1$) or retire ($d_{t+1} = 0$). Retirement is absorbing: once retired, the agent cannot return to work.
 
 **Budget constraint:**
 
-\[
+$$
 a_{t+1} = (1+r)a_t + d_t y - c_t
-\]
+$$
 
 **Per-period utility:**
 
-\[
+$$
 \log(c_t) - \delta d_{t+1}
-\]
+$$
 
-where \(\delta\) is the utility cost of working.
+where $\delta$ is the utility cost of working, $a_{t}$ is beginning of period liquid assets, $y$ is income for a worker and $r$ is the renter rate. 
 
 **Worker's Bellman equation:**
 
-\[
+$$
 V_t^1(a) = \max_{c, d_{t+1} \in \{0,1\}} \left\{ u(c) - d_{t+1}\delta + \beta V_{t+1}^{d_{t+1}}(a') \right\}
-\]
+$$
+where $a^{\prime} = (1+r)a +  y - c$.
 
 **Retiree's Bellman equation:**
 
-\[
+$$
 V_t^0(a) = \max_c \left\{ u(c) + \beta V_{t+1}^0(a') \right\}
-\]
+$$
 
-The worker's value function is the upper envelope of multiple concave functions, one for each feasible sequence of future discrete choices. This non-concavity is precisely the problem that FUES solves.
+The worker's value function is the upper envelope of multiple concave functions, one for each feasible sequence of future discrete choices. Holding $d_{t+1}=1$ fixed,  by selecting $a^{\prime}$, the worker selects implicitly selects all $d_{j}$ for $j>t+1$. The upper envelope of concave functions is not concave, leading to secondary kinks in $V_{t+1}^{1}$  and his non-concavity is precisely the problem that FUES solves.
 
 ## Running locally
 
@@ -91,10 +92,10 @@ Sparse YAML files in `experiments/retirement/params/` — only values that diffe
 
 | File | Key changes |
 |------|-------------|
-| `baseline.yml` | \(\beta=0.96\), \(T=50\) |
-| `high_beta.yml` | \(\beta=0.99\) |
-| `low_delta.yml` | \(\delta=0.5\), \(T=50\) |
-| `long_horizon.yml` | \(T=50\), padding\_mbar |
+| `baseline.yml` | $\beta=0.96$, $T=50$ |
+| `high_beta.yml` | $\beta=0.99$ |
+| `low_delta.yml` | $\delta=0.5$, $T=50$ |
+| `long_horizon.yml` | $T=50$, padding_mbar |
 
 ```bash
 python examples/retirement/run.py --override-file experiments/retirement/params/long_horizon.yml
@@ -104,11 +105,11 @@ python examples/retirement/run.py --override-file experiments/retirement/params/
 
 ### Without taste shocks
 
-Parameters: \(T=50\), \(\beta=0.96\), \(r=0.02\), \(y=20\), \(a \in [0, 500]\).
+Parameters: $T=50$, $\beta=0.96$, $r=0.02$, $y=20$, $a \in [0, 500]$.
 
 **Upper envelope time (ms per period):**
 
-| Grid | \(\delta\) | RFC | FUES | MSS |
+| Grid | $\delta$ | RFC | FUES | MSS |
 |------|-----------|-----|------|-----|
 | 500 | 0.25 | 1.2 | 0.11 | 0.36 |
 | 500 | 1.00 | 1.4 | 0.11 | 0.65 |
@@ -119,9 +120,9 @@ Parameters: \(T=50\), \(\beta=0.96\), \(r=0.02\), \(y=20\), \(a \in [0, 500]\).
 | 3000 | 0.25 | 8.4 | 0.65 | 1.98 |
 | 3000 | 1.00 | 12.8 | 0.63 | 6.63 |
 
-**Euler equation error** (\(\log_{10}\)):
+**Euler equation error** ($\log_{10}$):
 
-| Grid | \(\delta\) | RFC | FUES | MSS |
+| Grid | $\delta$ | RFC | FUES | MSS |
 |------|-----------|------|------|-----|
 | 500 | 0.25 | -1.537 | -1.591 | -1.537 |
 | 1000 | 1.00 | -1.630 | -1.658 | -1.629 |
@@ -131,9 +132,9 @@ FUES is 5--20× faster than MSS and 10--20× faster than RFC across all configur
 
 ### Key observations
 
-1. **FUES timing is stable across \(\delta\)**: MSS slows as \(\delta\) increases (more kinks in the endogenous grid), while FUES timing is nearly constant.
+1. **FUES timing is stable across $\delta$**: MSS slows as $\delta$ increases (more kinks in the endogenous grid), while FUES timing is nearly constant.
 
-2. **With taste shocks** (\(\bar{s} > 0\)): the endogenous grid becomes non-monotone, with decreasing segments and isolated points. MSS must process many additional segments. FUES handles this without modification.
+2. **With taste shocks** ($\bar{s} > 0$): the endogenous grid becomes non-monotone, with decreasing segments and isolated points. MSS must process many additional segments. FUES handles this without modification.
 
 3. **Scaling**: FUES scales sub-linearly with grid size; MSS scales linearly; LTM scales quadratically. See the [scaling analysis in the notebook](../notebooks/retirement_fues.ipynb).
 
