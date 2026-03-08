@@ -26,6 +26,7 @@ theme:
   font:
     text: Inter
     code: JetBrains Mono
+  logo: images/fues-logo.svg
   icon:
     repo: fontawesome/brands/github
   features:
@@ -75,6 +76,10 @@ extra_javascript:
   - javascripts/mathjax.js
   - javascripts/fues-interactive.js
   - https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js
+
+copyright: >-
+  &copy; Akshay Shanker &mdash;
+  Logo font: TNG Title by Ukraine Fonts
 
 extra:
   social:
