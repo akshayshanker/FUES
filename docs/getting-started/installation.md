@@ -1,55 +1,76 @@
 # Installation
 
-## From source (recommended)
+The installable package containing `fues` and `uenvelope` modules is `dcsmm`.
+Requires Python 3.11+.
+
+## Option 1: Library only
+
+Install FUES and the upper-envelope interface without cloning the repo. This is
+the simplest option if you want to use `fues` and the benchmark upper-envelope
+methods in your own application.
 
 ```bash
-git clone https://github.com/akshayshanker/FUES.git
+pip install git+https://github.com/akshayshanker/FUES.git@release-prep
+```
+
+```python
+from dcsmm.fues import FUES
+from dcsmm.uenvelope import EGM_UE
+```
+
+Runtime dependencies, including `numba`, `numpy`, `scipy`,
+[`HARK`](https://github.com/econ-ark/HARK), and
+[`ConSav`](https://github.com/NumEconCopenhagen/ConsumptionSaving), are
+installed automatically. See `pyproject.toml` for the full list and version
+pins.
+
+## Option 2: With examples
+
+Clone the repo and install with example dependencies (`matplotlib`, `pyyaml`,
+`seaborn`). This includes everything in Option 1 plus the example models in the
+repo checkout.
+
+```bash
+git clone -b release-prep https://github.com/akshayshanker/FUES.git
 cd FUES
-pip install -e ".[examples]"
+pip install ".[examples]"
 ```
 
-This installs `dcsmm` in editable mode with all dependencies for running examples (matplotlib, seaborn, pyyaml).
-
-## Core only
+You can then run a simple example solve:
 
 ```bash
-pip install -e .
+python examples/retirement/run.py --grid-size 3000
 ```
 
-Core dependencies: NumPy, Numba, SciPy, econ-ark (HARK), ConSav, interpolation, dill.
+The interactive notebook at `examples/retirement/notebooks/retirement_fues.ipynb`
+walks through the retirement model step by step.
 
-## On NCI Gadi
+## Option 3: Developer (editable)
+
+Full setup with editable install, examples, and all dependencies including the
+dolo-plus compiler. Use this if you are modifying the source.
 
 ```bash
-bash scripts/setup_venv.sh
+git clone -b release-prep https://github.com/akshayshanker/FUES.git
+cd FUES
+bash setup/setup_venv.sh
+source .venv/bin/activate
 ```
 
-This auto-detects the Gadi environment, creates a venv on `/scratch`, and installs everything. Activate with:
+This creates a local `.venv`, installs `dcsmm` in editable mode, and verifies
+the install.
+
+Run the full timing sweep:
 
 ```bash
-source setup/load_env.sh
+python examples/retirement/run.py --run-timings
 ```
-
-## Requirements
-
-- Python 3.11+
-- NumPy >= 1.23
-- Numba (JIT compilation for the FUES scan)
-- SciPy
-
-## Optional dependencies
-
-| Extra | Install | Provides |
-|-------|---------|----------|
-| `[examples]` | `pip install -e ".[examples]"` | matplotlib, seaborn, pyyaml for running examples |
-| `[mpi]` | `pip install -e ".[mpi]"` | mpi4py for parallel computation |
 
 ## Verify installation
 
 ```python
 from dcsmm.fues import FUES
-print("FUES imported successfully")
-
 from dcsmm.uenvelope import EGM_UE
-print("EGM_UE registry imported successfully")
+
+print("FUES and EGM_UE imported successfully")
 ```

@@ -12,6 +12,7 @@ import seaborn as sns
 from matplotlib.ticker import FormatStrFormatter
 import matplotlib.pylab as pl
 import matplotlib.lines as mlines
+from IPython.display import HTML, display
 
 from dcsmm.fues.fues import FUES as fues_alg
 
@@ -354,79 +355,296 @@ def plot_dcegm_cf(age, g_size, e_grid, vf_work, c_worker, dela_worker, a_prime, 
 # plot_cons_pol, plot_dcegm_cf) are above.
 # ====================================================================
 
-# ── Nord palette (matches MkDocs Material theme) ──
-_NORD = {
-    'frost':  ['#5e81ac', '#81a1c1', '#88c0d0', '#8fbcbb'],
-    'aurora': ['#bf616a', '#d08770', '#ebcb8b', '#a3be8c', '#b48ead'],
-    'fg':     '#2e3440',
-    'bg':     '#ffffff',
-    'grid':   '#e5e7eb',
-    'spine':  '#d1d5db',
+# ── Notebook theme palette (aligned with MkDocs Material + extra.css) ──
+_NB_THEMES = {
+    'light': {
+        'fg': '#1a1a2e',
+        'bg': '#fafafa',
+        'panel': '#ffffff',
+        'grid': '#e5e7eb',
+        'spine': '#d1d5db',
+        'muted': '#64748b',
+        'accent': '#4361ee',
+        'accent_soft': '#2d3561',
+        'raw': '#b23a48',
+        'cross': '#2ec4b6',
+        'dcegm': '#e07c3e',
+        'consav': '#9b5de5',
+        'reference': '#9ca3af',
+    },
+    'dark': {
+        'fg': '#e8e8ed',
+        'bg': '#16161e',
+        'panel': '#1e1e2a',
+        'grid': '#3b4252',
+        'spine': '#4b5565',
+        'muted': '#a7b0c0',
+        'accent': '#7b8cde',
+        'accent_soft': '#a0b0ee',
+        'raw': '#ff8fab',
+        'cross': '#54e1d1',
+        'dcegm': '#ffb074',
+        'consav': '#c4a7ff',
+        'reference': '#8b95a7',
+    },
 }
-_METHOD_COLORS = {
-    'FUES': _NORD['frost'][0],
-    'DCEGM': _NORD['aurora'][1],
-    'RFC': _NORD['aurora'][3],
-    'CONSAV': _NORD['aurora'][4],
-}
+_NB_THEME_NAME = 'light'
 _METHOD_MARKERS = {'FUES': 'o', 'DCEGM': 's', 'RFC': '^', 'CONSAV': 'D'}
 # Display labels for plots (API uses DCEGM/CONSAV, paper uses MSS/LTM)
 _METHOD_LABELS = {'FUES': 'FUES', 'DCEGM': 'MSS', 'RFC': 'RFC', 'CONSAV': 'LTM'}
 
-# Plotly template matching the matplotlib style
-_PLOTLY_TEMPLATE = dict(
-    layout=dict(
-        font=dict(family='Source Sans Pro, Helvetica Neue, Arial', size=11,
-                  color=_NORD['fg']),
-        plot_bgcolor=_NORD['bg'],
-        paper_bgcolor=_NORD['bg'],
-        xaxis=dict(gridcolor=_NORD['grid'], gridwidth=0.5,
-                   linecolor=_NORD['spine'], linewidth=0.6),
-        yaxis=dict(gridcolor=_NORD['grid'], gridwidth=0.5,
-                   linecolor=_NORD['spine'], linewidth=0.6),
+def _resolve_nb_theme(theme='auto'):
+    """Resolve notebook theme from explicit choice or environment."""
+    if theme in _NB_THEMES:
+        return theme
+    env_theme = os.environ.get('FUES_NOTEBOOK_THEME', '').strip().lower()
+    if env_theme in _NB_THEMES:
+        return env_theme
+    # Python cannot reliably observe browser dark/light mode. Default to light,
+    # while injected notebook CSS/JS handles browser-side presentation.
+    return 'light'
+
+
+def _nb_theme(theme_name=None):
+    return _NB_THEMES[theme_name or _NB_THEME_NAME]
+
+
+def _method_colors(theme_name=None):
+    t = _nb_theme(theme_name)
+    return {
+        'FUES': t['accent'],
+        'DCEGM': t['dcegm'],
+        'RFC': t['cross'],
+        'CONSAV': t['consav'],
+    }
+
+
+def _plotly_layout_defaults(theme_name=None):
+    t = _nb_theme(theme_name)
+    return dict(
+        font=dict(
+            family='Inter, Helvetica Neue, Arial, sans-serif',
+            size=11,
+            color=t['fg'],
+        ),
+        plot_bgcolor=t['panel'],
+        paper_bgcolor=t['panel'],
+        xaxis=dict(
+            gridcolor=t['grid'],
+            gridwidth=0.6,
+            linecolor=t['spine'],
+            linewidth=0.8,
+            zerolinecolor=t['grid'],
+            tickfont=dict(color=t['fg']),
+            title=dict(font=dict(color=t['fg'])),
+        ),
+        yaxis=dict(
+            gridcolor=t['grid'],
+            gridwidth=0.6,
+            linecolor=t['spine'],
+            linewidth=0.8,
+            zerolinecolor=t['grid'],
+            tickfont=dict(color=t['fg']),
+            title=dict(font=dict(color=t['fg'])),
+        ),
     )
-)
 
 
-def setup_nb_style():
-    """Apply notebook rcParams globally. Call once at notebook top."""
+def _build_notebook_style_block():
+    """Notebook CSS + JS aligned with the MkDocs site theme."""
+    light = _NB_THEMES['light']
+    dark = _NB_THEMES['dark']
+    return f"""
+<style id="fues-notebook-theme">
+  .jp-RenderedHTMLCommon, .rendered_html, .jp-RenderedMarkdown, .text_cell_render {{
+    font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    line-height: 1.7;
+    color: {light['fg']};
+  }}
+  .jp-RenderedHTMLCommon h1, .jp-RenderedMarkdown h1, .rendered_html h1, .text_cell_render h1 {{
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    color: {light['fg']};
+  }}
+  .jp-RenderedHTMLCommon h2, .jp-RenderedMarkdown h2, .rendered_html h2, .text_cell_render h2 {{
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    border-bottom: 2px solid {light['accent']};
+    padding-bottom: 0.25em;
+  }}
+  .jp-RenderedHTMLCommon code, .jp-RenderedMarkdown code, .rendered_html code, .text_cell_render code,
+  .jp-OutputArea-output pre, .output_area pre {{
+    font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  }}
+  .jp-RenderedMarkdown pre, .rendered_html pre, .text_cell_render pre, .jp-OutputArea-output pre, .output_area pre {{
+    background: #f4f4f8;
+    border: 1px solid {light['grid']};
+    border-radius: 8px;
+    padding: 0.9em 1em;
+  }}
+  .jp-RenderedHTMLCommon blockquote, .jp-RenderedMarkdown blockquote, .rendered_html blockquote, .text_cell_render blockquote {{
+    border-left: 4px solid {light['accent']};
+    background: rgba(67, 97, 238, 0.03);
+    padding: 0.5em 1.1em;
+    margin: 1.25em 0;
+  }}
+  .jp-RenderedHTMLCommon table, .jp-RenderedMarkdown table, .rendered_html table, .text_cell_render table {{
+    border-collapse: collapse;
+    font-size: 0.92rem;
+  }}
+  .jp-RenderedHTMLCommon th, .jp-RenderedMarkdown th, .rendered_html th, .text_cell_render th {{
+    background: #f0f0f5;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-size: 0.76rem;
+  }}
+  .jp-RenderedHTMLCommon th, .jp-RenderedMarkdown th, .rendered_html th, .text_cell_render th,
+  .jp-RenderedHTMLCommon td, .jp-RenderedMarkdown td, .rendered_html td, .text_cell_render td {{
+    border: 1px solid {light['grid']};
+    padding: 0.5em 0.75em;
+  }}
+  @media (prefers-color-scheme: dark) {{
+    .jp-RenderedHTMLCommon, .rendered_html, .jp-RenderedMarkdown, .text_cell_render {{
+      color: {dark['fg']};
+    }}
+    .jp-RenderedHTMLCommon h1, .jp-RenderedMarkdown h1, .rendered_html h1, .text_cell_render h1 {{
+      color: {dark['fg']};
+    }}
+    .jp-RenderedHTMLCommon h2, .jp-RenderedMarkdown h2, .rendered_html h2, .text_cell_render h2 {{
+      border-bottom-color: {dark['accent']};
+    }}
+    .jp-RenderedMarkdown pre, .rendered_html pre, .text_cell_render pre, .jp-OutputArea-output pre, .output_area pre {{
+      background: {dark['panel']};
+      border-color: {dark['spine']};
+      color: {dark['fg']};
+    }}
+    .jp-RenderedHTMLCommon blockquote, .jp-RenderedMarkdown blockquote, .rendered_html blockquote, .text_cell_render blockquote {{
+      border-left-color: {dark['accent']};
+      background: rgba(123, 140, 222, 0.08);
+    }}
+    .jp-RenderedHTMLCommon th, .jp-RenderedMarkdown th, .rendered_html th, .text_cell_render th {{
+      background: #242433;
+    }}
+    .jp-RenderedHTMLCommon th, .jp-RenderedMarkdown th, .rendered_html th, .text_cell_render th,
+    .jp-RenderedHTMLCommon td, .jp-RenderedMarkdown td, .rendered_html td, .text_cell_render td {{
+      border-color: {dark['spine']};
+    }}
+  }}
+</style>
+<script>
+(function() {{
+  const light = {{
+    fg: "{light['fg']}",
+    panel: "{light['panel']}",
+    grid: "{light['grid']}",
+    spine: "{light['spine']}"
+  }};
+  const dark = {{
+    fg: "{dark['fg']}",
+    panel: "{dark['panel']}",
+    grid: "{dark['grid']}",
+    spine: "{dark['spine']}"
+  }};
+  function activeTheme() {{
+    return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? dark : light;
+  }}
+  function applyPlotlyTheme() {{
+    if (!window.Plotly) return;
+    const t = activeTheme();
+    document.querySelectorAll('.js-plotly-plot').forEach((gd) => {{
+      try {{
+        window.Plotly.relayout(gd, {{
+          paper_bgcolor: t.panel,
+          plot_bgcolor: t.panel,
+          'font.family': 'Inter, Helvetica Neue, Arial, sans-serif',
+          'font.color': t.fg,
+          'xaxis.gridcolor': t.grid,
+          'xaxis.linecolor': t.spine,
+          'xaxis.zerolinecolor': t.grid,
+          'yaxis.gridcolor': t.grid,
+          'yaxis.linecolor': t.spine,
+          'yaxis.zerolinecolor': t.grid,
+          'legend.font.color': t.fg,
+          'legend.bgcolor': 'rgba(0,0,0,0)'
+        }});
+      }} catch (err) {{
+      }}
+    }});
+  }}
+  const mq = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+  if (mq) {{
+    if (mq.addEventListener) mq.addEventListener('change', applyPlotlyTheme);
+    else if (mq.addListener) mq.addListener(applyPlotlyTheme);
+  }}
+  new MutationObserver(applyPlotlyTheme).observe(document.body, {{ childList: true, subtree: true }});
+  setTimeout(applyPlotlyTheme, 0);
+  setTimeout(applyPlotlyTheme, 300);
+}})();
+</script>
+"""
+
+
+def setup_nb_style(theme='auto'):
+    """Apply notebook styling aligned with the MkDocs theme.
+
+    Parameters
+    ----------
+    theme : {"auto", "light", "dark"}
+        Matplotlib theme choice. ``auto`` falls back to light unless the
+        ``FUES_NOTEBOOK_THEME`` environment variable is set. Browser-side CSS
+        and Plotly styling still react to dark/light mode dynamically.
+    """
     import matplotlib
+    global _NB_THEME_NAME
+    _NB_THEME_NAME = _resolve_nb_theme(theme)
+    t = _nb_theme()
+
     matplotlib.rcParams.update({
         'font.family': 'sans-serif',
-        'font.sans-serif': ['Source Sans Pro', 'Helvetica Neue', 'Arial'],
-        'font.size': 10,
-        'axes.titlesize': 11,
-        'axes.titleweight': '600',
+        'font.sans-serif': ['Inter', 'Helvetica Neue', 'Arial'],
+        'font.size': 10.5,
+        'axes.titlesize': 11.5,
+        'axes.titleweight': '700',
         'axes.labelsize': 10,
-        'figure.facecolor': _NORD['bg'],
-        'axes.facecolor': _NORD['bg'],
+        'axes.titlelocation': 'left',
+        'figure.facecolor': t['panel'],
+        'axes.facecolor': t['panel'],
         'axes.grid': True,
-        'grid.alpha': 0.4,
-        'grid.linewidth': 0.5,
-        'grid.color': _NORD['grid'],
-        'axes.edgecolor': _NORD['spine'],
-        'axes.linewidth': 0.6,
-        'text.color': _NORD['fg'],
-        'axes.labelcolor': _NORD['fg'],
-        'xtick.color': _NORD['fg'],
-        'ytick.color': _NORD['fg'],
+        'grid.alpha': 0.55,
+        'grid.linewidth': 0.6,
+        'grid.color': t['grid'],
+        'axes.edgecolor': t['spine'],
+        'axes.linewidth': 0.8,
+        'text.color': t['fg'],
+        'axes.labelcolor': t['fg'],
+        'xtick.color': t['fg'],
+        'ytick.color': t['fg'],
         'xtick.labelsize': 9,
         'ytick.labelsize': 9,
         'legend.fontsize': 9,
-        'legend.framealpha': 0.7,
-        'legend.edgecolor': 'none',
+        'legend.framealpha': 0.9,
+        'legend.edgecolor': t['spine'],
+        'legend.facecolor': t['panel'],
         'figure.dpi': 150,
         'savefig.dpi': 150,
         'savefig.bbox': 'tight',
+        'savefig.facecolor': t['panel'],
+        'savefig.edgecolor': t['panel'],
     })
+    try:
+        display(HTML(_build_notebook_style_block()))
+    except Exception:
+        pass
 
 
 def _style_nb_ax(ax):
-    """Apply Nord styling to a single matplotlib axes."""
+    """Apply notebook axis styling to a single matplotlib axes."""
+    t = _nb_theme()
     for s in ax.spines.values():
-        s.set_color(_NORD['spine'])
-        s.set_linewidth(0.6)
-    ax.tick_params(colors=_NORD['fg'], labelsize=9)
+        s.set_color(t['spine'])
+        s.set_linewidth(0.8)
+    ax.tick_params(colors=t['fg'], labelsize=9)
+    ax.set_facecolor(t['panel'])
 
 
 def nb_plot_egm_interactive(nest, model, age, pad=10):
@@ -454,6 +672,7 @@ def nb_plot_egm_interactive(nest, model, age, pad=10):
     from plotly.subplots import make_subplots
     from dcsmm.fues.fues import FUES as fues_alg
     from .diagnostics import get_policy
+    t = _nb_theme()
 
     e_grid = get_policy(nest, 'egrid', stage='work_cons')
     vf_unref = get_policy(nest, 'q_hat', stage='work_cons')
@@ -490,25 +709,25 @@ def nb_plot_egm_interactive(nest, model, age, pad=10):
     # Value panel
     fig.add_trace(go.Scattergl(
         x=x_raw, y=v_raw, mode='markers',
-        marker=dict(size=4, color='red', opacity=0.3, symbol='circle-open'),
+        marker=dict(size=5, color=t['raw'], opacity=0.35, symbol='circle-open'),
         name='Raw EGM',
     ), row=1, col=1)
     fig.add_trace(go.Scattergl(
         x=x_clean, y=v_clean, mode='markers',
-        marker=dict(size=5, color='blue', symbol='x'),
+        marker=dict(size=6, color=t['accent'], symbol='x'),
         name='FUES optimal',
     ), row=1, col=1)
     sort_idx = np.argsort(x_clean)
     fig.add_trace(go.Scattergl(
         x=x_clean[sort_idx], y=v_clean[sort_idx],
-        mode='lines', line=dict(color='black', width=1),
+        mode='lines', line=dict(color=t['fg'], width=1.3),
         name='Value function',
     ), row=1, col=1)
     if len(inter_e) > 0:
         fig.add_trace(go.Scattergl(
             x=inter_e, y=v_inter, mode='markers',
-            marker=dict(size=10, color='green', symbol='star',
-                        line=dict(width=1, color='black')),
+            marker=dict(size=10, color=t['cross'], symbol='star',
+                        line=dict(width=1, color=t['fg'])),
             name='Crossing points',
         ), row=1, col=1)
 
@@ -516,20 +735,20 @@ def nb_plot_egm_interactive(nest, model, age, pad=10):
     sort_raw = np.argsort(x_raw)
     fig.add_trace(go.Scattergl(
         x=x_raw[sort_raw], y=sav_raw[sort_raw], mode='markers',
-        marker=dict(size=4, color='red', opacity=0.3, symbol='circle-open'),
+        marker=dict(size=5, color=t['raw'], opacity=0.35, symbol='circle-open'),
         showlegend=False,
     ), row=1, col=2)
     fig.add_trace(go.Scattergl(
         x=x_clean[sort_idx], y=sav_clean[sort_idx], mode='markers',
-        marker=dict(size=5, color='blue', symbol='x'),
+        marker=dict(size=6, color=t['accent'], symbol='x'),
         showlegend=False,
     ), row=1, col=2)
     if len(inter_e) > 0:
         si = np.argsort(inter_e)
         fig.add_trace(go.Scattergl(
             x=inter_e[si], y=sav_inter[si], mode='markers',
-            marker=dict(size=10, color='green', symbol='star',
-                        line=dict(width=1, color='black')),
+            marker=dict(size=10, color=t['cross'], symbol='star',
+                        line=dict(width=1, color=t['fg'])),
             showlegend=False,
         ), row=1, col=2)
 
@@ -552,9 +771,17 @@ def nb_plot_egm_interactive(nest, model, age, pad=10):
     fig.update_yaxes(title_text='Value', range=[v_lo, v_hi], row=1, col=1)
     fig.update_yaxes(title_text='Next-period assets', range=[s_lo, s_hi], row=1, col=2)
     fig.update_layout(
-        height=450, dragmode='zoom', template='plotly_white',
+        height=450,
+        dragmode='zoom',
         margin=dict(t=40, b=40),
-        legend=dict(x=0.01, y=0.99, font=dict(size=9)),
+        legend=dict(
+            x=0.01,
+            y=0.99,
+            bgcolor='rgba(0,0,0,0)',
+            borderwidth=0,
+            font=dict(size=9, color=t['fg']),
+        ),
+        **_plotly_layout_defaults(),
     )
     return fig
 
@@ -576,9 +803,10 @@ def nb_plot_cons_ages(nest, model, ages=(10, 30, 40)):
     matplotlib.figure.Figure
     """
     from .diagnostics import get_policy
+    t = _nb_theme()
 
     c_worker = get_policy(nest, 'c', stage='work_cons')
-    colors = [_NORD['frost'][0], _NORD['aurora'][1], _NORD['aurora'][3]]
+    colors = [t['accent'], t['dcegm'], t['cross']]
 
     fig, axes = pl.subplots(1, len(ages), figsize=(13, 4))
     if len(ages) == 1:
@@ -621,6 +849,8 @@ def nb_plot_scaling(grid_sizes, scaling, methods=None):
     """
     if methods is None:
         methods = list(scaling.keys())
+    method_colors = _method_colors()
+    t = _nb_theme()
 
     fig, ax = pl.subplots(figsize=(7, 4.5))
     ns = np.array(grid_sizes, dtype=float)
@@ -628,24 +858,24 @@ def nb_plot_scaling(grid_sizes, scaling, methods=None):
     for m in methods:
         ax.loglog(ns, scaling[m],
                   f'-{_METHOD_MARKERS.get(m, "o")}',
-                  color=_METHOD_COLORS.get(m, 'gray'),
+                  color=method_colors.get(m, t['muted']),
                   label=_METHOD_LABELS.get(m, m), markersize=5, linewidth=1.6)
 
     # Reference lines anchored at first data point
     if 'DCEGM' in scaling:
         t0 = scaling['DCEGM'][0]
         ax.loglog(ns, t0 * (ns / ns[0]), '--',
-                  color='#9ca3af', linewidth=0.8, label='$O(n)$')
+                  color=t['reference'], linewidth=0.8, label='$O(n)$')
 
     if 'CONSAV' in scaling:
         t0 = scaling['CONSAV'][0]
         ax.loglog(ns, t0 * (ns / ns[0])**2, ':',
-                  color='#9ca3af', linewidth=0.8, label='$O(n^2)$')
+                  color=t['reference'], linewidth=0.8, label='$O(n^2)$')
 
     if 'FUES' in scaling:
         t0 = scaling['FUES'][0]
         ax.loglog(ns, t0 * (ns / ns[0]), '--',
-                  color=_METHOD_COLORS['FUES'], linewidth=0.7,
+                  color=method_colors['FUES'], linewidth=0.7,
                   alpha=0.4, label='$O(n)$ at FUES')
 
     ax.set_xlabel('Grid size $n$')
@@ -689,6 +919,7 @@ def nb_plot_egrids(nest, model, age, pad=10, xlim=None, ylim_v=None, ylim_s=None
     """
     from dcsmm.fues.fues import FUES as fues_alg
     from .diagnostics import get_policy
+    t = _nb_theme()
 
     e_grid = get_policy(nest, 'egrid', stage='work_cons')
     vf_unref = get_policy(nest, 'q_hat', stage='work_cons')
@@ -745,16 +976,16 @@ def nb_plot_egrids(nest, model, age, pad=10, xlim=None, ylim_v=None, ylim_s=None
     fig, (ax1, ax2) = pl.subplots(1, 2, figsize=(10, 4))
 
     # Value panel
-    ax1.scatter(x_raw, v_raw, s=12, facecolors='none', edgecolors=_NORD['aurora'][0],
+    ax1.scatter(x_raw, v_raw, s=12, facecolors='none', edgecolors=t['raw'],
                 linewidths=0.5, alpha=0.4, label='Raw EGM', zorder=1)
     sort_idx = np.argsort(x_clean)
-    ax1.plot(x_clean[sort_idx], v_clean[sort_idx], color=_NORD['fg'],
-             linewidth=1, label='Value function', zorder=2)
-    ax1.scatter(x_clean, v_clean, s=15, color=_NORD['frost'][0], marker='x',
+    ax1.plot(x_clean[sort_idx], v_clean[sort_idx], color=t['fg'],
+             linewidth=1.3, label='Value function', zorder=2)
+    ax1.scatter(x_clean, v_clean, s=15, color=t['accent'], marker='x',
                 linewidths=0.8, label='FUES optimal', zorder=3)
     if len(inter_e) > 0:
-        ax1.scatter(inter_e, v_inter, s=60, color=_NORD['aurora'][3], marker='*',
-                    edgecolors=_NORD['fg'], linewidths=0.5,
+        ax1.scatter(inter_e, v_inter, s=60, color=t['cross'], marker='*',
+                    edgecolors=t['fg'], linewidths=0.5,
                     label='Crossing points', zorder=4)
     ax1.set_xlim(x_lo, x_hi)
     if v_lo is not None:
@@ -767,15 +998,15 @@ def nb_plot_egrids(nest, model, age, pad=10, xlim=None, ylim_v=None, ylim_s=None
 
     # Savings panel
     ax2.scatter(np.sort(x_raw), np.take(sav_raw, np.argsort(x_raw)),
-                s=12, facecolors='none', edgecolors=_NORD['aurora'][0],
+                s=12, facecolors='none', edgecolors=t['raw'],
                 linewidths=0.5, alpha=0.4, label='Raw EGM', zorder=1)
     ax2.scatter(x_clean[sort_idx], sav_clean[sort_idx],
-                s=15, color=_NORD['frost'][0], marker='x',
+                s=15, color=t['accent'], marker='x',
                 linewidths=0.8, label='FUES optimal', zorder=3)
     if len(inter_e) > 0:
         si = np.argsort(inter_e)
-        ax2.scatter(inter_e[si], sav_inter[si], s=60, color=_NORD['aurora'][3],
-                    marker='*', edgecolors=_NORD['fg'], linewidths=0.5,
+        ax2.scatter(inter_e[si], sav_inter[si], s=60, color=t['cross'],
+                    marker='*', edgecolors=t['fg'], linewidths=0.5,
                     label='Crossing points', zorder=4)
     ax2.set_xlim(x_lo, x_hi)
     if s_lo is not None:

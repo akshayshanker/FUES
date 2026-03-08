@@ -2,9 +2,9 @@
 
 > Dobrescu, L.I. and Shanker, A. (2026). "A fast upper envelope scan method for discrete-continuous dynamic programming." [SSRN Working Paper.](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=4181302)
 
-FUES recovers the upper envelope of the EGM ([Carroll 2006](https://doi.org/10.1016/j.econlet.2005.09.013)) value correspondence in discrete-continuous problems. Unlike monotone segment selection (MSS, algorithm by [Iskhakov et al. 2017](https://doi.org/10.3982/QE643)), local triangulation (LTM, [Druedahl & Jørgensen 2017](https://doi.org/10.1016/j.jedc.2016.11.005)), and NEGM ([Druedahl 2021](https://doi.org/10.1007/s10614-020-10045-x)), FUES does not require monotonicity of the optimal policy function or numerical optimisation. FUES is also orders of magnitude faster than existing upper envelope methods. 
+FUES recovers the upper envelope of the EGM ([Carroll 2006](https://doi.org/10.1016/j.econlet.2005.09.013)) value correspondence in discrete-continuous problems. FUES does not require monotonicity of the optimal policy function or numerical optimisation. FUES is also orders of magnitude faster than existing upper envelope methods. 
 
-This repo also ships a unified upper-envelope interface (`uenvelope`) that dispatches to FUES, MSS, RFC, or CONSAV/LTM through a single call.
+This repo also ships a unified upper-envelope interface (`uenvelope`) that dispatches to FUES as well as key benchmark upper envelope methods including the monotone segment selection (MSS, algorithm by [Iskhakov et al. 2017](https://doi.org/10.3982/QE643)) and local triangulation (LTM, [Druedahl & Jørgensen 2017](https://doi.org/10.1016/j.jedc.2016.11.005)).
 
 **[Docs](https://akshayshanker.github.io/FUES/)** · **[Notebooks](https://akshayshanker.github.io/FUES/notebooks/retirement_fues/)** 
 
@@ -94,7 +94,7 @@ FUES/
 │   ├── retirement/       # retirement choice (+ notebooks/)
 │   ├── durables/         # durables with adjustment frictions
 │   └── housing_renting/  # discrete housing + capital tax
-├── experiments/          # PBS/HPC scripts, sparse param overrides
+├── experiments/          # PBS/HPC scripts with param overrides
 ├── replication/          # paper tables + figures (committed outputs)
 ├── setup/                # setup_venv.sh, load_env.sh
 └── docs/                 # mkdocs site

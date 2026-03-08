@@ -1,44 +1,31 @@
 name: RetireeConsumption
-
 symbols:
   spaces:
     Xa: "@def R+"
-
   prestate:
     a_ret: "@in Xa"       # assets (distinct namespace from worker)
-
   states:
     w_ret: "@in Xa"       # cash-on-hand = (1+r)*a_ret (no income)
-
   poststates:
     b_ret: "@in Xa"       # end-of-period assets (distinct from worker b)
-
   controls:
     c: "@in R+"
-
   exogenous: {}
-
   values:
     V[>]: "@in [-inf, inf)"
     V[<]: "@in [-inf, inf)"
     V: "@in [-inf, inf)"
-
   values_marginal:
     dV[>]: "@in R+"
     dV[<]: "@in R+"
     dV: "@in R+"
-
   parameters: [beta, r]
-
   settings: [n_w_ret, w_ret_min, w_ret_max]
-
 equations:
   arvl_to_dcsn_transition: |
     w_ret = (1 + r) * a_ret
-
   dcsn_to_cntn_transition: |
     b_ret = w_ret - c
- 
   cntn_to_dcsn_mover:
     Bellman: |
       V = max_c{log(c) + beta * V[>]}
@@ -48,7 +35,6 @@ equations:
       w_ret[>] = b_ret + c[>]
     MarginalBellman: |
       dV = 1/c
-
   dcsn_to_arvl_mover:
     Bellman: |
       V[<] = V

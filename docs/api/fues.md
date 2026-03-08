@@ -48,6 +48,21 @@ FUES(
 (fues_result, intersections)
 ```
 
+### Recommended notation
+
+The current implementation keeps some legacy parameter names for API stability.
+For documentation and paper alignment, the preferred interpretation is:
+
+| API name | Recommended code meaning | Math notation |
+|---|---|---|
+| `e_grid` | `x_dcsn_hat` | `\hat{x}` or `\hat{x}_v` |
+| `vlu` | `v_hat` | `\hat{v}` or `\hat{v}_v` |
+| `policy_1` | `kappa_hat` | `\hat{c}` in consumption-saving applications |
+| `policy_2` | `x_cntn_hat` | `\hat{x}_e`, with `\hat{x}_e \equiv \hat{x}'` as the transition from the paper's current notation |
+| `*_ref` outputs | refined upper-envelope objects | refined counterparts of the above |
+
+This keeps the docs close to the current paper while making the continuation / post-decision object easier to read from a Bellman-DDSL perspective.
+
 ### Implementation notes
 
 - Core scan is `@njit` (Numba JIT-compiled)
@@ -88,6 +103,14 @@ EGM_UE(
 - `refined` — dict: `x_dcsn_ref`, `v_dcsn_ref`, `kappa_ref`, `x_cntn_ref`, `lambda_ref`, `ue_time`
 - `raw` — dict: original inputs
 - `interpolated` — dict: values on `X_dcsn` (if `interpolate=True`)
+
+### Naming note
+
+`EGM_UE` currently uses `qf_hat` and `X_cntn` in the API. Read these as:
+
+- `qf_hat` = raw value correspondence, with preferred paper-facing notation `v_hat`
+- `X_cntn` = raw continuation / post-decision state, with preferred descriptive name `x_cntn_hat`
+- `X_dcsn` = target decision grid used for interpolation and comparison
 
 ### Available methods
 
