@@ -110,10 +110,32 @@ def plot_pbs_scaling(path, ax=None):
               color=mc['FUES'], linewidth=0.7,
               alpha=0.4, label='$O(n)$ at FUES')
 
+    # ── Speedup factor ticks on the right margin ──
+    fues_last = means['FUES'][-1]
+    ylim = ax.get_ylim()
+    for factor in [5, 10, 20, 50, 100]:
+        y = fues_last * factor
+        if y < ylim[0] or y > ylim[1]:
+            continue
+        ax.plot([ns[-1], ns[-1] * 1.06], [y, y],
+                color='#6b7280', linewidth=0.7, clip_on=False,
+                solid_capstyle='round')
+        ax.text(ns[-1] * 1.09, y, f'{factor}x',
+                fontsize=7.5, fontweight='600', color='#4b5563',
+                va='center', ha='left', clip_on=False)
+    if ylim[0] <= fues_last <= ylim[1]:
+        ax.plot([ns[-1], ns[-1] * 1.06], [fues_last, fues_last],
+                color=mc['FUES'], linewidth=0.9, clip_on=False,
+                solid_capstyle='round')
+        ax.text(ns[-1] * 1.09, fues_last, '1x',
+                fontsize=7.5, fontweight='700', color=mc['FUES'],
+                va='center', ha='left', clip_on=False)
+
     ax.set_xlabel('Grid size $n$')
     ax.set_ylabel('Mean UE time (ms, avg over $\\delta$)')
     ax.set_title('PBS cluster (Gadi) scaling')
     _style_nb_ax(ax)
-    ax.legend(fontsize=7, framealpha=0.7, edgecolor='none', ncol=2)
-    fig.tight_layout()
+    ax.legend(fontsize=7, framealpha=0.7, edgecolor='none', ncol=2,
+              loc='upper left')
+    fig.subplots_adjust(right=0.82)
     return fig

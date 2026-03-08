@@ -878,38 +878,53 @@ def nb_plot_scaling(grid_sizes, scaling, methods=None):
                   color=method_colors['FUES'], linewidth=0.7,
                   alpha=0.4, label='$O(n)$ at FUES')
 
-    # Speedup reference lines: horizontal lines at multiples of FUES,
-    # labeled 5×, 10×, 20×, 50× on the right margin.
+    # ── Speedup reference: secondary y-axis with factor labels ──
+    # Place factor ticks on the right-hand side outside the plot area,
+    # anchored to the FUES time at the largest grid size.
     if 'FUES' in scaling:
-        fues_arr = np.array(scaling['FUES'])
-        fues_ref = fues_arr[len(fues_arr) // 2]  # value at median grid size
+        fues_last = scaling['FUES'][-1]
         ylim = ax.get_ylim()
-        for factor in [5, 10, 20, 50]:
-            y = fues_ref * factor
+
+        # Thin colored bands spanning the full x-range
+        band_color = '#e8ecfa'  # very light blue
+        band_color_dark = '#252540'
+        for factor in [5, 10, 20, 50, 100]:
+            y = fues_last * factor
             if y < ylim[0] or y > ylim[1]:
                 continue
-            ax.axhline(y, color=t['muted'], linewidth=0.5,
-                       linestyle=(0, (4, 4)), zorder=0, alpha=0.5)
-            ax.annotate(f'{factor}$\\times$',
-                        xy=(ns[-1], y), xytext=(5, 0),
-                        textcoords='offset points',
-                        fontsize=7, color=t['muted'],
-                        va='center', ha='left')
-        # Mark FUES baseline (1×)
-        ax.axhline(fues_ref, color=method_colors.get('FUES', t['accent']),
-                   linewidth=0.6, linestyle=(0, (4, 4)), alpha=0.4, zorder=0)
-        ax.annotate('1$\\times$ (FUES)',
-                    xy=(ns[-1], fues_ref), xytext=(5, 0),
-                    textcoords='offset points',
-                    fontsize=7, color=method_colors.get('FUES', t['accent']),
-                    va='center', ha='left', alpha=0.7)
+            # Subtle horizontal tick mark on the right spine
+            ax.plot([ns[-1], ns[-1] * 1.06], [y, y],
+                    color='#6b7280', linewidth=0.7, clip_on=False,
+                    solid_capstyle='round')
+            # Label outside the axis
+            ax.text(ns[-1] * 1.09, y, f'{factor}x',
+                    fontsize=7.5, fontweight='600', color='#4b5563',
+                    va='center', ha='left', clip_on=False)
+
+        # FUES baseline tick (1×)
+        if ylim[0] <= fues_last <= ylim[1]:
+            ax.plot([ns[-1], ns[-1] * 1.06], [fues_last, fues_last],
+                    color=method_colors.get('FUES', t['accent']),
+                    linewidth=0.9, clip_on=False, solid_capstyle='round')
+            ax.text(ns[-1] * 1.09, fues_last, '1x',
+                    fontsize=7.5, fontweight='700',
+                    color=method_colors.get('FUES', t['accent']),
+                    va='center', ha='left', clip_on=False)
+
+        # Label the secondary axis
+        ax.text(ns[-1] * 1.22, np.sqrt(ylim[0] * ylim[1]),
+                'slower\nthan\nFUES', fontsize=6.5, color='#9ca3af',
+                va='center', ha='center', clip_on=False,
+                linespacing=1.3, style='italic')
 
     ax.set_xlabel('Grid size $n$')
     ax.set_ylabel('Upper envelope time (ms)')
     ax.set_title('UE scaling (log-log)')
     _style_nb_ax(ax)
-    ax.legend(fontsize=8, framealpha=0.7, edgecolor='none', ncol=2)
-    fig.tight_layout()
+    ax.legend(fontsize=8, framealpha=0.7, edgecolor='none', ncol=2,
+              loc='upper left')
+    # Extra right margin for the factor labels
+    fig.subplots_adjust(right=0.82)
     return fig
 
 
