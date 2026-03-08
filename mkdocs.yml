@@ -90,7 +90,7 @@ nav:
   - Examples:
     - Overview: examples/index.md
     - Retirement Choice: examples/retirement.md
-    - Housing Investment: examples/housing.md
+    - Durables: examples/housing.md
     - Housing-Renting: examples/housing-renting.md
   - Notebooks:
     - Retirement: notebooks/retirement_fues.ipynb
