@@ -54,9 +54,54 @@ $$
 
 Because the value function is not concave, worker points satisfying these first-order conditions may lie on choice-specific value functions associated with suboptimal future discrete-choice sequences. The endogenous grid method (EGM) inverts these Euler equations analytically to produce an unrefined endogenous grid $\hat{\mathbb{X}}_t$, value correspondence $\hat{\mathbb{V}}_t$, and continuation grid $\hat{\mathbb{X}}_t'$. FUES then identifies and removes suboptimal points from these EGM outputs in a single pass. See the [algorithm page](../algorithm/fues-algorithm.md) for a detailed description of the scan logic, forward/backward scans, and intersection-point construction.
 
+## Solve interface
+
+The primary entry point is `solve_nest` in `solve.py`. It loads the YAML declarations, builds the model, and solves backward over $T$ periods:
+
+```python
+from examples.retirement.solve import solve_nest
+from examples.retirement.outputs import euler, get_policy
+
+nest, model, stage_ops = solve_nest(
+    'examples/retirement/syntax',
+    method='FUES',
+    config_overrides={'grid_size': 3000, 'T': 50},
+)
+
+# Euler error (log10)
+c_refined = get_policy(nest, 'c', stage='labour_mkt_decision')
+print(f'Euler error: {euler(model, c_refined):.4f}')
+```
+
+`solve_nest` runs a three-step pipeline on each stage declared in `syntax/stages/`:
+
+1. **Methodize** — attach the upper-envelope method (FUES, DCEGM, RFC, or CONSAV) specified in each stage's `*_methods.yml` file.
+2. **Configure** — bind numerical settings (grid sizes, bounds, $\bar{M}$) from `settings.yaml`.
+3. **Calibrate** — bind economic parameters ($\beta$, $\delta$, $r$, $y$) from `calibration.yaml`.
+
+It then solves the three stages in reverse topological order each period:
+
+1. **`retire_cons`** — retiree EGM (standard concave problem, no upper envelope).
+2. **`work_cons`** — worker EGM + upper envelope via `EGM_UE`. This is where FUES runs.
+3. **`labour_mkt_decision`** — pointwise $\max(V^{\text{work}} - \delta,\; V^{\text{retire}})$ to evaluate the discrete choice.
+
+The returned `nest` dict contains the full solution history. Use `get_policy(nest, key, stage=...)` to extract policies and `get_timing(nest)` to extract UE and total solve times.
+
+Overrides are passed as dicts:
+
+```python
+# Lower beta and increase grid
+nest, model, _ = solve_nest(
+    'examples/retirement/syntax',
+    method='FUES',
+    calib_overrides={'beta': 0.94},
+    config_overrides={'grid_size': 5000, 'T': 50},
+)
+```
+
 ## Running locally
 
-`run.py` is a command-line interface for the retirement model. It loads baseline economic parameters from `syntax/calibration.yaml` and numerical settings from `syntax/settings.yaml`, then builds the model using the  three-steps (attaching methods, settings, parameters, then solving). Parameters can be overridden at the command line.
+`run.py` is a command-line wrapper around `solve_nest`. It loads baseline economic parameters from `syntax/calibration.yaml` and numerical settings from `syntax/settings.yaml`, applies any command-line overrides, solves with all four methods, and prints a comparison table. Parameters can be overridden at the command line.
 
 The override mechanism works at two levels:
 
