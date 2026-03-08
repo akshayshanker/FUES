@@ -6,7 +6,7 @@ Factors the logic previously hard-wired in the EGM solver into:
     engines are made discoverable.
 2.  Engine wrappers (FUES, DCEGM, RFC, SIMPLE, CONSAV).  Each wrapper
     normalises one algorithm's output into a common dict with keys
-    ``x_dcsn_ref, v_dcsn_ref, kappa_ref, x_cntn_ref, lambda_ref``.
+    ``x_dcsn_ref, v_ref, kappa_ref, x_cntn_ref, lambda_ref``.
 3.  `fill_interpolated` — common interpolation + lambda computation that
     maps a refined grid onto a target evaluation grid.
 """
@@ -100,10 +100,10 @@ def available() -> list[str]:
 
 def EGM_UE(
     x_dcsn_hat: np.ndarray,
-    qf_hat: np.ndarray,
+    v_hat: np.ndarray,
     v_cntn_hat: np.ndarray,
     kappa_hat: np.ndarray,
-    X_cntn: np.ndarray,
+    x_cntn_hat: np.ndarray,
     X_dcsn: Optional[np.ndarray],
     uc_func_partial: Callable,
     u_func: Callable,
@@ -118,15 +118,87 @@ def EGM_UE(
 ) -> tuple[Dict[str, np.ndarray], Dict[str, np.ndarray], Dict[str, np.ndarray]]:
     """Universal entry point for all upper-envelope algorithms.
 
-    Dispatches to a registered engine, times execution, and optionally
-    interpolates the refined result onto ``X_dcsn``.
+    Takes the unrefined EGM correspondence, dispatches to a registered
+    upper-envelope engine, times the execution, and optionally
+    interpolates the refined result onto the target decision grid
+    ``X_dcsn``.
+
+    Parameters
+    ----------
+    x_dcsn_hat : ndarray, shape (N,)
+        Unrefined endogenous decision grid produced by the EGM
+        inversion step (``hat{x}``).
+    v_hat : ndarray, shape (N,)
+        Unrefined value correspondence aligned with ``x_dcsn_hat``
+        (``hat{v}``).
+    v_cntn_hat : ndarray, shape (N,)
+        Continuation value at each point on the exogenous grid.
+        Used by engines that need the raw continuation value
+        (e.g., CONSAV).
+    kappa_hat : ndarray, shape (N,)
+        Unrefined primary control aligned with ``x_dcsn_hat``
+        (e.g., consumption ``hat{c}``).
+    x_cntn_hat : ndarray, shape (N,)
+        Unrefined continuation / exogenous grid aligned with
+        ``x_dcsn_hat`` (e.g., next-period assets ``hat{x}'``).
+    X_dcsn : ndarray, shape (M,)
+        Target decision grid onto which refined policies are
+        interpolated.  Must be strictly increasing.
+    uc_func_partial : callable
+        Marginal-utility function ``u'(c)`` used to compute
+        ``lambda_ref`` from the refined consumption policy.
+    u_func : callable or dict
+        Utility function (or ``{"func": njit_u, "args": ...}``
+        dict for engines like CONSAV that need it directly).
+    ue_method : str, default ``"FUES"``
+        Name of the registered upper-envelope engine to use.
+        Available engines: FUES, FUES_V0DEV, FUES_V0_1DEV,
+        FUES_V0_2DEV, DCEGM, RFC, SIMPLE, CONSAV.
+    m_bar : float, default 1.0
+        Jump-detection threshold passed to FUES / RFC engines.
+    lb : int, default 4
+        Look-back / look-forward buffer length for FUES engines.
+    rfc_radius : float, default 0.75
+        Radius parameter for the RFC engine.
+    rfc_n_iter : int, default 20
+        Iteration count for the RFC engine.
+    interpolate : bool, default False
+        If True, interpolate the refined result onto ``X_dcsn``
+        and return the interpolated dict in the third element.
+    include_intersections : bool, default True
+        If True (and the engine supports it), create explicit
+        intersection points at discrete-choice switches.
+    ue_kwargs : dict, optional
+        Additional keyword arguments forwarded to the engine
+        (e.g., ``endog_mbar``, ``padding_mbar``,
+        ``single_intersection``).
+
+    Returns
+    -------
+    refined : dict
+        Upper-envelope output with keys:
+
+        - ``x_dcsn_ref`` — refined decision grid
+        - ``v_dcsn_ref`` — refined value on the decision grid
+        - ``kappa_ref``  — refined primary control
+        - ``x_cntn_ref`` — refined continuation grid
+        - ``lambda_ref`` — marginal utility at ``kappa_ref``
+        - ``ue_time``    — wall-clock seconds for the UE step
+
+    raw : dict
+        Unrefined inputs passed through for diagnostics:
+        ``{x_dcsn_hat, v_hat, kappa_hat, x_cntn_hat}``.
+
+    interpolated : dict
+        If ``interpolate=True``, same keys as *refined* but
+        evaluated on ``X_dcsn``.  Always contains ``ue_time``.
     """
 
     if X_dcsn is None:
         raise ValueError("X_dcsn must be provided for interpolation")
 
     # -------- raw (always reported) -----------------------------------
-    raw = {"x_dcsn_hat": x_dcsn_hat, "qf_hat": qf_hat, "kappa_hat": kappa_hat, "X_cntn": X_cntn}
+    raw = {"x_dcsn_hat": x_dcsn_hat, "v_hat": v_hat, "kappa_hat": kappa_hat, "x_cntn_hat": x_cntn_hat}
 
     # -------- select engine ------------------------------------------
     engine = get_engine(ue_method)
@@ -150,9 +222,9 @@ def EGM_UE(
 
     refined = engine(
         x_dcsn_hat=x_dcsn_hat,
-        qf_hat=qf_hat,
+        v_hat=v_hat,
         kappa_hat=kappa_hat,
-        X_cntn=X_cntn,
+        x_cntn_hat=x_cntn_hat,
         v_cntn_hat=v_cntn_hat,
         X_dcsn=X_dcsn,
         uc_func_partial=uc_func_partial,
@@ -210,9 +282,9 @@ def fill_interpolated(
 @register("FUES_V0DEV")
 def _fues_v0dev_engine(
     x_dcsn_hat: np.ndarray,
-    qf_hat: np.ndarray,
+    v_hat: np.ndarray,
     kappa_hat: np.ndarray,
-    X_cntn: np.ndarray,
+    x_cntn_hat: np.ndarray,
     *,
     uc_func_partial: Callable[[np.ndarray], np.ndarray],
     m_bar: float = 1.0,
@@ -226,13 +298,13 @@ def _fues_v0dev_engine(
 
     lb_int = int(lb[0]) if isinstance(lb, (list, tuple)) else int(lb)
 
-    x_dcsn_ref, qf_ref, kappa_ref, x_cntn_ref, _ = fues_v0dev(
-        x_dcsn_hat, qf_hat, kappa_hat, X_cntn, X_cntn, m_bar=m_bar, LB=lb_int
+    x_dcsn_ref, v_ref, kappa_ref, x_cntn_ref, _ = fues_v0dev(
+        x_dcsn_hat, v_hat, kappa_hat, x_cntn_hat, x_cntn_hat, m_bar=m_bar, LB=lb_int
     )
 
     return {
         "x_dcsn_ref": x_dcsn_ref,
-        "v_dcsn_ref": qf_ref,
+        "v_dcsn_ref": v_ref,
         "kappa_ref": kappa_ref,
         "x_cntn_ref": x_cntn_ref,
         "lambda_ref": uc_func_partial(kappa_ref),
@@ -242,9 +314,9 @@ def _fues_v0dev_engine(
 @register("DCEGM")
 def _dcegm_engine(
     x_dcsn_hat: np.ndarray,
-    qf_hat: np.ndarray,
+    v_hat: np.ndarray,
     kappa_hat: np.ndarray,
-    X_cntn: np.ndarray,
+    x_cntn_hat: np.ndarray,
     *,
     uc_func_partial: Callable[[np.ndarray], np.ndarray],
     **kwargs: Any,
@@ -256,14 +328,14 @@ def _dcegm_engine(
 
     # NOTE: Do NOT sort arrays before passing to DCEGM.
     # DCEGM's calc_nondecreasing_segments expects the original EGM iteration order
-    # (sorted by exogenous grid a'). Pre-sorting by X_cntn or x_dcsn_hat breaks
+    # (sorted by exogenous grid a'). Pre-sorting by x_cntn_hat or x_dcsn_hat breaks
     # segment detection and creates spurious multiple segments.
 
-    x_cntn_ref, x_dcsn_ref, kappa_ref, qf_ref, _ = dcegm(kappa_hat, kappa_hat, qf_hat, X_cntn, x_dcsn_hat)
+    x_cntn_ref, x_dcsn_ref, kappa_ref, v_ref, _ = dcegm(kappa_hat, kappa_hat, v_hat, x_cntn_hat, x_dcsn_hat)
 
     return {
         "x_dcsn_ref": x_dcsn_ref,
-        "v_dcsn_ref": qf_ref,
+        "v_dcsn_ref": v_ref,
         "kappa_ref": kappa_ref,
         "x_cntn_ref": x_cntn_ref,
         "lambda_ref": uc_func_partial(kappa_ref),
@@ -273,9 +345,9 @@ def _dcegm_engine(
 @register("RFC")
 def _rfc_engine(
     x_dcsn_hat: np.ndarray,
-    qf_hat: np.ndarray,
+    v_hat: np.ndarray,
     kappa_hat: np.ndarray,
-    X_cntn: np.ndarray,
+    x_cntn_hat: np.ndarray,
     *,
     uc_func_partial: Callable[[np.ndarray], np.ndarray],
     m_bar: float = 1.0,
@@ -291,9 +363,9 @@ def _rfc_engine(
     lambda_egm = uc_func_partial(kappa_hat)
 
     xr = np.array([x_dcsn_hat]).T
-    qfr = np.array([qf_hat]).T
+    qfr = np.array([v_hat]).T
     gradr = np.array([lambda_egm]).T
-    pr = np.array([X_cntn]).T
+    pr = np.array([x_cntn_hat]).T
 
     sub_points, _, _ = rfc(xr, gradr, qfr, pr, m_bar, rfc_radius, rfc_n_iter)
 
@@ -303,9 +375,9 @@ def _rfc_engine(
 
     return {
         "x_dcsn_ref": x_dcsn_hat[mask],
-        "v_dcsn_ref": qf_hat[mask],
+        "v_dcsn_ref": v_hat[mask],
         "kappa_ref": kappa_hat[mask],
-        "x_cntn_ref": X_cntn[mask],
+        "x_cntn_ref": x_cntn_hat[mask],
         "lambda_ref": lambda_egm[mask],
     }
 
@@ -313,9 +385,9 @@ def _rfc_engine(
 @register("FUES")
 def _fues_engine(
     x_dcsn_hat: np.ndarray,
-    qf_hat: np.ndarray,
+    v_hat: np.ndarray,
     kappa_hat: np.ndarray,
-    X_cntn: np.ndarray,
+    x_cntn_hat: np.ndarray,
     *,
     uc_func_partial: Callable[[np.ndarray], np.ndarray],
     m_bar: float = 1.0,
@@ -343,15 +415,15 @@ def _fues_engine(
                  'eps_d', 'eps_sep', 'eps_fwd_back', 'parallel_guard')
     }
 
-    x_dcsn_ref, qf_ref, kappa_ref, x_cntn_ref, _ = fues_current(
-        x_dcsn_hat, qf_hat, kappa_hat, X_cntn, X_cntn,
+    x_dcsn_ref, v_ref, kappa_ref, x_cntn_ref, _ = fues_current(
+        x_dcsn_hat, v_hat, kappa_hat, x_cntn_hat,
         m_bar=m_bar, LB=lb_int, include_intersections=include_intersections,
         **fues_kwargs
     )
 
     return {
         "x_dcsn_ref": x_dcsn_ref,
-        "v_dcsn_ref": qf_ref,
+        "v_dcsn_ref": v_ref,
         "kappa_ref": kappa_ref,
         "x_cntn_ref": x_cntn_ref,
         "lambda_ref": uc_func_partial(kappa_ref),
@@ -361,9 +433,9 @@ def _fues_engine(
 @register("FUES_V0_1DEV")
 def _fues_v0_1dev_engine(
     x_dcsn_hat: np.ndarray,
-    qf_hat: np.ndarray,
+    v_hat: np.ndarray,
     kappa_hat: np.ndarray,
-    X_cntn: np.ndarray,
+    x_cntn_hat: np.ndarray,
     *,
     uc_func_partial: Callable[[np.ndarray], np.ndarray],
     m_bar: float = 1.0,
@@ -386,15 +458,15 @@ def _fues_v0_1dev_engine(
                  'eps_d', 'eps_sep', 'eps_fwd_back', 'parallel_guard')
     }
 
-    x_dcsn_ref, qf_ref, kappa_ref, x_cntn_ref, _ = fues_v0_1dev(
-        x_dcsn_hat, qf_hat, kappa_hat, X_cntn, X_cntn,
+    x_dcsn_ref, v_ref, kappa_ref, x_cntn_ref, _ = fues_v0_1dev(
+        x_dcsn_hat, v_hat, kappa_hat, x_cntn_hat, x_cntn_hat,
         m_bar=m_bar, LB=lb_int, include_intersections=include_intersections,
         **fues_kwargs
     )
 
     return {
         "x_dcsn_ref": x_dcsn_ref,
-        "v_dcsn_ref": qf_ref,
+        "v_dcsn_ref": v_ref,
         "kappa_ref": kappa_ref,
         "x_cntn_ref": x_cntn_ref,
         "lambda_ref": uc_func_partial(kappa_ref),
@@ -404,9 +476,9 @@ def _fues_v0_1dev_engine(
 @register("FUES_V0_2DEV")
 def _fues_v0_2dev_engine(
     x_dcsn_hat: np.ndarray,
-    qf_hat: np.ndarray,
+    v_hat: np.ndarray,
     kappa_hat: np.ndarray,
-    X_cntn: np.ndarray,
+    x_cntn_hat: np.ndarray,
     *,
     uc_func_partial: Callable[[np.ndarray], np.ndarray],
     m_bar: float = 1.0,
@@ -429,15 +501,15 @@ def _fues_v0_2dev_engine(
                  'eps_d', 'eps_sep', 'eps_fwd_back', 'parallel_guard')
     }
 
-    x_dcsn_ref, qf_ref, kappa_ref, x_cntn_ref, _ = fues_v0_2dev(
-        x_dcsn_hat, qf_hat, kappa_hat, X_cntn, X_cntn,
+    x_dcsn_ref, v_ref, kappa_ref, x_cntn_ref, _ = fues_v0_2dev(
+        x_dcsn_hat, v_hat, kappa_hat, x_cntn_hat,
         m_bar=m_bar, LB=lb_int, include_intersections=include_intersections,
         **fues_kwargs
     )
 
     return {
         "x_dcsn_ref": x_dcsn_ref,
-        "v_dcsn_ref": qf_ref,
+        "v_dcsn_ref": v_ref,
         "kappa_ref": kappa_ref,
         "x_cntn_ref": x_cntn_ref,
         "lambda_ref": uc_func_partial(kappa_ref),
@@ -447,9 +519,9 @@ def _fues_v0_2dev_engine(
 @register("SIMPLE")
 def _simple_engine(
     x_dcsn_hat: np.ndarray,
-    qf_hat: np.ndarray,
+    v_hat: np.ndarray,
     kappa_hat: np.ndarray,
-    X_cntn: np.ndarray,
+    x_cntn_hat: np.ndarray,
     *,
     uc_func_partial: Callable[[np.ndarray], np.ndarray],
     **kwargs: Any,
@@ -460,18 +532,18 @@ def _simple_engine(
     if not np.all(np.diff(x_dcsn_hat) > 0):
         idx = np.argsort(x_dcsn_hat)
         x_dcsn_hat = x_dcsn_hat[idx]
-        qf_hat = qf_hat[idx]
+        v_hat = v_hat[idx]
         kappa_hat = kappa_hat[idx]
-        X_cntn = X_cntn[idx]
+        x_cntn_hat = x_cntn_hat[idx]
 
     # keep only strictly increasing c segments
     mask = np.append(True, np.diff(kappa_hat) > 0)
 
     return {
         "x_dcsn_ref": x_dcsn_hat[mask],
-        "v_dcsn_ref": qf_hat[mask],
+        "v_dcsn_ref": v_hat[mask],
         "kappa_ref": kappa_hat[mask],
-        "x_cntn_ref": X_cntn[mask],
+        "x_cntn_ref": x_cntn_hat[mask],
         "lambda_ref": uc_func_partial(kappa_hat[mask]),
     }
 
@@ -486,9 +558,9 @@ _CONSAV_CACHE: Dict[tuple, Any] = {}
 @register("CONSAV")
 def _consav_engine(
     x_dcsn_hat: np.ndarray,
-    qf_hat: np.ndarray,
+    v_hat: np.ndarray,
     kappa_hat: np.ndarray,
-    X_cntn: np.ndarray,
+    x_cntn_hat: np.ndarray,
     v_cntn_hat: np.ndarray,
     X_dcsn: np.ndarray,
     uc_func_partial: Callable[[np.ndarray], np.ndarray],
@@ -500,7 +572,7 @@ def _consav_engine(
 
     Parameters
     ----------
-    x_dcsn_hat, qf_hat, kappa_hat, X_cntn : raw EGM outputs
+    x_dcsn_hat, v_hat, kappa_hat, x_cntn_hat : raw EGM outputs
     X_dcsn : evaluation grid (Nm, strictly increasing)
     uc_func_partial : marginal utility lambda(kappa)
     u_func : dict with keys ``func`` (njitted utility) and ``args``.
@@ -521,15 +593,15 @@ def _consav_engine(
     else:
         args_as_tuple = (u_func["args"],)
 
-    env(X_cntn, x_dcsn_hat, kappa_hat, v_cntn_hat, X_dcsn, kappa_pol, v_dcsn, *args_as_tuple)
+    env(x_cntn_hat, x_dcsn_hat, kappa_hat, v_cntn_hat, X_dcsn, kappa_pol, v_dcsn, *args_as_tuple)
 
-    X_cntn_pol = np.maximum(X_dcsn - kappa_pol, 0.0)
+    x_cntn_pol = np.maximum(X_dcsn - kappa_pol, 0.0)
     lambda_dcsn = uc_func_partial(kappa_pol)
 
     return {
         "x_dcsn_ref": X_dcsn,
         "v_dcsn_ref": v_dcsn,
         "kappa_ref": kappa_pol,
-        "x_cntn_ref": X_cntn_pol,
+        "x_cntn_ref": x_cntn_pol,
         "lambda_ref": lambda_dcsn,
     }

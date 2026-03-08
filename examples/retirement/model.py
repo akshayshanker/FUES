@@ -595,11 +595,11 @@ def Operator_Factory(cp, equations=None):
         t_s2 = time.time()
         refined, _, _ = egm_ue_global(
             endog_grid,                          # x_dcsn_hat
-            q_cntn_hat,                          # qf_hat
-            beta * v_worker_cntn - delta,        # v_nxt_raw
-            cons_cntn_hat,                       # c_hat
-            asset_grid_A,                        # a_hat
-            asset_grid_A,                        # w_grid (evaluation grid)
+            q_cntn_hat,                          # v_hat
+            beta * v_worker_cntn - delta,        # v_cntn_hat
+            cons_cntn_hat,                       # kappa_hat
+            asset_grid_A,                        # x_cntn_hat
+            asset_grid_A,                        # X_dcsn (evaluation grid)
             du,                                  # uc_func_partial
             {"func": u, "args": {}},             # u_func placeholder
             ue_method=method.upper(),
