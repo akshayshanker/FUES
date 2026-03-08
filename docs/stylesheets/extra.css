@@ -250,12 +250,32 @@
   background-color: transparent;
 }
 
-[data-md-color-scheme="slate"] .jupyter-wrapper .jp-OutputArea-output pre {
-  color: #e8e8ed;
-}
-
 [data-md-color-scheme="slate"] .jupyter-wrapper .jp-OutputArea-output {
   color: #e8e8ed;
+  background-color: transparent !important;
+}
+
+[data-md-color-scheme="slate"] .jupyter-wrapper .jp-OutputArea-output pre {
+  color: #e8e8ed !important;
+  background-color: #1e1e2a !important;
+}
+
+[data-md-color-scheme="slate"] .jupyter-wrapper .jp-OutputArea-child {
+  background-color: transparent !important;
+}
+
+[data-md-color-scheme="slate"] .jupyter-wrapper .jp-Cell-outputWrapper {
+  background-color: transparent !important;
+}
+
+[data-md-color-scheme="slate"] .jupyter-wrapper .jp-OutputArea {
+  background-color: transparent !important;
+}
+
+/* Output HTML tables (e.g. pandas) */
+[data-md-color-scheme="slate"] .jupyter-wrapper .jp-RenderedHTMLCommon.jp-OutputArea-output {
+  background-color: #1e1e2a !important;
+  color: #e8e8ed !important;
 }
 
 /* ── Notebook markdown cells + all text in dark mode ── */
@@ -297,6 +317,12 @@
 [data-md-color-scheme="slate"] .md-header img,
 [data-md-color-scheme="slate"] .md-footer img {
   filter: none;
+}
+
+/* ── Hide In/Out prompts ── */
+.jupyter-wrapper .jp-InputPrompt,
+.jupyter-wrapper .jp-OutputPrompt {
+  display: none !important;
 }
 
 /* ── Notebook cell spacing ── */
