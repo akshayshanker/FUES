@@ -43,11 +43,11 @@ Each example can be run as a simple single solve via `run.py`
 python examples/retirement/run.py --grid-size 3000
 ```
 
-See docs(link) for details on the bash args. 
+See the [retirement example docs](https://akshayshanker.github.io/FUES/examples/retirement/) for details on CLI arguments, parameter overrides, and outputs.
 
-Formal benchmarking tests and parameter sweeps are performed on a HPC cluster, scripts are in (link). The results are saved in replication//(link) 
+Formal benchmarking and parameter sweeps are run on an HPC cluster using the PBS scripts in [`experiments/retirement/`](experiments/retirement/). Pre-computed paper results (tables and figures) are in [`replication/`](replication/).
 
-The [interactive notebooks](examples/retirement/notebooks/retirement_fues.ipynb) walks through the retirement model and other examples step by step.
+The [interactive notebook](examples/retirement/notebooks/retirement_fues.ipynb) walks through the retirement model step by step, including EGM grid inspection, method comparison, and scaling analysis.
 
 ### Option 3: Developer (editable)
 

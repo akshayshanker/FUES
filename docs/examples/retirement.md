@@ -36,9 +36,37 @@ $$
 V_t^0(a) = \max_c \left\{ u(c) + \beta V_{t+1}^0(a') \right\}
 $$
 
-The worker's value function is the upper envelope of multiple concave functions, one for each feasible sequence of future discrete choices. Holding $d_{t+1}=1$ fixed,  by selecting $a^{\prime}$, the worker selects implicitly selects all $d_{j}$ for $j>t+1$. The upper envelope of concave functions is not concave, leading to secondary kinks in $V_{t+1}^{1}$  and his non-concavity is precisely the problem that FUES solves.
+The worker's value function is the upper envelope of multiple concave functions, one for each feasible sequence of future discrete choices. Holding $d_{t+1}=1$ fixed, by selecting $a'$, the worker implicitly selects all future discrete choices $d_j$ for $j > t+1$. The upper envelope of these concave functions is not itself concave, producing the "secondary kinks" described by Iskhakov et al. (2017). This non-concavity is precisely the problem that FUES solves.
+
+### Euler equations and applying FUES
+
+If the agent chooses to continue working ($d_{t+1} = 1$), the worker's Euler equation at time $t$ is
+
+$$
+u'(c_t^1) \geq \beta(1+r)\, u'(c_{t+1}),
+$$
+
+where $c_t^1$ is consumption conditional on $d_{t+1}=1$ and $c_{t+1}$ is the unconditional time $t+1$ consumption. If the agent retires ($d_{t+1}=0$), the Euler equation is
+
+$$
+u'(c_t^0) \geq \beta(1+r)\, u'(c_{t+1}^0).
+$$
+
+Because the value function is not concave, worker points satisfying these first-order conditions may lie on choice-specific value functions associated with suboptimal future discrete-choice sequences. The endogenous grid method (EGM) inverts these Euler equations analytically to produce an unrefined endogenous grid $\hat{\mathbb{X}}_t$, value correspondence $\hat{\mathbb{V}}_t$, and continuation grid $\hat{\mathbb{X}}_t'$. FUES then identifies and removes suboptimal points from these EGM outputs in a single pass. See the [algorithm page](../algorithm/fues-algorithm.md) for a detailed description of the scan logic, forward/backward scans, and intersection-point construction.
 
 ## Running locally
+
+`run.py` is a command-line interface for the retirement model. It loads baseline economic parameters from `syntax/calibration.yaml` and numerical settings from `syntax/settings.yaml`, then builds the model using the  three-steps (attaching methods, settings, parameters, then solving). Parameters can be overridden at the command line.
+
+The override mechanism works at two levels:
+
+- **`--calib-override key=value`** overrides economic parameters (e.g., `beta`, `delta`, `y`) defined in `calibration.yaml`.
+- **`--config-override key=value`** overrides numerical settings (e.g., `grid_size`, `T`, `m_bar`) defined in `settings.yaml`.
+- **`--override-file path.yml`** loads a sparse YAML file; keys matching `settings.yaml` are treated as config overrides, all others as calibration overrides.
+
+Each stage in `syntax/stages/` declares which parameters it consumes. The configure and calibrate functors bind only the relevant parameters to each stage, so extra keys are ignored.
+
+Outputs are saved to `--output-dir` and include EGM grid plots, consumption policy plots, and a printed table of Euler errors and timing for all four upper-envelope methods (FUES, RFC, MSS, LTM).
 
 All commands run from the repo root (`FUES/`).
 
@@ -73,6 +101,8 @@ This runs the full sweep (15 grid sizes × 4 delta values × 4 methods × 3 repe
 - `retirement_accuracy.md` / `.tex` — Euler error and consumption deviation tables
 - EGM grid plots at the configured age
 
+Outputs are written to `experiments/retirement/results/`. Pre-computed benchmark results from the paper are available in the same directory.
+
 The LaTeX tables include only the paper grid sizes (1k, 2k, 3k, 6k, 10k) via `--latex-grids`. The markdown tables include all 15 grid sizes for the [notebook comparison](../notebooks/retirement_fues.ipynb).
 
 ### PBS settings
@@ -88,14 +118,14 @@ Edit `experiments/retirement/retirement_timings.sh` to change:
 
 ### Override files
 
-Sparse YAML files in `experiments/retirement/params/` — only values that differ from `syntax/` defaults:
+Instead of entering parameters manually, sparse YAML override files in `experiments/retirement/params/` specify only values that differ from the `syntax/` defaults:
 
-| File | Key changes |
-|------|-------------|
-| `baseline.yml` | $\beta=0.96$, $T=50$ |
-| `high_beta.yml` | $\beta=0.99$ |
-| `low_delta.yml` | $\delta=0.5$, $T=50$ |
-| `long_horizon.yml` | $T=50$, padding_mbar |
+| File               | Key changes          |
+| ------------------ | -------------------- |
+| `baseline.yml`     | $\beta=0.96$, $T=50$ |
+| `high_beta.yml`    | $\beta=0.99$         |
+| `low_delta.yml`    | $\delta=0.5$, $T=50$ |
+| `long_horizon.yml` | $T=50$,              |
 
 ```bash
 python examples/retirement/run.py --override-file experiments/retirement/params/long_horizon.yml
@@ -103,9 +133,7 @@ python examples/retirement/run.py --override-file experiments/retirement/params/
 
 ## Benchmark results
 
-### Without taste shocks
-
-Parameters: $T=50$, $\beta=0.96$, $r=0.02$, $y=20$, $a \in [0, 500]$.
+Parameters: $T=50$, $\beta=0.96$, $r=0.02$, $y=20$, $a \in [0, 500]$. No taste shocks. (See Tables 1--2 in the paper for the full results.)
 
 **Upper envelope time (ms per period):**
 
@@ -128,15 +156,8 @@ Parameters: $T=50$, $\beta=0.96$, $r=0.02$, $y=20$, $a \in [0, 500]$.
 | 1000 | 1.00 | -1.630 | -1.658 | -1.629 |
 | 3000 | 1.00 | -1.629 | -1.660 | -1.629 |
 
-FUES is 5--20× faster than MSS and 10--20× faster than RFC across all configurations. Euler errors are comparable, with FUES slightly more accurate.
+FUES is 5--20× faster than MSS and 10--20× faster than RFC across all configurations. Euler errors are comparable, with FUES slightly more accurate. FUES scales sub-linearly, MSS scales linearly and LTM scales quadratically. 
 
-### Key observations
-
-1. **FUES timing is stable across $\delta$**: MSS slows as $\delta$ increases (more kinks in the endogenous grid), while FUES timing is nearly constant.
-
-2. **With taste shocks** ($\bar{s} > 0$): the endogenous grid becomes non-monotone, with decreasing segments and isolated points. MSS must process many additional segments. FUES handles this without modification.
-
-3. **Scaling**: FUES scales sub-linearly with grid size; MSS scales linearly; LTM scales quadratically. See the [scaling analysis in the notebook](../notebooks/retirement_fues.ipynb).
 
 ## Code structure
 
