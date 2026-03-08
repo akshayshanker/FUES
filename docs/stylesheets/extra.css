@@ -258,6 +258,33 @@
   color: #e8e8ed;
 }
 
+/* ── Notebook markdown cells + all text in dark mode ── */
+[data-md-color-scheme="slate"] .jupyter-wrapper .jp-RenderedHTMLCommon,
+[data-md-color-scheme="slate"] .jupyter-wrapper .jp-RenderedHTMLCommon p,
+[data-md-color-scheme="slate"] .jupyter-wrapper .jp-RenderedHTMLCommon li,
+[data-md-color-scheme="slate"] .jupyter-wrapper .jp-RenderedHTMLCommon h1,
+[data-md-color-scheme="slate"] .jupyter-wrapper .jp-RenderedHTMLCommon h2,
+[data-md-color-scheme="slate"] .jupyter-wrapper .jp-RenderedHTMLCommon h3,
+[data-md-color-scheme="slate"] .jupyter-wrapper .jp-RenderedHTMLCommon h4,
+[data-md-color-scheme="slate"] .jupyter-wrapper .jp-RenderedHTMLCommon td,
+[data-md-color-scheme="slate"] .jupyter-wrapper .jp-RenderedHTMLCommon th {
+  color: #e8e8ed !important;
+}
+
+[data-md-color-scheme="slate"] .jupyter-wrapper .jp-RenderedHTMLCommon a {
+  color: #7b8cde !important;
+}
+
+[data-md-color-scheme="slate"] .jupyter-wrapper .jp-RenderedHTMLCommon code {
+  color: #e8e8ed;
+  background-color: #1e1e2a;
+}
+
+/* ── Notebook text output (stdout/stderr) ── */
+[data-md-color-scheme="slate"] .jupyter-wrapper .jp-RenderedText pre {
+  color: #e8e8ed !important;
+}
+
 /* ── Plot images: invert in dark mode for white-background matplotlib plots ── */
 [data-md-color-scheme="slate"] .jupyter-wrapper .jp-OutputArea-output img,
 [data-md-color-scheme="slate"] .md-content img:not(.emojione):not(.twemoji):not(.gemoji) {
