@@ -181,6 +181,3 @@ Detects and corrects spurious jumps in interpolated functions by checking gradie
 
 All 1D interpolation in `dcsmm` uses `interp_as` / `interp_as_scalar`. Do not use `np.interp` directly.
 
----
-
-*(c) Akshay Shanker*

@@ -75,6 +75,3 @@ from dcsmm.uenvelope import EGM_UE
 print("FUES and EGM_UE imported successfully")
 ```
 
----
-
-*(c) Akshay Shanker*

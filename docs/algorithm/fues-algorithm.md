@@ -2,7 +2,7 @@
 
 ## The problem in one picture
 
-In discrete-continuous problems, the Euler equation delivers a **value correspondence** rather than a globally optimal value function. After EGM inverts the Euler, we therefore have candidate points on a non-uniform endogenous grid: some lie on the upper envelope, while others solve only a local first-order condition and are sub-optimal. FUES recovers the upper envelope by scanning the sorted candidate points once from left to right along the endogenous grid.
+In discrete-continuous problems with a **one-dimensional EGM representation**, the Euler equation may generate a value correspondence rather than the optimal solution. After EGM inverts the Euler equation, some candidate points lie on the upper envelope and others satisfy only local first-order conditions. FUES recovers the upper envelope by scanning the ordered endogenous grid from left to right.
 
 <div class="diagram-container">
   <img src="../images/fues-scan.svg" alt="FUES scan diagram" />
@@ -21,7 +21,7 @@ In discrete-continuous problems, the Euler equation delivers a **value correspon
 
     The continuation value \(V_{t+1}^d\) depends on the future discrete choice sequence. Each sequence yields a **concave** value function. The true \(V_t\) is the **upper envelope** of these concave functions.
 
-When we invert the Euler equation via EGM, we obtain raw correspondence points \((\hat{x}_i, \hat{v}_i)\) together with an associated continuation or post-decision object \(\hat{x}_{e,i}\) (equivalently, the paper's current \(\hat{x}'_i\)). Economically, each smooth branch corresponds to a continuation value associated with a particular future sequence of discrete choices. The true decision value is the supremum of these branch-specific concave objects. EGM does not by itself select the globally dominant branch, so some candidate points satisfy the Euler equation while still lying below the upper envelope.
+When we invert the Euler equation via EGM, we obtain raw correspondence points \((\hat{x}_i, \hat{v}_i)\) together with an associated **post-decision asset / next-period asset choice** \(\hat{x}'_i\). Economically, each smooth branch corresponds to a continuation value associated with a particular future sequence of discrete choices. The true decision value is the supremum of these branch-specific concave objects. EGM does not by itself select the globally dominant branch, so some candidate points satisfy the Euler equation while still lying below the upper envelope.
 
 !!! tip "The key insight"
     Along a single branch, the continuation policy is smooth and the value correspondence is locally concave. A discontinuous policy jump can therefore only be consistent with the upper envelope if it occurs at or just after a crossing between branches. Geometrically, that means:
@@ -50,13 +50,9 @@ These secants tell us whether moving from \((\hat{x}_{i-1},\hat{v}_{i-1})\) to \
     - the point is associated with an inferior branch
     - **remove it** from the endogenous grid, value correspondence, and continuation-policy arrays
 
-=== "Left turn: keep"
+=== "Left turn: tentatively retain"
 
-    If \(g_{i+1} > g_i\) (a convex left turn) at a policy jump:
-
-    - the scan has passed a crossing between choice-specific value functions
-    - the candidate is potentially on the upper envelope
-    - **keep it** and, in the refined implementation, optionally attach an interpolated crossing point
+    If \(g_{i+1} > g_i\) (a convex left turn) at a policy jump, the point is **tentatively retained** as a post-crossing candidate. In finite grids, however, a left turn is not by itself enough to classify the point with certainty; this is why FUES adds forward and backward scans near crossings.
 
 ---
 
@@ -66,14 +62,12 @@ These secants tell us whether moving from \((\hat{x}_{i-1},\hat{v}_{i-1})\) to \
     A "jump" occurs when the continuation-policy gradient between adjacent points exceeds a threshold \(\bar{M}\):
 
     \[
-    \left| \frac{\hat{x}_{e,i+1} - \hat{x}_{e,i}}{\hat{x}_{i+1} - \hat{x}_i} \right| > \bar{M}
+    \left| \frac{\hat{x}'_{i+1} - \hat{x}'_{i}}{\hat{x}_{i+1} - \hat{x}_i} \right| > \bar{M}
     \]
 
     Within a single branch, the continuation object is smooth and its slope is bounded. A large difference quotient therefore signals that adjacent endogenous points are associated with different future choice sequences.
 
-**Setting \(\bar{M}\):** Use the maximum marginal propensity to save in your model. For standard consumption-savings problems, values between 1.0 and 2.0 work well. Results are not sensitive to the exact choice.
-
-Alternatively, set `endog_mbar=True` to compute \(\bar{M}\) endogenously at each grid point.
+A jump is detected when adjacent candidate points differ too much in the post-decision policy to be explained by movement along a single conditional policy branch. In the paper, \(\bar{M}\) is introduced as a user-chosen jump threshold. The appendix also derives a grid-specific endogenous threshold \(\bar{M}_i^*\) from bounds on the conditional policy derivative.
 
 ---
 
@@ -81,15 +75,17 @@ Alternatively, set `endog_mbar=True` to compute \(\bar{M}\) endogenously at each
 
 !!! example "FUES (basic scan)"
 
-    1. Compute the raw EGM objects \(\hat{\mathbb{X}}_t\), \(\hat{\mathbb{V}}_t\), and \(\hat{\mathbb{X}}_{e,t}\)
+    1. Compute the raw EGM objects \(\hat{\mathbb{X}}_t\), \(\hat{\mathbb{V}}_t\), and \(\hat{\mathbb{X}}'_t\)
     2. Set the jump-detection threshold \(\bar{M}\)
     3. Sort all candidate points by the endogenous grid \(\hat{\mathbb{X}}_t\)
     4. Starting from \(i=2\), compute the secants \(g_i\) and \(g_{i+1}\)
-    5. Compute the policy difference quotient \(\left|\frac{\hat{x}_{e,i+1}-\hat{x}_{e,i}}{\hat{x}_{i+1}-\hat{x}_i}\right|\)
+    5. Compute the policy difference quotient \(\left|\frac{\hat{x}'_{i+1}-\hat{x}'_{i}}{\hat{x}_{i+1}-\hat{x}_i}\right|\)
     6. If the policy quotient exceeds \(\bar{M}\) and \(g_{i+1}<g_i\), delete point \(i+1\)
     7. Otherwise retain the point, advance the scan, and continue until the grid is exhausted
 
 ### Forward and backward scans
+
+These scans are not cosmetic refinements; they handle the two main finite-grid failure modes of the basic three-point rule near crossings.
 
 The simple left-turn/right-turn rule is the core of FUES, but crossings can occur very close to sampled grid points. In such cases, a purely local three-point test may misclassify the first point after a crossing or fail to detect that a previously retained point has become dominated.
 
@@ -105,12 +101,12 @@ These refinements are local, inexpensive, and mainly matter near closely spaced 
 
 ## Complexity comparison
 
-| Method | Time | Monotone policy? | Gradient info? | Note |
-|--------|------|:---:|:---:|------|
-| **FUES** | \(O(N)\) | -- | -- | Single scan, fixed look-back |
-| DC-EGM | \(O(N \log N)\) | Required | -- | Segment detection + interpolation |
-| RFC | \(O(Nk)\) | -- | Required | Nearest-neighbour search |
-| NEGM | \(O(N \cdot \text{opt})\) | N/A | N/A | Numerical optimisation per point |
+| Method | Main requirement | How the upper envelope is constructed | What can fail |
+|--------|-----------------|--------------------------------------|---------------|
+| **FUES** | None (no monotonicity or gradients) | Single left-to-right scan with secant comparisons and local forward/backward refinement | Threshold \(\bar{M}\) must be set appropriately for the model |
+| DC-EGM | Monotonicity of savings policy | Segment detection using policy monotonicity, then interpolation across segments | Breaks down when the policy object used for segment detection is non-monotone |
+| RFC | Analytical gradients of the value function | Rooftop-cut: uses gradient information to detect and interpolate crossings | Requires closed-form gradient expressions; not available in all models |
+| NEGM | Exogenous cash-on-hand grid | Evaluates value-of-choice on an exogenous grid and keeps the best value at each point | Requires a numerical optimisation step per grid point |
 
 !!! success "FUES advantages"
     - **No monotonicity assumption** on the policy function
@@ -123,12 +119,9 @@ These refinements are local, inexpensive, and mainly matter near closely spaced 
 
 ## References
 
-- Dobrescu, L.I. and Shanker, A. (2025). "A fast upper envelope scan method for discrete-continuous dynamic programming."
+- Dobrescu, L.I. and Shanker, A. (2026). "A fast upper envelope scan method for discrete-continuous dynamic programming." CEPAR Working Paper 2024/20.
 - Carroll, C.D. (2006). "The method of endogenous gridpoints for solving dynamic stochastic optimization problems." *Economics Letters*, 91(3).
 - Iskhakov, F. et al. (2017). "The endogenous grid method for discrete-continuous dynamic choice models with (or without) taste shocks." *Quantitative Economics*, 8(2).
 - Druedahl, J. (2021). "A guide on solving non-convex consumption-saving models." *Computational Economics*, 58.
 - Fella, G. (2014). "A generalized endogenous grid method for non-smooth and non-concave problems." *Review of Economic Dynamics*, 17(2).
 
----
-
-*(c) Akshay Shanker*

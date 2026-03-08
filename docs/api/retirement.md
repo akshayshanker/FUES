@@ -417,6 +417,3 @@ Returns
 float
     Mean log10 absolute relative deviation.
 
----
-
-*(c) Akshay Shanker*

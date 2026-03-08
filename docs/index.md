@@ -54,6 +54,3 @@ refined, _, _ = EGM_UE(
 | **[API Reference](api/fues.md)** | Full signatures and docstrings |
 | **[Algorithm](algorithm/fues-algorithm.md)** | How FUES works, forward/backward scans |
 
----
-
-*(c) Akshay Shanker*
