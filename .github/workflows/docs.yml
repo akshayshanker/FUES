@@ -19,9 +19,10 @@ jobs:
 
       - run: pip install mkdocs-material mkdocs-jupyter mkdocstrings[python]
 
-      # Sync notebook into docs/ (symlinks don't survive git checkout)
+      # Sync notebook into docs/ (replace symlink with real copy)
       - run: |
           mkdir -p docs/notebooks
+          rm -f docs/notebooks/retirement_fues.ipynb
           cp examples/retirement/notebooks/retirement_fues.ipynb docs/notebooks/
 
       - run: pip install -e ".[examples]"
