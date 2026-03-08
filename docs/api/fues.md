@@ -71,8 +71,6 @@ This keeps the docs close to the current paper while making the continuation / p
 - Sub-optimal = policy jump **and** concave right turn
 - Crossing points computed via two-point linear interpolation
 
----
-
 ## `EGM_UE` — Upper Envelope Registry
 
 ```python
@@ -137,8 +135,6 @@ def my_engine(x_dcsn_hat, qf_hat, kappa_hat, X_cntn, *,
         "lambda_ref": uc_func_partial(...),
     }
 ```
-
----
 
 ## Helpers
 

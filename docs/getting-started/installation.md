@@ -10,7 +10,7 @@ the simplest option if you want to use `fues` and the benchmark upper-envelope
 methods in your own application.
 
 ```bash
-pip install git+https://github.com/akshayshanker/FUES.git@release-prep
+pip install git+https://github.com/akshayshanker/FUES.git
 ```
 
 ```python
@@ -31,7 +31,7 @@ Clone the repo and install with example dependencies (`matplotlib`, `pyyaml`,
 repo checkout.
 
 ```bash
-git clone -b release-prep https://github.com/akshayshanker/FUES.git
+git clone https://github.com/akshayshanker/FUES.git
 cd FUES
 pip install ".[examples]"
 ```
@@ -51,7 +51,7 @@ Full setup with editable install, examples, and all dependencies including the
 dolo-plus compiler. Use this if you are modifying the source.
 
 ```bash
-git clone -b release-prep https://github.com/akshayshanker/FUES.git
+git clone https://github.com/akshayshanker/FUES.git
 cd FUES
 bash setup/setup_venv.sh
 source .venv/bin/activate

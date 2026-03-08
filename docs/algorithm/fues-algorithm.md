@@ -11,12 +11,10 @@ After EGM inverts the Euler equation, some candidate points lie on the upper env
   <img src="../images/fues-scan.svg" alt="FUES scan diagram" />
 </div>
 
----
-
 ## Why EGM produces sub-optimal points
 
 !!! abstract "Setup"
-    Consider a standard Bellman equation with a discrete choice \(d \in \{0, 1\}\) and a continuous choice \(c\):
+    Consider Bellman equation with a discrete choice \(d \in \{0, 1\}\) and a continuous choice \(c\):
 
     \[
     V_t(a) = \max_{c,\, d} \left\{ u(c) + \beta V_{t+1}^d(a') \right\}
@@ -71,8 +69,6 @@ A jump is detected when adjacent candidate points differ too much in the post-de
 !!! tip "Accuracy and choice of \(\bar{M}\)"
     The slope of the policy at a jump is infinite, while the slope of the policy function along a branch is bounded above in economic problems. For example, in a consumption-savings problem, the consumption function has a maximum slope of 1 -- the maximum marginal propensity to consume. So, if we take a grid fine enough and set \(\bar{M}\) equal to the maximum MPC, then we can detect all jumps and remove all sub-optimal points by removing jumps that do not make a left turn.
 
-
----
 
 ## The algorithm
 

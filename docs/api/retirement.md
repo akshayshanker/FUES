@@ -2,7 +2,6 @@
 
 Auto-generated from docstrings. See [Retirement Choice Model](../examples/retirement.md) for usage and the [notebook](../notebooks/retirement_fues.ipynb) for a walkthrough.
 
----
 
 ## Pipeline (`solve.py`)
 
@@ -101,7 +100,6 @@ dict
     ``{u, du, uc_inv, ddu}`` -- each an ``@njit``
     callable.
 
----
 
 ## Model (`model.py`)
 
@@ -248,7 +246,6 @@ dict
        'work_cons':    solver_worker_stage,
        'labour_mkt_decision': lab_mkt_choice_stage}``
 
----
 
 ## Benchmark (`benchmark.py`)
 
@@ -286,7 +283,6 @@ latex_grids : list of int, optional
     Subset of grid_sizes to include in LaTeX tables.
     Markdown tables always include all grid sizes.
 
----
 
 ## CLI (`run.py`)
 
@@ -306,7 +302,6 @@ load_override_file(path)
 
 Load overrides from a YAML file (flat key-value format).
 
----
 
 ## Diagnostics (`outputs/diagnostics.py`)
 
