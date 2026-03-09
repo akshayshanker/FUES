@@ -196,19 +196,23 @@
   border-bottom-color: #2a2a3a;
 }
 
-/* ── Links: Frost-style – no underline, accent on hover ── */
+/* ── Links: visible underline in light mode, accent on hover ── */
 .md-typeset a {
-  text-decoration: none;
+  text-decoration: underline;
+  text-decoration-color: rgba(67, 97, 238, 0.35);
+  text-underline-offset: 2px;
   font-weight: 500;
-  transition: color 0.15s;
+  transition: color 0.15s, text-decoration-color 0.15s;
 }
 
 .md-typeset a:hover {
   color: #2d3561;
+  text-decoration-color: #2d3561;
 }
 
 [data-md-color-scheme="slate"] .md-typeset a:hover {
   color: #a0b0ee;
+  text-decoration-color: #a0b0ee;
 }
 
 /* ── Navigation: tight, lightweight ── */
