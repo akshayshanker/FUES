@@ -7,9 +7,7 @@ In discrete-continuous problems, the Euler equation generates a value correspond
 After EGM inverts the Euler equation, some candidate points lie on the upper envelope and others satisfy only local first-order conditions. FUES recovers the upper envelope by scanning the ordered endogenous grid from left to right.
 
 
-<div class="diagram-container">
-  <img src="../images/fues-scan.svg" alt="FUES scan diagram" />
-</div>
+![FUES scan diagram](../images/fues-scan.svg)
 
 ## Why EGM produces sub-optimal points
 
