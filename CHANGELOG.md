@@ -2,6 +2,30 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.6.0dev2] - 2026-03-09 – Docs overhaul, PEP 8 formatting, citation fixes
+
+### Documentation
+
+- Algorithm page (`docs/algorithm/fues-algorithm.md`): narrowed scope to 1D EGM, aligned notation with paper (`\hat{x}'_i`), softened left-turn rule to "tentatively retain", rewrote jump-threshold section, added forward/backward scan purpose statement, replaced big-O complexity table with requirements/mechanism comparison table, added new `\bar{M}` accuracy tip, spelling and grammar fixes.
+- Comparison table now includes linked references, complexity descriptions, and a new LTM row (Druedahl & Jørgensen 2017).
+- Removed all `---` horizontal rules from docs and notebook markdown cells.
+- Added FUES scan diagram (`fues-scan.svg`) to the retirement notebook for MkDocs rendering.
+- Fixed install instructions: removed `@release-prep` and `-b release-prep` from `docs/getting-started/installation.md`.
+- Trimmed `docs/examples/housing.md` and `docs/examples/housing-renting.md` stubs.
+
+### Citation standardisation
+
+- All references to the FUES paper across docs, docstrings, `pyproject.toml`, `CHANGELOG.md`, `README.md`, and `replication/README.md` now consistently cite Dobrescu & Shanker (2022) with the correct SSRN link.
+- Fixed author order in `pyproject.toml` description (was "Shanker & Dobrescu").
+
+### Code formatting
+
+- `fues_v0_2dev.py`: PEP 8 formatted to 78-character line width — all code lines, docstrings, and comments wrapped. Docstrings trimmed for conciseness. No logic changes; all tests pass.
+
+### Notebook
+
+- Retirement notebook: updated paper reference to (2022), fixed "dolo-plusz" typo, re-ran all cells with latest outputs.
+
 ## [0.5.0dev5] - 2026-03-05 – Versioned FUES & Scaling Optimisations
 
 ### FUES versioning

@@ -1,7 +1,9 @@
-"""Fast Upper-Envelope Scan (FUES) Algorithm Implementation
+"""Fast Upper-Envelope Scan (FUES) Algorithm
 
-This module implements the FUES algorithm from Dobrescu & Shanker (2022) for solving 
-discrete-continuous dynamic programming problems using Carroll's endogenous grid method.
+Implements the FUES algorithm from Dobrescu & Shanker
+(2022) for solving discrete-continuous dynamic
+programming problems using Carroll's endogenous grid
+method.
 
 Author: Akshay Shanker, 2025, a.shanker@unsw.edu.au
 """
@@ -27,11 +29,20 @@ JUMP_NO = 0
 
 
 @njit(inline="always")
-def check_same_seg(x_dcsn_hat, kappa_hat, idx1, idx2, m_bar, eps_d=EPS_D, eps_fwd_back=EPS_fwd_back):
-    """Check if two points are on the same segment (no jump in policy between them)."""
-    if idx1 < 0 or idx2 < 0 or idx1 >= len(x_dcsn_hat) or idx2 >= len(x_dcsn_hat):
+def check_same_seg(
+        x_dcsn_hat,
+        kappa_hat,
+        idx1,
+        idx2,
+        m_bar,
+        eps_d=EPS_D,
+        eps_fwd_back=EPS_fwd_back):
+    """Check if two points are on the same segment."""
+    if idx1 < 0 or idx2 < 0 or idx1 >= len(
+            x_dcsn_hat) or idx2 >= len(x_dcsn_hat):
         return False
-    de = max(eps_d, x_dcsn_hat[idx2] - x_dcsn_hat[idx1]) # should give use positive value since e-grid sorted to be increasing
+    # should give use positive value since e-grid sorted to be increasing
+    de = max(eps_d, x_dcsn_hat[idx2] - x_dcsn_hat[idx1])
     # Guard against numerical overflow in gradient computation
     if de < eps_d * 10:  # Very close points
         return False
@@ -40,45 +51,70 @@ def check_same_seg(x_dcsn_hat, kappa_hat, idx1, idx2, m_bar, eps_d=EPS_D, eps_fw
 
 
 @njit(inline="always")
-def find_safe_extrapolation_point(x_dcsn_hat, kappa_hat, base_idx, N, m_bar, forward=True, eps_d=EPS_D, eps_fwd_back=EPS_fwd_back):
-    """
-    Find a safe point for extrapolation that's on the same segment as base_idx.
-    Returns the index of a point that doesn't jump from base_idx, or base_idx if none found.
+def find_safe_extrapolation_point(
+        x_dcsn_hat,
+        kappa_hat,
+        base_idx,
+        N,
+        m_bar,
+        forward=True,
+        eps_d=EPS_D,
+        eps_fwd_back=EPS_fwd_back):
+    """Find a safe extrapolation point on same segment.
+
+    Returns the index of a point that doesn't jump
+    from base_idx, or base_idx if none found.
 
     Todo
     ----
-    - Also include a condition that point jumps from "other" segment that is jumped from or to?
+    - Also include a condition that point jumps
+      from "other" segment?
     - Should we remove the min 4 condition?
     """
     if forward:
         # Search forward for a point on same branch
         for offset in range(1, min(4, N - base_idx)):
             test_idx = base_idx + offset
-            if test_idx < N and check_same_seg(x_dcsn_hat, kappa_hat, base_idx, test_idx, m_bar, eps_d, eps_fwd_back):
+            if test_idx < N and check_same_seg(
+                    x_dcsn_hat,
+                    kappa_hat,
+                    base_idx,
+                    test_idx,
+                    m_bar,
+                    eps_d,
+                    eps_fwd_back):
                 return test_idx
     else:
         # Search backward for a point on same branch
         for offset in range(1, min(4, base_idx + 1)):
             test_idx = base_idx - offset
-            if test_idx >= 0 and check_same_seg(x_dcsn_hat, kappa_hat, test_idx, base_idx, m_bar, eps_d, eps_fwd_back):
+            if test_idx >= 0 and check_same_seg(
+                    x_dcsn_hat,
+                    kappa_hat,
+                    test_idx,
+                    base_idx,
+                    m_bar,
+                    eps_d,
+                    eps_fwd_back):
                 return test_idx
-    # If no valid point found, return base_idx (will result in flat extrapolation)
+    # If no valid point found, return base_idx (will result in flat
+    # extrapolation)
     return base_idx
 
 
 @njit(inline="always")
-def make_pair_from_indices_or_fallback(e, v, a, p2, d, lo_idx, hi_idx, fb_lo, fb_hi, N):
-    """
-    If forward and backward scans both return points, then returns endpoints (x1,y1,a1,p21,d1) and (x2,y2,a2,p22,d2).
+def make_pair_from_indices_or_fallback(
+        e, v, a, p2, d, lo_idx, hi_idx, fb_lo, fb_hi, N):
+    """Return endpoints from forward/backward scans.
 
-    Otherwise, returns the fallback pair (fb_lo, fb_hi).
-    
-    If lo_idx or hi_idx is -1, uses the fallback pair (fb_lo, fb_hi).
+    If both scans return points, returns
+    (x1,y1,a1,p21,d1) and (x2,y2,a2,p22,d2).
+    Otherwise returns the fallback pair.
     """
     # Bounds checking for fallback indices
     fb_lo = max(0, min(fb_lo, N - 1))
     fb_hi = max(0, min(fb_hi, N - 1))
-    
+
     if lo_idx != -1 and hi_idx != -1:
         return (e[lo_idx], v[lo_idx], a[lo_idx], p2[lo_idx], d[lo_idx],
                 e[hi_idx], v[hi_idx], a[hi_idx], p2[hi_idx], d[hi_idx])
@@ -136,9 +172,17 @@ def backward_scan_combined(
     return keep_j, b
 
 
-
 @njit(cache=True)
-def find_forward_same_branch(x_dcsn_hat, kappa_hat, start_idx, j_idx, N, LB, m_bar, eps_d=EPS_D, eps_fwd_back=EPS_fwd_back):
+def find_forward_same_branch(
+        x_dcsn_hat,
+        kappa_hat,
+        start_idx,
+        j_idx,
+        N,
+        LB,
+        m_bar,
+        eps_d=EPS_D,
+        eps_fwd_back=EPS_fwd_back):
     """Find the first point in forward scan that's on same branch.
 
     Returns found flag and index.
@@ -154,103 +198,119 @@ def find_forward_same_branch(x_dcsn_hat, kappa_hat, start_idx, j_idx, N, LB, m_b
 
 
 @njit(cache=True)
-def check_intersection_within_bounds(x_dcsn_hat, v_hat, j, idx_f, i_plus_1, idx_b, eps_d=EPS_D, parallel_guard=PARALLEL_GUARD):
-    """
-    Check if the natural intersection of segment [j, idx_f] with segment [i+1, idx_b] 
-    lies within the segment boundaries [j, i+1].
-    
-    Computes the raw intersection without forcing it inside bounds, then checks
-    if it naturally falls within the interval.
-    
+def check_intersection_within_bounds(
+        x_dcsn_hat,
+        v_hat,
+        j,
+        idx_f,
+        i_plus_1,
+        idx_b,
+        eps_d=EPS_D,
+        parallel_guard=PARALLEL_GUARD):
+    """Check if intersection of two segments is in bounds.
+
+    Tests whether the natural intersection of segment
+    [j, idx_f] with segment [i+1, idx_b] lies within
+    [x_dcsn_hat[j], x_dcsn_hat[i_plus_1]].
+
     Parameters
     ----------
     x_dcsn_hat, v_hat : arrays
-        Grid points and values
+        Grid points and values.
     j, idx_f : int
-        Indices for the first segment (j to forward point)
-    i_plus_1, idx_b : int  
-        Indices for the second segment (i+1 to backward point)
+        Indices for the first segment.
+    i_plus_1, idx_b : int
+        Indices for the second segment.
     eps_d : float
-        Small epsilon for division protection
-        
+        Small epsilon for division protection.
+
     Returns
     -------
     bool
-        True if intersection is within [x_dcsn_hat[j], x_dcsn_hat[i_plus_1]]
+        True if intersection is within bounds.
     """
     # Check if we have valid indices
     if idx_f == -1 or idx_b == -1:
         return False
-    
-    # Compute the raw intersection using the same logic as _force_crossing_inside
-    # but without the clipping step
+
+    # Raw intersection (same logic as
+    # _force_crossing_inside, without clipping)
     L_x1, L_y1 = x_dcsn_hat[j], v_hat[j]
     L_x2, L_y2 = x_dcsn_hat[idx_f], v_hat[idx_f]
     R_x1, R_y1 = x_dcsn_hat[i_plus_1], v_hat[i_plus_1]
     R_x2, R_y2 = x_dcsn_hat[idx_b], v_hat[idx_b]
-    
+
     dxL = L_x2 - L_x1
     dyL = L_y2 - L_y1
     dxR = R_x2 - R_x1
     dyR = R_y2 - R_y1
-    
+
     # Check for parallel lines
     denom = dxL * dyR - dyL * dxR
     if np.abs(denom) < parallel_guard:
         return False  # Lines are parallel or nearly parallel
-    
+
     # Compute intersection point using parametric form
     # Intersection occurs at parameter s on the left line
     s = ((R_x1 - L_x1) * dyR - (R_y1 - L_y1) * dxR) / denom
-    
+
     # Compute the x-coordinate of the intersection
     x_intersect = L_x1 + s * dxL
-    
+
     # Check if intersection is within the segment boundary [j, i+1]
     # Use a small tolerance for numerical precision
     tol = eps_d
     e_lo = x_dcsn_hat[j] - tol
     e_hi = x_dcsn_hat[i_plus_1] + tol
-    
+
     # Return true if intersection is within bounds
     if x_intersect >= e_lo and x_intersect <= e_hi:
         return True
     else:
         return False
 
+
 @njit(cache=True)
-def forward_scan_case_a(x_dcsn_hat, v_hat, kappa_hat, i, j, N, LB, m_bar, g_1, eps_d=EPS_D, eps_fwd_back=EPS_fwd_back):
-    """Forward scan validation for Case A (right-turn jump).
+def forward_scan_case_a(
+        x_dcsn_hat,
+        v_hat,
+        kappa_hat,
+        i,
+        j,
+        N,
+        LB,
+        m_bar,
+        g_1,
+        eps_d=EPS_D,
+        eps_fwd_back=EPS_fwd_back):
+    """Forward scan for Case A (right-turn jump).
 
-    When we detect a right-turn jump, point i+1 might be jumping from a dominated
-    branch. This function checks if i+1 should be kept by:
-    1. Finding a future point f on the same branch as j
-    2. Checking if the value gradient from j to i+1 dominates the gradient from i+1 to f
-
-    If g_1 > g_f (gradient j→i+1 > gradient i+1→f), then i+1 lies above the
+    Checks if i+1 should be kept by finding a future
+    point f on the same branch as j and comparing
+    value gradients. If g_1 > g_f, i+1 lies above the
     extrapolated line from j to f, so we keep it.
 
     Parameters
     ----------
     x_dcsn_hat, v_hat, kappa_hat : arrays
-        Grid points, values, and policies
+        Grid points, values, and policies.
     i, j : int
-        Indices: i (loop counter), j (last kept point)
+        Loop counter and last kept point.
     N : int
-        Total number of grid points
+        Total number of grid points.
     LB : int
-        Lookback/forward buffer size
+        Lookback/forward buffer size.
     m_bar : float
-        Jump threshold for same-branch detection
+        Jump threshold for same-branch detection.
     g_1 : float
-        Value gradient from j to i+1
+        Value gradient from j to i+1.
 
     Returns
     -------
     keep_i1 : bool
-        Whether to keep point i+1
+        Whether to keep point i+1.
     idx_f : int
-        Index of forward point on same branch as j (-1 if not found)
+        Forward point on same branch (-1 if none).
     """
     idx_f = -1
     idx_f_return = -1
@@ -260,23 +320,24 @@ def forward_scan_case_a(x_dcsn_hat, v_hat, kappa_hat, i, j, N, LB, m_bar, g_1, e
     for f in range(LB):
         if i + 2 + f >= N:  # CRITICAL: Add bounds check
             break
-        de = max(eps_d, x_dcsn_hat[i + 2 + f]-x_dcsn_hat[j])
-        #sde_1 = max(eps_d, x_dcsn_hat[i + 1] - x_dcsn_hat[j])
+        de = max(eps_d, x_dcsn_hat[i + 2 + f] - x_dcsn_hat[j])
+        # sde_1 = max(eps_d, x_dcsn_hat[i + 1] - x_dcsn_hat[j])
         g_f_a = np.abs((kappa_hat[j] - kappa_hat[i + 2 + f]) / de)
         idx_f = i + 2 + f  # Store actual grid index
         de_jump = max(eps_d, x_dcsn_hat[idx_f] - x_dcsn_hat[i + 1])
         g_jump = np.abs((kappa_hat[i + 1] - kappa_hat[idx_f]) / de_jump)
-        
+
         if g_f_a < m_bar and de < eps_fwd_back and g_jump >= m_bar:
-            
+
             found_forward_same_branch = True
             idx_f_return = idx_f
-            # Compute g_f_v_hat for this point (de already equals max(eps_d, x_dcsn_hat[i+2+f]-x_dcsn_hat[j]))
+            # Compute g_f_v_hat for this point (de already equals max(eps_d,
+            # x_dcsn_hat[i+2+f]-x_dcsn_hat[j]))
             g_f_v_at_idx = (v_hat[i + 2 + f] - v_hat[j]) / de
             if g_1 > g_f_v_at_idx:
                 keep_i1 = True
                 break
-    
+
     if not found_forward_same_branch:
         keep_i1 = True
 
@@ -284,7 +345,12 @@ def forward_scan_case_a(x_dcsn_hat, v_hat, kappa_hat, i, j, N, LB, m_bar, g_1, e
 
 
 @njit(cache=True)
-def _postclean_double_jump_mask(x_dcsn_hat, x_cntn_hat, m_bar, skip_mask, eps_d=EPS_D):
+def _postclean_double_jump_mask(
+        x_dcsn_hat,
+        x_cntn_hat,
+        m_bar,
+        skip_mask,
+        eps_d=EPS_D):
     """
     Keep[i] == False  iff BOTH neighbors of i are policy jumps > m_bar.
     First and last points are always kept. Points with skip_mask[i]==True
@@ -343,105 +409,69 @@ def FUES(
     assume_sorted=False,
     eps_d=None, eps_sep=None, eps_fwd_back=None, parallel_guard=None,
 ):
-    """
-    Fast Upper-Envelope Scan (FUES) wrapper.
+    """Fast Upper-Envelope Scan (FUES) wrapper.
 
-    Computes the upper envelope of future segment choices over an endogenous grid in a
-    single pass and returns the retained points. Optionally, it also creates
-    explicit intersection points at discrete-choice switches and can return
-    those intersections separately for downstream processing.
-
-    The Numba-compiled scanner (`_scan`) provides O(N) time behavior with a
-    small, fixed look-back/forward window. This wrapper prepares inputs,
-    invokes the scanner, and post-processes the results (merging or returning
-    intersections separately, plus a final post-clean step to avoid spurious
-   consecutive jumps).
+    Computes the upper envelope in a single pass
+    and returns retained points.  Optionally creates
+    intersection points at discrete-choice switches.
 
     Parameters
     ----------
-    x_dcsn_hat : ndarray, shape (N,)
-        Unrefined endogenous decision grid (hat{x}).
-        Internally sorted before scanning.
-    v_hat : ndarray, shape (N,)
-        Unrefined value correspondence (hat{v}), read-only in the scan.
-    kappa_hat : ndarray, shape (N,)
-        Unrefined primary control aligned with `x_dcsn_hat`
-        (e.g., consumption hat{c}).
-    x_cntn_hat : ndarray, shape (N,)
-        Unrefined continuation / exogenous grid aligned with `x_dcsn_hat`
-        (e.g., next-period assets hat{x}'). Used in jump classification
-        and as payload in intersections.
-    del_a : ndarray, shape (N,), optional
-        Policy-gradient-like series used for endogenous jump thresholds.
-        Required when ``endog_mbar=True``; defaults to zeros otherwise.
-
+    x_dcsn_hat : ndarray (N,)
+        Unrefined endogenous decision grid.
+    v_hat : ndarray (N,)
+        Unrefined value correspondence.
+    kappa_hat : ndarray (N,)
+        Unrefined primary control (e.g. consumption).
+    x_cntn_hat : ndarray (N,)
+        Continuation / exogenous grid (e.g. next-period
+        assets). Used for jump classification.
+    del_a : ndarray (N,), optional
+        Policy-gradient series for endogenous thresholds.
+        Required when ``endog_mbar=True``.
     m_bar : float, default 1.0
-        Jump threshold for same-branch tests. If `endog_mbar=True`, the
-        threshold adapts using `del_a` with `padding_mbar`.
+        Jump threshold for same-branch tests.
     LB : int, default 4
-        Look-back/forward buffer length used by backward/forward scans.
+        Look-back/forward buffer length.
     endog_mbar : bool, default False
-        If True, uses endogenous jump threshold based on `del_a`.
+        Use endogenous jump threshold from `del_a`.
     padding_mbar : float, default 0.0
-        Extra padding added to the endogenous threshold.
+        Extra padding for endogenous threshold.
     include_intersections : bool, default True
-        If True, create forced intersections at kept jumps.
-    return_intersections_separately : bool, default False
-        If True, return a pair `(fues_result, inter_tuple)` instead of a
-        single merged result. See Returns.
+        Create forced intersections at kept jumps.
+    return_intersections_separately : bool
+        If True, return ``(fues_result, inter_tuple)``.
     single_intersection : bool, default False
-        If True, create only one intersection point (on the right) instead of two.
-        This reduces the number of points but may affect envelope smoothness.
+        Create only one intersection per crossing.
     disable_jump_checks : bool, default False
-        If True, applies manual overrides to disable jump validity checks:
-        - Forces keep_i1=False in right turn cases
-        - Forces keep_j=True in left turn cases
-        Default is False (checks are enabled, no overrides).
+        Override jump validity checks.
     eps_d : float, optional
-        Minimum separation between grid points. Defaults to `EPS_D`.
+        Minimum grid-point separation.
     eps_sep : float, optional
-        Minimum separation used when creating intersections. Defaults to
-        `EPS_SEP`.
+        Minimum separation for intersections.
     eps_fwd_back : float, optional
-        Proximity threshold for forward/backward scans. Defaults to
-        `EPS_fwd_back`.
+        Proximity threshold for fwd/bwd scans.
     parallel_guard : float, optional
-        Tolerance to guard against near-parallel segment geometry when forming
-        intersections. Defaults to `PARALLEL_GUARD`.
+        Guard against near-parallel segments.
 
     Returns
     -------
     tuple
-        If `return_intersections_separately` is False:
-            (x_dcsn_ref, v_ref, kappa_ref, x_cntn_ref, del_a_ref)
-
-        If `return_intersections_separately` is True:
-            (fues_result, inter_tuple)
-
-            where
-              - fues_result = (x_dcsn_ref, v_ref, kappa_ref, x_cntn_ref, del_a_ref)
-              - inter_tuple = (x_inter, v_inter, kap_inter, xcn_inter, da_inter)
-
-            Each array in `inter_tuple` contains only intersection rows.
-
-    Notes
-    -----
-    - Inputs are sorted by `x_dcsn_hat` prior to scanning. Outputs inherit this
-      order; merged outputs are resorted after adding intersections.
-    - Intersections are forced to lie strictly within open intervals, using
-      `eps_sep` and `parallel_guard` to avoid degenerate intersections.
-    - When `single_intersection=True`, only one intersection point is created on the
-      right side of the crossing, reducing the total number of points but potentially
-      affecting envelope smoothness at discrete choice switches.
-    - Both `kappa_hat` and `x_cntn_hat` are used to detect jumps.
-
+        ``(x_dcsn_ref, v_ref, kappa_ref,
+        x_cntn_ref, del_a_ref)``
+        or ``(fues_result, inter_tuple)`` when
+        ``return_intersections_separately=True``.
     """
     # Use provided epsilons or fall back to module defaults
-    eps_d = eps_d if eps_d is not None else EPS_D
-    eps_sep = eps_sep if eps_sep is not None else EPS_SEP
-    eps_fwd_back = eps_fwd_back if eps_fwd_back is not None else EPS_fwd_back
-    parallel_guard = parallel_guard if parallel_guard is not None else PARALLEL_GUARD
-    
+    if eps_d is None:
+        eps_d = EPS_D
+    if eps_sep is None:
+        eps_sep = EPS_SEP
+    if eps_fwd_back is None:
+        eps_fwd_back = EPS_fwd_back
+    if parallel_guard is None:
+        parallel_guard = PARALLEL_GUARD
+
     # Ensure float64 precision for all arrays
     x_dcsn_hat = np.asarray(x_dcsn_hat, dtype=np.float64)
     v_hat = np.asarray(v_hat, dtype=np.float64)
@@ -487,22 +517,30 @@ def FUES(
                 intersections[:, 3].copy(),
                 intersections[:, 4].copy(),
             )
-            fues_result = (x_dcsn_ref, v_ref, kappa_ref, x_cntn_ref, del_a_ref)
+            fues_result = (
+                x_dcsn_ref,
+                v_ref,
+                kappa_ref,
+                x_cntn_ref,
+                del_a_ref)
             return fues_result, inter_tuple
-        
-        all_e, all_v, all_p1, all_p2, all_d, is_inter = _merge_sorted_with_few(
+
+        (all_e, all_v, all_p1,
+         all_p2, all_d, is_inter) = _merge_sorted_with_few(
             x_dcsn_ref, v_ref, kappa_ref, x_cntn_ref, del_a_ref,
             intersections[:, 0], intersections[:, 1], intersections[:, 2],
             intersections[:, 3], intersections[:, 4],
         )
 
-        post_mask = _postclean_double_jump_mask(all_e, all_p2, m_bar, is_inter, eps_d)
+        post_mask = _postclean_double_jump_mask(
+            all_e, all_p2, m_bar, is_inter, eps_d)
 
         return (all_e[post_mask], all_v[post_mask],
                 all_p1[post_mask], all_p2[post_mask], all_d[post_mask])
 
     is_inter = np.zeros(x_dcsn_ref.size, dtype=np.bool_)
-    post_mask = _postclean_double_jump_mask(x_dcsn_ref, x_cntn_ref, m_bar, is_inter, eps_d)
+    post_mask = _postclean_double_jump_mask(
+        x_dcsn_ref, x_cntn_ref, m_bar, is_inter, eps_d)
 
     if return_intersections_separately:
         empty = np.zeros(0, dtype=x_dcsn_ref.dtype)
@@ -540,60 +578,54 @@ def _scan(
     eps_fwd_back=EPS_fwd_back,
     parallel_guard=PARALLEL_GUARD,
 ):
-    """Core FUES algorithm: Single-pass scan to identify upper envelope points.
+    """Core FUES scan: single-pass upper envelope.
 
-    The algorithm maintains three key indices as it scans:
-    - k: "tail" - second-to-last kept point
-    - j: "head" - last kept point
-    - i+1: current point being evaluated
-
-    For each triplet (k, j, i+1), we compute:
-    - g_jm1: value gradient from k to j (slope of previous segment)
-    - g_1: value gradient from j to i+1 (slope of current segment)
-    - g_tilde_a: policy gradient (for jump detection)
+    Maintains indices k (tail), j (head), i+1 (current)
+    and classifies each triplet by secant turn direction
+    and policy jump status.
 
     Parameters
     ----------
     x_dcsn_hat : array
-        Sorted unrefined endogenous decision grid.
+        Sorted endogenous decision grid.
     v_hat : array
-        Unrefined value correspondence (read-only).
+        Value correspondence (read-only).
     kappa_hat : array
-        Unrefined primary control (e.g., consumption).
+        Primary control (e.g. consumption).
     x_cntn_hat : array
-        Unrefined continuation / exogenous grid (e.g., next-period assets).
+        Continuation grid (e.g. next-period assets).
     del_a : array
         Policy gradient (for endogenous m_bar).
     m_bar : float
-        Jump threshold (maximum marginal propensity to save)
+        Jump threshold.
     LB : int
-        Lookback buffer size for backward/forward scans
+        Lookback buffer size.
     endog_mbar : bool
-        Use endogenous jump threshold based on policy gradients
+        Use endogenous jump threshold.
     padding_mbar : float
-        Additional padding for endogenous threshold
+        Padding for endogenous threshold.
     include_intersections : bool
-        Track intersection points where value functions cross
+        Track intersection points.
     single_intersection : bool
-        If True, create only one intersection point (on the right) instead of two
+        One intersection per crossing.
     disable_jump_checks : bool
-        If True, applies manual overrides to disable jump validity checks
+        Override jump validity checks.
 
     Returns
     -------
     x_dcsn_hat : array
-        Original grid (unchanged)
-    keep : array
-        Boolean mask indicating which points to keep
-    intersections : tuple or None
-        If include_intersections=True, returns (inter_e, inter_v, inter_p1, inter_p2, inter_d)
-        containing intersection points and interpolated policies
+        Original grid (unchanged).
+    keep : bool array
+        Mask of points to keep.
+    intersections : ndarray
+        Intersection rows (n_inter, 5).
     """
 
     N = x_dcsn_hat.size
     keep = np.ones(N, dtype=np.bool_)
 
-    # Adjust capacity based on whether we're using single or double intersections
+    # Adjust capacity based on whether we're using single or double
+    # intersections
     max_inter = (N - 1) if single_intersection else 2 * (N - 1)
     intersections = np.empty((max_inter, 5))
     n_inter = 0
@@ -611,7 +643,8 @@ def _scan(
     last_was_jump = False
     prev_j = 0
 
-    # Pre-compute abs(del_a) for endogenous m_bar (avoids per-iteration np.abs)
+    # Pre-compute abs(del_a) for endogenous m_bar (avoids per-iteration
+    # np.abs)
     abs_del_a = np.abs(del_a) if endog_mbar else del_a
 
     for i in range(N - 2):
@@ -638,8 +671,6 @@ def _scan(
             k_e = x_dcsn_hat[k] if k >= 0 else x_dcsn_hat[0]
             k_v = v_hat[k] if k >= 0 else v_hat[0]
 
-
-        
         de_prev = max(eps_d, x_dcsn_hat[j] - k_e)
         inv_de_prev = 1.0 / de_prev
         g_jm1 = (v_hat[j] - k_v) * inv_de_prev
@@ -663,8 +694,6 @@ def _scan(
         left_turn_jump = left_turn_any and jump_now
         right_turn_jump = (not left_turn_any) and jump_now
 
-
-
         added_intersection_last_iter = False
 
         # Case B: Value fall
@@ -678,9 +707,11 @@ def _scan(
 
         # Case A: Right-turn with jump
         if right_turn_jump:
-            keep_i1, idx_f, found_forward_same_branch = forward_scan_case_a(
-                x_dcsn_hat, v_hat, kappa_hat, i, j, N, LB, M_max, g_1, eps_d, eps_fwd_back
-            )
+            (keep_i1, idx_f,
+             found_forward_same_branch) = forward_scan_case_a(
+                x_dcsn_hat, v_hat, kappa_hat,
+                i, j, N, LB, M_max, g_1,
+                eps_d, eps_fwd_back)
             # Apply manual override only if disable_jump_checks is True
             if disable_jump_checks:
                 keep_i1 = False
@@ -700,42 +731,63 @@ def _scan(
                     check_drop=False,
                     eps_d=eps_d,
                 )
-                
+
                 # Check if we should create an intersection
-                create_intersection = include_intersections and not last_was_jump
-                
-                # Augmented keep_i1 condition:
-                # If found_forward_same_branch is true and both idx_f and idx_b are valid,
-                # check if intersection of [j, idx_f] with [i+1, idx_b] is within segment boundary
+                create_intersection = (
+                    include_intersections and not last_was_jump)
+
+                # Augmented keep_i1: if forward same
+                # branch found and both idx valid, check
+                # intersection is within segment boundary
                 if found_forward_same_branch and idx_f != -1 and idx_b != -1:
                     intersection_within = check_intersection_within_bounds(
                         x_dcsn_hat, v_hat, j, idx_f, i + 1, idx_b, eps_d
                     )
-                    if not intersection_within:  
+                    if not intersection_within:
                         # If intersection is OUTSIDE bounds:
                         # - Don't keep i+1
                         # - Don't create intersection
                         keep_i1 = False
                         create_intersection = False
-        
+
                 # Only create intersection if it's within bounds
                 if create_intersection and keep_i1:
                     L = make_pair_from_indices_or_fallback(
                         x_dcsn_hat, v_hat, kappa_hat, x_cntn_hat, del_a,
                         j, idx_f if idx_f != -1 else -1, k, j, N
                     )
-                    safe_extrap = find_safe_extrapolation_point(x_dcsn_hat, kappa_hat, i+1, N, M_max, forward=True, eps_d=eps_d, eps_fwd_back=eps_fwd_back)
+                    safe_extrap = find_safe_extrapolation_point(
+                        x_dcsn_hat,
+                        kappa_hat,
+                        i + 1,
+                        N,
+                        M_max,
+                        forward=True,
+                        eps_d=eps_d,
+                        eps_fwd_back=eps_fwd_back)
                     R = make_pair_from_indices_or_fallback(
-                        x_dcsn_hat, v_hat, kappa_hat, x_cntn_hat, del_a,
-                        idx_b if idx_b != -1 else -1, i+1, i+1, safe_extrap, N
-                    )
+                        x_dcsn_hat,
+                        v_hat,
+                        kappa_hat,
+                        x_cntn_hat,
+                        del_a,
+                        idx_b if idx_b != -1 else -1,
+                        i + 1,
+                        i + 1,
+                        safe_extrap,
+                        N)
 
-                    n_inter, intersection_e, intersection_v, _, _, added = _forced_intersection_twopoint(
+                    (n_inter, intersection_e,
+                     intersection_v, _, _, added
+                     ) = _forced_intersection_twopoint(
                         intersections, n_inter,
-                        x_dcsn_hat[j], x_dcsn_hat[i+1], -1.0,   # sep_cap disabled
+                        x_dcsn_hat[j],
+                        x_dcsn_hat[i + 1],
+                        -1.0,  # sep_cap disabled
                         L, R,
-                        eps_d, eps_sep, parallel_guard,
-                        i, j, single_intersection
+                        eps_d, eps_sep,
+                        parallel_guard,
+                        i, j, single_intersection,
                     )
 
                     if added:
@@ -743,7 +795,8 @@ def _scan(
                         use_intersection_as_k = True
                         created_intersection = True
 
-                # Only update k, j, etc. if keep_i1 is still true after augmented check
+                # Only update k, j, etc. if keep_i1 is still true after
+                # augmented check
                 if keep_i1:
                     k = j
                     prev_j = j
@@ -757,12 +810,10 @@ def _scan(
                 use_intersection_as_k = False
                 last_turn_left = False
             if keep_i1:
-                last_was_jump=jump_now
+                last_was_jump = jump_now
             else:
-                last_was_jump=False
+                last_was_jump = False
             continue
-
-        
 
         # Case C: Left turn
         if left_turn_jump:
@@ -794,18 +845,38 @@ def _scan(
                         x_dcsn_hat, v_hat, kappa_hat, x_cntn_hat, del_a,
                         -1, -1, k, j, N
                     )
-                    safe_extrap = find_safe_extrapolation_point(x_dcsn_hat, kappa_hat, i+1, N, M_max, forward=True, eps_d=eps_d, eps_fwd_back=eps_fwd_back)
+                    safe_extrap = find_safe_extrapolation_point(
+                        x_dcsn_hat,
+                        kappa_hat,
+                        i + 1,
+                        N,
+                        M_max,
+                        forward=True,
+                        eps_d=eps_d,
+                        eps_fwd_back=eps_fwd_back)
                     R = make_pair_from_indices_or_fallback(
-                        x_dcsn_hat, v_hat, kappa_hat, x_cntn_hat, del_a,
-                        m_ind if m_ind != -1 else -1, i+1, i+1, safe_extrap, N
-                    )
+                        x_dcsn_hat,
+                        v_hat,
+                        kappa_hat,
+                        x_cntn_hat,
+                        del_a,
+                        m_ind if m_ind != -1 else -1,
+                        i + 1,
+                        i + 1,
+                        safe_extrap,
+                        N)
 
-                    n_inter, intersection_e, intersection_v, _, _, added = _forced_intersection_twopoint(
+                    (n_inter, intersection_e,
+                     intersection_v, _, _, added
+                     ) = _forced_intersection_twopoint(
                         intersections, n_inter,
-                        x_dcsn_hat[j], x_dcsn_hat[i+1], -1.0,
+                        x_dcsn_hat[j],
+                        x_dcsn_hat[i + 1],
+                        -1.0,
                         L, R,
-                        eps_d, eps_sep, parallel_guard,
-                        i, j, single_intersection
+                        eps_d, eps_sep,
+                        parallel_guard,
+                        i, j, single_intersection,
                     )
 
                     if added:
@@ -817,57 +888,85 @@ def _scan(
 
             # Case C.2: Left turn with j kept
             else:
-                if  not_allow_2lefts and jump_now and last_was_jump:
+                if not_allow_2lefts and jump_now and last_was_jump:
                     keep[j] = False
-                    if include_intersections and added_intersection_last_iter and n_inter > 0:
-                        # Adjust based on whether we're using single or double intersections
-                        n_inter = n_inter - 1 if single_intersection else n_inter - 2
-                    
+                    if (include_intersections
+                            and added_intersection_last_iter
+                            and n_inter > 0):
+                        # Adjust based on whether we're using single or double
+                        # intersections
+                        if single_intersection:
+                            n_inter -= 1
+                        else:
+                            n_inter -= 2
+
                     j = prev_j
 
                 use_intersection_as_k = False
                 if include_intersections and not last_was_jump:
-                    found_fwd, idx_fwd = find_forward_same_branch(
-                        x_dcsn_hat, kappa_hat, j, j, N, LB, m_bar, eps_d, eps_fwd_back
-                    )
-                    
+                    found_fwd, idx_fwd = (
+                        find_forward_same_branch(
+                            x_dcsn_hat, kappa_hat,
+                            j, j, N, LB, m_bar,
+                            eps_d, eps_fwd_back))
+
                     _, idx_back = backward_scan_combined(
                         m_buf, m_head, LB, x_dcsn_hat, v_hat, kappa_hat,
-                        j, i+1, M_max,
+                        j, i + 1, M_max,
                         check_drop=False, eps_d=eps_d
                     )
-                    
+
                     L = make_pair_from_indices_or_fallback(
                         x_dcsn_hat, v_hat, kappa_hat, x_cntn_hat, del_a,
                         j, idx_fwd if found_fwd else -1, k, j, N
                     )
-                    
-                    safe_extrap = find_safe_extrapolation_point(x_dcsn_hat, kappa_hat, i+1, N, M_max, forward=True, eps_d=eps_d, eps_fwd_back=eps_fwd_back)
+
+                    safe_extrap = find_safe_extrapolation_point(
+                        x_dcsn_hat,
+                        kappa_hat,
+                        i + 1,
+                        N,
+                        M_max,
+                        forward=True,
+                        eps_d=eps_d,
+                        eps_fwd_back=eps_fwd_back)
                     R = make_pair_from_indices_or_fallback(
-                        x_dcsn_hat, v_hat, kappa_hat, x_cntn_hat, del_a,
-                        idx_back if idx_back != -1 else -1, i+1, i+1, safe_extrap, N
-                    )
-                    
-                    n_inter, intersection_e, intersection_v, _, _, added = _forced_intersection_twopoint(
+                        x_dcsn_hat,
+                        v_hat,
+                        kappa_hat,
+                        x_cntn_hat,
+                        del_a,
+                        idx_back if idx_back != -1 else -1,
+                        i + 1,
+                        i + 1,
+                        safe_extrap,
+                        N)
+
+                    (n_inter, intersection_e,
+                     intersection_v, _, _, added
+                     ) = _forced_intersection_twopoint(
                         intersections, n_inter,
-                        x_dcsn_hat[j], x_dcsn_hat[i+1], -1.0,
+                        x_dcsn_hat[j],
+                        x_dcsn_hat[i + 1],
+                        -1.0,
                         L, R,
-                        eps_d, eps_sep, parallel_guard,
-                        i, j, single_intersection
+                        eps_d, eps_sep,
+                        parallel_guard,
+                        i, j, single_intersection,
                     )
-                    
+
                     if added:
                         use_intersection_as_k = True
                         created_intersection = True
-                
-                if  not_allow_2lefts and jump_now and last_was_jump:
+
+                if not_allow_2lefts and jump_now and last_was_jump:
                     k = j
                     j = i + 1
                 else:
                     k = j
                     prev_j = j
                     j = i + 1
-            
+
             last_turn_left = True
             last_was_jump = jump_now
             continue
@@ -883,4 +982,3 @@ def _scan(
             continue
 
     return x_dcsn_hat, keep, intersections[:n_inter, :]
-
