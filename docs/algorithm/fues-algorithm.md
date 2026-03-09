@@ -17,7 +17,7 @@ After EGM inverts the Euler equation, some candidate points lie on the upper env
     V_t(a) = \max_{c,\, d} \left\{ u(c) + \beta V_{t+1}^d(a') \right\}
     \]
 
-    The continuation value \(V_{t+1}^d\) -- even holding \(d\) fixed -- depends on all future discrete choice sequences. Each sequence yields a **concave** value function. The true \(V_t\) is the **upper envelope** of these concave functions.
+    The continuation value \(V_{t+1}^d\) — even holding \(d\) fixed — depends on all future discrete choice sequences. Each sequence yields a **concave** value function. The true \(V_t\) is the **upper envelope** of these concave functions.
 
 When we invert the Euler equation via EGM, we obtain raw correspondence points \((\hat{x}_i, \hat{v}_i)\) together with an associated **post-decision asset / next-period asset choice** \(\hat{x}'_i\). Economically, each smooth branch corresponds to a continuation value associated with a particular future sequence of discrete choices. A jump across branches causes secondary kinks, coinciding with a switch in discrete choices at some point/stochastic state in the future. The true decision value is the supremum of these concave branch-specific values.
 
