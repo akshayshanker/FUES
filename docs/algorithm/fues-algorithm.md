@@ -2,10 +2,9 @@
 
 ## The problem in one picture
 
-In discrete-continuous problems, the Euler equation generates a value correspondence rather than the optimal solution. 
+In discrete-continuous problems, the Euler equation generates a value correspondence rather than the optimal solution.
 
 After EGM inverts the Euler equation, some candidate points lie on the upper envelope and others satisfy only local first-order conditions. FUES recovers the upper envelope by scanning the ordered endogenous grid from left to right.
-
 
 ![FUES scan diagram](../images/fues-scan.svg)
 
@@ -18,13 +17,13 @@ After EGM inverts the Euler equation, some candidate points lie on the upper env
     V_t(a) = \max_{c,\, d} \left\{ u(c) + \beta V_{t+1}^d(a') \right\}
     \]
 
-    The continuation value \(V_{t+1}^d\) depends on the future discrete choice sequence. Each sequence yields a **concave** value function. The true \(V_t\) is the **upper envelope** of these concave functions.
+    The continuation value \(V_{t+1}^d\) -- even holding \(d\) fixed -- depends on all future discrete choice sequences. Each sequence yields a **concave** value function. The true \(V_t\) is the **upper envelope** of these concave functions.
 
 When we invert the Euler equation via EGM, we obtain raw correspondence points \((\hat{x}_i, \hat{v}_i)\) together with an associated **post-decision asset / next-period asset choice** \(\hat{x}'_i\). Economically, each smooth branch corresponds to a continuation value associated with a particular future sequence of discrete choices. A jump across branches causes secondary kinks, coinciding with a switch in discrete choices at some point/stochastic state in the future. The true decision value is the supremum of these concave branch-specific values.
 
 !!! tip "The key insight"
     Along a single branch, the continuation policy is smooth and the value correspondence is concave. A discontinuous policy jump can therefore only lie on the upper envelope if the associated branch-specific value overtakes the upper envelope from below. Thus, an optimal jump must imply a left turn on the value correspondence. Geometrically, that means:
-    
+
     - a **jump plus a concave right turn** signals a sub-optimal point
     - a **jump plus a convex left turn** signals that the scan has passed a crossing point between branches on the upper envelope and the point should be retained
 
@@ -67,18 +66,17 @@ A jump is detected when adjacent candidate points differ too much in the post-de
 !!! tip "Accuracy and choice of \(\bar{M}\)"
     The slope of the policy at a jump is infinite, while the slope of the policy function along a branch is bounded above in economic problems. For example, in a consumption-savings problem, the consumption function has a maximum slope of 1 -- the maximum marginal propensity to consume. So, if we take a grid fine enough and set \(\bar{M}\) equal to the maximum MPC, then we can detect all jumps and remove all sub-optimal points by removing jumps that do not make a left turn.
 
-
 ## The algorithm
 
 !!! example "FUES (basic scan)"
 
-    1. Compute the raw EGM objects \(\hat{\mathbb{X}}_t\), \(\hat{\mathbb{V}}_t\), and \(\hat{\mathbb{X}}'_t\)
-    2. Set the jump-detection threshold \(\bar{M}\)
-    3. Sort all candidate points by the endogenous grid \(\hat{\mathbb{X}}_t\)
-    4. Starting from \(i=2\), compute the secants \(g_i\) and \(g_{i+1}\)
-    5. Compute the policy difference quotient \(\left|\frac{\hat{x}'_{i+1}-\hat{x}'_{i}}{\hat{x}_{i+1}-\hat{x}_i}\right|\)
-    6. If the policy quotient exceeds \(\bar{M}\) and \(g_{i+1}<g_i\), delete point \(i+1\)
-    7. Otherwise retain the point, advance the scan, and continue until the grid is exhausted
+    1. Compute the raw EGM objects \(\hat{\mathbb{X}}_t\), \(\hat{\mathbb{V}}_t\), and \(\hat{\mathbb{X}}'_t\).
+    2. Set the jump-detection threshold \(\bar{M}\).
+    3. Sort all candidate points by the endogenous grid \(\hat{\mathbb{X}}_t\).
+    4. Starting from \(i=2\), compute the secants \(g_i\) and \(g_{i+1}\).
+    5. Compute the policy difference quotient \(\left|\frac{\hat{x}'_{i+1}-\hat{x}'_{i}}{\hat{x}_{i+1}-\hat{x}_i}\right|\).
+    6. If the policy quotient exceeds \(\bar{M}\) and \(g_{i+1}<g_i\), delete point \(i+1\).
+    7. Otherwise retain the point, advance the scan, and continue until the grid is exhausted.
 
 ### Forward and backward scans
 
@@ -96,20 +94,18 @@ These refinements are local, inexpensive, and mainly matter near closely spaced 
 
 ## Comparison
 
-| Method                                                                                             | Main restrictions on optimal policy                                                                                                                                         | How the upper envelope is constructed                                                                                                          | Complexity                                                                  |
-| -------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| **FUES** ([Dobrescu & Shanker, 2022](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=4181302)) | Bounded curvature of policy function *away from jumps*; this is standard in economic problems, for instance MPCs and MPSs are bounded.                                      | Targeted left-to-right scan with secant comparisons and local forward/backward refinement.                                                     | Less than linear (only requires constructing secants on the upper envelope) |
-| MSS ( [Iskhakov et al. 2017](https://doi.org/10.3982/QE643))                                       | Strict monotonicity of savings policy/ global invertibility of policy.                                                                                                      | Segment detection using policy monotonicity, then interpolation across each segment.                                                           | Linear (must interpolate over each branch)                                  |
-| RFC ([Dobrescu & Shanker, 2024](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=4850746))      | Same as FUES.                                                                                                                                                               | Rooftop-cut: uses gradient information to "cut" sub-optimal points                                                                             | Linear (requires local searches at each point to determine neighbours)      |
-| LTM ([Druedahl & Jørgensen 2017](https://doi.org/10.1016/j.jedc.2016.11.005))                      | Strict monotonicity of savings policy/ global invertibility of policy (this ensures local triangles on the exogenous grid fall within regions belonging to the same branch) | Evaluates value-of-choice on an exogenous grid using "triangles" on the exogenous grid and keeps the best interpolated from the best triangle | Quadratic (double loop across EGM points to find covering segments)         |
-
+| Method | Main restrictions on optimal policy | How the upper envelope is constructed | Complexity |
+|--------|-------------------------------------|---------------------------------------|------------|
+| **FUES** ([Dobrescu & Shanker, 2022](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=4181302)) | Bounded curvature of policy function *away from jumps*; standard in economic problems (e.g. MPCs and MPSs are bounded). | Targeted left-to-right scan with secant comparisons and local forward/backward refinement. | Less than linear (only constructs secants on the upper envelope). |
+| MSS ([Iskhakov et al., 2017](https://doi.org/10.3982/QE643)) | Strict monotonicity of savings policy / global invertibility of policy. | Segment detection using policy monotonicity, then interpolation across each segment. | Linear (must interpolate over each branch). |
+| RFC ([Dobrescu & Shanker, 2024](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=4850746)) | Same as FUES. | Rooftop-cut: uses gradient information to "cut" sub-optimal points. | Linear (requires local searches at each point to determine neighbours). |
+| LTM ([Druedahl & Jørgensen, 2017](https://doi.org/10.1016/j.jedc.2016.11.005)) | Strict monotonicity of savings policy / global invertibility of policy (ensures local triangles on the exogenous grid fall within regions belonging to the same branch). | Evaluates value-of-choice on an exogenous grid using "triangles" and keeps the best interpolated from the best triangle. | Quadratic (double loop across EGM points to find covering segments). |
 
 ## References
 
-- Dobrescu, L.I. and Shanker, A. (2022). "A fast upper envelope scan method for discrete-continuous dynamic programming." CEPAR Working Paper 2024/20.
+- Dobrescu, L.I. and Shanker, A. (2022). "A fast upper envelope scan method for discrete-continuous dynamic programming." [SSRN Working Paper No. 4181302.](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=4181302)
 - Carroll, C.D. (2006). "The method of endogenous gridpoints for solving dynamic stochastic optimization problems." *Economics Letters*, 91(3).
 - Iskhakov, F. et al. (2017). "The endogenous grid method for discrete-continuous dynamic choice models with (or without) taste shocks." *Quantitative Economics*, 8(2).
 - Druedahl, J. (2021). "A guide on solving non-convex consumption-saving models." *Computational Economics*, 58.
 - Fella, G. (2014). "A generalized endogenous grid method for non-smooth and non-concave problems." *Review of Economic Dynamics*, 17(2).
 - Druedahl, J. and Jørgensen, T.H. (2017). "A general endogenous grid method for multi-dimensional models with non-convexities and constraints." *Journal of Economic Dynamics and Control*, 74, 87–107.
-
