@@ -6,7 +6,7 @@ window.MathJax = {
     processEnvironments: true
   },
   options: {
-    ignoreHtmlClass: ".*|",
+    ignoreHtmlClass: "no-mathjax",
     processHtmlClass: "arithmatex|jupyter-wrapper|jp-Notebook|jp-RenderedMarkdown|jp-RenderedHTMLCommon|jp-Cell"
   }
 };
