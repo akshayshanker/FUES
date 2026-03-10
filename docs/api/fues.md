@@ -83,8 +83,8 @@ Unified entry point for all upper envelope algorithms. Wraps FUES, MSS, RFC, and
 
 ```python
 EGM_UE(
-    x_dcsn_hat, qf_hat, v_cntn_hat, kappa_hat,
-    X_cntn, X_dcsn, uc_func_partial, u_func,
+    x_dcsn_hat, v_hat, v_cntn_hat, kappa_hat,
+    x_cntn_hat, X_dcsn, uc_func_partial, u_func,
     ue_method="FUES", m_bar=1.0, lb=4,
     rfc_radius=0.75, rfc_n_iter=20,
     interpolate=False, include_intersections=True,
@@ -104,10 +104,6 @@ EGM_UE(
 
 ### Naming note
 
-`EGM_UE` currently uses `qf_hat` and `X_cntn` in the API. Read these as:
-
-- `qf_hat` = raw value correspondence, with preferred paper-facing notation `v_hat`
-- `X_cntn` = raw continuation / post-decision state, with preferred descriptive name `x_cntn_hat`
 - `X_dcsn` = target decision grid used for interpolation and comparison
 
 ### Available methods
@@ -127,7 +123,7 @@ EGM_UE(
 from dcsmm.uenvelope.upperenvelope import register
 
 @register("MY_METHOD")
-def my_engine(x_dcsn_hat, qf_hat, kappa_hat, X_cntn, *,
+def my_engine(x_dcsn_hat, v_hat, kappa_hat, x_cntn_hat, *,
               uc_func_partial, **kwargs):
     return {
         "x_dcsn_ref": ..., "v_dcsn_ref": ...,

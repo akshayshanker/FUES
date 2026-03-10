@@ -7,13 +7,17 @@
 
 > Dobrescu, L.I. and Shanker, A. (2022). "A fast upper envelope scan method for discrete-continuous dynamic programming." [SSRN.](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=4181302)
 
-FUES scans the sorted endogenous grid in a single pass, detecting sub-optimal points by the conjunction of a policy jump and a concave right turn in the value correspondence. Unlike existing upper envelope methods, it does not require monotonicity of the policy function or numerical optimisation. It is also orders of magnitude faster.
+FUES scans the endogenous grid in a single $O(n^{1/2})$ pass, detecting sub-optimal points as the conjunction of a policy jump and a concave right turn in the value correspondence. 
+
+Unlike existing upper envelope methods, FUES does not require monotonicity of the policy function or numerical optimisation. It is also orders of magnitude faster.
 
 See [How FUES Works](algorithm/fues-algorithm.md) for the full algorithm.
 
 ## At a glance
 
-Suppose we invert an Euler equation to recover the raw endogenous decision grid `x_dcsn_hat`, the value correspondence `v_hat` (the current value evaluated at those endogenous grid points), the policy correspondence `kappa_hat`, and the continuation or post-decision object `x_cntn_hat`.
+Suppose we invert an Euler equation and recover the raw endogenous decision grid `x_dcsn_hat`, the value correspondence `v_hat` (the current value evaluated at those endogenous grid points), the policy correspondence `kappa_hat`, and the continuation or post-decision object `x_cntn_hat`.
+
+The `FUES` operator can be applied like this:
 
 ```python
 from dcsmm.fues import FUES
@@ -23,19 +27,19 @@ x_dcsn_ref, v_ref, kappa_ref, x_cntn_ref, _ = FUES(
 )
 ```
 
-The refined upper-envelope objects are `x_dcsn_ref`, `v_ref`, `kappa_ref`, and `x_cntn_ref`.
+the refined (optimal) upper-envelope objects are the endogenous decision state grid points `x_dcsn_ref`, the value function `v_ref`, the optimal policy `kappa_ref`, and the optimal post-state `x_cntn_ref`.
 
-Or use the unified registry to compare methods:
+The `dcsmm` package also ships an upper envelope interface that dispatches to the main benchmark algorithms in `python`. 
 
 ```python
 from dcsmm.uenvelope import EGM_UE
 
 refined, _, _ = EGM_UE(
     x_dcsn_hat=x_dcsn_hat,
-    qf_hat=v_hat,              # legacy API name; read as raw value correspondence
+    v_hat=v_hat,
     v_cntn_hat=v_cntn,
     kappa_hat=kappa_hat,
-    X_cntn=x_cntn_hat,         # legacy API name; read as continuation state
+    x_cntn_hat=x_cntn_hat,
     X_dcsn=X_dcsn,
     uc_func_partial=uc_func,   # only used by "CONSAV"
     u_func=u_func,
@@ -44,6 +48,9 @@ refined, _, _ = EGM_UE(
 ```
 
 `refined` is a dict of refined objects. 
+
+Note: DCEGM (MSS in the paper) and CONSAV (LTM in the paper) will only work if the optimal policy function is strictly monotone. See the [durables example](examples/housing.md) and the [housing-renting example](examples/housing-renting.md).
+
 ## Quick links
 
 | | |

@@ -38,10 +38,10 @@ from dcsmm.uenvelope import EGM_UE
 
 refined, raw, interpolated = EGM_UE(
     x_dcsn_hat=x_dcsn_hat,
-    qf_hat=v_hat,                    # legacy API name; read as value correspondence
+    v_hat=v_hat,
     v_cntn_hat=v_continuation,
     kappa_hat=kappa_hat,
-    X_cntn=x_cntn_hat,               # legacy API name; read as continuation state
+    x_cntn_hat=x_cntn_hat,
     X_dcsn=X_dcsn,
     uc_func_partial=marginal_utility,   # u'(c)
     u_func={"func": utility_fn, "args": {}},
@@ -59,15 +59,6 @@ refined["ue_time"]      # wall-clock time (seconds)
 
 Switch `ue_method` to `"DCEGM"`, `"RFC"`, or `"CONSAV"` to run the same problem with a different algorithm. All methods return the same dict structure.
 
-## Notation note
-
-Across the docs we now recommend:
-
-- `v_hat` rather than `q_hat` for the raw value object in paper-facing notation
-- `x_cntn_hat` in code and `\hat{x}_e` in math for the continuation / post-decision object
-- `\hat{x}_e \equiv \hat{x}'` when transitioning from the current paper notation
-
-That lets the documentation stay close to the current FUES paper while remaining readable from a Bellman-DDSL perspective.
 
 See [API Reference](../api/fues.md) for full parameter documentation.
 
