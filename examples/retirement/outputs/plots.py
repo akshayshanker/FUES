@@ -66,7 +66,7 @@ def plot_egrids(age, e_grid, vf_work, c_worker, del_a, g_size, cp, save_path, ta
     vf = np.array(vf_work[age])
     c = np.array(c_worker[age])
     del_a = np.array(del_a[age])
-    a_prime = np.array(cp.asset_grid_A)
+    a_prime = x - c  # savings policy (used for jump detection)
 
     # 2. Generate refined grid, value function and policy using FUES
     fues_result, intersections = fues_alg(
@@ -212,7 +212,7 @@ def plot_dcegm_cf(age, g_size, e_grid, vf_work, c_worker, dela_worker, a_prime, 
     x = e_grid[age]
     vf = vf_work[age]
     c = c_worker[age]
-    a_prime = cp.asset_grid_A
+    a_prime = x - c  # savings policy (used for jump detection)
     dela = dela_worker[age]
 
     x_clean, vf_clean, c_clean, a_prime_clean, dela_clean = fues_alg(
@@ -684,19 +684,21 @@ def nb_plot_egm_interactive(nest, model, age, pad=10):
     c_raw = np.array(c_unref[age])
     da_raw = np.array(da_unref[age])
 
+    # Savings policy = egrid - consumption (used for jump detection)
+    sav_raw = x_raw - c_raw
+
     fues_result, intersections = fues_alg(
-        x_raw, q_raw, c_raw, model.asset_grid_A, da_raw,
+        x_raw, q_raw, c_raw, sav_raw, da_raw,
         m_bar=1.0001, include_intersections=True,
         return_intersections_separately=True,
     )
-    x_clean, vf_clean, c_clean, _, _ = fues_result
-    inter_e, inter_v, inter_p1, _, _ = intersections
+    x_clean, vf_clean, c_clean, sav_clean_fues, _ = fues_result
+    inter_e, inter_v, inter_p1, inter_sav, _ = intersections
 
     v_raw = q_raw * model.beta - model.delta
     v_clean = vf_clean * model.beta - model.delta
     v_inter = inter_v * model.beta - model.delta if len(inter_e) > 0 else np.array([])
 
-    sav_raw = x_raw - c_raw
     sav_clean = x_clean - c_clean
     sav_inter = inter_e - inter_p1 if len(inter_e) > 0 else np.array([])
 
@@ -975,8 +977,11 @@ def nb_plot_egrids(nest, model, age, pad=10, xlim=None, ylim_v=None, ylim_s=None
     c_raw = np.array(c_unref[age])
     da_raw = np.array(da_unref[age])
 
+    # Savings policy = egrid - consumption (used for jump detection)
+    sav_raw = x_raw - c_raw
+
     fues_result, intersections = fues_alg(
-        x_raw, q_raw, c_raw, model.asset_grid_A, da_raw,
+        x_raw, q_raw, c_raw, sav_raw, da_raw,
         m_bar=1.0001, include_intersections=True,
         return_intersections_separately=True,
     )
@@ -987,7 +992,6 @@ def nb_plot_egrids(nest, model, age, pad=10, xlim=None, ylim_v=None, ylim_s=None
     v_clean = vf_clean * model.beta - model.delta
     v_inter = inter_v * model.beta - model.delta if len(inter_e) > 0 else np.array([])
 
-    sav_raw = x_raw - c_raw
     sav_clean = x_clean - c_clean
     sav_inter = inter_e - inter_p1 if len(inter_e) > 0 else np.array([])
 
