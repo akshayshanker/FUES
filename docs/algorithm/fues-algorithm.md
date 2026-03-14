@@ -92,15 +92,6 @@ FUES therefore uses a small look-ahead / look-back window (`LB`, default 4):
 
 These refinements are local, inexpensive, and mainly matter near closely spaced crossings; they do not change the basic economic logic of the method.
 
-## Comparison
-
-| Method | Main restrictions on optimal policy | How the upper envelope is constructed | Complexity |
-|--------|-------------------------------------|---------------------------------------|------------|
-| **FUES** ([Dobrescu & Shanker, 2022](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=4181302)) | Bounded curvature of policy function *away from jumps*; standard in economic problems (e.g. MPCs and MPSs are bounded). | Targeted left-to-right scan with secant comparisons and local forward/backward refinement. | Less than linear (only constructs secants on the upper envelope). |
-| MSS ([Iskhakov et al., 2017](https://doi.org/10.3982/QE643)) | Strict monotonicity of savings policy / global invertibility of policy. | Segment detection using policy monotonicity, then interpolation across each segment. | Linear (must interpolate over each branch). |
-| RFC ([Dobrescu & Shanker, 2024](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=4850746)) | Same as FUES. | Rooftop-cut: uses gradient information to "cut" sub-optimal points. | Linear (requires local searches at each point to determine neighbours). |
-| LTM ([Druedahl & Jørgensen, 2017](https://doi.org/10.1016/j.jedc.2016.11.005)) | Strict monotonicity of savings policy / global invertibility of policy (ensures local triangles on the exogenous grid fall within regions belonging to the same branch). | Evaluates value-of-choice on an exogenous grid using "triangles" and keeps the best interpolated from the best triangle. | Quadratic (double loop across EGM points to find covering segments). |
-
 ## References
 
 - Dobrescu, L.I. and Shanker, A. (2022). "A fast upper envelope scan method for discrete-continuous dynamic programming." [SSRN Working Paper No. 4181302.](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=4181302)
