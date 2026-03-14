@@ -1,40 +1,40 @@
-/* FUES docs — Frost-inspired: bold type, generous space, high contrast
-   + Material Design 2 elevation/shadows */
+/* FUES docs — Daft Punk x LCARS: amber/gold accents, deep-space blacks,
+   warm typography, generous space, Material Design 2 elevation */
 
 :root {
-  /* Near-black header, crisp blue accent (Frost: high contrast, few colors) */
-  --md-primary-fg-color: #1a1a2e;
-  --md-primary-fg-color--light: #2d3561;
-  --md-primary-fg-color--dark: #0f0f1a;
-  --md-accent-fg-color: #4361ee;
+  /* Deep-space header, warm amber accent */
+  --md-primary-fg-color: #121218;
+  --md-primary-fg-color--light: #1e1e28;
+  --md-primary-fg-color--dark: #0a0a10;
+  --md-accent-fg-color: #c87f2a;
 
-  /* Clean backgrounds */
-  --md-default-bg-color: #fafafa;
-  --md-default-fg-color: #1a1a2e;
-  --md-typeset-a-color: #4361ee;
-  --md-code-bg-color: #f4f4f8;
+  /* Warm light backgrounds */
+  --md-default-bg-color: #faf9f6;
+  --md-default-fg-color: #1c1c1e;
+  --md-typeset-a-color: #b07020;
+  --md-code-bg-color: #f3f1ec;
 
-  /* Material 2 elevation colors */
+  /* Material 2 elevation */
   --elevation-1: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.06);
-  --elevation-2: 0 3px 6px rgba(0,0,0,0.1), 0 2px 4px rgba(0,0,0,0.06);
+  --elevation-2: 0 3px 6px rgba(0,0,0,0.10), 0 2px 4px rgba(0,0,0,0.06);
 }
 
 [data-md-color-scheme="slate"] {
-  --md-primary-fg-color: #0f0f1a;
-  --md-primary-fg-color--light: #1a1a2e;
-  --md-primary-fg-color--dark: #080810;
-  --md-accent-fg-color: #7b8cde;
-  --md-default-bg-color: #16161e;
-  --md-default-fg-color: #e8e8ed;
-  --md-typeset-a-color: #7b8cde;
-  --md-code-bg-color: #1e1e2a;
-  --elevation-1: 0 1px 3px rgba(0,0,0,0.3);
-  --elevation-2: 0 3px 6px rgba(0,0,0,0.4);
+  --md-primary-fg-color: #0a0a10;
+  --md-primary-fg-color--light: #121218;
+  --md-primary-fg-color--dark: #060608;
+  --md-accent-fg-color: #e8a838;
+  --md-default-bg-color: #0d0d14;
+  --md-default-fg-color: #e4e2dc;
+  --md-typeset-a-color: #e8a838;
+  --md-code-bg-color: #161620;
+  --elevation-1: 0 1px 3px rgba(0,0,0,0.4);
+  --elevation-2: 0 3px 6px rgba(0,0,0,0.5);
 }
 
-/* ── Header: dark, authoritative (Frost: strong masthead) ── */
+/* ── Header: deep-space black ── */
 .md-header {
-  background: #1a1a2e;
+  background: #0e0e16;
   box-shadow: var(--elevation-2);
   letter-spacing: 0.02em;
 }
@@ -44,20 +44,20 @@
 }
 
 .md-tabs {
-  background: #1a1a2e;
-  border-bottom: 1px solid rgba(255,255,255,0.06);
+  background: #0e0e16;
+  border-bottom: 1px solid rgba(232, 168, 56, 0.12);
 }
 
-/* ── Typography: colored heading hierarchy ── */
+/* ── Typography: warm heading hierarchy ── */
 .md-typeset h1 {
   font-weight: 800;
   letter-spacing: -0.02em;
   margin-top: 1.5em;
-  color: #1a1a2e;
+  color: #1c1c1e;
 }
 
 [data-md-color-scheme="slate"] .md-typeset h1 {
-  color: #f0f0f5;
+  color: #f0ede6;
 }
 
 .md-typeset h2 {
@@ -65,38 +65,38 @@
   letter-spacing: -0.01em;
   margin-top: 2.2em;
   padding-bottom: 0.35em;
-  border-bottom: 2px solid #4361ee;
-  color: #2d3561;
+  border-bottom: 2px solid #c87f2a;
+  color: #3a3024;
 }
 
 [data-md-color-scheme="slate"] .md-typeset h2 {
-  color: #8fa4f0;
-  border-bottom-color: #4361ee;
+  color: #e8a838;
+  border-bottom-color: rgba(232, 168, 56, 0.5);
 }
 
 .md-typeset h3 {
   font-weight: 600;
-  color: #4361ee;
+  color: #9a6820;
   margin-top: 1.8em;
 }
 
 [data-md-color-scheme="slate"] .md-typeset h3 {
-  color: #7b8cde;
+  color: #d4922a;
 }
 
 .md-typeset h4 {
   font-weight: 600;
-  color: #555;
+  color: #777066;
   text-transform: uppercase;
   font-size: 0.82em;
   letter-spacing: 0.04em;
 }
 
 [data-md-color-scheme="slate"] .md-typeset h4 {
-  color: #9ca3af;
+  color: #9a9488;
 }
 
-/* ── Content: generous whitespace (Frost: let it breathe) ── */
+/* ── Content: generous whitespace ── */
 .md-content {
   max-width: 50rem;
   padding: 0 1.5rem;
@@ -110,10 +110,10 @@
   margin-bottom: 1.2em;
 }
 
-/* ── Code: Material 2 elevation, rounded corners ── */
+/* ── Code: warm tinted, rounded ── */
 .md-typeset code {
   background-color: var(--md-code-bg-color);
-  color: #1a1a2e;
+  color: #1c1c1e;
   border-radius: 4px;
   padding: 0.15em 0.4em;
   font-size: 0.84em;
@@ -121,7 +121,7 @@
 }
 
 [data-md-color-scheme="slate"] .md-typeset code {
-  color: #e8e8ed;
+  color: #e4e2dc;
 }
 
 .md-typeset pre {
@@ -135,7 +135,7 @@
   font-weight: 400;
 }
 
-/* ── Admonitions: Material 2 cards ── */
+/* ── Admonitions: warm-toned cards ── */
 .md-typeset .admonition,
 .md-typeset details {
   border-radius: 8px;
@@ -145,25 +145,35 @@
 
 .md-typeset .admonition.note,
 .md-typeset details.note {
-  border-color: #4361ee;
+  border-color: #c87f2a;
 }
 
 .md-typeset .note > .admonition-title,
 .md-typeset .note > summary {
-  background: rgba(67, 97, 238, 0.06);
+  background: rgba(200, 127, 42, 0.06);
 }
 
 .md-typeset .admonition.warning,
 .md-typeset details.warning {
-  border-color: #e07c3e;
+  border-color: #cc4444;
 }
 
 .md-typeset .admonition.tip,
 .md-typeset details.tip {
-  border-color: #2ec4b6;
+  border-color: #2aaa8a;
 }
 
-/* ── Tables: clean, tight, Material elevation ── */
+.md-typeset .admonition.abstract,
+.md-typeset details.abstract {
+  border-color: #6a8caa;
+}
+
+.md-typeset .admonition.example,
+.md-typeset details.example {
+  border-color: #9a7acc;
+}
+
+/* ── Tables: clean, tight ── */
 .md-typeset table:not([class]) {
   font-size: 0.84rem;
   border-collapse: collapse;
@@ -173,49 +183,49 @@
 }
 
 .md-typeset table:not([class]) th {
-  background: #f0f0f5;
+  background: #f0ede6;
   font-weight: 600;
   text-transform: uppercase;
   font-size: 0.75rem;
   letter-spacing: 0.05em;
   padding: 0.8em 1em;
-  border-bottom: 2px solid #ddd;
+  border-bottom: 2px solid #d8d0c4;
 }
 
 [data-md-color-scheme="slate"] .md-typeset table:not([class]) th {
-  background: #1e1e2a;
-  border-bottom-color: #333;
+  background: #1a1a24;
+  border-bottom-color: rgba(232, 168, 56, 0.2);
 }
 
 .md-typeset table:not([class]) td {
   padding: 0.6em 1em;
-  border-bottom: 1px solid #eee;
+  border-bottom: 1px solid #eae6de;
 }
 
 [data-md-color-scheme="slate"] .md-typeset table:not([class]) td {
-  border-bottom-color: #2a2a3a;
+  border-bottom-color: #22222e;
 }
 
-/* ── Links: visible underline in light mode, accent on hover ── */
+/* ── Links: warm underline, amber accent ── */
 .md-typeset a {
   text-decoration: underline;
-  text-decoration-color: rgba(67, 97, 238, 0.35);
+  text-decoration-color: rgba(176, 112, 32, 0.3);
   text-underline-offset: 2px;
   font-weight: 500;
   transition: color 0.15s, text-decoration-color 0.15s;
 }
 
 .md-typeset a:hover {
-  color: #2d3561;
-  text-decoration-color: #2d3561;
+  color: #8a5818;
+  text-decoration-color: #8a5818;
 }
 
 [data-md-color-scheme="slate"] .md-typeset a:hover {
-  color: #a0b0ee;
-  text-decoration-color: #a0b0ee;
+  color: #f0c060;
+  text-decoration-color: #f0c060;
 }
 
-/* ── Navigation: tight, lightweight ── */
+/* ── Navigation ── */
 .md-nav__link {
   font-size: 0.82rem;
   font-weight: 500;
@@ -228,20 +238,20 @@
 
 /* ── Footer: match header ── */
 .md-footer {
-  background: #1a1a2e;
+  background: #0e0e16;
 }
 
-/* ── Blockquotes: Frost-style pull quote feel ── */
+/* ── Blockquotes: amber accent ── */
 .md-typeset blockquote {
-  border-left: 4px solid #4361ee;
+  border-left: 4px solid #c87f2a;
   padding: 0.5em 1.2em;
   margin: 1.5em 0;
-  background: rgba(67, 97, 238, 0.03);
+  background: rgba(200, 127, 42, 0.04);
   font-style: italic;
 }
 
 [data-md-color-scheme="slate"] .md-typeset blockquote {
-  background: rgba(67, 97, 238, 0.06);
+  background: rgba(232, 168, 56, 0.06);
 }
 
 /* ── Hero section ── */
@@ -257,19 +267,18 @@
 
 /* ═══════════════════════════════════════════════════════════════════
    Jupyter notebook styling (mkdocs-jupyter)
-   Adapts cell backgrounds and plot images to light/dark scheme.
    ═══════════════════════════════════════════════════════════════════ */
 
 /* ── Input cells ── */
 .jupyter-wrapper .jp-InputArea-editor,
 .jupyter-wrapper .highlight {
-  background-color: #f4f4f8;
+  background-color: #f3f1ec;
   border-radius: 6px;
 }
 
 [data-md-color-scheme="slate"] .jupyter-wrapper .jp-InputArea-editor,
 [data-md-color-scheme="slate"] .jupyter-wrapper .highlight {
-  background-color: #1e1e2a !important;
+  background-color: #161620 !important;
   border-radius: 6px;
 }
 
@@ -279,13 +288,13 @@
 }
 
 [data-md-color-scheme="slate"] .jupyter-wrapper .jp-OutputArea-output {
-  color: #e8e8ed;
+  color: #e4e2dc;
   background-color: transparent !important;
 }
 
 [data-md-color-scheme="slate"] .jupyter-wrapper .jp-OutputArea-output pre {
-  color: #e8e8ed !important;
-  background-color: #1e1e2a !important;
+  color: #e4e2dc !important;
+  background-color: #161620 !important;
 }
 
 [data-md-color-scheme="slate"] .jupyter-wrapper .jp-OutputArea-child {
@@ -302,8 +311,8 @@
 
 /* Output HTML tables (e.g. pandas) */
 [data-md-color-scheme="slate"] .jupyter-wrapper .jp-RenderedHTMLCommon.jp-OutputArea-output {
-  background-color: #1e1e2a !important;
-  color: #e8e8ed !important;
+  background-color: #161620 !important;
+  color: #e4e2dc !important;
 }
 
 /* ── Notebook markdown cells + all text in dark mode ── */
@@ -316,24 +325,24 @@
 [data-md-color-scheme="slate"] .jupyter-wrapper .jp-RenderedHTMLCommon h4,
 [data-md-color-scheme="slate"] .jupyter-wrapper .jp-RenderedHTMLCommon td,
 [data-md-color-scheme="slate"] .jupyter-wrapper .jp-RenderedHTMLCommon th {
-  color: #e8e8ed !important;
+  color: #e4e2dc !important;
 }
 
 [data-md-color-scheme="slate"] .jupyter-wrapper .jp-RenderedHTMLCommon a {
-  color: #7b8cde !important;
+  color: #e8a838 !important;
 }
 
 [data-md-color-scheme="slate"] .jupyter-wrapper .jp-RenderedHTMLCommon code {
-  color: #e8e8ed;
-  background-color: #1e1e2a;
+  color: #e4e2dc;
+  background-color: #161620;
 }
 
 /* ── Notebook text output (stdout/stderr) ── */
 [data-md-color-scheme="slate"] .jupyter-wrapper .jp-RenderedText pre {
-  color: #e8e8ed !important;
+  color: #e4e2dc !important;
 }
 
-/* ── Plot images: invert in dark mode for white-background matplotlib plots ── */
+/* ── Plot images: invert in dark mode for white-background matplotlib ── */
 [data-md-color-scheme="slate"] .jupyter-wrapper .jp-OutputArea-output img,
 [data-md-color-scheme="slate"] .md-content img:not(.emojione):not(.twemoji):not(.gemoji) {
   filter: invert(0.88) hue-rotate(180deg);

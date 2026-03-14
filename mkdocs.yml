@@ -24,7 +24,7 @@ theme:
         icon: material/brightness-4
         name: Switch to light mode
   font:
-    text: Inter
+    text: Space Grotesk
     code: JetBrains Mono
   logo: images/fues-logo.svg
   icon:
