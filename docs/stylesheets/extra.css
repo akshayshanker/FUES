@@ -48,12 +48,10 @@
   border-bottom: 1px solid rgba(232, 168, 56, 0.12);
 }
 
-/* ── Typography: warm heading hierarchy ── */
+/* ── Typography: tight heading hierarchy ── */
 .md-typeset h1 {
-  font-weight: 800;
-  letter-spacing: -0.02em;
-  margin-top: 1.5em;
-  color: #1c1c1e;
+  font-weight: 700;
+  letter-spacing: -0.01em;
 }
 
 [data-md-color-scheme="slate"] .md-typeset h1 {
@@ -61,23 +59,21 @@
 }
 
 .md-typeset h2 {
-  font-weight: 700;
-  letter-spacing: -0.01em;
-  margin-top: 2.2em;
-  padding-bottom: 0.35em;
-  border-bottom: 1px solid #d0c8bc;
+  font-weight: 600;
+  margin-top: 1.6em;
+  padding-bottom: 0.25em;
+  border-bottom: 1px solid #ddd5ca;
   color: #2a2520;
 }
 
 [data-md-color-scheme="slate"] .md-typeset h2 {
   color: #e4ddd0;
-  border-bottom-color: rgba(228, 221, 208, 0.18);
+  border-bottom-color: rgba(228, 221, 208, 0.15);
 }
 
 .md-typeset h3 {
   font-weight: 600;
-  color: #5a5045;
-  margin-top: 1.8em;
+  color: #444;
 }
 
 [data-md-color-scheme="slate"] .md-typeset h3 {
@@ -86,9 +82,9 @@
 
 .md-typeset h4 {
   font-weight: 600;
-  color: #777066;
+  color: #666;
   text-transform: uppercase;
-  font-size: 0.82em;
+  font-size: 0.8em;
   letter-spacing: 0.04em;
 }
 
@@ -96,51 +92,23 @@
   color: #9a9488;
 }
 
-/* ── Content: generous whitespace ── */
-.md-content {
-  max-width: 50rem;
-  padding: 0 1.5rem;
-}
-
-.md-typeset {
-  line-height: 1.7;
-}
-
-.md-typeset p {
-  margin-bottom: 1.2em;
-}
-
-/* ── Code: warm tinted, rounded ── */
+/* ── Code ── */
 .md-typeset code {
   background-color: var(--md-code-bg-color);
-  color: #1c1c1e;
-  border-radius: 4px;
-  padding: 0.15em 0.4em;
-  font-size: 0.84em;
-  font-weight: 500;
-}
-
-[data-md-color-scheme="slate"] .md-typeset code {
-  color: #e4e2dc;
+  border-radius: 3px;
+  padding: 0.1em 0.35em;
+  font-size: 0.85em;
 }
 
 .md-typeset pre {
-  border-radius: 8px;
-  box-shadow: var(--elevation-1);
-  overflow: hidden;
+  border-radius: 4px;
 }
 
-.md-typeset pre > code {
-  padding: 1em 1.2em;
-  font-weight: 400;
-}
-
-/* ── Admonitions: warm-toned cards ── */
+/* ── Admonitions ── */
 .md-typeset .admonition,
 .md-typeset details {
-  border-radius: 8px;
-  box-shadow: var(--elevation-1);
-  border-left-width: 4px;
+  border-radius: 4px;
+  border-left-width: 3px;
 }
 
 .md-typeset .admonition.note,
@@ -173,66 +141,26 @@
   border-color: #9a7acc;
 }
 
-/* ── Tables: clean, tight ── */
-.md-typeset table:not([class]) {
-  font-size: 0.84rem;
-  border-collapse: collapse;
-  box-shadow: var(--elevation-1);
-  border-radius: 6px;
-  overflow: hidden;
-}
-
+/* ── Tables ── */
 .md-typeset table:not([class]) th {
-  background: #f0ede6;
   font-weight: 600;
-  text-transform: uppercase;
-  font-size: 0.75rem;
-  letter-spacing: 0.05em;
-  padding: 0.8em 1em;
-  border-bottom: 2px solid #d8d0c4;
+  font-size: 0.8rem;
+  letter-spacing: 0.02em;
 }
 
-[data-md-color-scheme="slate"] .md-typeset table:not([class]) th {
-  background: #1a1a24;
-  border-bottom-color: rgba(232, 168, 56, 0.2);
-}
-
-.md-typeset table:not([class]) td {
-  padding: 0.6em 1em;
-  border-bottom: 1px solid #eae6de;
-}
-
-[data-md-color-scheme="slate"] .md-typeset table:not([class]) td {
-  border-bottom-color: #22222e;
-}
-
-/* ── Links: warm underline, amber accent ── */
+/* ── Links ── */
 .md-typeset a {
-  text-decoration: underline;
-  text-decoration-color: rgba(176, 112, 32, 0.3);
+  text-decoration-color: rgba(176, 112, 32, 0.25);
   text-underline-offset: 2px;
-  font-weight: 500;
-  transition: color 0.15s, text-decoration-color 0.15s;
 }
 
 .md-typeset a:hover {
-  color: #8a5818;
-  text-decoration-color: #8a5818;
-}
-
-[data-md-color-scheme="slate"] .md-typeset a:hover {
-  color: #f0c060;
-  text-decoration-color: #f0c060;
+  text-decoration-color: currentColor;
 }
 
 /* ── Navigation ── */
-.md-nav__link {
-  font-size: 0.82rem;
-  font-weight: 500;
-}
-
 .md-nav__item--active > .md-nav__link {
-  font-weight: 700;
+  font-weight: 600;
   color: var(--md-accent-fg-color);
 }
 
@@ -241,28 +169,15 @@
   background: #0e0e16;
 }
 
-/* ── Blockquotes: amber accent ── */
+/* ── Blockquotes ── */
 .md-typeset blockquote {
-  border-left: 4px solid #c87f2a;
-  padding: 0.5em 1.2em;
-  margin: 1.5em 0;
-  background: rgba(200, 127, 42, 0.04);
-  font-style: italic;
+  border-left: 3px solid #c87f2a;
+  padding: 0.4em 1em;
+  background: rgba(200, 127, 42, 0.03);
 }
 
 [data-md-color-scheme="slate"] .md-typeset blockquote {
-  background: rgba(232, 168, 56, 0.06);
-}
-
-/* ── Hero section ── */
-.md-typeset .hero {
-  margin: 2rem 0;
-  padding: 2rem 0;
-}
-
-.md-typeset .hero h1 {
-  font-weight: 800;
-  letter-spacing: -0.03em;
+  background: rgba(232, 168, 56, 0.05);
 }
 
 /* ═══════════════════════════════════════════════════════════════════
@@ -270,16 +185,9 @@
    ═══════════════════════════════════════════════════════════════════ */
 
 /* ── Input cells ── */
-.jupyter-wrapper .jp-InputArea-editor,
-.jupyter-wrapper .highlight {
-  background-color: #f3f1ec;
-  border-radius: 6px;
-}
-
 [data-md-color-scheme="slate"] .jupyter-wrapper .jp-InputArea-editor,
 [data-md-color-scheme="slate"] .jupyter-wrapper .highlight {
   background-color: #161620 !important;
-  border-radius: 6px;
 }
 
 /* ── Output cells ── */
