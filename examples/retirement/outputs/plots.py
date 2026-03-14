@@ -730,7 +730,7 @@ def nb_plot_egm_interactive(nest, model, age, pad=10):
             x=inter_e, y=v_inter, mode='markers',
             marker=dict(size=10, color=t['cross'], symbol='star',
                         line=dict(width=1, color=t['fg'])),
-            name='Crossing points',
+            name='Intersection points',
         ), row=1, col=1)
 
     # Savings panel
@@ -940,7 +940,7 @@ def nb_plot_egrids(nest, model, age, pad=10, xlim=None, ylim_v=None, ylim_s=None
     - Red open circles: raw EGM points
     - Blue crosses: FUES-refined optimal points
     - Black line: value function through optimal points
-    - Green stars: estimated crossing points
+    - Green stars: estimated intersection points
 
     Parameters
     ----------
@@ -1034,7 +1034,7 @@ def nb_plot_egrids(nest, model, age, pad=10, xlim=None, ylim_v=None, ylim_s=None
     if len(inter_e) > 0:
         ax1.scatter(inter_e, v_inter, s=60, color=t['cross'], marker='*',
                     edgecolors=t['fg'], linewidths=0.5,
-                    label='Crossing points', zorder=4)
+                    label='Intersection points', zorder=4)
     ax1.set_xlim(x_lo, x_hi)
     if v_lo is not None:
         ax1.set_ylim(v_lo, v_hi)
@@ -1055,7 +1055,7 @@ def nb_plot_egrids(nest, model, age, pad=10, xlim=None, ylim_v=None, ylim_s=None
         si = np.argsort(inter_e)
         ax2.scatter(inter_e[si], sav_inter[si], s=60, color=t['cross'],
                     marker='*', edgecolors=t['fg'], linewidths=0.5,
-                    label='Crossing points', zorder=4)
+                    label='Intersection points', zorder=4)
     ax2.set_xlim(x_lo, x_hi)
     if s_lo is not None:
         ax2.set_ylim(s_lo, s_hi)
