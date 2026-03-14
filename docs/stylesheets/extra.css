@@ -65,23 +65,23 @@
   letter-spacing: -0.01em;
   margin-top: 2.2em;
   padding-bottom: 0.35em;
-  border-bottom: 2px solid #c87f2a;
-  color: #3a3024;
+  border-bottom: 1px solid #d0c8bc;
+  color: #2a2520;
 }
 
 [data-md-color-scheme="slate"] .md-typeset h2 {
-  color: #e8a838;
-  border-bottom-color: rgba(232, 168, 56, 0.5);
+  color: #e4ddd0;
+  border-bottom-color: rgba(228, 221, 208, 0.18);
 }
 
 .md-typeset h3 {
   font-weight: 600;
-  color: #9a6820;
+  color: #5a5045;
   margin-top: 1.8em;
 }
 
 [data-md-color-scheme="slate"] .md-typeset h3 {
-  color: #d4922a;
+  color: #bab0a0;
 }
 
 .md-typeset h4 {
