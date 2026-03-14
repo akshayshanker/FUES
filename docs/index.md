@@ -1,4 +1,4 @@
-# FUES: Fast Upper-Envelope Scan
+# FUES: Fast Upper Envelope Scan
 
 !!! warning "Pre-release (v0.6.0dev1)"
     Under active development. The API and docs may change.
@@ -7,9 +7,9 @@
 
 > Dobrescu, L.I. and Shanker, A. (2022). "A fast upper envelope scan method for discrete-continuous dynamic programming." [SSRN.](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=4181302)
 
-FUES scans the endogenous grid in a single $O(n^{1/2})$ pass, detecting sub-optimal points as the conjunction of a policy jump and a concave right turn in the value correspondence.
-
-Unlike existing upper envelope methods, FUES does not require monotonicity of the policy function or numerical optimisation. It is also orders of magnitude faster.
+FUES recovers the upper envelope of the EGM ([Carroll 2006](https://doi.org/10.1016/j.econlet.2005.09.013)) value correspondence in discrete-continuous problems. 
+FUES works by scanning the endogenous grid in a single $O(n^{1/2})$ pass, detecting sub-optimal points as the conjunction of a policy jump and a concave right turn in the value correspondence.
+FUES does not require monotonicity of the optimal policy function or numerical optimisation, it is also orders of magnitude faster than existing upper envelope methods. 
 
 See [How FUES Works](algorithm/fues-algorithm.md) for the full algorithm.
 
@@ -73,21 +73,3 @@ Note: DCEGM (MSS in the paper) and CONSAV (LTM in the paper) require a strictly 
 
 See [API Reference](api/fues.md) for full parameter documentation.
 
-## Try the notebook
-
-For a complete worked example solving the [Iskhakov et al. (2017)](https://doi.org/10.3982/QE643) retirement model:
-
-```bash
-jupyter lab examples/retirement/notebooks/retirement_fues.ipynb
-```
-
-Or view the [rendered notebook](notebooks/retirement_fues.ipynb) in the docs.
-
-## Quick links
-
-| | |
-|---|---|
-| **[Installation](getting-started/installation.md)** | pip install, editable, Gadi |
-| **[Examples](examples/index.md)** | Retirement, housing, durables — with notebooks |
-| **[API Reference](api/fues.md)** | Full signatures and docstrings |
-| **[Algorithm](algorithm/fues-algorithm.md)** | How FUES works, forward/backward scans |
