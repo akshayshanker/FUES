@@ -26,14 +26,14 @@ where $\tau$ is the utility cost of working, $a_{t}$ is beginning of period liqu
 **Worker's Bellman equation:**
 
 $$
-V_t^1(a) = \max_{c, d_{t+1} \in \{0,1\}} \left\{ u(c) - d_{t+1}\tau + \beta V_{t+1}^{d_{t+1}}(a') \right\}
+V_t^1(a) = \max_{c, d_{t+1} \in \lbrace 0,1 \rbrace} \left\lbrace u(c) - d_{t+1}\tau + \beta V_{t+1}^{d_{t+1}}(a') \right\rbrace
 $$
 where $a^{\prime} = (1+r)a +  y - c$.
 
 **Retiree's Bellman equation:**
 
 $$
-V_t^0(a) = \max_c \left\{ u(c) + \beta V_{t+1}^0(a') \right\}
+V_t^0(a) = \max_c \left\lbrace u(c) + \beta V_{t+1}^0(a') \right\rbrace
 $$
 
 The worker's value function is the upper envelope of multiple concave functions, one for each feasible sequence of future discrete choices. Holding $d_{t+1}=1$ fixed, by selecting $a'$, the worker implicitly selects all future discrete choices $d_j$ for $j > t+1$. The upper envelope of these concave functions is not itself concave, producing the "secondary kinks" described by Iskhakov et al. (2017). This non-concavity is precisely the problem that FUES solves.

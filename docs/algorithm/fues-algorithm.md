@@ -14,7 +14,7 @@ After EGM inverts the Euler equation, some candidate points lie on the upper env
     Consider Bellman equation with a discrete choice \(d \in \{0, 1\}\) and a continuous choice \(c\):
 
     \[
-    V_t(a) = \max_{c,\, d} \left\{ u(c) + \beta V_{t+1}^d(a') \right\}
+    V_t(a) = \max_{c,\, d} \left\lbrace u(c) + \beta V_{t+1}^d(a') \right\rbrace
     \]
 
     The continuation value \(V_{t+1}^d\) — even holding \(d\) fixed — depends on all future discrete choice sequences. Each sequence yields a **concave** value function. The true \(V_t\) is the **upper envelope** of these concave functions.
