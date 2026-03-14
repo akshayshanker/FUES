@@ -244,6 +244,19 @@
   color: #e4e2dc !important;
 }
 
+[data-md-color-scheme="slate"] .jupyter-wrapper .jp-RenderedHTMLCommon th {
+  background-color: #1a1a24 !important;
+  border-color: #2a2a36 !important;
+}
+
+[data-md-color-scheme="slate"] .jupyter-wrapper .jp-RenderedHTMLCommon td {
+  border-color: #22222e !important;
+}
+
+[data-md-color-scheme="slate"] .jupyter-wrapper .jp-RenderedHTMLCommon table {
+  background-color: #0d0d14 !important;
+}
+
 [data-md-color-scheme="slate"] .jupyter-wrapper .jp-RenderedHTMLCommon a {
   color: #e8a838 !important;
 }
