@@ -104,13 +104,13 @@ def test_Timings(grid_sizes, delta_values, n=3, results_dir="results",
         cfg_ov = {**extra_config, 'grid_size': true_grid_size,
                   'padding_mbar': -0.011}
         # Warmup
-        solve_nest(
+        _, _, _, _ = solve_nest(
             SYNTAX_DIR, method=true_method,
             calib_overrides=cal_ov,
             config_overrides=cfg_ov,
         )
         # Actual run
-        nest_true, model_true, _ = solve_nest(
+        nest_true, model_true, _, _ = solve_nest(
             SYNTAX_DIR, method=true_method,
             calib_overrides=cal_ov,
             config_overrides=cfg_ov,
@@ -135,7 +135,7 @@ def test_Timings(grid_sizes, delta_values, n=3, results_dir="results",
 
             for _ in range(n):
                 for method in ('RFC', 'FUES', 'DCEGM', 'CONSAV'):
-                    nest, model, _ = solve_nest(
+                    nest, model, _, _ = solve_nest(
                         SYNTAX_DIR, method=method,
                         calib_overrides={**extra_calib, 'delta': delta},
                         config_overrides={**extra_config, 'grid_size': g_size,
@@ -215,11 +215,11 @@ if __name__ == "__main__":
     test_Timings(grid_sizes, delta_values)
 
     # Generate baseline solution and plots via canonical pipeline
-    nest, model, _ = solve_nest(SYNTAX_DIR, method='RFC')
+    nest, model, _, _ = solve_nest(SYNTAX_DIR, method='RFC')
 
     results = {}
     for method in ['RFC', 'FUES', 'DCEGM', 'CONSAV']:
-        nest, model, _ = solve_nest(SYNTAX_DIR, method=method)
+        nest, model, _, _ = solve_nest(SYNTAX_DIR, method=method)
         results[method] = {
             'nest': nest,
             'c': get_policy(nest, 'c'),

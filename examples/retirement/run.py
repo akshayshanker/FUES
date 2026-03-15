@@ -178,16 +178,17 @@ def main():
     solutions = {}
     for method in UE_METHODS:
         # Warmup (JIT compile)
-        solve_nest(
+        _, m_, ops_, w_ = solve_nest(
             SYNTAX_DIR, method=method,
             calib_overrides=calib_overrides,
             config_overrides=config_overrides,
         )
-        # Timed run
-        nest, model, _ = solve_nest(
+        # Timed run (reuse model + ops)
+        nest, model, _, _ = solve_nest(
             SYNTAX_DIR, method=method,
             calib_overrides=calib_overrides,
             config_overrides=config_overrides,
+            model=m_, stage_ops=ops_, waves=w_,
         )
         solutions[method] = {
             'nest': nest,
