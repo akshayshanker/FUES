@@ -81,14 +81,14 @@ def _wire_continuations(prev_sol):
 # Stage dispatch (application-specific, pure)
 # ============================================================
 
-def _solve_retire_cons(op, cntn):
-    c, v, da, ddv = op(*cntn)
+def _solve_retire_cons(op, cntn, grid):
+    c, v, da, ddv = op(*cntn, grid)
     return {"c": c, "v": v, "da": da, "ddv": ddv}
 
 
-def _solve_work_cons(op, cntn):
+def _solve_work_cons(op, cntn, grid):
     (v, c, da, ue_elapsed,
-     c_hat, q_hat, egrid, da_pre_ue) = op(*cntn)
+     c_hat, q_hat, egrid, da_pre_ue) = op(*cntn, grid)
     return {
         "v": v, "c": c, "da": da,
         "c_hat": c_hat, "q_hat": q_hat,
@@ -110,7 +110,7 @@ def _solve_labour_mkt(op, work_result, retire_result):
 # Backward solve: solve_period + backward loop
 # ============================================================
 
-def solve_period(waves, stage_ops, cntns, t, h):
+def solve_period(waves, stage_ops, cntns, grid, t, h):
     """Solve one period using kikku-derived wave ordering.
 
     Parameters
@@ -122,6 +122,9 @@ def solve_period(waves, stage_ops, cntns, t, h):
         Method and all config are already bound.
     cntns : dict
         Continuation values keyed by stage name.
+    grid : ndarray
+        Asset grid (passed to operators so they can be
+        reused across grid sizes without JIT recompilation).
     t : int
         Calendar time index.
     h : int
@@ -135,9 +138,11 @@ def solve_period(waves, stage_ops, cntns, t, h):
     dispatchers = {
         'retire_cons': lambda sr: _solve_retire_cons(
             stage_ops['retire_cons'], cntns['retire_cons'],
+            grid,
         ),
         'work_cons': lambda sr: _solve_work_cons(
             stage_ops['work_cons'], cntns['work_cons'],
+            grid,
         ),
         'labour_mkt_decision': lambda sr: _solve_labour_mkt(
             stage_ops['labour_mkt_decision'],
@@ -174,7 +179,8 @@ def solve_period(waves, stage_ops, cntns, t, h):
 # ============================================================
 
 def solve_nest(syntax_dir, method='FUES',
-               calib_overrides=None, config_overrides=None):
+               calib_overrides=None, config_overrides=None,
+               model=None, stage_ops=None):
     """Canonical pipeline: load → build → solve backward.
 
     The composition algebra is visible::
@@ -184,6 +190,10 @@ def solve_nest(syntax_dir, method='FUES',
             → period → graph → waves
             → model  → ops(method)
         for h: cntns + waves + ops → solve_period → solution
+
+    For stationary models, pass back the returned ``model``
+    and ``stage_ops`` to avoid re-building operators (and
+    re-triggering JIT compilation) on subsequent calls.
 
     Parameters
     ----------
@@ -196,6 +206,10 @@ def solve_nest(syntax_dir, method='FUES',
         Override economic parameters.
     config_overrides : dict, optional
         Override numerical settings.
+    model : RetirementModel, optional
+        Pre-built model (reuse to skip reconstruction).
+    stage_ops : dict, optional
+        Pre-built stage operators (reuse to skip JIT).
 
     Returns
     -------
@@ -206,29 +220,26 @@ def solve_nest(syntax_dir, method='FUES',
     """
     syntax_dir = Path(syntax_dir)
 
-    # I/O boundary: all disk reads happen here
-    calibration, settings, stage_sources, \
-        period_template, inter_conn = load_syntax(
-            syntax_dir, calib_overrides, config_overrides,
+    # I/O + pipeline (skip entirely when reusing model + ops)
+    if model is None or stage_ops is None:
+        calibration, settings, stage_sources, \
+            period_template, inter_conn = load_syntax(
+                syntax_dir, calib_overrides, config_overrides,
+            )
+        stage_sources = _override_ue_method(stage_sources, method)
+        period = instantiate_period(
+            calibration, settings, stage_sources, period_template,
         )
-    T = int(settings.get('T', calibration.get('T', 20)))
+        graph = period_to_graph(period)
+        waves = backward_paths(graph, inter_conn)
+        if model is None:
+            model = RetirementModel(period)
+        if stage_ops is None:
+            stage_ops = make_stage_operators(model, period=period)
+        stage_ops['_waves'] = waves
 
-    # Override UE method in the methodization data before
-    # the pipeline runs — method is a methodization concern
-    stage_sources = _override_ue_method(stage_sources, method)
-
-    # Dolo-plus pipeline (parse → methodize → configure → calibrate)
-    period = instantiate_period(
-        calibration, settings, stage_sources, period_template,
-    )
-
-    # Kikku: topology
-    graph = period_to_graph(period)
-    waves = backward_paths(graph, inter_conn)
-
-    # Application: numModel + operators (method read from period)
-    model = RetirementModel(period)
-    stage_ops = make_stage_operators(model, period=period)
+    waves = stage_ops['_waves']
+    T = int(model.T)
 
     # Backward induction (thin combinator)
     solutions = []
@@ -236,7 +247,7 @@ def solve_nest(syntax_dir, method='FUES',
         cntns = _terminal_continuations(model) if h == 0 \
             else _wire_continuations(solutions[h - 1])
         sol = solve_period(waves, stage_ops, cntns,
-                           t=T - 1 - h, h=h)
+                           model.asset_grid_A, t=T - 1 - h, h=h)
         solutions.append(sol)
 
     nest = {"solutions": solutions}

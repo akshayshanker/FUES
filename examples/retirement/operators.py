@@ -1,8 +1,9 @@
 """Stage operator factories for the retirement choice model.
 
-Each factory builds a closure over calibrated parameters and
-equation callables.  The closures are the actual stage operators
-that the backward-solve loop calls.
+Each factory builds a closure over calibrated scalar parameters
+and equation callables.  Grids are passed as arguments so the
+same compiled operators work with any grid size — no JIT
+recompilation needed when the grid changes.
 
 Separated from ``model.py`` so that the numModel (params + grid)
 and the operators (computation) live in different modules —
@@ -34,34 +35,30 @@ def _read_ue_method(period):
 def make_stage_operators(model, period=None, equations=None):
     """Build stage operators for the retirement model.
 
-    The UE method is read from the stage's methodization
-    data (set during the pipeline), not passed as a
-    separate argument.
+    Scalar parameters (beta, R, delta, etc.) and equation
+    callables are captured in closures.  The asset grid is
+    passed as an argument to each operator, so the same
+    compiled operators can be reused across grid sizes
+    without JIT recompilation.
 
     Parameters
     ----------
     model : RetirementModel
-        Model instance with calibrated parameters and
-        grids.
+        Model instance (scalars + callables).
     period : dict, optional
-        Canonical period dict.  If provided, the UE method
-        is read from the ``work_cons`` stage's methods
-        (a methodization concern).  Defaults to ``FUES``.
+        Canonical period dict (UE method read from here).
     equations : dict, optional
         Override equation callables.
 
     Returns
     -------
     dict
-        ``{'retire_cons':  ...,
-           'work_cons':    ...,
+        ``{'retire_cons': ..., 'work_cons': ...,
            'labour_mkt_decision': ...}``
     """
     beta, delta = model.beta, model.delta
-    asset_grid_A = model.asset_grid_A
     y = model.y
     smooth_sigma = model.smooth_sigma
-    grid_size = model.grid_size
     R = model.R
     m_bar = model.m_bar
 
@@ -77,29 +74,22 @@ def make_stage_operators(model, period=None, equations=None):
     # ----------------------------------------------------------
 
     @njit
-    def solver_retiree_stage(c_cntn, v_cntn, dlambda_cntn):
+    def solver_retiree_stage(c_cntn, v_cntn, dlambda_cntn, grid):
         """Retiree consumption stage (EGM, no upper envelope).
 
-        1. InvEuler on the poststate grid
-        2. cntn_to_dcsn transition (endogenous grid)
-        3. Bellman
-        4. Asset derivative
-        5. Interpolate to exogenous arrival grid
-        6. Constrained region
-        7. MarginalBellman
+        ``grid`` is the asset grid (arrival/poststate).
         """
-        c_dcsn_hat = np.zeros(grid_size)
-        v_dcsn_hat = np.zeros(grid_size)
-        endog_grid = np.zeros(grid_size)
-        da_dcsn_hat = np.zeros(grid_size)
+        n = len(grid)
+        c_dcsn_hat = np.zeros(n)
+        v_dcsn_hat = np.zeros(n)
+        endog_grid = np.zeros(n)
+        da_dcsn_hat = np.zeros(n)
 
-        for i in range(len(asset_grid_A)):
-            b_ret = asset_grid_A[i]
-            c_next = c_cntn[i]
-            uc_cntn = beta * R * du(c_next)
+        for i in range(n):
+            b_ret = grid[i]
+            uc_cntn = beta * R * du(c_cntn[i])
             c_dcsn = uc_inv(uc_cntn)
-            a_ret_hat = (c_dcsn + b_ret) / R
-            endog_grid[i] = a_ret_hat
+            endog_grid[i] = (c_dcsn + b_ret) / R
             c_dcsn_hat[i] = c_dcsn
             v_dcsn_hat[i] = u(c_dcsn) + beta * v_cntn[i]
             da_dcsn_hat[i] = R * ddu(c_dcsn) / \
@@ -108,12 +98,12 @@ def make_stage_operators(model, period=None, equations=None):
         min_a_val = endog_grid[0]
         c_arvl, v_arvl, da_arvl = interp_as_3(
             endog_grid, c_dcsn_hat, v_dcsn_hat, da_dcsn_hat,
-            asset_grid_A)
+            grid)
 
-        constrained_idx = np.where(asset_grid_A <= min_a_val)
-        c_arvl[constrained_idx] = asset_grid_A[constrained_idx]
+        constrained_idx = np.where(grid <= min_a_val)
+        c_arvl[constrained_idx] = grid[constrained_idx]
         v_arvl[constrained_idx] = u(
-            asset_grid_A[constrained_idx]) + beta * v_cntn[0]
+            grid[constrained_idx]) + beta * v_cntn[0]
         da_arvl[constrained_idx] = 0
 
         dlambda_arvl = ddu(c_arvl) * (R - da_arvl)
@@ -124,32 +114,35 @@ def make_stage_operators(model, period=None, equations=None):
     # ----------------------------------------------------------
 
     @njit
-    def _invert_euler(lambda_cntn, dlambda_cntn, v_cntn):
+    def _invert_euler(lambda_cntn, dlambda_cntn, v_cntn, grid):
         """Inverse Euler step for the worker stage (pre-UE)."""
-        cons_hat = np.zeros(grid_size)
-        q_hat = np.zeros(grid_size)
-        endog_grid = np.zeros(grid_size)
-        del_a = np.zeros(grid_size)
+        n = len(grid)
+        cons_hat = np.zeros(n)
+        q_hat = np.zeros(n)
+        endog_grid = np.zeros(n)
+        del_a = np.zeros(n)
 
-        for i in range(grid_size):
-            c = uc_inv(beta * R * lambda_cntn[i] )     #control function 
-            q_hat[i] = u(c) + beta * v_cntn[i] - delta #RHS of bellman 
+        for i in range(n):
+            c = uc_inv(beta * R * lambda_cntn[i])
+            q_hat[i] = u(c) + beta * v_cntn[i] - delta
             cons_hat[i] = c
-            endog_grid[i] = c + asset_grid_A[i]
+            endog_grid[i] = c + grid[i]
             del_a[i] = R * ddu(c) / \
                 (ddu(c) + beta * R * dlambda_cntn[i])
 
         return cons_hat, q_hat, endog_grid, del_a
 
     @njit
-    def _interp_to_arrival(egrid, vf, sigma, dela, min_a, v_cntn):
+    def _interp_to_arrival(egrid, vf, sigma, dela, min_a,
+                           v_cntn, grid):
         """Interpolate refined worker policies to arrival grid."""
-        w_grid = R * asset_grid_A + y
+        w_grid = R * grid + y
+        n = len(grid)
         vf_arvl, c_arvl = interp_as_2(egrid, vf, sigma, w_grid)
-        da_arvl = np.zeros(grid_size)
+        da_arvl = np.zeros(n)
 
         constrained = np.where(w_grid < min_a)
-        c_arvl[constrained] = w_grid[constrained] - asset_grid_A[0]
+        c_arvl[constrained] = w_grid[constrained] - grid[0]
         vf_arvl[constrained] = u(
             w_grid[constrained]) + beta * v_cntn[0] - delta
 
@@ -157,17 +150,15 @@ def make_stage_operators(model, period=None, equations=None):
 
     ue_method = _read_ue_method(period) if period else "FUES"
 
-    def solver_worker_stage(lambda_cntn, dlambda_cntn, v_cntn):
+    def solver_worker_stage(lambda_cntn, dlambda_cntn,
+                            v_cntn, grid):
         """Worker consumption stage (EGM + upper envelope).
 
+        ``grid`` is the asset grid (poststate / arrival).
         UE method is bound at operator construction time.
-
-        1. Invert Euler (pre-UE)
-        2. Upper envelope (method bound at construction)
-        3. Interpolate to arrival grid
         """
         cons_hat, q_hat, endog_grid, del_a = _invert_euler(
-            lambda_cntn, dlambda_cntn, v_cntn)
+            lambda_cntn, dlambda_cntn, v_cntn, grid)
 
         min_a_val = endog_grid[0]
 
@@ -175,7 +166,7 @@ def make_stage_operators(model, period=None, equations=None):
         refined, _, _ = egm_ue_global(
             endog_grid, q_hat,
             beta * v_cntn - delta, cons_hat,
-            asset_grid_A, asset_grid_A,
+            grid, grid,
             du, {"func": u, "args": {}},
             ue_method=ue_method,
             m_bar=m_bar, lb=10,
@@ -189,7 +180,8 @@ def make_stage_operators(model, period=None, equations=None):
         dela_ref = np.zeros_like(refined["x_cntn_ref"])
 
         v_arvl, c_arvl, da_arvl = _interp_to_arrival(
-            egrid1, q_ref, c_ref, dela_ref, min_a_val, v_cntn)
+            egrid1, q_ref, c_ref, dela_ref, min_a_val,
+            v_cntn, grid)
 
         return (v_arvl, c_arvl, da_arvl, ue_time,
                 cons_hat, q_hat, endog_grid, del_a)
@@ -204,7 +196,8 @@ def make_stage_operators(model, period=None, equations=None):
     ):
         """Branching stage: discrete work/retire choice.
 
-        Hard max (smooth_sigma=0) or logit smoothing.
+        No grid argument needed — operates on arrays from
+        the two branch stages.
         """
         if smooth_sigma == 0:
             p = v_work > v_ret
