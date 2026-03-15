@@ -15,6 +15,8 @@ import time
 from numba import njit
 from dcsmm.fues.helpers.math_funcs import interp_as_2, interp_as_3
 from dcsmm.uenvelope import EGM_UE as egm_ue_global
+from kikku.asva.egm_1d import make_egm_1d
+from .model import WORKER_EGM_FNS, RETIREE_EGM_FNS
 
 
 def _read_ue_method(period):
@@ -69,68 +71,60 @@ def make_stage_operators(model, period=None, equations=None):
     uc_inv = equations.get('uc_inv', model.uc_inv)
     ddu = equations.get('ddu', model.ddu)
 
+    egm_params = np.array([beta, R, delta])
+
     # ----------------------------------------------------------
     # retire_cons: retiree EGM (no upper envelope)
     # ----------------------------------------------------------
 
+    _egm_retire = make_egm_1d(
+        RETIREE_EGM_FNS['inv_euler'],
+        RETIREE_EGM_FNS['bellman_rhs'],
+        RETIREE_EGM_FNS['cntn_to_dcsn'],
+        RETIREE_EGM_FNS['concavity'],
+        egm_params,
+    )
+
     @njit
-    def solver_retiree_stage(c_cntn, v_cntn, dlambda_cntn, grid):
-        """Retiree consumption stage (EGM, no upper envelope).
-
-        ``grid`` is the asset grid (arrival/poststate).
-        """
-        n = len(grid)
-        c_dcsn_hat = np.zeros(n)
-        v_dcsn_hat = np.zeros(n)
-        endog_grid = np.zeros(n)
-        da_dcsn_hat = np.zeros(n)
-
-        for i in range(n):
-            b_ret = grid[i]
-            uc_cntn = beta * R * du(c_cntn[i])
-            c_dcsn = uc_inv(uc_cntn)
-            endog_grid[i] = (c_dcsn + b_ret) / R
-            c_dcsn_hat[i] = c_dcsn
-            v_dcsn_hat[i] = u(c_dcsn) + beta * v_cntn[i]
-            da_dcsn_hat[i] = R * ddu(c_dcsn) / \
-                (ddu(c_dcsn) + beta * R * dlambda_cntn[i])
-
+    def _retire_interp(endog_grid, c_hat, v_hat, da_hat,
+                       grid, v_cntn_0):
+        """Interpolate retiree EGM results to arrival grid + constrained region."""
         min_a_val = endog_grid[0]
         c_arvl, v_arvl, da_arvl = interp_as_3(
-            endog_grid, c_dcsn_hat, v_dcsn_hat, da_dcsn_hat,
-            grid)
+            endog_grid, c_hat, v_hat, da_hat, grid)
 
         constrained_idx = np.where(grid <= min_a_val)
         c_arvl[constrained_idx] = grid[constrained_idx]
         v_arvl[constrained_idx] = u(
-            grid[constrained_idx]) + beta * v_cntn[0]
+            grid[constrained_idx]) + beta * v_cntn_0
         da_arvl[constrained_idx] = 0
 
         dlambda_arvl = ddu(c_arvl) * (R - da_arvl)
         return c_arvl, v_arvl, da_arvl, dlambda_arvl
 
+    def solver_retiree_stage(c_cntn, v_cntn, dlambda_cntn, grid):
+        """Retiree consumption stage (EGM, no upper envelope).
+
+        Note: the retiree's cntn_to_dcsn transition produces an
+        endogenous grid scaled by 1/R: a_ret = (c + b_ret) / R.
+        The EGM step handles this via fn_cntn_to_dcsn_ret.
+        """
+        c_hat, v_hat, endog_grid, da_hat = _egm_retire(
+            du(c_cntn), dlambda_cntn, v_cntn, grid, 0.0)
+        return _retire_interp(
+            endog_grid, c_hat, v_hat, da_hat, grid, v_cntn[0])
+
     # ----------------------------------------------------------
     # work_cons: worker EGM + upper envelope
     # ----------------------------------------------------------
 
-    @njit
-    def _invert_euler(lambda_cntn, dlambda_cntn, v_cntn, grid):
-        """Inverse Euler step for the worker stage (pre-UE)."""
-        n = len(grid)
-        cons_hat = np.zeros(n)
-        q_hat = np.zeros(n)
-        endog_grid = np.zeros(n)
-        del_a = np.zeros(n)
-
-        for i in range(n):
-            c = uc_inv(beta * R * lambda_cntn[i])
-            q_hat[i] = u(c) + beta * v_cntn[i] - delta
-            cons_hat[i] = c
-            endog_grid[i] = c + grid[i]
-            del_a[i] = R * ddu(c) / \
-                (ddu(c) + beta * R * dlambda_cntn[i])
-
-        return cons_hat, q_hat, endog_grid, del_a
+    _invert_euler = make_egm_1d(
+        WORKER_EGM_FNS['inv_euler'],
+        WORKER_EGM_FNS['bellman_rhs'],
+        WORKER_EGM_FNS['cntn_to_dcsn'],
+        WORKER_EGM_FNS['concavity'],
+        egm_params,
+    )
 
     @njit
     def _interp_to_arrival(egrid, vf, sigma, dela, min_a,
@@ -150,22 +144,22 @@ def make_stage_operators(model, period=None, equations=None):
 
     ue_method = _read_ue_method(period) if period else "FUES"
 
-    def solver_worker_stage(lambda_cntn, dlambda_cntn,
-                            v_cntn, grid):
+    def solver_worker_stage(dv_cntn, ddv_cntn, v_cntn, grid):
         """Worker consumption stage (EGM + upper envelope).
 
         ``grid`` is the asset grid (poststate / arrival).
         UE method is bound at operator construction time.
+        EGM sub-equations are from model.WORKER_EGM_FNS.
         """
-        cons_hat, q_hat, endog_grid, del_a = _invert_euler(
-            lambda_cntn, dlambda_cntn, v_cntn, grid)
+        c_hat, v_hat, x_dcsn_hat, del_a = _invert_euler(
+            dv_cntn, ddv_cntn, v_cntn, grid, 0.0)
 
-        min_a_val = endog_grid[0]
+        min_a_val = x_dcsn_hat[0]
 
         t_ue = time.time()
         refined, _, _ = egm_ue_global(
-            endog_grid, q_hat,
-            beta * v_cntn - delta, cons_hat,
+            x_dcsn_hat, v_hat,
+            beta * v_cntn - delta, c_hat,
             grid, grid,
             du, {"func": u, "args": {}},
             ue_method=ue_method,
@@ -175,16 +169,16 @@ def make_stage_operators(model, period=None, equations=None):
         ue_time = time.time() - t_ue
 
         egrid1 = refined["x_dcsn_ref"]
-        q_ref = refined["v_dcsn_ref"]
+        v_ref = refined["v_dcsn_ref"]
         c_ref = refined["kappa_ref"]
         dela_ref = np.zeros_like(refined["x_cntn_ref"])
 
         v_arvl, c_arvl, da_arvl = _interp_to_arrival(
-            egrid1, q_ref, c_ref, dela_ref, min_a_val,
+            egrid1, v_ref, c_ref, dela_ref, min_a_val,
             v_cntn, grid)
 
         return (v_arvl, c_arvl, da_arvl, ue_time,
-                cons_hat, q_hat, endog_grid, del_a)
+                c_hat, v_hat, x_dcsn_hat, del_a)
 
     # ----------------------------------------------------------
     # labour_mkt_decision: branching max/logit

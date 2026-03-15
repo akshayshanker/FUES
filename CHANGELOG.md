@@ -2,6 +2,30 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.6.0dev3] - 2026-03-15 – Kikku package, solver refactor, generic EGM operators
+
+### Architecture
+
+- **Kikku package** ([bright-forest/kikku](https://github.com/bright-forest/kikku)): new standalone package for stage-composition and period-graph tools.
+  - `period_graphs`: `period_to_graph`, `backward_paths` (wavefront partition), `forward_order`. Handles branching stages with branch-keyed poststates. DAG acyclicity check.
+  - `pipeline`: `load_syntax` (I/O boundary), `instantiate_period` (dolo-plus pipeline, lazy import).
+  - `nest`: `load_inter_connector` (inter-period connector loading with custom YAML tag handling).
+  - `asva` subpackage: `make_egm_1d` — generic 1D EGM operator factory. Takes four sub-equation callables (InvEuler, Bellman, cntn_to_dcsn, Concavity) + params array → returns `@njit` EGM step function.
+
+### Retirement solver refactor
+
+- **`solve.py`**: thin functional combinator. All I/O in `load_syntax`, pure transforms downstream. `solve_backward` is a standalone combinator. `solve_nest` returns `(nest, model, ops, waves)` for full reuse.
+- **`operators.py`**: stage operators extracted from `model.py`. Grids passed as arguments (reusable across grid sizes without JIT recompilation). Both worker and retiree stages use `make_egm_1d` from kikku. EGM sub-equation callables have standardized `(pointwise, fixed_state, params)` signatures.
+- **`model.py`**: thin rho output. `RetirementModel` delegates params to stage `.calibration`/`.settings` via `__getattr__`. Stores only grids + `@njit` callables. EGM recipe callables (`WORKER_EGM_FNS`, `RETIREE_EGM_FNS`) defined here.
+- UE method bound at methodization time (patched in stage sources before pipeline runs), not in the solve loop.
+- Period graph auto-plotted in notebook via networkx.
+- Scaling plot includes `O(√N)` reference line.
+
+### Installation
+
+- `kikku` added to `examples` and `dev` optional dependencies (`pyproject.toml`), pointing to `git+https://github.com/bright-forest/kikku.git`.
+- Setup script (`setup/setup_venv.sh`) verifies kikku import.
+
 ## [0.6.0dev2] - 2026-03-09 – Docs overhaul, PEP 8 formatting, citation fixes
 
 ### Documentation
