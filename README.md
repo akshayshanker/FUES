@@ -30,7 +30,7 @@ Runtime dependencies (numba, numpy, scipy, [HARK](https://github.com/econ-ark/HA
 
 ### Option 2: With examples
 
-Clone the repo and install with example dependencies (`matplotlib`, `pyyaml`, `seaborn`). Includes everything in Option 1 plus the example models in the repo checkout.
+Clone the repo and install with example dependencies (`matplotlib`, `pyyaml`, `seaborn`, [`kikku`](https://github.com/bright-forest/kikku)). Includes everything in Option 1 plus the example models in the repo checkout.
 
 ```bash
 git clone https://github.com/akshayshanker/FUES.git

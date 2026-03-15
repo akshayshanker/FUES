@@ -21,8 +21,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-examples = ["pyyaml", "matplotlib", "seaborn"]
-dev = ["pyyaml", "matplotlib", "seaborn", "pytest", "autopep8"]
+examples = ["pyyaml", "matplotlib", "seaborn", "kikku @ git+https://github.com/bright-forest/kikku.git"]
+dev = ["pyyaml", "matplotlib", "seaborn", "kikku @ git+https://github.com/bright-forest/kikku.git", "pytest", "autopep8"]
 mpi = ["mpi4py>=3.1"]
 
 [project.urls]
