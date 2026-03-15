@@ -27,8 +27,8 @@ pins.
 ## Option 2: With examples
 
 Clone the repo and install with example dependencies (`matplotlib`, `pyyaml`,
-`seaborn`). This includes everything in Option 1 plus the example models in the
-repo checkout.
+`seaborn`, [`kikku`](https://github.com/bright-forest/kikku)). This includes
+everything in Option 1 plus the example models in the repo checkout.
 
 ```bash
 git clone https://github.com/akshayshanker/FUES.git

@@ -73,6 +73,7 @@ python3 -c "import HARK; print('OK: HARK (econ-ark)')"
 python3 -c "from dcsmm.uenvelope.upperenvelope import _consav_ue; assert _consav_ue is not None; print('OK: consav.upperenvelope (via dcsmm)')"
 python3 -c "import yaml; print('OK: pyyaml')"
 python3 -c "import matplotlib; print('OK: matplotlib')"
+python3 -c "from kikku.period_graphs import period_to_graph; print('OK: kikku')"
 python3 -c "import dolo; print('OK: dolo')"
 pip list | grep -i -E "dcsmm|numba|numpy|scipy|HARK|consav|interpolation|dill|matplotlib|seaborn|pyyaml|dolo"
 
