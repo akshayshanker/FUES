@@ -75,6 +75,7 @@ plugins:
 extra_javascript:
   - javascripts/mathjax.js
   - javascripts/fues-interactive.js
+  - javascripts/thebe-config.js
   - https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js
 
 copyright: >-
