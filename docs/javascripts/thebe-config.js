@@ -207,6 +207,11 @@
     var msgType = message.msg_type || message.header.msg_type;
     var running = outputArea.querySelector(".thebe-running");
 
+    if (msgType === "stream" && message.content && message.content.text &&
+        message.content.text.indexOf("findfont") !== -1) {
+      return;
+    }
+
     if (msgType === "stream") {
       if (running) running.remove();
       var pre = document.createElement("pre");
@@ -216,7 +221,21 @@
     } else if (msgType === "execute_result" || msgType === "display_data") {
       if (running) running.remove();
       var content = message.content.data;
-      if (content["image/png"]) {
+      if (content["application/vnd.plotly.v1+json"]) {
+        var plotData = content["application/vnd.plotly.v1+json"];
+        var plotDiv = document.createElement("div");
+        plotDiv.style.width = "100%";
+        plotDiv.style.minHeight = "400px";
+        outputArea.appendChild(plotDiv);
+        if (typeof Plotly === "undefined") {
+          var s = document.createElement("script");
+          s.src = "https://cdn.plot.ly/plotly-3.0.1.min.js";
+          s.onload = function () { Plotly.newPlot(plotDiv, plotData.data || [], plotData.layout || {}); };
+          document.head.appendChild(s);
+        } else {
+          Plotly.newPlot(plotDiv, plotData.data || [], plotData.layout || {});
+        }
+      } else if (content["image/png"]) {
         var img = document.createElement("img");
         img.src = "data:image/png;base64," + content["image/png"];
         img.style.maxWidth = "100%";
