@@ -225,6 +225,12 @@
         var div = document.createElement("div");
         div.innerHTML = content["text/html"];
         outputArea.appendChild(div);
+        div.querySelectorAll("script").forEach(function (oldScript) {
+          var newScript = document.createElement("script");
+          if (oldScript.src) { newScript.src = oldScript.src; }
+          else { newScript.textContent = oldScript.textContent; }
+          oldScript.parentNode.replaceChild(newScript, oldScript);
+        });
       } else if (content["text/plain"]) {
         var pre = document.createElement("pre");
         pre.style.cssText = "margin:2px 8px;font-size:13px;color:#cfd8dc;";
