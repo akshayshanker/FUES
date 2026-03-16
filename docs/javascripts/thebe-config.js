@@ -224,16 +224,26 @@
       if (content["application/vnd.plotly.v1+json"]) {
         var plotData = content["application/vnd.plotly.v1+json"];
         var plotDiv = document.createElement("div");
+        plotDiv.id = "plotly-" + Math.random().toString(36).substr(2, 9);
         plotDiv.style.width = "100%";
         plotDiv.style.minHeight = "400px";
         outputArea.appendChild(plotDiv);
+        var doPlot = (function(div, data) {
+          return function() {
+            try {
+              Plotly.newPlot(div, data.data || [], data.layout || {},
+                            {responsive: true});
+            } catch(e) { console.error("[thebe] Plotly error:", e); }
+          };
+        })(plotDiv, plotData);
         if (typeof Plotly === "undefined") {
           var s = document.createElement("script");
-          s.src = "https://cdn.plot.ly/plotly-3.0.1.min.js";
-          s.onload = function () { Plotly.newPlot(plotDiv, plotData.data || [], plotData.layout || {}); };
+          s.src = "https://cdn.plot.ly/plotly-2.35.2.min.js";
+          s.onload = doPlot;
+          s.onerror = function() { console.error("[thebe] Failed to load plotly.js"); };
           document.head.appendChild(s);
         } else {
-          Plotly.newPlot(plotDiv, plotData.data || [], plotData.layout || {});
+          doPlot();
         }
       } else if (content["image/png"]) {
         var img = document.createElement("img");
