@@ -30,7 +30,7 @@ equations:
     Bellman: |
       V = max_c{log(c) + beta * V[>]}
     InvEuler: |
-      c[>] = (beta * dV[>])^(-1)
+      c[>] = (beta * (1+r) * dV[>])^(-1)
     cntn_to_dcsn_transition: |
       w[>] = b + c[>]
     MarginalBellman: |
