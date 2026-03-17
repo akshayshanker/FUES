@@ -80,18 +80,22 @@ def main():
     else:
         print(f'WARNING: no cell starting with "{ANCHOR}" found', file=sys.stderr)
 
-    # Fix missing metadata in display_data outputs
-    meta_fixes = 0
+    # Fix invalid outputs (nbformat validation)
+    out_fixes = 0
     for cell in nb['cells']:
         for out in cell.get('outputs', []):
             if out.get('output_type') in ('display_data', 'execute_result'):
                 if 'metadata' not in out:
                     out['metadata'] = {}
-                    meta_fixes += 1
+                    out_fixes += 1
+            if out.get('output_type') == 'stream':
+                if 'name' not in out:
+                    out['name'] = 'stdout'
+                    out_fixes += 1
 
-    if meta_fixes:
-        print(f'  FIX {meta_fixes} output(s) missing metadata')
-        changes += meta_fixes
+    if out_fixes:
+        print(f'  FIX {out_fixes} output(s) with missing required fields')
+        changes += out_fixes
 
     if changes == 0:
         print('Nothing to do.')
