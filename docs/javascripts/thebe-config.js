@@ -3,12 +3,26 @@
 // No dependency on thebelab — uses Jupyter REST + WebSocket API
 
 (function () {
-  var JUPYTER_URL = "https://key-literary-age-valuable.trycloudflare.com";
+  var JUPYTER_URL = "https://biological-jade-syntax-studying.trycloudflare.com";
   var TOKEN = "fues-thebe-2026";
-  var WS_URL = "wss://key-literary-age-valuable.trycloudflare.com";
+  var WS_URL = "wss://biological-jade-syntax-studying.trycloudflare.com";
 
   var kernel = null;
   var ws = null;
+  window._thebeDbg = function(text) {
+    var p = document.getElementById("thebe-debug-panel");
+    if (!p) {
+      p = document.createElement("div");
+      p.id = "thebe-debug-panel";
+      p.style.cssText = "position:fixed;bottom:0;left:0;right:0;max-height:200px;overflow:auto;background:#1a1a2e;color:#e0e0e0;font:11px/1.4 monospace;padding:6px 10px;z-index:9999;border-top:2px solid #ffab40;";
+      document.body.appendChild(p);
+    }
+    var line = document.createElement("div");
+    line.textContent = new Date().toLocaleTimeString() + " " + text;
+    p.appendChild(line);
+    p.scrollTop = p.scrollHeight;
+  };
+  var dbg = window._thebeDbg;
 
   function init() {
     if (document.getElementById("thebe-banner")) return;
@@ -149,6 +163,7 @@
   function connectWebSocket(kernelId, btn, msg) {
     var wsUrl = WS_URL + "/api/kernels/" + kernelId + "/channels?token=" + TOKEN;
     ws = new WebSocket(wsUrl);
+    ws.binaryType = "blob";
 
     ws.onopen = function () {
       btn.textContent = "\u2713 Live";
@@ -157,7 +172,24 @@
       msg.textContent = "Kernel running. Edit cells and click \u25B6 Run.";
       activateCells();
     };
-    ws.onmessage = function (event) { handleMessage(JSON.parse(event.data)); };
+    ws.onmessage = function (event) {
+      var data = event.data;
+      var dtype = typeof data === "string" ? "string" : (data instanceof Blob ? "Blob" : "other");
+      dbg("WS recv: type=" + dtype + " size=" + (data.length || data.size || "?"));
+      if (typeof data === "string") {
+        try { handleMessage(JSON.parse(data)); }
+        catch (e) { dbg("JSON parse error (string): " + e.message); }
+      } else if (data instanceof Blob) {
+        data.text().then(function (text) {
+          try { handleMessage(JSON.parse(text)); }
+          catch (e) { dbg("JSON parse error (blob): " + e.message); }
+        });
+      } else if (data instanceof ArrayBuffer) {
+        var text = new TextDecoder().decode(data);
+        try { handleMessage(JSON.parse(text)); }
+        catch (e) { dbg("JSON parse error (arraybuffer): " + e.message); }
+      }
+    };
     ws.onerror = function () { msg.textContent = "WebSocket error."; };
     ws.onclose = function () {
       msg.textContent = "Kernel disconnected.";
@@ -182,6 +214,8 @@
     }
     var outputArea = ensureOutputArea(cellEl);
     outputArea.innerHTML = "";
+    outputArea.style.display = "block";
+    if (outputArea.parentElement) outputArea.parentElement.style.display = "block";
     var msgId = "exec_" + Math.random().toString(36).substr(2, 9);
     pendingCells[msgId] = outputArea;
 
@@ -201,10 +235,12 @@
   }
 
   function handleMessage(message) {
+    var _d = window._thebeDbg || function(){};
     var parentId = message.parent_header && message.parent_header.msg_id;
+    var msgType = message.msg_type || (message.header && message.header.msg_type);
+    _d("MSG: type=" + msgType + " parent=" + (parentId||"none") + " matched=" + (!!pendingCells[parentId]));
     var outputArea = pendingCells[parentId];
     if (!outputArea) return;
-    var msgType = message.msg_type || message.header.msg_type;
     var running = outputArea.querySelector(".thebe-running");
 
     if (msgType === "stream" && message.content && message.content.text &&
@@ -221,29 +257,33 @@
     } else if (msgType === "execute_result" || msgType === "display_data") {
       if (running) running.remove();
       var content = message.content.data;
+      var mimeKeys = Object.keys(content);
+      var dbg = document.createElement("pre");
+      dbg.style.cssText = "margin:4px 8px;font-size:11px;color:#ffab40;";
+      dbg.textContent = "[thebe-debug] mimes: " + mimeKeys.join(", ") + " | Plotly loaded: " + (typeof Plotly !== "undefined");
+      outputArea.appendChild(dbg);
       if (content["application/vnd.plotly.v1+json"]) {
         var plotData = content["application/vnd.plotly.v1+json"];
+        var dbg2 = document.createElement("pre");
+        dbg2.style.cssText = "margin:4px 8px;font-size:11px;color:#ffab40;";
+        dbg2.textContent = "[thebe-debug] plotData type: " + typeof plotData + " | has .data: " + (plotData && !!plotData.data) + " | traces: " + (plotData && plotData.data ? plotData.data.length : "N/A");
+        outputArea.appendChild(dbg2);
         var plotDiv = document.createElement("div");
         plotDiv.id = "plotly-" + Math.random().toString(36).substr(2, 9);
-        plotDiv.style.width = "100%";
-        plotDiv.style.minHeight = "400px";
+        plotDiv.style.cssText = "width:100%;min-height:450px;border:2px dashed #666;";
         outputArea.appendChild(plotDiv);
-        var doPlot = (function(div, data) {
-          return function() {
-            try {
-              Plotly.newPlot(div, data.data || [], data.layout || {},
-                            {responsive: true});
-            } catch(e) { console.error("[thebe] Plotly error:", e); }
-          };
-        })(plotDiv, plotData);
-        if (typeof Plotly === "undefined") {
-          var s = document.createElement("script");
-          s.src = "https://cdn.plot.ly/plotly-2.35.2.min.js";
-          s.onload = doPlot;
-          s.onerror = function() { console.error("[thebe] Failed to load plotly.js"); };
-          document.head.appendChild(s);
-        } else {
-          doPlot();
+        try {
+          Plotly.newPlot(plotDiv, plotData.data || [], plotData.layout || {},
+                        {responsive: true});
+          var dbg3 = document.createElement("pre");
+          dbg3.style.cssText = "margin:4px 8px;font-size:11px;color:#66bb6a;";
+          dbg3.textContent = "[thebe-debug] Plotly.newPlot() succeeded";
+          outputArea.appendChild(dbg3);
+        } catch(e) {
+          var dbg4 = document.createElement("pre");
+          dbg4.style.cssText = "margin:4px 8px;font-size:11px;color:#ef5350;";
+          dbg4.textContent = "[thebe-debug] Plotly.newPlot() ERROR: " + e.message;
+          outputArea.appendChild(dbg4);
         }
       } else if (content["image/png"]) {
         var img = document.createElement("img");
