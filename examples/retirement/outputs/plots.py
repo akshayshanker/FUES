@@ -783,7 +783,7 @@ def nb_plot_egm_interactive(nest, model, age, pad=10):
         ),
         **_plotly_layout_defaults(),
     )
-    fig.update_layout(template=None)
+    fig.update_layout(template={})
     return fig
 
 
