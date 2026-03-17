@@ -19,8 +19,9 @@ jobs:
 
       - run: pip install mkdocs-material mkdocs-jupyter mkdocstrings[python]
 
-      # Sync notebook into docs/ (replace symlink with real copy)
+      # Sync model.md into notebook and copy to docs/
       - run: |
+          python examples/retirement/notebooks/sync_md_to_notebook.py --apply
           mkdir -p docs/notebooks
           rm -f docs/notebooks/retirement_fues.ipynb
           cp examples/retirement/notebooks/retirement_fues.ipynb docs/notebooks/
