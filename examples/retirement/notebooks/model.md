@@ -70,17 +70,14 @@ Workers arrive at $a$ (into the branching stage); retirees arrive at $a_{\text{r
 
 In each stage, the state variable is represented at three nodes: arrival ($\mathsf{X}_{\prec}$), decision ($\mathsf{X}$), and continuation ($\mathsf{X}_{\succ}$). Solving proceeds backward: given a continuation-value function $\mathrm{v}_{\succ}$ on $\mathsf{X}_{\succ}$, the decision mover $\mathbb{B}$ produces the decision-value function $\mathrm{v}$ on $\mathsf{X}$, and the arrival mover $\mathbb{I}$ passes $\mathrm{v}$ back to $\mathsf{X}_{\prec}$. Throughout, $\partial\mathrm{v}$ denotes the derivative of $\mathrm{v}$ with respect to the stage's own state variable.
 
----
-
-#### `work_cons`
+<details style="border-left:3px solid #7c4dff;padding:8px 16px;margin:12px 0;background:rgba(124,77,255,0.04);border-radius:4px;">
+<summary style="cursor:pointer;font-weight:600;font-size:0.95em;"><code>work_cons</code> — worker consumption (EGM + FUES)</summary>
 
 **Decision mover $\mathbb{B}$** &ensp; (continuation $\to$ decision)
 
 Let $\mathrm{v}_{\succ}(b)$ be the continuation value at end-of-period savings $b$, and $\partial\mathrm{v}_{\succ}$ the marginal value. The worker's cash-on-hand is $w$ and the budget constraint is $b = w - c$. The decision mover is:
 
-$$
-(\mathbb{B}\mathrm{v}_{\succ})(w) = \mathrm{v}(w) = \max_c\bigl\{\log(c) + \beta\,\mathrm{v}_{\succ}(b)\bigr\}
-$$
+$$(\mathbb{B}\mathrm{v}_{\succ})(w) = \mathrm{v}(w) = \max_c\bigl\{\log(c) + \beta\,\mathrm{v}_{\succ}(b)\bigr\}$$
 
 such that $b=w-c$. The first-order condition is:
 
@@ -94,23 +91,20 @@ Each $(w_i^{\#}, c_i^{\#})$ pair satisfies the FOC, but the endogenous grid $\{w
 
 The arrival transition is $w = (1{+}r)a + y$, so:
 
-$$
-(\mathbb{I}\mathrm{v})(a) = \mathrm{v}\bigl((1{+}r)a + y\bigr)
-$$
+$$(\mathbb{I}\mathrm{v})(a) = \mathrm{v}\bigl((1{+}r)a + y\bigr)$$
 
 The chain rule gives $\partial\mathrm{v}_{\prec}(a) = (1{+}r)\,\partial\mathrm{v}(w)$, and the envelope theorem yields $\partial\mathrm{v}(w) = 1/c$.
 
----
+</details>
 
-#### `retire_cons`
+<details style="border-left:3px solid #00897b;padding:8px 16px;margin:12px 0;background:rgba(0,137,123,0.04);border-radius:4px;">
+<summary style="cursor:pointer;font-weight:600;font-size:0.95em;"><code>retire_cons</code> — retiree consumption (EGM, concave)</summary>
 
 **Decision mover $\mathbb{B}$** &ensp; (continuation $\to$ decision)
 
 Let $\mathrm{v}_{\succ}(b_{\text{ret}})$ be the continuation value at retiree savings $b_{\text{ret}}$, and $\partial\mathrm{v}_{\succ}(b_{\text{ret}})$ the marginal value. The retiree's cash-on-hand is $w_{\text{ret}}$ and the budget constraint is $b_{\text{ret}} = w_{\text{ret}} - c$. The decision mover is:
 
-$$
-(\mathbb{B}\mathrm{v}_{\succ})(w_{\text{ret}}) = \mathrm{v}(w_{\text{ret}}) = \max_c\bigl\{\log(c) + \beta\,\mathrm{v}_{\succ}(b_{\text{ret}})\bigr\}
-$$
+$$(\mathbb{B}\mathrm{v}_{\succ})(w_{\text{ret}}) = \mathrm{v}(w_{\text{ret}}) = \max_c\bigl\{\log(c) + \beta\,\mathrm{v}_{\succ}(b_{\text{ret}})\bigr\}$$
 
 such that $b_{\text{ret}} = w_{\text{ret}} - c$. The first-order condition is $1/c = \beta\,\partial\mathrm{v}_{\succ}(b_{\text{ret}})$.
 
@@ -120,34 +114,33 @@ such that $b_{\text{ret}} = w_{\text{ret}} - c$. The first-order condition is $1
 
 The arrival transition is $w_{\text{ret}} = (1{+}r)\,a_{\text{ret}}$ (no income), so:
 
-$$
-(\mathbb{I}\mathrm{v})(a_{\text{ret}}) = \mathrm{v}\bigl((1{+}r)\,a_{\text{ret}}\bigr)
-$$
+$$(\mathbb{I}\mathrm{v})(a_{\text{ret}}) = \mathrm{v}\bigl((1{+}r)\,a_{\text{ret}}\bigr)$$
 
 and $\partial\mathrm{v}_{\prec}(a_{\text{ret}}) = (1{+}r)\,\partial\mathrm{v}(w_{\text{ret}})$.
 
----
+</details>
 
-#### `labour_mkt_decision`
+<details style="border-left:3px solid #1565c0;padding:8px 16px;margin:12px 0;background:rgba(21,101,192,0.04);border-radius:4px;">
+<summary style="cursor:pointer;font-weight:600;font-size:0.95em;"><code>labour_mkt_decision</code> — discrete branching</summary>
 
 **Decision mover $\mathbb{B}$** &ensp; (continuation $\to$ decision)
 
 The branching stage receives the arrival values from the two consumption stages: $\mathrm{v}_{\succ}^{\text{work}}(a)$ from `work_cons` and $\mathrm{v}_{\succ}^{\text{retire}}(a)$ from `retire_cons`. Assets $a$ pass through unchanged (identity transitions). The decision mover is the discrete-choice $\max$:
 
-$$
-(\mathbb{B}\mathrm{v}_{\succ})(a) = \mathrm{v}(a) = \max\!\bigl(\mathrm{v}_{\succ}^{\text{work}}(a) - \delta,\;\; \mathrm{v}_{\succ}^{\text{retire}}(a)\bigr)
-$$
+$$(\mathbb{B}\mathrm{v}_{\succ})(a) = \mathrm{v}(a) = \max\!\bigl(\mathrm{v}_{\succ}^{\text{work}}(a) - \delta,\;\; \mathrm{v}_{\succ}^{\text{retire}}(a)\bigr)$$
 
 **Arrival mover $\mathbb{I}$** &ensp; (decision $\to$ arrival)
 
 Identity: $(\mathbb{I}\mathrm{v})(a) = \mathrm{v}(a)$.
 
+</details>
+
 ---
 
-> **Sequential form.** &ensp; Composing the three stage operators and substituting the transitions recovers the standard recursive Bellman equations. Writing $V_t^1$ for the worker's arrival value and $V_t^0$ for the retiree's:
+> **Sequential form.** &ensp; Composing the three stage operators and substituting the transitions recovers the traditional sequential recursive Bellman equations. Writing $V_t^1$ for the worker's arrival value and $V_t^0$ for the retiree's:
 >
 > $$V_t^1(a) = \max_{d}\; Q_t^d(a), \qquad Q_t^{\text{work}}(a) = \max_c \bigl\{ \log(c) - \delta + \beta\, V_{t+1}^1\bigl((1{+}r)a + y - c\bigr) \bigr\}$$
 >
 > $$Q_t^{\text{retire}}(a) = \max_c \bigl\{ \log(c) + \beta\, V_{t+1}^0\bigl((1{+}r)a - c\bigr) \bigr\}, \qquad V_t^0(a) = \max_c \bigl\{ \log(c) + \beta\, V_{t+1}^0\bigl((1{+}r)a - c\bigr) \bigr\}$$
 >
-> The key difficulty: $V_{t+1}^1$ is **not concave** because it is the upper envelope of concave functions, each conditional on a different sequence of future discrete choices. This is where FUES comes in.
+>
