@@ -18,15 +18,15 @@ $$
 **Per-period utility:**
 
 $$
-\log(c_t) - \delta \cdot d_{t+1}
+\log(c_t) - \tau d_{t+1}
 $$
 
-where $\delta$ is the utility cost of working, $a_{t}$ is beginning-of-period liquid assets, $y$ is income for a worker, and $r$ is the interest rate.
+where $\tau$ is the utility cost of working, $a_{t}$ is beginning-of-period liquid assets, $y$ is income for a worker, and $r$ is the interest rate.
 
 **Worker's Bellman equation:**
 
 $$
-V_t^1(a) = \max_{c, d_{t+1} \in \lbrace 0,1 \rbrace} \left\lbrace u(c) - d_{t+1}\delta + \beta V_{t+1}^{d_{t+1}}(a') \right\rbrace
+V_t^1(a) = \max_{c, d_{t+1} \in \lbrace 0,1 \rbrace} \left\lbrace u(c) - d_{t+1}\tau + \beta V_{t+1}^{d_{t+1}}(a') \right\rbrace
 $$
 where $a^{\prime} = (1+r)a +  y - c$.
 
@@ -87,7 +87,7 @@ It then solves the three stages in reverse topological order each period:
 
 1. **`retire_cons`** — retiree EGM (standard concave problem, no upper envelope).
 2. **`work_cons`** — worker EGM + upper envelope. This is where FUES runs.
-3. **`labour_mkt_decision`** — pointwise $\max(\mathrm{v}^{\text{work}} - \delta,\; \mathrm{v}^{\text{retire}})$ to evaluate the discrete choice.
+3. **`labour_mkt_decision`** — pointwise $\max(\mathrm{v}^{\text{work}} - \tau,\; \mathrm{v}^{\text{retire}})$ to evaluate the discrete choice.
 
 The returned `nest` dict contains the full solution history. Use `get_policy(nest, key, stage=...)` to extract policies and `get_timing(nest)` to extract UE and total solve times.
 
@@ -181,7 +181,7 @@ Instead of entering parameters manually, sparse YAML override files in `experime
 | ------------------ | -------------------- |
 | `baseline.yml`     | $\beta=0.96$, $T=50$ |
 | `high_beta.yml`    | $\beta=0.99$         |
-| `low_delta.yml`    | $\delta=0.5$, $T=50$ |
+| `low_delta.yml`    | $\tau=0.5$, $T=50$ |
 | `long_horizon.yml` | $T=50$,              |
 
 ```bash
@@ -194,7 +194,7 @@ Parameters: $T=50$, $\beta=0.96$, $r=0.02$, $y=20$, $a \in [0, 500]$. No taste s
 
 **Upper envelope time (ms per period):**
 
-| Grid | $\delta$ | RFC | FUES | MSS |
+| Grid | $\tau$ | RFC | FUES | MSS |
 |------|-----------|-----|------|-----|
 | 500 | 0.25 | 1.2 | 0.11 | 0.36 |
 | 500 | 1.00 | 1.4 | 0.11 | 0.65 |
@@ -207,7 +207,7 @@ Parameters: $T=50$, $\beta=0.96$, $r=0.02$, $y=20$, $a \in [0, 500]$. No taste s
 
 **Euler equation error** ($\log_{10}$):
 
-| Grid | $\delta$ | RFC | FUES | MSS |
+| Grid | $\tau$ | RFC | FUES | MSS |
 |------|-----------|------|------|-----|
 | 500 | 0.25 | -1.537 | -1.591 | -1.537 |
 | 1000 | 1.00 | -1.630 | -1.658 | -1.629 |
