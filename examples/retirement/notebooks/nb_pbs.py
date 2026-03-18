@@ -147,15 +147,19 @@ def plot_pbs_scaling(path, ax=None):
     ax.xaxis.set_minor_formatter(ticker.NullFormatter())
     ax.set_xlim(ns[0] * 0.85, ns[-1] * 1.08)
 
-    # y-axis: explicit ms ticks
-    yticks = [0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500]
+    # y-axis: sparse ms ticks
+    yticks = [0.1, 1, 10, 100]
     vis_yticks = [y for y in yticks if ax.get_ylim()[0] <= y <= ax.get_ylim()[1]]
     ax.set_yticks(vis_yticks)
     ax.set_yticklabels([f'{y:g}' for y in vis_yticks])
     ax.yaxis.set_minor_formatter(ticker.NullFormatter())
+    ax.xaxis.set_minor_locator(ticker.NullLocator())
+    ax.yaxis.set_minor_locator(ticker.NullLocator())
 
-    ax.grid(True, which='major', alpha=0.15)
-    ax.grid(True, which='minor', alpha=0.06)
+    ax.grid(True, which='major', axis='y', alpha=0.12, linewidth=0.5)
+
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
 
     ax.set_xlabel('Grid size (number of EGM points)')
     ax.set_ylabel('Upper-envelope time per period (ms)')
