@@ -157,7 +157,7 @@ def plot_pbs_scaling(path, ax=None):
     ax.xaxis.set_minor_locator(ticker.NullLocator())
     ax.yaxis.set_minor_locator(ticker.NullLocator())
 
-    ax.grid(True, which='major', axis='y', alpha=0.12, linewidth=0.5)
+    ax.grid(False)
 
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
