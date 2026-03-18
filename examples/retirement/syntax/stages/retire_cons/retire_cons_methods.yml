@@ -7,7 +7,14 @@ methods:
         method: !egm
 
       - scheme: interpolation
-        method: !Cartesian
+        method: !Linear
+        grid: endogenous
+
+  - on: dcsn_to_arvl_mover
+    schemes:
+      - scheme: interpolation
+        method: !Linear
+        grid: !Cartesian
         settings:
-          orders: [n_w_ret]
-          bounds: [[w_ret_min, w_ret_max]]
+          orders: [n_a_ret]
+          bounds: [[a_ret_min, a_ret_max]]

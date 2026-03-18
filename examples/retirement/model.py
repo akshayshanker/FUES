@@ -122,6 +122,30 @@ RETIREE_EGM_FNS = {
     'concavity': fn_concavity,
 }
 
+# ============================================================================
+# Arrival-to-decision transition callables (dcsn_to_arvl_mover)
+#
+# These encode the forward transition g_{prec~sim} for each stage.
+# Manually defined for now; will be extracted from the syntax
+# automatically in a future version.
+#
+# Signature: g(x_arvl_grid, params) → x_dcsn_grid
+#   params layout: [beta, R, delta, y]
+# ============================================================================
+
+@njit(cache=True)
+def g_arvl_to_dcsn_worker(a_grid, params):
+    """arvl_to_dcsn_transition (worker): w = (1+r)*a + y."""
+    R, y = params[1], params[3]
+    return R * a_grid + y
+
+
+@njit(cache=True)
+def g_arvl_to_dcsn_retiree(a_ret_grid, params):
+    """arvl_to_dcsn_transition (retiree): w_ret = (1+r)*a_ret."""
+    R = params[1]
+    return R * a_ret_grid
+
 
 class RetirementModel:
     """Numerical resources (rho output) for the retirement model.
