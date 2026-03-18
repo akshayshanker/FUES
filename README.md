@@ -6,6 +6,11 @@
 
 FUES recovers the upper envelope of the EGM ([Carroll 2006](https://doi.org/10.1016/j.econlet.2005.09.013)) value correspondence in discrete-continuous problems. FUES does not require monotonicity of the optimal policy function or numerical optimisation. FUES is also orders of magnitude faster than existing upper envelope methods. 
 
+<p align="center">
+  <img src="docs/images/pbs-scaling.png" alt="Upper-envelope scaling: FUES vs MSS, RFC, LTM" width="680">
+</p>
+<p align="center"><em>PBS cluster timings (NCI Gadi): upper-envelope time vs grid size across methods.</em></p>
+
 This repo also ships a unified upper-envelope interface (`uenvelope`) that dispatches to FUES as well as key benchmark upper envelope methods including the monotone segment selection (MSS, algorithm by [Iskhakov et al. 2017](https://doi.org/10.3982/QE643)) and local triangulation (LTM, [Druedahl & Jørgensen 2017](https://doi.org/10.1016/j.jedc.2016.11.005)).
 
 **[Docs](https://akshayshanker.github.io/FUES/)** · **[Notebooks](https://akshayshanker.github.io/FUES/notebooks/retirement_fues/)** 
