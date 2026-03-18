@@ -113,23 +113,31 @@ def plot_pbs_scaling(path, ax=None):
     # ── Speedup factor ticks on the right margin ──
     fues_last = means['FUES'][-1]
     ylim = ax.get_ylim()
+    tick_ys = []
     for factor in [5, 10, 20, 50, 100]:
         y = fues_last * factor
         if y < ylim[0] or y > ylim[1]:
             continue
+        tick_ys.append(y)
         ax.plot([ns[-1], ns[-1] * 1.06], [y, y],
                 color='#6b7280', linewidth=0.7, clip_on=False,
                 solid_capstyle='round')
-        ax.text(ns[-1] * 1.09, y, f'{factor}x',
+        ax.text(ns[-1] * 1.09, y, f'{factor}\u00d7',
                 fontsize=7.5, fontweight='600', color='#4b5563',
                 va='center', ha='left', clip_on=False)
     if ylim[0] <= fues_last <= ylim[1]:
+        tick_ys.append(fues_last)
         ax.plot([ns[-1], ns[-1] * 1.06], [fues_last, fues_last],
                 color=mc['FUES'], linewidth=0.9, clip_on=False,
                 solid_capstyle='round')
-        ax.text(ns[-1] * 1.09, fues_last, '1x',
+        ax.text(ns[-1] * 1.09, fues_last, '1\u00d7',
                 fontsize=7.5, fontweight='700', color=mc['FUES'],
                 va='center', ha='left', clip_on=False)
+    if tick_ys:
+        mid_y = np.exp(np.mean(np.log(tick_ys)))
+        ax.text(ns[-1] * 1.28, mid_y, 'slowdown\nvs FUES',
+                fontsize=6, color='#9ca3af', ha='center', va='center',
+                rotation=90, clip_on=False, linespacing=1.3)
 
     ax.set_xlabel('Grid size $n$')
     ax.set_ylabel('Mean UE time (ms, avg over $\\tau$)')
