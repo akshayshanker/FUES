@@ -134,10 +134,9 @@ def plot_pbs_scaling(path, ax=None):
                 fontsize=7.5, fontweight='700', color=mc['FUES'],
                 va='center', ha='left', clip_on=False)
     if tick_ys:
-        mid_y = np.exp(np.mean(np.log(tick_ys)))
-        ax.text(ns[-1] * 1.28, mid_y, 'slowdown\nvs FUES',
-                fontsize=6, color='#9ca3af', ha='center', va='center',
-                rotation=90, clip_on=False, linespacing=1.3)
+        ax.text(ns[-1] * 1.12, ylim[1] * 1.15, 'slowdown vs FUES',
+                fontsize=6.5, color='#9ca3af', ha='right', va='bottom',
+                clip_on=False)
 
     import matplotlib.ticker as ticker
 
