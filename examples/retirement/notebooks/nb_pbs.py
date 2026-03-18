@@ -139,9 +139,28 @@ def plot_pbs_scaling(path, ax=None):
                 fontsize=6, color='#9ca3af', ha='center', va='center',
                 rotation=90, clip_on=False, linespacing=1.3)
 
-    ax.set_xlabel('Grid size $n$')
-    ax.set_ylabel('Mean UE time (ms, avg over $\\tau$)')
-    ax.set_title('Upper-envelope scaling')
+    import matplotlib.ticker as ticker
+
+    # x-axis: explicit grid-size ticks in thousands
+    xticks = [1000, 2000, 3000, 5000, 10000, 15000]
+    ax.set_xticks(xticks)
+    ax.set_xticklabels([f'{x // 1000}k' for x in xticks])
+    ax.xaxis.set_minor_formatter(ticker.NullFormatter())
+    ax.set_xlim(ns[0] * 0.85, ns[-1] * 1.08)
+
+    # y-axis: explicit ms ticks
+    yticks = [0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500]
+    vis_yticks = [y for y in yticks if ax.get_ylim()[0] <= y <= ax.get_ylim()[1]]
+    ax.set_yticks(vis_yticks)
+    ax.set_yticklabels([f'{y:g}' for y in vis_yticks])
+    ax.yaxis.set_minor_formatter(ticker.NullFormatter())
+
+    ax.grid(True, which='major', alpha=0.15)
+    ax.grid(True, which='minor', alpha=0.06)
+
+    ax.set_xlabel('Grid size (number of EGM points)')
+    ax.set_ylabel('Upper-envelope time per period (ms)')
+    ax.set_title('Upper-envelope scaling (avg over $\\tau$)')
     _style_nb_ax(ax)
     ax.legend(fontsize=7, framealpha=0.7, edgecolor='none', ncol=2,
               loc='upper left')
