@@ -37,13 +37,13 @@ def _read_ue_method(period):
 # retire_cons
 # ==============================================================
 
-def make_retire_cons(model, egm_fns):
+def make_retire_cons(model, g_fns):
     """Factory for retire_cons stage operators.
 
     Parameters
     ----------
     model : RetirementModel
-    egm_fns : dict
+    g_fns : dict
         EGM recipe: ``{'inv_euler', 'bellman_rhs',
         'cntn_to_dcsn', 'concavity'}``.
 
@@ -58,10 +58,10 @@ def make_retire_cons(model, egm_fns):
     egm_params = np.array([beta, R, model.delta, model.y])
 
     _egm_retire = make_egm_1d(
-        egm_fns['inv_euler'],
-        egm_fns['bellman_rhs'],
-        egm_fns['cntn_to_dcsn'],
-        egm_fns['concavity'],
+        g_fns['inv_euler'],
+        g_fns['bellman_rhs'],
+        g_fns['cntn_to_dcsn'],
+        g_fns['concavity'],
         egm_params,
     )
 
@@ -106,13 +106,13 @@ def make_retire_cons(model, egm_fns):
 # work_cons
 # ==============================================================
 
-def make_work_cons(model, egm_fns, period=None):
+def make_work_cons(model, g_fns, period=None):
     """Factory for work_cons stage operators.
 
     Parameters
     ----------
     model : RetirementModel
-    egm_fns : dict
+    g_fns : dict
         EGM recipe: ``{'inv_euler', 'bellman_rhs',
         'cntn_to_dcsn', 'concavity'}``.
     period : dict, optional
@@ -131,10 +131,10 @@ def make_work_cons(model, egm_fns, period=None):
     egm_params = np.array([beta, R, delta, y])
 
     _invert_euler = make_egm_1d(
-        egm_fns['inv_euler'],
-        egm_fns['bellman_rhs'],
-        egm_fns['cntn_to_dcsn'],
-        egm_fns['concavity'],
+        g_fns['inv_euler'],
+        g_fns['bellman_rhs'],
+        g_fns['cntn_to_dcsn'],
+        g_fns['concavity'],
         egm_params,
     )
 
