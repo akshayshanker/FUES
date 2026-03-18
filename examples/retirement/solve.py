@@ -6,11 +6,14 @@ Functional pipeline::
                         ↓                                       ↓
                   RetirementModel(period)                  solve_backward
                         ↓                                  (wave loop)
-                  make_stage_operators ─────────────────────────┘
+                  make_retire_cons(model, callables)             │
+                  make_work_cons(model, callables, ue_method)    │
+                  make_labour_mkt_decision(model) ──────────────┘
 
 Each step is a distinct transform with a different semantic
 contract.  The backward loop is a thin combinator that iterates
-over kikku's topology-derived wave ordering.
+over kikku's topology-derived wave ordering.  Operator composition
+T = I ∘ B is visible inline in solve_period.
 """
 
 import copy
@@ -24,6 +27,25 @@ from kikku.dynx import load_syntax, instantiate_period
 from .model import RetirementModel
 from .operators import make_retire_cons, make_work_cons, make_labour_mkt_decision
 from .model import WORKER_EGM_FNS, RETIREE_EGM_FNS
+
+
+# ============================================================
+# Syntax helpers
+# ============================================================
+
+def _read_ue_method(period):
+    """Extract the UE method tag from the work_cons stage's methods."""
+    stages = period["stages"] if "stages" in period else period
+    work = stages.get("work_cons")
+    if work and hasattr(work, "methods"):
+        mover = work.methods.get("cntn_to_dcsn_mover", {})
+        for scheme in mover.get("schemes", []):
+            if scheme.get("scheme") == "upper_envelope":
+                tag = scheme.get("method", {})
+                if isinstance(tag, dict):
+                    return tag.get("__yaml_tag__", "FUES")
+                return str(tag)
+    return "FUES"
 
 
 # ============================================================
@@ -73,51 +95,15 @@ def _wire_continuations(prev_sol):
 
 
 # ============================================================
-# Stage dispatch (pure: inputs in, result out)
-# ============================================================
-
-def _run_retire_cons(op, cntn, grid):
-    c, v, da, ddv = op(*cntn, grid)
-    return {"c": c, "v": v, "da": da, "ddv": ddv}
-
-
-def _run_work_cons(op, cntn, grid):
-    (v, c, da, ue_elapsed,
-     c_dcsn_hat, v_dcsn_hat, x_dcsn_hat, dela_dcsn_hat) = op(*cntn, grid)
-    return {
-        "v": v, "c": c, "da": da,
-        "c_dcsn_hat": c_dcsn_hat, "v_dcsn_hat": v_dcsn_hat,
-        "x_dcsn_hat": x_dcsn_hat, "dela_dcsn_hat": dela_dcsn_hat,
-        "ue_time": ue_elapsed,
-    }
-
-
-def _run_labour_mkt(op, work_result, retire_result):
-    v, c, dv, ddv = op(
-        work_result['v'], retire_result['v'],
-        work_result['c'], retire_result['c'],
-        work_result['da'], retire_result['da'],
-    )
-    return {"v": v, "c": c, "dv": dv, "ddv": ddv}
-
-
-_STAGE_RUNNERS = {
-    'retire_cons': lambda ops, cntns, grid, sr: _run_retire_cons(
-        ops['retire_cons']['stage_op'], cntns['retire_cons'], grid),
-    'work_cons': lambda ops, cntns, grid, sr: _run_work_cons(
-        ops['work_cons']['stage_op'], cntns['work_cons'], grid),
-    'labour_mkt_decision': lambda ops, cntns, grid, sr: _run_labour_mkt(
-        ops['labour_mkt_decision']['stage_op'],
-        sr['work_cons'], sr['retire_cons']),
-}
-
-
-# ============================================================
 # Backward solve
 # ============================================================
 
 def solve_period(waves, stage_ops, cntns, grid, t, h):
-    """Solve one period using kikku-derived wave ordering."""
+    """Solve one period using kikku-derived wave ordering.
+
+    Operator composition is inline — each stage's T = I ∘ B
+    is visible at the call site.
+    """
     t0 = time.time()
     sr = {}
     timings = {}
@@ -125,9 +111,38 @@ def solve_period(waves, stage_ops, cntns, grid, t, h):
     for wave in waves:
         for name in wave:
             ts = time.time()
-            sr[name] = _STAGE_RUNNERS[name](
-                stage_ops, cntns, grid, sr,
-            )
+
+            if name == 'retire_cons':
+                B = stage_ops['retire_cons']['dcsn_mover']
+                I = stage_ops['retire_cons']['arvl_mover']
+                x, v, c, da = B(*cntns['retire_cons'], grid)
+                c_a, v_a, da_a, ddv = I(
+                    x, v, c, da, grid, cntns['retire_cons'][1][0])
+                sr[name] = {"c": c_a, "v": v_a, "da": da_a, "ddv": ddv}
+
+            elif name == 'work_cons':
+                B = stage_ops['work_cons']['dcsn_mover']
+                I = stage_ops['work_cons']['arvl_mover']
+                (x, v, c, da, ue_time,
+                 c_hat, v_hat, x_hat, da_hat) = B(
+                    *cntns['work_cons'], grid)
+                v_a, c_a, da_a = I(x, v, c, cntns['work_cons'][2], grid)
+                sr[name] = {
+                    "v": v_a, "c": c_a, "da": da_a,
+                    "c_dcsn_hat": c_hat, "v_dcsn_hat": v_hat,
+                    "x_dcsn_hat": x_hat, "dela_dcsn_hat": da_hat,
+                    "ue_time": ue_time,
+                }
+
+            elif name == 'labour_mkt_decision':
+                B = stage_ops['labour_mkt_decision']['dcsn_mover']
+                v, c, dv, ddv = B(
+                    sr['work_cons']['v'], sr['retire_cons']['v'],
+                    sr['work_cons']['c'], sr['retire_cons']['c'],
+                    sr['work_cons']['da'], sr['retire_cons']['da'],
+                )
+                sr[name] = {"v": v, "c": c, "dv": dv, "ddv": ddv}
+
             timings[name] = time.time() - ts
 
     solve_time = time.time() - t0
@@ -175,9 +190,9 @@ def solve_nest(syntax_dir, method='FUES',
         instantiate_period → period
         period_to_graph → graph → backward_paths → waves
         RetirementModel(period) → model
-        make_retire_cons(model) → retire ops
-        make_work_cons(model, period) → work ops
-        make_labour_mkt_decision(model) → branching ops
+        make_retire_cons(model, callables) → {dcsn_mover, arvl_mover}
+        make_work_cons(model, callables, ue_method) → {dcsn_mover, arvl_mover}
+        make_labour_mkt_decision(model) → {dcsn_mover}
         solve_backward(T, model, ops, waves) → solutions
 
     For stationary models, pass back ``model``, ``stage_ops``,
@@ -221,10 +236,11 @@ def solve_nest(syntax_dir, method='FUES',
         if model is None:
             model = RetirementModel(period)
         if stage_ops is None:
+            ue = _read_ue_method(period) if method is None else method
             stage_ops = {
                 'retire_cons': make_retire_cons(model, RETIREE_EGM_FNS),
                 'work_cons': make_work_cons(
-                    model, WORKER_EGM_FNS, period=period),
+                    model, WORKER_EGM_FNS, ue_method=ue),
                 'labour_mkt_decision': make_labour_mkt_decision(model),
             }
 

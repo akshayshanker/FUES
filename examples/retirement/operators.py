@@ -18,21 +18,6 @@ from kikku.asva.compose_interp import make_compose_interp
 from .model import g_arvl_to_dcsn_worker, g_arvl_to_dcsn_retiree
 
 
-def _read_ue_method(period):
-    """Extract the UE method tag from the work_cons stage's methods."""
-    stages = period["stages"] if "stages" in period else period
-    work = stages.get("work_cons")
-    if work and hasattr(work, "methods"):
-        mover = work.methods.get("cntn_to_dcsn_mover", {})
-        for scheme in mover.get("schemes", []):
-            if scheme.get("scheme") == "upper_envelope":
-                tag = scheme.get("method", {})
-                if isinstance(tag, dict):
-                    return tag.get("__yaml_tag__", "FUES")
-                return str(tag)
-    return "FUES"
-
-
 # ==============================================================
 # retire_cons
 # ==============================================================
@@ -90,23 +75,15 @@ def make_retire_cons(model, callables):
         dlambda_arvl = ddu(c_arvl) * (R - da_arvl)
         return c_arvl, v_arvl, da_arvl, dlambda_arvl
 
-    def stage_op(c_cntn, v_cntn, dlambda_cntn, grid):
-        """T = I ∘ B."""
-        x_dcsn, v_dcsn, c_dcsn, dela_dcsn = dcsn_mover(
-            c_cntn, v_cntn, dlambda_cntn, grid)
-        return arvl_mover(
-            x_dcsn, v_dcsn, c_dcsn, dela_dcsn, grid, v_cntn[0])
-
     return {'dcsn_mover': dcsn_mover,
-            'arvl_mover': arvl_mover,
-            'stage_op': stage_op}
+            'arvl_mover': arvl_mover}
 
 
 # ==============================================================
 # work_cons
 # ==============================================================
 
-def make_work_cons(model, callables, period=None):
+def make_work_cons(model, callables, ue_method='FUES'):
     """Factory for work_cons stage operators.
 
     Parameters
@@ -115,12 +92,12 @@ def make_work_cons(model, callables, period=None):
     callables : dict
         EGM recipe: ``{'inv_euler', 'bellman_rhs',
         'cntn_to_dcsn', 'concavity'}``.
-    period : dict, optional
-        Canonical period dict (UE method read from here).
+    ue_method : str
+        Upper-envelope method (FUES/DCEGM/RFC/CONSAV).
 
     Returns
     -------
-    dict with 'dcsn_mover', 'arvl_mover', 'stage_op'
+    dict with 'dcsn_mover', 'arvl_mover'
     """
     beta, delta = model.beta, model.delta
     y = model.y
@@ -137,8 +114,6 @@ def make_work_cons(model, callables, period=None):
         callables['concavity'],
         egm_params,
     )
-
-    ue_method = _read_ue_method(period) if period else "FUES"
 
     _compose = make_compose_interp(
         g_arvl_to_dcsn_worker, interp_as_2)
@@ -183,21 +158,8 @@ def make_work_cons(model, callables, period=None):
         da_arvl = np.zeros(len(grid))
         return v_arvl, c_arvl, da_arvl
 
-    def stage_op(dv_cntn, ddv_cntn, v_cntn, grid):
-        """T = I ∘ B."""
-        (x_dcsn, v_dcsn, c_dcsn, dela_dcsn, ue_time,
-         c_hat, v_hat, x_dcsn_hat, del_a) = dcsn_mover(
-            dv_cntn, ddv_cntn, v_cntn, grid)
-
-        v_arvl, c_arvl, da_arvl = arvl_mover(
-            x_dcsn, v_dcsn, c_dcsn, v_cntn, grid)
-
-        return (v_arvl, c_arvl, da_arvl, ue_time,
-                c_hat, v_hat, x_dcsn_hat, del_a)
-
     return {'dcsn_mover': dcsn_mover,
-            'arvl_mover': arvl_mover,
-            'stage_op': stage_op}
+            'arvl_mover': arvl_mover}
 
 
 # ==============================================================
@@ -216,8 +178,8 @@ def make_labour_mkt_decision(model):
     du, ddu = model.du, model.ddu
 
     @njit
-    def stage_op(v_work, v_ret, c_work, c_ret, da_work, da_ret):
-        """Branching stage: discrete work/retire choice."""
+    def dcsn_mover(v_work, v_ret, c_work, c_ret, da_work, da_ret):
+        """B: branching discrete choice (no arrival mover)."""
         if smooth_sigma == 0:
             p = v_work > v_ret
         else:
@@ -235,4 +197,4 @@ def make_labour_mkt_decision(model):
         ddv = ddu(c) * (R - da)
         return v, c, dv, ddv
 
-    return {'stage_op': stage_op}
+    return {'dcsn_mover': dcsn_mover}
