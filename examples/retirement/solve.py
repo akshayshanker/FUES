@@ -22,7 +22,7 @@ from kikku.dynx import period_to_graph, backward_paths
 from kikku.dynx import load_syntax, instantiate_period
 
 from .model import RetirementModel
-from .operators import make_stage_operators
+from .operators import make_retire_cons, make_work_cons, make_labour_mkt_decision
 
 
 # ============================================================
@@ -102,11 +102,11 @@ def _run_labour_mkt(op, work_result, retire_result):
 
 _STAGE_RUNNERS = {
     'retire_cons': lambda ops, cntns, grid, sr: _run_retire_cons(
-        ops['retire_cons'], cntns['retire_cons'], grid),
+        ops['retire_cons']['stage_op'], cntns['retire_cons'], grid),
     'work_cons': lambda ops, cntns, grid, sr: _run_work_cons(
-        ops['work_cons'], cntns['work_cons'], grid),
+        ops['work_cons']['stage_op'], cntns['work_cons'], grid),
     'labour_mkt_decision': lambda ops, cntns, grid, sr: _run_labour_mkt(
-        ops['labour_mkt_decision'],
+        ops['labour_mkt_decision']['stage_op'],
         sr['work_cons'], sr['retire_cons']),
 }
 
@@ -174,7 +174,9 @@ def solve_nest(syntax_dir, method='FUES',
         instantiate_period → period
         period_to_graph → graph → backward_paths → waves
         RetirementModel(period) → model
-        make_stage_operators(model, period) → ops
+        make_retire_cons(model) → retire ops
+        make_work_cons(model, period) → work ops
+        make_labour_mkt_decision(model) → branching ops
         solve_backward(T, model, ops, waves) → solutions
 
     For stationary models, pass back ``model``, ``stage_ops``,
@@ -218,7 +220,11 @@ def solve_nest(syntax_dir, method='FUES',
         if model is None:
             model = RetirementModel(period)
         if stage_ops is None:
-            stage_ops = make_stage_operators(model, period=period)
+            stage_ops = {
+                'retire_cons': make_retire_cons(model),
+                'work_cons': make_work_cons(model, period=period),
+                'labour_mkt_decision': make_labour_mkt_decision(model),
+            }
 
     solutions = solve_backward(int(model.T), model, stage_ops, waves)
 

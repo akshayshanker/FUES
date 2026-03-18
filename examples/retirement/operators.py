@@ -1,11 +1,8 @@
 """Stage operator factories for the retirement choice model.
 
-Each stage is decomposed into two movers following bellman calculus:
-  - dcsn_mover (B): continuation → decision
-  - arvl_mover (I): decision → arrival
-
-The composed stage operator calls both movers internally,
-so solve.py does not need to know about the split.
+Each stage has its own factory returning dcsn_mover (B) and
+arvl_mover (I).  The composed stage operator T = I ∘ B is
+also returned for use by the solver.
 
 Grids are passed as arguments so the same compiled operators
 work with any grid size — no JIT recompilation needed.
@@ -39,33 +36,22 @@ def _read_ue_method(period):
     return "FUES"
 
 
-def make_stage_operators(model, period=None, equations=None):
-    """Build stage operators for the retirement model.
+# ==============================================================
+# retire_cons
+# ==============================================================
+
+def make_retire_cons(model):
+    """Factory for retire_cons stage operators.
 
     Returns
     -------
-    dict
-        ``{'retire_cons': ..., 'work_cons': ...,
-           'labour_mkt_decision': ...}``
+    dict with 'dcsn_mover', 'arvl_mover', 'stage_op'
     """
-    beta, delta = model.beta, model.delta
-    y = model.y
-    smooth_sigma = model.smooth_sigma
+    beta = model.beta
     R = model.R
-    m_bar = model.m_bar
+    u, du, ddu = model.u, model.du, model.ddu
 
-    if equations is None:
-        equations = {}
-    u = equations.get('u', model.u)
-    du = equations.get('du', model.du)
-    uc_inv = equations.get('uc_inv', model.uc_inv)
-    ddu = equations.get('ddu', model.ddu)
-
-    egm_params = np.array([beta, R, delta, y])
-
-    # ==============================================================
-    # retire_cons: retiree EGM (no upper envelope)
-    # ==============================================================
+    egm_params = np.array([beta, R, model.delta, model.y])
 
     _egm_retire = make_egm_1d(
         RETIREE_EGM_FNS['inv_euler'],
@@ -75,24 +61,19 @@ def make_stage_operators(model, period=None, equations=None):
         egm_params,
     )
 
-    _compose_ret = make_compose_interp(
+    _compose = make_compose_interp(
         g_arvl_to_dcsn_retiree, interp_as_3)
 
-    def dcsn_mover_ret(c_cntn, v_cntn, dlambda_cntn, grid):
-        """B: continuation → decision for retire_cons."""
+    def dcsn_mover(c_cntn, v_cntn, dlambda_cntn, grid):
+        """B: continuation → decision."""
         c_dcsn, v_dcsn, x_dcsn, dela_dcsn = _egm_retire(
             du(c_cntn), dlambda_cntn, v_cntn, grid, 0.0)
         return x_dcsn, v_dcsn, c_dcsn, dela_dcsn
 
-    def arvl_mover_ret(x_dcsn, v_dcsn, c_dcsn, dela_dcsn,
-                       grid, v_cntn_0):
-        """I: decision → arrival for retire_cons.
-
-        Composes with g(a_ret) = R*a_ret, interpolates onto
-        the Cartesian arrival grid, and patches the constrained
-        region where grid <= min_a.
-        """
-        c_arvl, v_arvl, da_arvl = _compose_ret(
+    def arvl_mover(x_dcsn, v_dcsn, c_dcsn, dela_dcsn,
+                   grid, v_cntn_0):
+        """I: decision → arrival."""
+        c_arvl, v_arvl, da_arvl = _compose(
             x_dcsn, c_dcsn, v_dcsn, dela_dcsn, grid, egm_params)
 
         min_a_val = x_dcsn[0] / R
@@ -105,16 +86,36 @@ def make_stage_operators(model, period=None, equations=None):
         dlambda_arvl = ddu(c_arvl) * (R - da_arvl)
         return c_arvl, v_arvl, da_arvl, dlambda_arvl
 
-    def solver_retiree_stage(c_cntn, v_cntn, dlambda_cntn, grid):
-        """Composed stage operator: T = I ∘ B for retire_cons."""
-        x_dcsn, v_dcsn, c_dcsn, dela_dcsn = dcsn_mover_ret(
+    def stage_op(c_cntn, v_cntn, dlambda_cntn, grid):
+        """T = I ∘ B."""
+        x_dcsn, v_dcsn, c_dcsn, dela_dcsn = dcsn_mover(
             c_cntn, v_cntn, dlambda_cntn, grid)
-        return arvl_mover_ret(
+        return arvl_mover(
             x_dcsn, v_dcsn, c_dcsn, dela_dcsn, grid, v_cntn[0])
 
-    # ==============================================================
-    # work_cons: worker EGM + upper envelope
-    # ==============================================================
+    return {'dcsn_mover': dcsn_mover,
+            'arvl_mover': arvl_mover,
+            'stage_op': stage_op}
+
+
+# ==============================================================
+# work_cons
+# ==============================================================
+
+def make_work_cons(model, period=None):
+    """Factory for work_cons stage operators.
+
+    Returns
+    -------
+    dict with 'dcsn_mover', 'arvl_mover', 'stage_op'
+    """
+    beta, delta = model.beta, model.delta
+    y = model.y
+    R = model.R
+    m_bar = model.m_bar
+    u, du, ddu = model.u, model.du, model.ddu
+
+    egm_params = np.array([beta, R, delta, y])
 
     _invert_euler = make_egm_1d(
         WORKER_EGM_FNS['inv_euler'],
@@ -126,11 +127,11 @@ def make_stage_operators(model, period=None, equations=None):
 
     ue_method = _read_ue_method(period) if period else "FUES"
 
-    _compose_work = make_compose_interp(
+    _compose = make_compose_interp(
         g_arvl_to_dcsn_worker, interp_as_2)
 
-    def dcsn_mover_work(dv_cntn, ddv_cntn, v_cntn, grid):
-        """B: continuation → decision for work_cons (EGM + UE)."""
+    def dcsn_mover(dv_cntn, ddv_cntn, v_cntn, grid):
+        """B: continuation → decision (EGM + UE)."""
         c_hat, v_hat, x_dcsn_hat, del_a = _invert_euler(
             dv_cntn, ddv_cntn, v_cntn, grid, 0.0)
 
@@ -154,15 +155,9 @@ def make_stage_operators(model, period=None, equations=None):
         return (x_dcsn, v_dcsn, c_dcsn, dela_dcsn, ue_time,
                 c_hat, v_hat, x_dcsn_hat, del_a)
 
-    def arvl_mover_work(x_dcsn, v_dcsn, c_dcsn, v_cntn,
-                        grid):
-        """I: decision → arrival for work_cons.
-
-        Composes with g(a) = R*a + y, interpolates onto
-        the Cartesian arrival grid, and patches the constrained
-        region where w < min(x_dcsn).
-        """
-        v_arvl, c_arvl = _compose_work(
+    def arvl_mover(x_dcsn, v_dcsn, c_dcsn, v_cntn, grid):
+        """I: decision → arrival."""
+        v_arvl, c_arvl = _compose(
             x_dcsn, v_dcsn, c_dcsn, grid, egm_params)
 
         w_grid = R * grid + y
@@ -175,26 +170,40 @@ def make_stage_operators(model, period=None, equations=None):
         da_arvl = np.zeros(len(grid))
         return v_arvl, c_arvl, da_arvl
 
-    def solver_worker_stage(dv_cntn, ddv_cntn, v_cntn, grid):
-        """Composed stage operator: T = I ∘ B for work_cons."""
+    def stage_op(dv_cntn, ddv_cntn, v_cntn, grid):
+        """T = I ∘ B."""
         (x_dcsn, v_dcsn, c_dcsn, dela_dcsn, ue_time,
-         c_hat, v_hat, x_dcsn_hat, del_a) = dcsn_mover_work(
+         c_hat, v_hat, x_dcsn_hat, del_a) = dcsn_mover(
             dv_cntn, ddv_cntn, v_cntn, grid)
 
-        v_arvl, c_arvl, da_arvl = arvl_mover_work(
+        v_arvl, c_arvl, da_arvl = arvl_mover(
             x_dcsn, v_dcsn, c_dcsn, v_cntn, grid)
 
         return (v_arvl, c_arvl, da_arvl, ue_time,
                 c_hat, v_hat, x_dcsn_hat, del_a)
 
-    # ==============================================================
-    # labour_mkt_decision: branching max/logit
-    # ==============================================================
+    return {'dcsn_mover': dcsn_mover,
+            'arvl_mover': arvl_mover,
+            'stage_op': stage_op}
+
+
+# ==============================================================
+# labour_mkt_decision
+# ==============================================================
+
+def make_labour_mkt_decision(model):
+    """Factory for labour_mkt_decision stage operators.
+
+    Returns
+    -------
+    dict with 'stage_op'
+    """
+    R = model.R
+    smooth_sigma = model.smooth_sigma
+    du, ddu = model.du, model.ddu
 
     @njit
-    def lab_mkt_choice_stage(
-        v_work, v_ret, c_work, c_ret, da_work, da_ret,
-    ):
+    def stage_op(v_work, v_ret, c_work, c_ret, da_work, da_ret):
         """Branching stage: discrete work/retire choice."""
         if smooth_sigma == 0:
             p = v_work > v_ret
@@ -213,8 +222,4 @@ def make_stage_operators(model, period=None, equations=None):
         ddv = ddu(c) * (R - da)
         return v, c, dv, ddv
 
-    return {
-        'retire_cons': solver_retiree_stage,
-        'work_cons': solver_worker_stage,
-        'labour_mkt_decision': lab_mkt_choice_stage,
-    }
+    return {'stage_op': stage_op}
