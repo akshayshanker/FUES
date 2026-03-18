@@ -3,10 +3,6 @@
 </p>
 
 <p align="center">
-  <em>Sub-linear upper-envelope recovery for endogenous grid methods in discrete-continuous dynamic programming.</em>
-</p>
-
-<p align="center">
   <a href="https://akshayshanker.github.io/FUES/">Docs</a> ·
   <a href="https://akshayshanker.github.io/FUES/notebooks/retirement_fues/">Notebooks</a> ·
   <a href="https://papers.ssrn.com/sol3/papers.cfm?abstract_id=4181302">Paper</a>
