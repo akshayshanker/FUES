@@ -82,11 +82,11 @@ def _run_retire_cons(op, cntn, grid):
 
 def _run_work_cons(op, cntn, grid):
     (v, c, da, ue_elapsed,
-     c_hat, q_hat, egrid, da_pre_ue) = op(*cntn, grid)
+     c_dcsn_hat, v_dcsn_hat, x_dcsn_hat, dela_dcsn_hat) = op(*cntn, grid)
     return {
         "v": v, "c": c, "da": da,
-        "c_hat": c_hat, "q_hat": q_hat,
-        "egrid": egrid, "da_pre_ue": da_pre_ue,
+        "c_dcsn_hat": c_dcsn_hat, "v_dcsn_hat": v_dcsn_hat,
+        "x_dcsn_hat": x_dcsn_hat, "dela_dcsn_hat": dela_dcsn_hat,
         "ue_time": ue_elapsed,
     }
 

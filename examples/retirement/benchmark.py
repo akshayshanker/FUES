@@ -240,10 +240,10 @@ if __name__ == "__main__":
 
     # Generate plots
     nest_rfc = results['RFC']['nest']
-    e_grid = get_policy(nest_rfc, 'egrid', stage='work_cons')
-    vf_work = get_policy(nest_rfc, 'q_hat', stage='work_cons')
-    c_worker = get_policy(nest_rfc, 'c_hat', stage='work_cons')
-    dela = get_policy(nest_rfc, 'da_pre_ue', stage='work_cons')
+    e_grid = get_policy(nest_rfc, 'x_dcsn_hat', stage='work_cons')
+    vf_work = get_policy(nest_rfc, 'v_dcsn_hat', stage='work_cons')
+    c_worker = get_policy(nest_rfc, 'c_dcsn_hat', stage='work_cons')
+    dela = get_policy(nest_rfc, 'dela_dcsn_hat', stage='work_cons')
 
     plot_egrids(
         egrid_plot_age, e_grid, vf_work, c_worker, dela,

@@ -674,10 +674,10 @@ def nb_plot_egm_interactive(nest, model, age, pad=10):
     from .diagnostics import get_policy
     t = _nb_theme()
 
-    e_grid = get_policy(nest, 'egrid', stage='work_cons')
-    vf_unref = get_policy(nest, 'q_hat', stage='work_cons')
-    c_unref = get_policy(nest, 'c_hat', stage='work_cons')
-    da_unref = get_policy(nest, 'da_pre_ue', stage='work_cons')
+    e_grid = get_policy(nest, 'x_dcsn_hat', stage='work_cons')
+    vf_unref = get_policy(nest, 'v_dcsn_hat', stage='work_cons')
+    c_unref = get_policy(nest, 'c_dcsn_hat', stage='work_cons')
+    da_unref = get_policy(nest, 'dela_dcsn_hat', stage='work_cons')
 
     x_raw = np.array(e_grid[age])
     q_raw = np.array(vf_unref[age])
@@ -966,10 +966,10 @@ def nb_plot_egrids(nest, model, age, pad=10, xlim=None, ylim_v=None, ylim_s=None
     from .diagnostics import get_policy
     t = _nb_theme()
 
-    e_grid = get_policy(nest, 'egrid', stage='work_cons')
-    vf_unref = get_policy(nest, 'q_hat', stage='work_cons')
-    c_unref = get_policy(nest, 'c_hat', stage='work_cons')
-    da_unref = get_policy(nest, 'da_pre_ue', stage='work_cons')
+    e_grid = get_policy(nest, 'x_dcsn_hat', stage='work_cons')
+    vf_unref = get_policy(nest, 'v_dcsn_hat', stage='work_cons')
+    c_unref = get_policy(nest, 'c_dcsn_hat', stage='work_cons')
+    da_unref = get_policy(nest, 'dela_dcsn_hat', stage='work_cons')
 
     x_raw = np.array(e_grid[age])
     q_raw = np.array(vf_unref[age])

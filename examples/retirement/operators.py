@@ -168,13 +168,13 @@ def make_stage_operators(model, period=None, equations=None):
         )
         ue_time = time.time() - t_ue
 
-        egrid1 = refined["x_dcsn_ref"]
-        v_ref = refined["v_dcsn_ref"]
-        c_ref = refined["kappa_ref"]
-        dela_ref = np.zeros_like(refined["x_cntn_ref"])
+        x_dcsn = refined["x_dcsn_ref"]
+        v_dcsn = refined["v_dcsn_ref"]
+        c_dcsn = refined["kappa_ref"]
+        dela_dcsn = np.zeros_like(refined["x_cntn_ref"])
 
         v_arvl, c_arvl, da_arvl = _interp_to_arrival(
-            egrid1, v_ref, c_ref, dela_ref, min_a_val,
+            x_dcsn, v_dcsn, c_dcsn, dela_dcsn, min_a_val,
             v_cntn, grid)
 
         return (v_arvl, c_arvl, da_arvl, ue_time,
