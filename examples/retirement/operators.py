@@ -84,31 +84,33 @@ def make_stage_operators(model, period=None, equations=None):
             du(c_cntn), dlambda_cntn, v_cntn, grid, 0.0)
         return x_dcsn, v_dcsn, c_dcsn, dela_dcsn
 
-    @njit
-    def _ret_constrained(x_dcsn, v_arvl, c_arvl, da_arvl,
-                         grid, v_cntn_0, params):
-        """Patch constrained region for retiree."""
-        beta_p = params[0]
-        R_p = params[1]
-        min_a_val = x_dcsn[0] / R_p
+    def arvl_mover_ret(x_dcsn, v_dcsn, c_dcsn, dela_dcsn,
+                       grid, v_cntn_0):
+        """I: decision → arrival for retire_cons.
+
+        Composes with g(a_ret) = R*a_ret, interpolates onto
+        the Cartesian arrival grid, and patches the constrained
+        region where grid <= min_a.
+        """
+        c_arvl, v_arvl, da_arvl = _compose_ret(
+            x_dcsn, c_dcsn, v_dcsn, dela_dcsn, grid, egm_params)
+
+        min_a_val = x_dcsn[0] / R
         constrained_idx = np.where(grid <= min_a_val)
         c_arvl[constrained_idx] = grid[constrained_idx]
         v_arvl[constrained_idx] = u(
-            grid[constrained_idx]) + beta_p * v_cntn_0
+            grid[constrained_idx]) + beta * v_cntn_0
         da_arvl[constrained_idx] = 0
-        dlambda_arvl = ddu(c_arvl) * (R_p - da_arvl)
+
+        dlambda_arvl = ddu(c_arvl) * (R - da_arvl)
         return c_arvl, v_arvl, da_arvl, dlambda_arvl
 
     def solver_retiree_stage(c_cntn, v_cntn, dlambda_cntn, grid):
-        """Composed stage operator for retire_cons."""
+        """Composed stage operator: T = I ∘ B for retire_cons."""
         x_dcsn, v_dcsn, c_dcsn, dela_dcsn = dcsn_mover_ret(
             c_cntn, v_cntn, dlambda_cntn, grid)
-        c_arvl, v_arvl, da_arvl = _compose_ret(
-            x_dcsn, c_dcsn, v_dcsn, dela_dcsn, grid, egm_params)
-        c_arvl, v_arvl, da_arvl, dlambda_arvl = _ret_constrained(
-            x_dcsn, v_arvl, c_arvl, da_arvl,
-            grid, v_cntn[0], egm_params)
-        return c_arvl, v_arvl, da_arvl, dlambda_arvl
+        return arvl_mover_ret(
+            x_dcsn, v_dcsn, c_dcsn, dela_dcsn, grid, v_cntn[0])
 
     # ==============================================================
     # work_cons: worker EGM + upper envelope
@@ -152,33 +154,35 @@ def make_stage_operators(model, period=None, equations=None):
         return (x_dcsn, v_dcsn, c_dcsn, dela_dcsn, ue_time,
                 c_hat, v_hat, x_dcsn_hat, del_a)
 
-    @njit
-    def _work_constrained(v_arvl, c_arvl, x_dcsn, v_cntn,
-                          grid, params):
-        """Patch constrained region for worker."""
-        R_p, y_p = params[1], params[3]
-        beta_p, delta_p = params[0], params[2]
-        w_grid = R_p * grid + y_p
+    def arvl_mover_work(x_dcsn, v_dcsn, c_dcsn, v_cntn,
+                        grid):
+        """I: decision → arrival for work_cons.
+
+        Composes with g(a) = R*a + y, interpolates onto
+        the Cartesian arrival grid, and patches the constrained
+        region where w < min(x_dcsn).
+        """
+        v_arvl, c_arvl = _compose_work(
+            x_dcsn, v_dcsn, c_dcsn, grid, egm_params)
+
+        w_grid = R * grid + y
         min_a = x_dcsn[0]
         constrained = np.where(w_grid < min_a)
         c_arvl[constrained] = w_grid[constrained] - grid[0]
         v_arvl[constrained] = u(
-            w_grid[constrained]) + beta_p * v_cntn[0] - delta_p
-        return v_arvl, c_arvl
+            w_grid[constrained]) + beta * v_cntn[0] - delta
+
+        da_arvl = np.zeros(len(grid))
+        return v_arvl, c_arvl, da_arvl
 
     def solver_worker_stage(dv_cntn, ddv_cntn, v_cntn, grid):
-        """Composed stage operator for work_cons."""
+        """Composed stage operator: T = I ∘ B for work_cons."""
         (x_dcsn, v_dcsn, c_dcsn, dela_dcsn, ue_time,
          c_hat, v_hat, x_dcsn_hat, del_a) = dcsn_mover_work(
             dv_cntn, ddv_cntn, v_cntn, grid)
 
-        v_arvl, c_arvl = _compose_work(
-            x_dcsn, v_dcsn, c_dcsn, grid, egm_params)
-
-        v_arvl, c_arvl = _work_constrained(
-            v_arvl, c_arvl, x_dcsn, v_cntn, grid, egm_params)
-
-        da_arvl = np.zeros(len(grid))
+        v_arvl, c_arvl, da_arvl = arvl_mover_work(
+            x_dcsn, v_dcsn, c_dcsn, v_cntn, grid)
 
         return (v_arvl, c_arvl, da_arvl, ue_time,
                 c_hat, v_hat, x_dcsn_hat, del_a)
