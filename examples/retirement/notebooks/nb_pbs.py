@@ -132,7 +132,7 @@ def plot_pbs_scaling(path, ax=None):
                 va='center', ha='left', clip_on=False)
 
     ax.set_xlabel('Grid size $n$')
-    ax.set_ylabel('Mean UE time (ms, avg over $\\delta$)')
+    ax.set_ylabel('Mean UE time (ms, avg over $\\tau$)')
     ax.set_title('Upper-envelope scaling')
     _style_nb_ax(ax)
     ax.legend(fontsize=7, framealpha=0.7, edgecolor='none', ncol=2,
