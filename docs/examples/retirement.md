@@ -5,7 +5,7 @@ Implementation of the Iskhakov, Jorgensen, Rust, and Schjerning (2017) retiremen
 !!! tip "Interactive notebook"
     For interactive run of scaling compared to benchmarks, see the **[Retirement Model Notebook](../notebooks/retirement_fues.ipynb)**.
 
-## Model
+## Model in Sequential Recursive Form 
 
 Each period, a finite-horizon agent chooses consumption $c_t$ and whether to *continue* work ($d_{t+1} = 1$) or retire ($d_{t+1} = 0$). Retirement is absorbing: once retired, the agent cannot return to work.
 
@@ -18,15 +18,15 @@ $$
 **Per-period utility:**
 
 $$
-\log(c_t) - \tau d_{t+1}
+\log(c_t) - \delta \cdot d_{t+1}
 $$
 
-where $\tau$ is the utility cost of working, $a_{t}$ is beginning of period liquid assets, $y$ is income for a worker and $r$ is the interest rate.
+where $\delta$ is the utility cost of working, $a_{t}$ is beginning-of-period liquid assets, $y$ is income for a worker, and $r$ is the interest rate.
 
 **Worker's Bellman equation:**
 
 $$
-V_t^1(a) = \max_{c, d_{t+1} \in \lbrace 0,1 \rbrace} \left\lbrace u(c) - d_{t+1}\tau + \beta V_{t+1}^{d_{t+1}}(a') \right\rbrace
+V_t^1(a) = \max_{c, d_{t+1} \in \lbrace 0,1 \rbrace} \left\lbrace u(c) - d_{t+1}\delta + \beta V_{t+1}^{d_{t+1}}(a') \right\rbrace
 $$
 where $a^{\prime} = (1+r)a +  y - c$.
 
@@ -54,6 +54,8 @@ $$
 
 Because the value function is not concave, worker points satisfying these first-order conditions may lie on choice-specific value functions associated with suboptimal future discrete-choice sequences. The endogenous grid method (EGM) inverts these Euler equations analytically to produce an unrefined endogenous grid $\hat{\mathbb{X}}_t$, value correspondence $\hat{\mathbb{V}}_t$, and continuation grid $\hat{\mathbb{X}}_t'$. FUES then identifies and removes suboptimal points from these EGM outputs in a single pass. See the [algorithm page](../algorithm/fues-algorithm.md) for a detailed description of the scan logic, forward/backward scans, and intersection-point construction.
 
+The [benchmarking notebook](../notebooks/retirement_fues.ipynb) transforms this model into a modular Bellman stage form. 
+
 ## Solve interface
 
 The primary entry point is `solve_nest` in `solve.py`. It loads the YAML declarations, builds the model, and solves backward over $T$ periods:
@@ -62,40 +64,50 @@ The primary entry point is `solve_nest` in `solve.py`. It loads the YAML declara
 from examples.retirement.solve import solve_nest
 from examples.retirement.outputs import euler, get_policy
 
-nest, model, stage_ops = solve_nest(
+nest, model, stage_ops, waves = solve_nest(
     'examples/retirement/syntax',
     method='FUES',
     config_overrides={'grid_size': 3000, 'T': 50},
 )
 
 # Euler error (log10)
-c_refined = get_policy(nest, 'c', stage='labour_mkt_decision')
-print(f'Euler error: {euler(model, c_refined):.4f}')
+sigma_work = get_policy(nest, 'c', stage='labour_mkt_decision')
+print(f'Euler error: {euler(model, sigma_work):.4f}')
 ```
 
-`solve_nest` runs a three-step pipeline on each stage declared in `syntax/stages/`:
+`solve_nest` runs a pipeline on each stage declared in `syntax/stages/`:
 
-1. **Methodize** — attach the upper-envelope method (FUES, DCEGM, RFC, or CONSAV) specified in each stage's `*_methods.yml` file.
-2. **Configure** — bind numerical settings (grid sizes, bounds, $\bar{M}$) from `settings.yaml`.
-3. **Calibrate** — bind economic parameters ($\beta$, $\tau$, $r$, $y$) from `calibration.yaml`.
+1. **Load** — read calibration, settings, stage YAML sources, period template, and inter-period connectors from `syntax/`.
+2. **Methodize** — attach the upper-envelope method (FUES, DCEGM, RFC, or CONSAV).
+3. **Configure** — bind numerical settings (grid sizes, bounds, $\bar{M}$) from `settings.yaml`.
+4. **Calibrate** — bind economic parameters ($\beta$, $\delta$, $r$, $y$) from `calibration.yaml`.
+5. **Graph** — build the stage DAG and derive the backward solve order (waves) via topological sort.
 
 It then solves the three stages in reverse topological order each period:
 
 1. **`retire_cons`** — retiree EGM (standard concave problem, no upper envelope).
-2. **`work_cons`** — worker EGM + upper envelope via `EGM_UE`. This is where FUES runs.
-3. **`labour_mkt_decision`** — pointwise $\max(V^{\text{work}} - \tau,\; V^{\text{retire}})$ to evaluate the discrete choice.
+2. **`work_cons`** — worker EGM + upper envelope. This is where FUES runs.
+3. **`labour_mkt_decision`** — pointwise $\max(\mathrm{v}^{\text{work}} - \delta,\; \mathrm{v}^{\text{retire}})$ to evaluate the discrete choice.
 
 The returned `nest` dict contains the full solution history. Use `get_policy(nest, key, stage=...)` to extract policies and `get_timing(nest)` to extract UE and total solve times.
 
-Overrides are passed as dicts:
+For stationary models or repeated solves, pass back `model`, `stage_ops`, and `waves` to skip the pipeline:
 
 ```python
-# Lower beta and increase grid
-nest, model, _ = solve_nest(
+# First call: full pipeline
+nest, model, stage_ops, waves = solve_nest(
+    'examples/retirement/syntax',
+    method='FUES',
+    config_overrides={'grid_size': 3000, 'T': 50},
+)
+
+# Subsequent calls: reuse model, operators, and graph
+nest2, _, _, _ = solve_nest(
     'examples/retirement/syntax',
     method='FUES',
     calib_overrides={'beta': 0.94},
     config_overrides={'grid_size': 5000, 'T': 50},
+    model=model, stage_ops=stage_ops, waves=waves,
 )
 ```
 
@@ -105,8 +117,8 @@ nest, model, _ = solve_nest(
 
 The override mechanism works at two levels:
 
-- **`--calib-override key=value`** overrides economic parameters (e.g., `beta`, `delta`, `y`) defined in `calibration.yaml`.
-- **`--config-override key=value`** overrides numerical settings (e.g., `grid_size`, `T`, `m_bar`) defined in `settings.yaml`.
+- **`--calib-override key=value`** overrides economic parameters (e.g. `beta`, `delta`, `y`) defined in `calibration.yaml`.
+- **`--config-override key=value`** overrides numerical settings (e.g. `grid_size`, `T`, `m_bar`) defined in `settings.yaml`.
 - **`--override-file path.yml`** loads a sparse YAML file; keys matching `settings.yaml` are treated as config overrides, all others as calibration overrides.
 
 Each stage in `syntax/stages/` declares which parameters it consumes. The configure and calibrate functors bind only the relevant parameters to each stage, so extra keys are ignored.
@@ -169,7 +181,7 @@ Instead of entering parameters manually, sparse YAML override files in `experime
 | ------------------ | -------------------- |
 | `baseline.yml`     | $\beta=0.96$, $T=50$ |
 | `high_beta.yml`    | $\beta=0.99$         |
-| `low_delta.yml`    | $\tau=0.5$, $T=50$ |
+| `low_delta.yml`    | $\delta=0.5$, $T=50$ |
 | `long_horizon.yml` | $T=50$,              |
 
 ```bash
@@ -182,7 +194,7 @@ Parameters: $T=50$, $\beta=0.96$, $r=0.02$, $y=20$, $a \in [0, 500]$. No taste s
 
 **Upper envelope time (ms per period):**
 
-| Grid | $\tau$ | RFC | FUES | MSS |
+| Grid | $\delta$ | RFC | FUES | MSS |
 |------|-----------|-----|------|-----|
 | 500 | 0.25 | 1.2 | 0.11 | 0.36 |
 | 500 | 1.00 | 1.4 | 0.11 | 0.65 |
@@ -195,7 +207,7 @@ Parameters: $T=50$, $\beta=0.96$, $r=0.02$, $y=20$, $a \in [0, 500]$. No taste s
 
 **Euler equation error** ($\log_{10}$):
 
-| Grid | $\tau$ | RFC | FUES | MSS |
+| Grid | $\delta$ | RFC | FUES | MSS |
 |------|-----------|------|------|-----|
 | 500 | 0.25 | -1.537 | -1.591 | -1.537 |
 | 1000 | 1.00 | -1.630 | -1.658 | -1.629 |
@@ -211,17 +223,20 @@ examples/retirement/
 ├── run.py                      # CLI entry point (uses solve_nest)
 ├── syntax/                     # dolo-plus YAML declarations (single source of truth)
 │   ├── period.yaml             # Period template (stage list)
+│   ├── nest.yaml               # Inter-period connectors
 │   ├── calibration.yaml        # r, beta, delta, y, b, smooth_sigma
 │   ├── settings.yaml           # grid_size, grid_max_A, T, m_bar
 │   └── stages/
 │       ├── labour_mkt_decision/  # Branching (max)
 │       ├── work_cons/            # Worker EGM + FUES
 │       └── retire_cons/          # Retiree EGM
-├── model.py                    # Model class + Operator_Factory
+├── model.py                    # RetirementModel (grids, callables)
+├── operators.py                # Stage operator factories
 ├── solve.py                    # Canonical pipeline (solve_nest)
 ├── benchmark.py                # Timing sweeps (via solve_nest)
 ├── notebooks/
-│   └── retirement_fues.ipynb   # Interactive walkthrough
+│   ├── retirement_fues.ipynb   # Interactive walkthrough
+│   └── model.md                # Model description (source of truth)
 └── outputs/
     ├── diagnostics.py          # Nest accessors, euler, deviation
     ├── plots.py                # Paper + notebook plot functions

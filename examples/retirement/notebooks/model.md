@@ -2,17 +2,21 @@
 
 An agent lives for $T$ periods. Each period she holds assets $a \geq 0$ and makes two choices: a **discrete** choice $d \in \{\text{work}, \text{retire}\}$ and a **continuous** choice of consumption $c$. Working yields wage income $y$ but costs disutility $\delta$; retirement is absorbing. Assets earn gross return $(1{+}r)$.
 
-The sequence of events within a period are as follows. Workers and retirees start with beginning-of-period assets $a$ and $a_{\text{ret}}$ respectively. They first earn returns and receive income to produce cash-on-hand $w = (1{+}r)a + y$ for workers or $w_{\text{ret}} = (1{+}r)a_{\text{ret}}$ for retirees. The agent then consumes $c$, leaving end-of-period savings $b = w - c$ (or $b_{\text{ret}} = w_{\text{ret}} - c$). The inter-period transition maps $b \to a$ and $b_{\text{ret}} \to a_{\text{ret}}$ for the next period; retirement is absorbing.
-
+The sequence of events within a period are
+- workers and retirees start with beginning-of-period assets $a$ and $a_{\text{ret}}$ respectively
+- earn returns and receive income to produce cash-on-hand $w = (1{+}r)a + y$ for workers or $w_{\text{ret}} = (1{+}r)a_{\text{ret}}$ for retirees
+- consumes $c$, leaving end-of-period savings $b = w - c$ (or $b_{\text{ret}} = w_{\text{ret}} - c$)
+- inter-period transition maps $b \to a$ and $b_{\text{ret}} \to a_{\text{ret}}$ for the next period; retirement is absorbing.
 ### Stage decomposition
 
-The solver decomposes each period into a directed graph of self-contained modular *stages*, following [Carroll (2026)](https://llorracc.github.io/SolvingMicroDSOPs/); see [Carroll and Shanker (2026)](https://bright-forest.github.io/bellman-ddsl/theory/MDP-foundations/) for the formal framework. The retirement model has three stages:
+Each period can be translated to a directed graph of self-contained modular *stages*, following [Carroll (2026)](https://llorracc.github.io/SolvingMicroDSOPs/); see [Carroll and Shanker (2026)](https://bright-forest.github.io/bellman-ddsl/theory/MDP-foundations/) for the formal framework. The retirement model has three stages:
 
 1. **`labour_mkt_decision`** (branching) — discrete choice: $\max(\mathrm{v}_{\succ}^{\text{work}} - \delta,\; \mathrm{v}_{\succ}^{\text{retire}})$. Assets $a$ pass through unchanged.
 2. **`work_cons`** (continuous, EGM + FUES) — worker consumption: $a \to w \to b$. The continuation value $\mathrm{v}_{\succ}$ is non-concave; FUES recovers the correct envelope.
 3. **`retire_cons`** (continuous, EGM) — retiree consumption: $a_{\text{ret}} \to w_{\text{ret}} \to b_{\text{ret}}$. Standard concave problem.
 
-Workers arrive at $a$ (into the branching stage); retirees arrive at $a_{\text{ret}}$ (directly into `retire_cons`). Both the retire branch and direct retiree arrival feed into the same `retire_cons` stage.
+Note that workers arrive at $a$ (into the branching stage); retirees arrive at $a_{\text{ret}}$ (directly into `retire_cons`). If a worker chooses to retire, they become a retiree and move into retiree consumption problem,  `retire_cons`, as those who entered the period as a retiree. 
+
 
 <div markdown="0">
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 280" style="max-width:680px;width:100%;">
@@ -68,24 +72,24 @@ Workers arrive at $a$ (into the branching stage); retirees arrive at $a_{\text{r
 
 ### Stage operators
 
-In each stage, the state variable is represented at three nodes: arrival ($\mathsf{X}_{\prec}$), decision ($\mathsf{X}$), and continuation ($\mathsf{X}_{\succ}$). Solving proceeds backward: given a continuation-value function $\mathrm{v}_{\succ}$ on $\mathsf{X}_{\succ}$, the decision mover $\mathbb{B}$ produces the decision-value function $\mathrm{v}$ on $\mathsf{X}$, and the arrival mover $\mathbb{I}$ passes $\mathrm{v}$ back to $\mathsf{X}_{\prec}$. Throughout, $\partial\mathrm{v}$ denotes the derivative of $\mathrm{v}$ with respect to the stage's own state variable.
+Within each each stage, the state space is represented at three nodes: arrival ($\mathsf{X}_{\prec}$), decision ($\mathsf{X}$), and continuation ($\mathsf{X}_{\succ}$). Solving proceeds backward: given a continuation-value function $\mathrm{v}_{\succ}$ on $\mathsf{X}_{\succ}$, the decision mover $\mathbb{B}$ produces the decision-value function $\mathrm{v}$ on $\mathsf{X}$, and the arrival mover $\mathbb{I}$ passes $\mathrm{v}$ back to $\mathsf{X}_{\prec}$. Throughout, $\partial\mathrm{v}$ denotes the derivative of $\mathrm{v}$ with respect to the stage's own state variable.
+
+The term mover here refers to operations that move from one node to the next (either forward or backward). The mathematical aspect of the mover is simply a functional operator -- but the mover captures an object that may also contain computational representations of how the operator is implemented on the computer. 
 
 <details style="border-left:3px solid #7c4dff;padding:8px 16px;margin:12px 0;background:rgba(124,77,255,0.04);border-radius:4px;">
 <summary style="cursor:pointer;font-weight:600;font-size:0.95em;"><code>work_cons</code> — worker consumption (EGM + FUES)</summary>
 
 **Decision mover $\mathbb{B}$** &ensp; (continuation $\to$ decision)
 
-Let $\mathrm{v}_{\succ}(b)$ be the continuation value at end-of-period savings $b$, and $\partial\mathrm{v}_{\succ}$ the marginal value. The worker's cash-on-hand is $w$ and the budget constraint is $b = w - c$. The decision mover is:
+Let $\mathrm{v}_{\succ}(b)$ be the continuation value at end-of-period savings $b$, and $\partial\mathrm{v}_{\succ}(b)$ its derivative. The worker's cash-on-hand is $w$ and the budget constraint is $b = w - c$. The decision mover solves:
 
-$$(\mathbb{B}\mathrm{v}_{\succ})(w) = \mathrm{v}(w) = \max_c\bigl\{\log(c) + \beta\,\mathrm{v}_{\succ}(b)\bigr\}$$
+$$(\mathbb{B}\,\mathrm{v}_{\succ})(w) = \mathrm{v}(w) = \max_c\bigl\{\log(c) + \beta\,\mathrm{v}_{\succ}(w - c)\bigr\}$$
 
-such that $b=w-c$. The first-order condition is:
+The first-order condition is $1/c = \beta\,\partial\mathrm{v}_{\succ}(b)$.
 
-$$1/c = \beta\,\partial\mathrm{v}_{\succ}(b)$$
+*EGM.* &ensp; Given an exogenous grid $\{b_0^{\#},\dots,b_N^{\#}\}$ on the continuation state, the FOC yields optimal consumption $c_i^{\#} = \bigl(\beta\,\partial\mathrm{v}_{\succ}(b_i^{\#})\bigr)^{-1}$ and the budget constraint recovers the endogenous grid $w_i^{\#} = b_i^{\#} + c_i^{\#}$. Each pair $(w_i^{\#},\, c_i^{\#})$ satisfies the FOC, and the corresponding value is $q_i^{\#} = \log(c_i^{\#}) + \beta\,\mathrm{v}_{\succ}(b_i^{\#})$.
 
-*EGM.* &ensp; Given a grid $\{b_0^{\#},\dots,b_N^{\#}\}$ on the continuation state, the FOC yields $c_i^{\#} = \bigl(\beta\,\partial\mathrm{v}_{\succ}(b_i^{\#})\bigr)^{-1}$ and the budget constraint recovers the endogenous grid $w_i^{\#} = b_i^{\#} + c_i^{\#}$.
-
-Each $(w_i^{\#}, c_i^{\#})$ pair satisfies the FOC, but the endogenous grid $\{w_i^{\#}\}$ may be non-monotone. This is because the worker's $\mathrm{v}_{\succ}$ is the upper envelope of concave functions (one for each future discrete-choice sequence) and is not itself concave. FUES recovers the correct monotone envelope on the endogenous grid.
+*Non-concavity.* &ensp; The worker's $\mathrm{v}_{\succ}$ is the upper envelope of concave functions (one for each future discrete-choice sequence) and is not itself concave. As a result the endogenous grid $\{w_i^{\#}\}$ may be non-monotone, and the points $(w_i^{\#},\, q_i^{\#})$ define a correspondence rather than a function. An upper-envelope algorithm recovers the monotone upper envelope of $\{(w_i^{\#},\, q_i^{\#})\}$, thereby approximating $\mathrm{v}$. This is where FUES comes in.
 
 **Arrival mover $\mathbb{I}$** &ensp; (decision $\to$ arrival)
 
