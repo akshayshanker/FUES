@@ -15,10 +15,7 @@ from dcsmm.fues.helpers.math_funcs import interp_as_2, interp_as_3
 from dcsmm.uenvelope import EGM_UE as egm_ue_global
 from kikku.asva.egm_1d import make_egm_1d
 from kikku.asva.compose_interp import make_compose_interp
-from .model import (
-    WORKER_EGM_FNS, RETIREE_EGM_FNS,
-    g_arvl_to_dcsn_worker, g_arvl_to_dcsn_retiree,
-)
+from .model import g_arvl_to_dcsn_worker, g_arvl_to_dcsn_retiree
 
 
 def _read_ue_method(period):
@@ -40,8 +37,15 @@ def _read_ue_method(period):
 # retire_cons
 # ==============================================================
 
-def make_retire_cons(model):
+def make_retire_cons(model, egm_fns):
     """Factory for retire_cons stage operators.
+
+    Parameters
+    ----------
+    model : RetirementModel
+    egm_fns : dict
+        EGM recipe: ``{'inv_euler', 'bellman_rhs',
+        'cntn_to_dcsn', 'concavity'}``.
 
     Returns
     -------
@@ -54,10 +58,10 @@ def make_retire_cons(model):
     egm_params = np.array([beta, R, model.delta, model.y])
 
     _egm_retire = make_egm_1d(
-        RETIREE_EGM_FNS['inv_euler'],
-        RETIREE_EGM_FNS['bellman_rhs'],
-        RETIREE_EGM_FNS['cntn_to_dcsn'],
-        RETIREE_EGM_FNS['concavity'],
+        egm_fns['inv_euler'],
+        egm_fns['bellman_rhs'],
+        egm_fns['cntn_to_dcsn'],
+        egm_fns['concavity'],
         egm_params,
     )
 
@@ -102,8 +106,17 @@ def make_retire_cons(model):
 # work_cons
 # ==============================================================
 
-def make_work_cons(model, period=None):
+def make_work_cons(model, egm_fns, period=None):
     """Factory for work_cons stage operators.
+
+    Parameters
+    ----------
+    model : RetirementModel
+    egm_fns : dict
+        EGM recipe: ``{'inv_euler', 'bellman_rhs',
+        'cntn_to_dcsn', 'concavity'}``.
+    period : dict, optional
+        Canonical period dict (UE method read from here).
 
     Returns
     -------
@@ -118,10 +131,10 @@ def make_work_cons(model, period=None):
     egm_params = np.array([beta, R, delta, y])
 
     _invert_euler = make_egm_1d(
-        WORKER_EGM_FNS['inv_euler'],
-        WORKER_EGM_FNS['bellman_rhs'],
-        WORKER_EGM_FNS['cntn_to_dcsn'],
-        WORKER_EGM_FNS['concavity'],
+        egm_fns['inv_euler'],
+        egm_fns['bellman_rhs'],
+        egm_fns['cntn_to_dcsn'],
+        egm_fns['concavity'],
         egm_params,
     )
 

@@ -23,6 +23,7 @@ from kikku.dynx import load_syntax, instantiate_period
 
 from .model import RetirementModel
 from .operators import make_retire_cons, make_work_cons, make_labour_mkt_decision
+from .model import WORKER_EGM_FNS, RETIREE_EGM_FNS
 
 
 # ============================================================
@@ -221,8 +222,9 @@ def solve_nest(syntax_dir, method='FUES',
             model = RetirementModel(period)
         if stage_ops is None:
             stage_ops = {
-                'retire_cons': make_retire_cons(model),
-                'work_cons': make_work_cons(model, period=period),
+                'retire_cons': make_retire_cons(model, RETIREE_EGM_FNS),
+                'work_cons': make_work_cons(
+                    model, WORKER_EGM_FNS, period=period),
                 'labour_mkt_decision': make_labour_mkt_decision(model),
             }
 
