@@ -30,6 +30,8 @@ The installable package is `dcsmm` (contains `fues` and `uenvelope`). Requires P
 
 ### Option 1 — Library only
 
+Install FUES and the upper-envelope interface without cloning the repo. Lets you use `fues` and all other benchmark upper-envelope methods in your own applications.
+
 ```bash
 pip install git+https://github.com/akshayshanker/FUES.git
 ```
@@ -39,9 +41,11 @@ from dcsmm.fues import FUES
 from dcsmm.uenvelope import EGM_UE
 ```
 
-Runtime dependencies (numba, numpy, scipy, [HARK](https://github.com/econ-ark/HARK), [ConSav](https://github.com/NumEconCopenhagen/ConsumptionSaving)) are installed automatically.
+Runtime dependencies (numba, numpy, scipy, [HARK](https://github.com/econ-ark/HARK), [ConSav](https://github.com/NumEconCopenhagen/ConsumptionSaving)) are installed automatically. See `pyproject.toml` for the full list and version pins.
 
 ### Option 2 — With examples
+
+Clone the repo and install with example dependencies (`matplotlib`, `pyyaml`, `seaborn`, [`kikku`](https://github.com/bright-forest/kikku)). Includes everything in Option 1 plus the example models in the repo checkout.
 
 ```bash
 git clone https://github.com/akshayshanker/FUES.git
@@ -49,13 +53,19 @@ cd FUES
 pip install ".[examples]"
 ```
 
+Each example can be run as a simple single solve via `run.py`:
+
 ```bash
 python examples/retirement/run.py --grid-size 3000
 ```
 
 See the [retirement example docs](https://akshayshanker.github.io/FUES/examples/retirement/) for CLI arguments, parameter overrides, and outputs. The [interactive notebook](examples/retirement/notebooks/retirement_fues.ipynb) walks through the model step by step.
 
+Formal benchmarking and parameter sweeps are run on an HPC cluster using the PBS scripts in [`experiments/retirement/`](experiments/retirement/). Pre-computed paper results (tables and figures) are in [`replication/`](replication/).
+
 ### Option 3 — Developer (editable)
+
+Full setup with editable install, examples, and all dependencies including the dolo-plus compiler. Use this if you are modifying the source.
 
 ```bash
 git clone https://github.com/akshayshanker/FUES.git
@@ -64,13 +74,13 @@ bash setup/setup_venv.sh
 source .venv/bin/activate
 ```
 
+This creates a local `.venv`, installs `dcsmm` in editable mode, and verifies the install.
+
 Run the full timing sweep:
 
 ```bash
 python examples/retirement/run.py --run-timings
 ```
-
-Formal benchmarking uses the PBS scripts in [`experiments/retirement/`](experiments/retirement/). Pre-computed paper results are in [`replication/`](replication/).
 
 ---
 
