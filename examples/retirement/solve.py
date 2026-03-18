@@ -18,8 +18,8 @@ import numpy as np
 import time
 from pathlib import Path
 
-from kikku.period_graphs import period_to_graph, backward_paths
-from kikku.pipeline import load_syntax, instantiate_period
+from kikku.dynx import period_to_graph, backward_paths
+from kikku.dynx import load_syntax, instantiate_period
 
 from .model import RetirementModel
 from .operators import make_stage_operators
