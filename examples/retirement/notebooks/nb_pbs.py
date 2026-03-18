@@ -167,7 +167,8 @@ def plot_pbs_scaling(path, ax=None):
 
     ax.set_xlabel('Grid size (number of EGM points)')
     ax.set_ylabel('Upper-envelope time per period (ms)')
-    ax.set_title('Upper-envelope scaling (avg over $\\tau$)')
+    ax.set_title('Retirement choice model — upper-envelope scaling (avg over $\\tau$)',
+                 fontsize=10)
     _style_nb_ax(ax)
     ax.legend(fontsize=7, framealpha=0.7, edgecolor='none', ncol=2,
               loc='upper left')
