@@ -1,0 +1,1564 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Fast Upper-Envelope Scan for discrete-continuous dynamic programming">
+      
+      
+        <meta name="author" content="Loretti I. Dobrescu and Akshay Shanker">
+      
+      
+        <link rel="canonical" href="https://akshayshanker.github.io/FUES/examples/retirement/">
+      
+      
+        <link rel="prev" href="../">
+      
+      
+        <link rel="next" href="../housing/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Retirement Choice - FUES</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=IBM+Plex+Sans:300,300i,400,400i,700,700i%7CJetBrains+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"IBM Plex Sans";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#retirement-choice-model" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="FUES" class="md-header__button md-logo" aria-label="FUES" data-md-component="logo">
+      
+  <img src="../../images/fues-logo.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            FUES
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Retirement Choice
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/akshayshanker/FUES" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    akshayshanker/FUES
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="FUES" class="md-nav__button md-logo" aria-label="FUES" data-md-component="logo">
+      
+  <img src="../../images/fues-logo.svg" alt="logo">
+
+    </a>
+    FUES
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/akshayshanker/FUES" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    akshayshanker/FUES
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithm/fues-algorithm/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Algorithm
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Examples
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Examples
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Retirement Choice
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Retirement Choice
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#model-in-sequential-recursive-form" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Model in Sequential Recursive Form
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Model in Sequential Recursive Form">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#euler-equations-and-applying-fues" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Euler equations and applying FUES
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#solve-interface" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Solve interface
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#running-locally" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Running locally
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#replicating-paper-results-pbs-cluster" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Replicating paper results (PBS cluster)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Replicating paper results (PBS cluster)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#pbs-settings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PBS settings
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#override-files" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Override files
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#benchmark-results" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Benchmark results
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#code-structure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Code structure
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#references" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        References
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../housing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Durables
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../housing-renting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Housing-Renting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Notebooks
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Notebooks
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../notebooks/retirement_fues/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Retirement choice speed benchmarks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    API Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/fues/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    FUES & EGM_UE
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/retirement/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Retirement Example
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#model-in-sequential-recursive-form" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Model in Sequential Recursive Form
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Model in Sequential Recursive Form">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#euler-equations-and-applying-fues" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Euler equations and applying FUES
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#solve-interface" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Solve interface
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#running-locally" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Running locally
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#replicating-paper-results-pbs-cluster" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Replicating paper results (PBS cluster)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Replicating paper results (PBS cluster)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#pbs-settings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PBS settings
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#override-files" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Override files
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#benchmark-results" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Benchmark results
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#code-structure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Code structure
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#references" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        References
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="retirement-choice-model">Retirement Choice Model<a class="headerlink" href="#retirement-choice-model" title="Permanent link">&para;</a></h1>
+<p>Implementation of the Iskhakov, Jorgensen, Rust, and Schjerning (2017) retirement choice model, used as the primary benchmark in Dobrescu and Shanker (2022). Demonstrates speed and lower complexity of FUES.</p>
+<div class="admonition tip">
+<p class="admonition-title">Interactive notebook</p>
+<p>For interactive run of scaling compared to benchmarks, see the <strong><a href="../../notebooks/retirement_fues/">Retirement Model Notebook</a></strong>.</p>
+</div>
+<h2 id="model-in-sequential-recursive-form">Model in Sequential Recursive Form<a class="headerlink" href="#model-in-sequential-recursive-form" title="Permanent link">&para;</a></h2>
+<p>Each period, a finite-horizon agent chooses consumption <span class="arithmatex">\(c_t\)</span> and whether to <em>continue</em> work (<span class="arithmatex">\(d_{t+1} = 1\)</span>) or retire (<span class="arithmatex">\(d_{t+1} = 0\)</span>). Retirement is absorbing: once retired, the agent cannot return to work.</p>
+<p><strong>Budget constraint:</strong></p>
+<div class="arithmatex">\[
+a_{t+1} = (1+r)a_t + d_t y - c_t
+\]</div>
+<p><strong>Per-period utility:</strong></p>
+<div class="arithmatex">\[
+\log(c_t) - \tau d_{t+1}
+\]</div>
+<p>where <span class="arithmatex">\(\tau\)</span> is the utility cost of working, <span class="arithmatex">\(a_{t}\)</span> is beginning-of-period liquid assets, <span class="arithmatex">\(y\)</span> is income for a worker, and <span class="arithmatex">\(r\)</span> is the interest rate.</p>
+<p><strong>Worker's Bellman equation:</strong></p>
+<p>$$
+V_t^1(a) = \max_{c, d_{t+1} \in \lbrace 0,1 \rbrace} \left\lbrace u(c) - d_{t+1}\tau + \beta V_{t+1}^{d_{t+1}}(a') \right\rbrace
+$$
+where <span class="arithmatex">\(a^{\prime} = (1+r)a +  y - c\)</span>.</p>
+<p><strong>Retiree's Bellman equation:</strong></p>
+<div class="arithmatex">\[
+V_t^0(a) = \max_c \left\lbrace u(c) + \beta V_{t+1}^0(a') \right\rbrace
+\]</div>
+<p>The worker's value function is the upper envelope of multiple concave functions, one for each feasible sequence of future discrete choices. Holding <span class="arithmatex">\(d_{t+1}=1\)</span> fixed, by selecting <span class="arithmatex">\(a'\)</span>, the worker implicitly selects all future discrete choices <span class="arithmatex">\(d_j\)</span> for <span class="arithmatex">\(j &gt; t+1\)</span>. The upper envelope of these concave functions is not itself concave, producing the "secondary kinks" described by Iskhakov et al. (2017). This non-concavity is precisely the problem that FUES solves.</p>
+<h3 id="euler-equations-and-applying-fues">Euler equations and applying FUES<a class="headerlink" href="#euler-equations-and-applying-fues" title="Permanent link">&para;</a></h3>
+<p>If the agent chooses to continue working (<span class="arithmatex">\(d_{t+1} = 1\)</span>), the worker's Euler equation at time <span class="arithmatex">\(t\)</span> is</p>
+<div class="arithmatex">\[
+u'(c_t^1) \geq \beta(1+r)\, u'(c_{t+1}),
+\]</div>
+<p>where <span class="arithmatex">\(c_t^1\)</span> is consumption conditional on <span class="arithmatex">\(d_{t+1}=1\)</span> and <span class="arithmatex">\(c_{t+1}\)</span> is the unconditional time <span class="arithmatex">\(t+1\)</span> consumption. If the agent retires (<span class="arithmatex">\(d_{t+1}=0\)</span>), the Euler equation is</p>
+<div class="arithmatex">\[
+u'(c_t^0) \geq \beta(1+r)\, u'(c_{t+1}^0).
+\]</div>
+<p>Because the value function is not concave, worker points satisfying these first-order conditions may lie on choice-specific value functions associated with suboptimal future discrete-choice sequences. The endogenous grid method (EGM) inverts these Euler equations analytically to produce an unrefined endogenous grid <span class="arithmatex">\(\hat{\mathbb{X}}_t\)</span>, value correspondence <span class="arithmatex">\(\hat{\mathbb{V}}_t\)</span>, and continuation grid <span class="arithmatex">\(\hat{\mathbb{X}}_t'\)</span>. FUES then identifies and removes suboptimal points from these EGM outputs in a single pass. See the <a href="../../algorithm/fues-algorithm/">algorithm page</a> for a detailed description of the scan logic, forward/backward scans, and intersection-point construction.</p>
+<p>The <a href="../../notebooks/retirement_fues/">benchmarking notebook</a> transforms this model into a modular Bellman stage form. </p>
+<h2 id="solve-interface">Solve interface<a class="headerlink" href="#solve-interface" title="Permanent link">&para;</a></h2>
+<p>The primary entry point is <code>solve_nest</code> in <code>solve.py</code>. It loads the YAML declarations, builds the model, and solves backward over <span class="arithmatex">\(T\)</span> periods:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">examples.retirement.solve</span><span class="w"> </span><span class="kn">import</span> <span class="n">solve_nest</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">examples.retirement.outputs</span><span class="w"> </span><span class="kn">import</span> <span class="n">euler</span><span class="p">,</span> <span class="n">get_policy</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="n">nest</span><span class="p">,</span> <span class="n">model</span><span class="p">,</span> <span class="n">stage_ops</span><span class="p">,</span> <span class="n">waves</span> <span class="o">=</span> <span class="n">solve_nest</span><span class="p">(</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    <span class="s1">&#39;examples/retirement/syntax&#39;</span><span class="p">,</span>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    <span class="n">method</span><span class="o">=</span><span class="s1">&#39;FUES&#39;</span><span class="p">,</span>
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>    <span class="n">config_overrides</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;grid_size&#39;</span><span class="p">:</span> <span class="mi">3000</span><span class="p">,</span> <span class="s1">&#39;T&#39;</span><span class="p">:</span> <span class="mi">50</span><span class="p">},</span>
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="p">)</span>
+</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>
+</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="c1"># Euler error (log10)</span>
+</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="n">sigma_work</span> <span class="o">=</span> <span class="n">get_policy</span><span class="p">(</span><span class="n">nest</span><span class="p">,</span> <span class="s1">&#39;c&#39;</span><span class="p">,</span> <span class="n">stage</span><span class="o">=</span><span class="s1">&#39;labour_mkt_decision&#39;</span><span class="p">)</span>
+</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Euler error: </span><span class="si">{</span><span class="n">euler</span><span class="p">(</span><span class="n">model</span><span class="p">,</span><span class="w"> </span><span class="n">sigma_work</span><span class="p">)</span><span class="si">:</span><span class="s1">.4f</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+</span></code></pre></div>
+<p><code>solve_nest</code> runs a pipeline on each stage declared in <code>syntax/stages/</code>:</p>
+<ol>
+<li><strong>Load</strong> — read calibration, settings, stage YAML sources, period template, and inter-period connectors from <code>syntax/</code>.</li>
+<li><strong>Methodize</strong> — attach the upper-envelope method (FUES, DCEGM, RFC, or CONSAV).</li>
+<li><strong>Configure</strong> — bind numerical settings (grid sizes, bounds, <span class="arithmatex">\(\bar{M}\)</span>) from <code>settings.yaml</code>.</li>
+<li><strong>Calibrate</strong> — bind economic parameters (<span class="arithmatex">\(\beta\)</span>, <span class="arithmatex">\(\delta\)</span>, <span class="arithmatex">\(r\)</span>, <span class="arithmatex">\(y\)</span>) from <code>calibration.yaml</code>.</li>
+<li><strong>Graph</strong> — build the stage DAG and derive the backward solve order (waves) via topological sort.</li>
+</ol>
+<p>It then solves the three stages in reverse topological order each period:</p>
+<ol>
+<li><strong><code>retire_cons</code></strong> — retiree EGM (standard concave problem, no upper envelope).</li>
+<li><strong><code>work_cons</code></strong> — worker EGM + upper envelope. This is where FUES runs.</li>
+<li><strong><code>labour_mkt_decision</code></strong> — pointwise <span class="arithmatex">\(\max(\mathrm{v}^{\text{work}} - \tau,\; \mathrm{v}^{\text{retire}})\)</span> to evaluate the discrete choice.</li>
+</ol>
+<p>The returned <code>nest</code> dict contains the full solution history. Use <code>get_policy(nest, key, stage=...)</code> to extract policies and <code>get_timing(nest)</code> to extract UE and total solve times.</p>
+<p>For stationary models or repeated solves, pass back <code>model</code>, <code>stage_ops</code>, and <code>waves</code> to skip the pipeline:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># First call: full pipeline</span>
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="n">nest</span><span class="p">,</span> <span class="n">model</span><span class="p">,</span> <span class="n">stage_ops</span><span class="p">,</span> <span class="n">waves</span> <span class="o">=</span> <span class="n">solve_nest</span><span class="p">(</span>
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>    <span class="s1">&#39;examples/retirement/syntax&#39;</span><span class="p">,</span>
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>    <span class="n">method</span><span class="o">=</span><span class="s1">&#39;FUES&#39;</span><span class="p">,</span>
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>    <span class="n">config_overrides</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;grid_size&#39;</span><span class="p">:</span> <span class="mi">3000</span><span class="p">,</span> <span class="s1">&#39;T&#39;</span><span class="p">:</span> <span class="mi">50</span><span class="p">},</span>
+</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="p">)</span>
+</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>
+</span><span id="__span-1-8"><a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="c1"># Subsequent calls: reuse model, operators, and graph</span>
+</span><span id="__span-1-9"><a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="n">nest2</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">solve_nest</span><span class="p">(</span>
+</span><span id="__span-1-10"><a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>    <span class="s1">&#39;examples/retirement/syntax&#39;</span><span class="p">,</span>
+</span><span id="__span-1-11"><a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>    <span class="n">method</span><span class="o">=</span><span class="s1">&#39;FUES&#39;</span><span class="p">,</span>
+</span><span id="__span-1-12"><a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>    <span class="n">calib_overrides</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;beta&#39;</span><span class="p">:</span> <span class="mf">0.94</span><span class="p">},</span>
+</span><span id="__span-1-13"><a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>    <span class="n">config_overrides</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;grid_size&#39;</span><span class="p">:</span> <span class="mi">5000</span><span class="p">,</span> <span class="s1">&#39;T&#39;</span><span class="p">:</span> <span class="mi">50</span><span class="p">},</span>
+</span><span id="__span-1-14"><a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a>    <span class="n">model</span><span class="o">=</span><span class="n">model</span><span class="p">,</span> <span class="n">stage_ops</span><span class="o">=</span><span class="n">stage_ops</span><span class="p">,</span> <span class="n">waves</span><span class="o">=</span><span class="n">waves</span><span class="p">,</span>
+</span><span id="__span-1-15"><a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a><span class="p">)</span>
+</span></code></pre></div>
+<h2 id="running-locally">Running locally<a class="headerlink" href="#running-locally" title="Permanent link">&para;</a></h2>
+<p><code>run.py</code> is a command-line wrapper around <code>solve_nest</code>. It loads baseline economic parameters from <code>syntax/calibration.yaml</code> and numerical settings from <code>syntax/settings.yaml</code>, applies any command-line overrides, solves with all four methods, and prints a comparison table. Parameters can be overridden at the command line.</p>
+<p>The override mechanism works at two levels:</p>
+<ul>
+<li><strong><code>--calib-override key=value</code></strong> overrides economic parameters (e.g. <code>beta</code>, <code>delta</code>, <code>y</code>) defined in <code>calibration.yaml</code>.</li>
+<li><strong><code>--config-override key=value</code></strong> overrides numerical settings (e.g. <code>grid_size</code>, <code>T</code>, <code>m_bar</code>) defined in <code>settings.yaml</code>.</li>
+<li><strong><code>--override-file path.yml</code></strong> loads a sparse YAML file; keys matching <code>settings.yaml</code> are treated as config overrides, all others as calibration overrides.</li>
+</ul>
+<p>Each stage in <code>syntax/stages/</code> declares which parameters it consumes. The configure and calibrate functors bind only the relevant parameters to each stage, so extra keys are ignored.</p>
+<p>Outputs are saved to <code>--output-dir</code> and include EGM grid plots, consumption policy plots, and a printed table of Euler errors and timing for all four upper-envelope methods (FUES, RFC, MSS, LTM).</p>
+<p>All commands run from the repo root (<code>FUES/</code>).</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># Single run (baseline calibration from syntax/)</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>python<span class="w"> </span>examples/retirement/run.py<span class="w"> </span>--grid-size<span class="w"> </span><span class="m">3000</span><span class="w"> </span>--output-dir<span class="w"> </span>results/retirement
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="c1"># Override parameters</span>
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>python<span class="w"> </span>examples/retirement/run.py<span class="w"> </span>--calib-override<span class="w"> </span><span class="nv">beta</span><span class="o">=</span><span class="m">0</span>.96<span class="w"> </span>--config-override<span class="w"> </span><span class="nv">T</span><span class="o">=</span><span class="m">50</span>
+</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>
+</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="c1"># Full timing sweep (all methods × grid sizes × delta values)</span>
+</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>python<span class="w"> </span>examples/retirement/run.py<span class="w"> </span>--run-timings<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-2-9"><a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="w">    </span>--sweep-grids<span class="w"> </span><span class="m">1000</span>,2000,3000,6000,10000<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-2-10"><a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="w">    </span>--sweep-deltas<span class="w"> </span><span class="m">0</span>.25,0.5,1,2<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-2-11"><a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="w">    </span>--output-dir<span class="w"> </span>results/retirement
+</span></code></pre></div>
+<h2 id="replicating-paper-results-pbs-cluster">Replicating paper results (PBS cluster)<a class="headerlink" href="#replicating-paper-results-pbs-cluster" title="Permanent link">&para;</a></h2>
+<p>The paper's timing and accuracy tables (Tables 1--2) were produced on NCI Gadi (Intel Xeon, single core). To replicate:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># On Gadi: submit the PBS batch job</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="nb">cd</span><span class="w"> </span>FUES
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="nb">source</span><span class="w"> </span>setup/load_env.sh
+</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>qsub<span class="w"> </span>experiments/retirement/retirement_timings.sh
+</span></code></pre></div>
+<p>This runs the full sweep (15 grid sizes × 4 delta values × 4 methods × 3 repetitions) and produces:</p>
+<ul>
+<li><code>retirement_timing.md</code> / <code>.tex</code> — timing table (ms per period)</li>
+<li><code>retirement_accuracy.md</code> / <code>.tex</code> — Euler error and consumption deviation tables</li>
+<li>EGM grid plots at the configured age</li>
+</ul>
+<p>Outputs are written to <code>experiments/retirement/results/</code>. Pre-computed benchmark results from the paper are available in the same directory.</p>
+<p>The LaTeX tables include only the paper grid sizes (1k, 2k, 3k, 6k, 10k) via <code>--latex-grids</code>. The markdown tables include all 15 grid sizes for the <a href="../../notebooks/retirement_fues/">notebook comparison</a>.</p>
+<h3 id="pbs-settings">PBS settings<a class="headerlink" href="#pbs-settings" title="Permanent link">&para;</a></h3>
+<p>Edit <code>experiments/retirement/retirement_timings.sh</code> to change:</p>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>SWEEP_GRIDS</code></td>
+<td>1k--15k (1k steps)</td>
+<td>Grid sizes for the sweep</td>
+</tr>
+<tr>
+<td><code>SWEEP_DELTAS</code></td>
+<td>0.25, 0.5, 1, 2</td>
+<td>Utility cost values</td>
+</tr>
+<tr>
+<td><code>LATEX_GRIDS</code></td>
+<td>1k, 2k, 3k, 6k, 10k</td>
+<td>Subset for LaTeX tables</td>
+</tr>
+<tr>
+<td><code>SWEEP_RUNS</code></td>
+<td>3</td>
+<td>Best-of-n repetitions</td>
+</tr>
+</tbody>
+</table>
+<h3 id="override-files">Override files<a class="headerlink" href="#override-files" title="Permanent link">&para;</a></h3>
+<p>Instead of entering parameters manually, sparse YAML override files in <code>experiments/retirement/params/</code> specify only values that differ from the <code>syntax/</code> defaults:</p>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Key changes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>baseline.yml</code></td>
+<td><span class="arithmatex">\(\beta=0.96\)</span>, <span class="arithmatex">\(T=50\)</span></td>
+</tr>
+<tr>
+<td><code>high_beta.yml</code></td>
+<td><span class="arithmatex">\(\beta=0.99\)</span></td>
+</tr>
+<tr>
+<td><code>low_delta.yml</code></td>
+<td><span class="arithmatex">\(\tau=0.5\)</span>, <span class="arithmatex">\(T=50\)</span></td>
+</tr>
+<tr>
+<td><code>long_horizon.yml</code></td>
+<td><span class="arithmatex">\(T=50\)</span>,</td>
+</tr>
+</tbody>
+</table>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>python<span class="w"> </span>examples/retirement/run.py<span class="w"> </span>--override-file<span class="w"> </span>experiments/retirement/params/long_horizon.yml
+</span></code></pre></div>
+<h2 id="benchmark-results">Benchmark results<a class="headerlink" href="#benchmark-results" title="Permanent link">&para;</a></h2>
+<p>Parameters: <span class="arithmatex">\(T=50\)</span>, <span class="arithmatex">\(\beta=0.96\)</span>, <span class="arithmatex">\(r=0.02\)</span>, <span class="arithmatex">\(y=20\)</span>, <span class="arithmatex">\(a \in [0, 500]\)</span>. No taste shocks. (See Tables 1--2 in the paper for the full results.)</p>
+<p><strong>Upper envelope time (ms per period):</strong></p>
+<table>
+<thead>
+<tr>
+<th>Grid</th>
+<th><span class="arithmatex">\(\tau\)</span></th>
+<th>RFC</th>
+<th>FUES</th>
+<th>MSS</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>500</td>
+<td>0.25</td>
+<td>1.2</td>
+<td>0.11</td>
+<td>0.36</td>
+</tr>
+<tr>
+<td>500</td>
+<td>1.00</td>
+<td>1.4</td>
+<td>0.11</td>
+<td>0.65</td>
+</tr>
+<tr>
+<td>1000</td>
+<td>0.25</td>
+<td>2.9</td>
+<td>0.22</td>
+<td>0.64</td>
+</tr>
+<tr>
+<td>1000</td>
+<td>1.00</td>
+<td>3.1</td>
+<td>0.21</td>
+<td>2.25</td>
+</tr>
+<tr>
+<td>2000</td>
+<td>0.25</td>
+<td>5.6</td>
+<td>0.43</td>
+<td>1.29</td>
+</tr>
+<tr>
+<td>2000</td>
+<td>1.00</td>
+<td>7.4</td>
+<td>0.43</td>
+<td>4.76</td>
+</tr>
+<tr>
+<td>3000</td>
+<td>0.25</td>
+<td>8.4</td>
+<td>0.65</td>
+<td>1.98</td>
+</tr>
+<tr>
+<td>3000</td>
+<td>1.00</td>
+<td>12.8</td>
+<td>0.63</td>
+<td>6.63</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Euler equation error</strong> (<span class="arithmatex">\(\log_{10}\)</span>):</p>
+<table>
+<thead>
+<tr>
+<th>Grid</th>
+<th><span class="arithmatex">\(\tau\)</span></th>
+<th>RFC</th>
+<th>FUES</th>
+<th>MSS</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>500</td>
+<td>0.25</td>
+<td>-1.537</td>
+<td>-1.591</td>
+<td>-1.537</td>
+</tr>
+<tr>
+<td>1000</td>
+<td>1.00</td>
+<td>-1.630</td>
+<td>-1.658</td>
+<td>-1.629</td>
+</tr>
+<tr>
+<td>3000</td>
+<td>1.00</td>
+<td>-1.629</td>
+<td>-1.660</td>
+<td>-1.629</td>
+</tr>
+</tbody>
+</table>
+<p>FUES is 5--20× faster than MSS and 10--20× faster than RFC across all configurations. Euler errors are comparable, with FUES slightly more accurate. FUES scales sub-linearly, MSS scales linearly and LTM scales quadratically. </p>
+<h2 id="code-structure">Code structure<a class="headerlink" href="#code-structure" title="Permanent link">&para;</a></h2>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>examples/retirement/
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>├── run.py                      # CLI entry point (uses solve_nest)
+</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>├── syntax/                     # dolo-plus YAML declarations (single source of truth)
+</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>│   ├── period.yaml             # Period template (stage list)
+</span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>│   ├── nest.yaml               # Inter-period connectors
+</span><span id="__span-5-6"><a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>│   ├── calibration.yaml        # r, beta, delta, y, b, smooth_sigma
+</span><span id="__span-5-7"><a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>│   ├── settings.yaml           # grid_size, grid_max_A, T, m_bar
+</span><span id="__span-5-8"><a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>│   └── stages/
+</span><span id="__span-5-9"><a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a>│       ├── labour_mkt_decision/  # Branching (max)
+</span><span id="__span-5-10"><a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a>│       ├── work_cons/            # Worker EGM + FUES
+</span><span id="__span-5-11"><a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a>│       └── retire_cons/          # Retiree EGM
+</span><span id="__span-5-12"><a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a>├── model.py                    # RetirementModel (grids, callables)
+</span><span id="__span-5-13"><a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a>├── operators.py                # Stage operator factories
+</span><span id="__span-5-14"><a id="__codelineno-5-14" name="__codelineno-5-14" href="#__codelineno-5-14"></a>├── solve.py                    # Canonical pipeline (solve_nest)
+</span><span id="__span-5-15"><a id="__codelineno-5-15" name="__codelineno-5-15" href="#__codelineno-5-15"></a>├── benchmark.py                # Timing sweeps (via solve_nest)
+</span><span id="__span-5-16"><a id="__codelineno-5-16" name="__codelineno-5-16" href="#__codelineno-5-16"></a>├── notebooks/
+</span><span id="__span-5-17"><a id="__codelineno-5-17" name="__codelineno-5-17" href="#__codelineno-5-17"></a>│   ├── retirement_fues.ipynb   # Interactive walkthrough
+</span><span id="__span-5-18"><a id="__codelineno-5-18" name="__codelineno-5-18" href="#__codelineno-5-18"></a>│   └── model.md                # Model description (source of truth)
+</span><span id="__span-5-19"><a id="__codelineno-5-19" name="__codelineno-5-19" href="#__codelineno-5-19"></a>└── outputs/
+</span><span id="__span-5-20"><a id="__codelineno-5-20" name="__codelineno-5-20" href="#__codelineno-5-20"></a>    ├── diagnostics.py          # Nest accessors, euler, deviation
+</span><span id="__span-5-21"><a id="__codelineno-5-21" name="__codelineno-5-21" href="#__codelineno-5-21"></a>    ├── plots.py                # Paper + notebook plot functions
+</span><span id="__span-5-22"><a id="__codelineno-5-22" name="__codelineno-5-22" href="#__codelineno-5-22"></a>    └── tables.py               # LaTeX + Markdown tables
+</span></code></pre></div>
+<p>See <a href="../../api/retirement/">API Reference</a> for detailed function signatures.</p>
+<h2 id="references">References<a class="headerlink" href="#references" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Iskhakov, F., Jorgensen, T.H., Rust, J., and Schjerning, B. (2017). "The endogenous grid method for discrete-continuous dynamic choice models with (or without) taste shocks." <em>Quantitative Economics</em>, 8(2), 317-365.</li>
+<li>Dobrescu, L.I. and Shanker, A. (2022). "A fast upper envelope scan method for discrete-continuous dynamic programming." <a href="https://papers.ssrn.com/sol3/papers.cfm?abstract_id=4181302">SSRN Working Paper No. 4181302.</a></li>
+<li>Druedahl, J. (2021). "A guide to solve non-convex consumption-saving models." <em>Computational Economics</em>, 58, 747-775.</li>
+<li>Dobrescu, L.I. and Shanker, A. (2024). "RFC: A rooftop-cut method for upper envelopes." Working paper.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      &copy; Akshay Shanker &mdash; Logo font: TNG Title by Ukraine Fonts
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+        
+<div class="md-social">
+  
+    
+    
+    
+    
+      
+      
+    
+    <a href="https://github.com/akshayshanker/FUES" target="_blank" rel="noopener" title="github.com" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.tracking", "navigation.sections", "navigation.expand", "navigation.top", "content.code.copy", "content.code.annotate", "search.highlight", "search.suggest", "toc.follow"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+        <script src="../../javascripts/mathjax.js"></script>
+      
+        <script src="../../javascripts/fues-interactive.js"></script>
+      
+        <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+      
+        <script src="../../javascripts/thebe-config.js?v=7"></script>
+      
+        <script src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
+      
+    
+  </body>
+</html>
