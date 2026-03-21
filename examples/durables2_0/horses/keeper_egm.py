@@ -1,8 +1,9 @@
 """Keeper consumption stage: EGM via kikku.
 
-Uses ``make_egm_1d`` from kikku with model-specific recipe
-callables. Per (z, h) slice, the keeper is a standard 1D
-EGM on liquid assets with housing as a fixed state.
+Uses ``make_egm_1d`` from kikku with module-level recipe
+callables defined in ``model.py``. Per (z, h) slice, the
+keeper is a standard 1D EGM on liquid assets with housing
+as a fixed state (pass-through dimension).
 """
 
 import numpy as np
@@ -19,12 +20,14 @@ from dcsmm.fues.fues_v0_2dev import (
 from dcsmm.fues.helpers.math_funcs import interp_as
 from kikku.asva.numerics import clamp_value, clamp_policy
 
+from ..model import KEEPER_EGM_FNS
+
 
 def make_keeper_ops(model):
     """Build keeper dcsn_mover + arvl_mover.
 
-    Uses ``make_egm_1d`` from kikku with recipe callables
-    derived from the model's equation system.
+    Recipe callables are module-level @njit from model.py.
+    ``make_egm_1d`` from kikku compiles the generic step.
 
     Parameters
     ----------
@@ -32,15 +35,11 @@ def make_keeper_ops(model):
 
     Returns
     -------
-    keeper_egm : callable
-        dcsn_mover: ``(vlu_cntn, t) -> (egrid, vf, c)``
-    refine_keeper : callable
-        arvl_mover: ``(egrid, vf, c, vlu_cntn, t, m_bar)``
-        -> ``(pol, vlu)``
+    dcsn_mover, arvl_mover : callable
     """
     cp = model.cp
 
-    # --- Grids (closure scope) ---
+    # Grids (closure scope)
     z_vals = cp.z_vals
     asset_grid_A = cp.asset_grid_A
     asset_grid_H = cp.asset_grid_H
@@ -49,86 +48,38 @@ def make_keeper_ops(model):
     asset_grid_AC = np.concatenate((bg, asset_grid_A))
     UGgrid_all = cp.UGgrid_all
 
-    # --- Scalars ---
-    beta = cp.beta
+    # Scalars
     delta = cp.delta
     b = cp.b
     grid_max_A = cp.grid_max_A
 
-    # --- Callables from model ---
-    u = cp.u
-    du_c_inv = cp.du_c_inv
+    # Params array for recipe callables
+    egm_params = model.keeper_egm_params
 
-    # --- EGM recipe callables ---
-    # params = [beta] (used by bellman_rhs)
-    egm_params = np.array([beta])
-
-    @njit
-    def fn_inv_euler(dv_cntn_i, fixed_state, params):
-        """InvEuler: c = (du_c)^{-1}(dv_cntn_i)."""
-        return du_c_inv(dv_cntn_i)
-
-    @njit
-    def fn_bellman_rhs(c_i, v_cntn_i, fixed_state, params):
-        """Bellman: v = u(c, h') + beta * V_cntn."""
-        h_prime = fixed_state
-        beta_p = params[0]
-        return u(c_i, h_prime, 0.0) + beta_p * v_cntn_i
-
-    @njit
-    def fn_cntn_to_dcsn(c_i, x_cntn_i, fixed_state, params):
-        """Transition: w = c + a' (endogenous grid)."""
-        return c_i + x_cntn_i
-
-    @njit
-    def fn_concavity(c_i, ddv_cntn_i, fixed_state, params):
-        """Concavity diagnostic (unused for keeper, return a')."""
-        return 0.0  # keeper doesn't use del_a
-
-    # --- Build the generic EGM step ---
+    # Build generic EGM step from model-level callables
+    fns = KEEPER_EGM_FNS
     _egm_step = make_egm_1d(
-        fn_inv_euler, fn_bellman_rhs,
-        fn_cntn_to_dcsn, fn_concavity,
+        fns['inv_euler'], fns['bellman_rhs'],
+        fns['cntn_to_dcsn'], fns['concavity'],
         egm_params,
     )
 
-    # --- Pre-evaluate dV_a at off-grid h' ---
+    # Pre-evaluate 2D arrays at off-grid h'
 
     @njit
-    def _eval_dv_at_hprime(dV_a_2d, h_prime, a_grid):
-        """Evaluate 2D dV_a at fixed h' along a_grid.
-
-        Returns 1D array: dV_a(a_grid[i], h_prime).
-        """
+    def _eval_at_hprime(arr_2d, h_prime, a_grid):
         n = len(a_grid)
-        dv_1d = np.zeros(n)
+        out = np.zeros(n)
         for i in range(n):
             pt = np.array([a_grid[i], h_prime])
-            dv_1d[i] = eval_linear(
-                UGgrid_all, dV_a_2d, pt, xto.LINEAR)
-        return dv_1d
+            out[i] = eval_linear(
+                UGgrid_all, arr_2d, pt, xto.LINEAR)
+        return out
 
-    @njit
-    def _eval_v_at_hprime(V_2d, h_prime, a_grid):
-        """Evaluate 2D V at fixed h' along a_grid."""
-        n = len(a_grid)
-        v_1d = np.zeros(n)
-        for i in range(n):
-            pt = np.array([a_grid[i], h_prime])
-            v_1d[i] = eval_linear(
-                UGgrid_all, V_2d, pt, xto.LINEAR)
-        return v_1d
+    # --- dcsn_mover ---
 
-    # --- dcsn_mover: keeper EGM ---
-
-    def keeper_dcsn_mover(vlu_cntn, t):
-        """B: EGM per (z, h) slice via make_egm_1d.
-
-        For each slice: pre-evaluate dV_a and V at the
-        off-grid h' = (1-delta)*h, then run the generic
-        1D EGM step. Concatenates constrained + unconstrained
-        regions into a 2x-sized grid.
-        """
+    def dcsn_mover(vlu_cntn, t):
+        """B: EGM per (z, h) slice via make_egm_1d."""
         n_z = len(z_vals)
         n_a = len(asset_grid_A)
         n_h = len(asset_grid_H)
@@ -143,32 +94,31 @@ def make_keeper_ops(model):
             for ih in range(n_h):
                 h_prime = asset_grid_H[ih] * (1 - delta)
 
-                # Pre-evaluate continuation at off-grid h'
-                dv_1d = _eval_dv_at_hprime(
+                # Pre-eval continuation at off-grid h'
+                dv_1d = _eval_at_hprime(
                     dV_a[iz], h_prime, asset_grid_AC)
-                v_1d = _eval_v_at_hprime(
+                v_1d = _eval_at_hprime(
                     V[iz], h_prime, asset_grid_AC)
 
-                # Constrained region: a' = b (first n_a pts)
-                # dv_1d[:n_a] all evaluated at a'=b
-                c0 = du_c_inv(dv_1d[0])
+                # Constrained region: a' = b
+                c0 = fns['inv_euler'](
+                    dv_1d[0], h_prime, egm_params)
                 C_arr = np.linspace(
                     1e-08, max(1e-08, c0 - 1e-10), n_a)
-                v_at_b = beta * v_1d[0]
+                v_at_b = egm_params[0] * v_1d[0]
 
                 for k in range(n_a):
-                    vf[iz, k, ih] = (
-                        u(C_arr[k], h_prime, 0.0)
-                        + v_at_b)
+                    vf[iz, k, ih] = fns['bellman_rhs'](
+                        C_arr[k], v_1d[0],
+                        h_prime, egm_params)
                     egrid[iz, k, ih] = C_arr[k] + b
                     c_out[iz, k, ih] = C_arr[k]
 
-                # Unconstrained: use generic EGM step
-                # x_cntn = asset_grid_AC[n_a:]
+                # Unconstrained: generic EGM step
                 x_cntn = asset_grid_AC[n_a:]
                 dv_unc = dv_1d[n_a:]
                 v_unc = v_1d[n_a:]
-                ddv_unc = np.zeros(n_a)  # unused
+                ddv_unc = np.zeros(n_a)
 
                 c_hat, v_hat, x_hat, _ = _egm_step(
                     dv_unc, ddv_unc, v_unc,
@@ -182,10 +132,9 @@ def make_keeper_ops(model):
 
         return egrid, vf, c_out
 
-    # --- arvl_mover: FUES refinement ---
+    # --- arvl_mover ---
 
-    def keeper_arvl_mover(egrid, vf, c, vlu_cntn,
-                          t, m_bar=1.1):
+    def arvl_mover(egrid, vf, c, vlu_cntn, t, m_bar=1.1):
         """I: FUES + interpolation to arrival grid."""
         n_z = len(z_vals)
         n_h = len(asset_grid_H)
@@ -246,8 +195,7 @@ def make_keeper_ops(model):
                 Vkeeper[iz, :, ih] = v_interp
                 Akeeper[iz, :, ih] = a_interp
 
-                e_clean[iz, :, ih] = eg_ref[0] if len(
-                    eg_ref) else 0.0
+                e_clean[iz, :, ih] = v_interp
                 v_clean[iz, :, ih] = v_interp
                 c_clean[iz, :, ih] = c_interp
                 a_clean[iz, :, ih] = a_interp
@@ -255,4 +203,4 @@ def make_keeper_ops(model):
         return (Akeeper, Ckeeper, Vkeeper,
                 e_clean, v_clean, c_clean, a_clean)
 
-    return keeper_dcsn_mover, keeper_arvl_mover
+    return dcsn_mover, arvl_mover

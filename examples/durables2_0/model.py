@@ -19,7 +19,74 @@ def _patched_UCGrid(*args):
     return _orig_UCGrid(*fixed)
 _splines.UCGrid = _patched_UCGrid
 
+from numba import njit
 from examples.durables.durables import ConsumerProblem
+
+
+# ============================================================
+# EGM recipe callables (module-level, pure @njit)
+#
+# Keeper params layout:
+#   params[0] = beta
+#   params[1] = alpha
+#   params[2] = gamma_c
+#   params[3] = gamma_h
+#   params[4] = kappa
+#
+# Signatures (the "EGM recipe" per kikku convention):
+#   fn(pointwise_input, fixed_state, params) → result
+# ============================================================
+
+@njit(cache=True)
+def keeper_inv_euler(dv_cntn_i, fixed_state, params):
+    """InvEuler: c = (alpha / dV)^{1/gamma_c}."""
+    alpha = params[1]
+    gamma_c = params[2]
+    if dv_cntn_i <= 0:
+        return 1e10
+    return (alpha / dv_cntn_i) ** (1.0 / gamma_c)
+
+
+@njit(cache=True)
+def keeper_bellman_rhs(c_i, v_cntn_i, fixed_state, params):
+    """Bellman: V = u(c, h') + beta * V_cntn.
+
+    fixed_state = h_prime (housing after depreciation).
+    """
+    beta = params[0]
+    alpha = params[1]
+    gamma_c = params[2]
+    gamma_h = params[3]
+    kappa = params[4]
+
+    h_prime = fixed_state
+    if c_i <= 0 or h_prime <= 0:
+        return -1e20
+    c_util = alpha * c_i ** (1.0 - gamma_c) / (1.0 - gamma_c)
+    h_util = ((1.0 - alpha)
+              * (kappa * h_prime) ** (1.0 - gamma_h)
+              / (1.0 - gamma_h))
+    return c_util + h_util + beta * v_cntn_i
+
+
+@njit(cache=True)
+def keeper_cntn_to_dcsn(c_i, x_cntn_i, fixed_state, params):
+    """Transition: w = c + a' (endogenous grid)."""
+    return c_i + x_cntn_i
+
+
+@njit(cache=True)
+def keeper_concavity(c_i, ddv_cntn_i, fixed_state, params):
+    """Concavity diagnostic (unused for keeper)."""
+    return 0.0
+
+
+KEEPER_EGM_FNS = {
+    'inv_euler': keeper_inv_euler,
+    'bellman_rhs': keeper_bellman_rhs,
+    'cntn_to_dcsn': keeper_cntn_to_dcsn,
+    'concavity': keeper_concavity,
+}
 
 
 class DurablesModel:
@@ -67,6 +134,18 @@ class DurablesModel:
         self.term_u = self.cp.term_u
         self.term_du = self.cp.term_du
         self.N_HD_LAMBDA = self.cp.N_HD_LAMBDA
+
+    @property
+    def keeper_egm_params(self):
+        """Params array for keeper EGM recipe callables."""
+        cp = self.cp
+        return np.array([
+            self.beta,       # [0]
+            self.alpha,       # [1]
+            cp.gamma_c,      # [2]
+            cp.gamma_h,      # [3]
+            cp.kappa,        # [4]
+        ])
 
     @property
     def params(self):
