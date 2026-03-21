@@ -59,7 +59,7 @@ equations:
   dcsn_to_cntn_transition:
     keep: |
       w_keep[>] = R * a + y(z)
-      h_keep[>] = h
+      h_keep[>] = (1 - delta) * h
     adjust: |
       w_adj[>] = R * a + R_H * (1 - delta) * h + y(z)
 
@@ -69,7 +69,7 @@ equations:
     MarginalBellman:
       keep: |
         d_{a}V = R * d_{w_keep}V[>]
-        d_{h}V = d_{h_keep}V[>]
+        d_{h}V = (1 - delta) * d_{h_keep}V[>]
       adjust: |
         d_{a}V = R * d_{w_adj}V[>]
         d_{h}V = R_H * (1 - delta) * d_{w_adj}V[>]

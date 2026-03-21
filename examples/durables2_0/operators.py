@@ -55,11 +55,13 @@ def build_stage_ops(model):
     # the tenure branch transition.
 
     def keeper_arvl_mover(Akeeper, Ckeeper, Vkeeper,
-                          vlu_cntn, t):
-        """I: interp to (z,a,h) state grid + compute phi.
+                          w_keep, h_keep, vlu_cntn, t):
+        """I: interp keeper onto state grid via w_keep.
 
-        Uses _keeper_to_state_grid from Operator_Factory
-        (Phase 3 WIP — will be extracted to horse).
+        w_keep and h_keep come from tenure branch_transitions.
+        Interpolates keeper policies (on asset grid) to the
+        state grid using w_keep[z, a] = R*a + y(t,z).
+        Also computes phi (housing marginal).
         """
         v_sg, c_sg, a_sg, h_sg, phi_sg = \
             _keeper_to_grid(
@@ -74,38 +76,30 @@ def build_stage_ops(model):
 
     # --- adjuster_cons ---
 
-    def adjuster_dcsn_mover(vlu_cntn, t):
-        """B: partial EGM + housing root-finding."""
-        return _adjEGM(
+    def adjuster_dcsn_mover(vlu_cntn, t, m_bar=1.4):
+        """B: partial EGM + root-finding + FUES.
+
+        Returns refined policies on the wealth grid.
+        """
+        egrid, vf, a_nxt, h_nxt = _adjEGM(
             vlu_cntn['dV']['a'], vlu_cntn['dV']['h'],
             vlu_cntn['V'], t)
-
-    def adjuster_arvl_mover(x_hat, v_hat,
-                            a_nxt_hat, h_nxt_hat,
-                            vlu_cntn, t,
-                            m_bar=1.4, c_from_budget=1):
-        """I: FUES + interp to (z, a, h) state grid.
-
-        Evaluates the Bellman at each state point so
-        the branching stage doesn't need vlu_cntn.
-
-        Returns
-        -------
-        pol : dict
-            ``{'c', 'a_nxt', 'h_nxt'}`` on state grid.
-        vlu : dict
-            ``{'V'}`` on state grid (Bellman-evaluated).
-        """
         (Aadj, Cadj, Hadj, Vadj,
          _, _, _, _, _, _, _, _) = _refine_adj(
-            x_hat, v_hat, a_nxt_hat, h_nxt_hat,
+            egrid, vf, a_nxt, h_nxt,
             m_bar=m_bar, return_grids=return_grids)
+        return Aadj, Cadj, Hadj, Vadj
 
-        # Interp to state grid + Bellman eval
+    def adjuster_arvl_mover(Aadj, Cadj, Hadj, Vadj,
+                            w_adj, vlu_cntn, t,
+                            c_from_budget=1):
+        """I: interp adjuster onto state grid via w_adj.
+
+        w_adj comes from tenure branch_transitions.
+        """
         v_sg, c_sg, a_sg, h_sg = _adjuster_to_grid(
             t, Aadj, Cadj, Hadj,
             vlu_cntn['V'], c_from_budget)
-
         return (
             {'c': c_sg, 'a_nxt': a_sg, 'h_nxt': h_sg},
             {'V': v_sg},
@@ -113,14 +107,42 @@ def build_stage_ops(model):
 
     # --- tenure ---
 
-    def tenure_branch_transitions():
-        """Compute branch transitions (arvl_to_dcsn).
+    R = cp.R
+    R_H = cp.R_H
+    y_func = cp.y_func
 
-        Returns h_keep_grid for the keep branch.
-        The adjust branch has no transition (identity).
+    def tenure_arvl_to_dcsn(t):
+        """Tenure arvl_to_dcsn: compute branch grids.
+
+        Per YAML dcsn_to_cntn_transition:
+          keep:   w_keep = R*a + y(z), h_keep = (1-delta)*h
+          adjust: w_adj = R*a + R_H*(1-delta)*h + y(z)
+
+        Returns wealth/housing grids for each branch.
         """
-        h_keep_grid = (1 - delta) * cp.asset_grid_H
-        return {'h_keep_grid': h_keep_grid}
+        z = cp.z_vals
+        a = cp.asset_grid_A
+        h = cp.asset_grid_H
+        n_z, n_a, n_h = len(z), len(a), len(h)
+
+        w_keep = np.empty((n_z, n_a))
+        for iz in range(n_z):
+            w_keep[iz, :] = R * a + y_func(t, z[iz])
+
+        w_adj = np.empty((n_z, n_a, n_h))
+        for iz in range(n_z):
+            for ih in range(n_h):
+                w_adj[iz, :, ih] = (
+                    R * a + R_H * (1 - delta) * h[ih]
+                    + y_func(t, z[iz]))
+
+        h_keep = (1 - delta) * h
+
+        return {
+            'w_keep': w_keep,
+            'h_keep': h_keep,
+            'w_adj': w_adj,
+        }
 
     def decision_dcsn_mover(t, branches):
         """B: max over keep/adjust branches.
@@ -181,7 +203,7 @@ def build_stage_ops(model):
             'arvl_mover': adjuster_arvl_mover,
         },
         'tenure': {
-            'branch_transitions': tenure_branch_transitions,
+            'arvl_to_dcsn': tenure_arvl_to_dcsn,
             'dcsn_mover': decision_dcsn_mover,
             'arvl_mover': decision_arvl_mover,
             'arvl_mover_hd': decision_arvl_mover_hd,

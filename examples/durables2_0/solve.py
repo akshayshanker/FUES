@@ -115,26 +115,26 @@ def solve_period(stage_ops, vlu_cntn, t, model,
     use_hd = model.N_HD_LAMBDA > 1
     t0 = time.perf_counter()
 
-    # --- Tenure branch transitions (arvl_to_dcsn) ---
-    br_trans = stage_ops['tenure']['branch_transitions']()
-    h_keep_grid = br_trans['h_keep_grid']
+    # --- Tenure arvl_to_dcsn (compute branch grids) ---
+    br = stage_ops['tenure']['arvl_to_dcsn'](t)
 
     # --- Wave 0: keeper_cons ---
     A_keep, C_keep, V_keep = stage_ops['keeper_cons'][
-        'dcsn_mover'](vlu_cntn, h_keep_grid, t, m_bar)
+        'dcsn_mover'](vlu_cntn, br['h_keep'], t, m_bar)
     pol_keep, vlu_keep = stage_ops['keeper_cons'][
         'arvl_mover'](A_keep, C_keep, V_keep,
+                      br['w_keep'], br['h_keep'],
                       vlu_cntn, t)
     t_keeper = time.perf_counter() - t0
 
-    # --- Wave 0: adjuster_cons (B then I) ---
+    # --- Wave 0: adjuster_cons ---
     t1 = time.perf_counter()
-    x_a, v_a, a_nxt_a, h_nxt_a = stage_ops[
-        'adjuster_cons']['dcsn_mover'](vlu_cntn, t)
+    Aadj, Cadj, Hadj, Vadj = stage_ops[
+        'adjuster_cons']['dcsn_mover'](vlu_cntn, t, m_bar)
     pol_adj, vlu_adj = stage_ops[
         'adjuster_cons']['arvl_mover'](
-            x_a, v_a, a_nxt_a, h_nxt_a,
-            vlu_cntn, t, m_bar=m_bar)
+            Aadj, Cadj, Hadj, Vadj,
+            br['w_adj'], vlu_cntn, t)
     t_adj = time.perf_counter() - t1
 
     # --- Wave 1: tenure (B then I) ---

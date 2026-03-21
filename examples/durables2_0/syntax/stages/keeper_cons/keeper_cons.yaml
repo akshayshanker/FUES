@@ -16,7 +16,7 @@ symbols:
 
   poststates:
     a_nxt: '@in Xa'        # end-of-period financial savings
-    h_nxt: '@in Xh'        # end-of-period housing = (1 - delta) * h_keep
+    h_nxt: '@in Xh'        # end-of-period housing = h_keep (already depreciated by tenure)
 
   controls:
     c: '@in R+'
@@ -55,18 +55,18 @@ equations:
 
   dcsn_to_cntn_transition: |
     a_nxt = w_keep - c
-    h_nxt = (1 - delta) * h_keep
+    h_nxt = h_keep
 
   cntn_to_dcsn_mover:
     Bellman: |
-      V = max_{c}(u(c, (1 - delta) * h_keep) + beta * V[>])
+      V = max_{c}(u(c, h_keep) + beta * V[>])
     InvEuler: |
       c[>] = (alpha / (beta * d_{a_nxt}V[>]))^(1 / gamma_c)
     cntn_to_dcsn_transition: |
       w_keep[>] = a_nxt + c[>]
     MarginalBellman: |
       d_{w}V = d_{c}u(c)
-      d_{h}V = d_{h}u((1 - delta) * h_keep) * (1 - delta) + beta * d_{h_nxt}V[>] * (1 - delta)
+      d_{h}V = d_{h}u(h_keep) + beta * d_{h_nxt}V[>]
 
   dcsn_to_arvl_mover:
     Bellman: |
