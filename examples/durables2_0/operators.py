@@ -63,15 +63,15 @@ def build_stage_ops(model):
         state grid using w_keep[z, a] = R*a + y(t,z).
         Also computes phi (housing marginal).
         """
-        v_sg, c_sg, a_sg, h_sg, phi_sg = \
+        v_out, c_out, a_out, h_out, phi_out = \
             _keeper_to_grid(
                 t, Akeeper, Ckeeper, Vkeeper,
                 vlu_cntn['dV']['h'],
                 vlu_cntn['dV'].get('h_hd',
                     np.zeros((1, 1, 1))))
         return (
-            {'c': c_sg, 'a_nxt': a_sg, 'h_nxt': h_sg},
-            {'V': v_sg, 'phi': phi_sg},
+            {'c': c_out, 'a_nxt': a_out, 'h_nxt': h_out},
+            {'V': v_out, 'phi': phi_out},
         )
 
     # --- adjuster_cons ---
@@ -97,12 +97,12 @@ def build_stage_ops(model):
 
         w_adj comes from tenure branch_transitions.
         """
-        v_sg, c_sg, a_sg, h_sg = _adjuster_to_grid(
+        v_out, c_out, a_out, h_out = _adjuster_to_grid(
             t, Aadj, Cadj, Hadj,
             vlu_cntn['V'], c_from_budget)
         return (
-            {'c': c_sg, 'a_nxt': a_sg, 'h_nxt': h_sg},
-            {'V': v_sg},
+            {'c': c_out, 'a_nxt': a_out, 'h_nxt': h_out},
+            {'V': v_out},
         )
 
     # --- tenure ---
@@ -144,15 +144,14 @@ def build_stage_ops(model):
             'w_adj': w_adj,
         }
 
-    def decision_dcsn_mover(t, branches):
+    def tenure_dcsn_mover(branches):
         """B: max over keep/adjust branches.
 
         Clean DDSL interface: receives only branch-keyed
-        results from the leaf stages. No vlu_cntn.
+        results from the leaf stages.
 
         Parameters
         ----------
-        t : int
         branches : dict
             ``{'keep':   {'pol': {...}, 'vlu': {...}},
                'adjust': {'pol': {...}, 'vlu': {...}}}``
@@ -181,7 +180,7 @@ def build_stage_ops(model):
         pol = {'c': C, 'a_nxt': A, 'h_nxt': H, 'd': D}
         return vlu_dcsn, pol
 
-    def decision_arvl_mover(vlu_dcsn):
+    def tenure_arvl_mover(vlu_dcsn):
         """I: E_z conditioning (Pi @ arrays)."""
         Ev, Edv_a, Edv_h = condition_V(
             vlu_dcsn['V'],
@@ -189,7 +188,7 @@ def build_stage_ops(model):
             vlu_dcsn['dV']['h'])
         return {'V': Ev, 'dV': {'a': Edv_a, 'h': Edv_h}}
 
-    def decision_arvl_mover_hd(dV_h_hd):
+    def tenure_arvl_mover_hd(dV_h_hd):
         """I: E_z conditioning for HD grid."""
         return condition_V_HD(dV_h_hd)
 
@@ -204,8 +203,8 @@ def build_stage_ops(model):
         },
         'tenure': {
             'arvl_to_dcsn': tenure_arvl_to_dcsn,
-            'dcsn_mover': decision_dcsn_mover,
-            'arvl_mover': decision_arvl_mover,
-            'arvl_mover_hd': decision_arvl_mover_hd,
+            'dcsn_mover': tenure_dcsn_mover,
+            'arvl_mover': tenure_arvl_mover,
+            'arvl_mover_hd': tenure_arvl_mover_hd,
         },
     }

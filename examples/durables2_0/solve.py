@@ -146,8 +146,7 @@ def solve_period(stage_ops, vlu_cntn, t, model,
     }
 
     vlu_dcsn, pol_dcsn = stage_ops[
-        'tenure']['dcsn_mover'](
-            t, branches)
+        'tenure']['dcsn_mover'](branches)
     t_discrete = time.perf_counter() - t2
 
     # arvl_mover: E_z conditioning
