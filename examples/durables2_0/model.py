@@ -4,6 +4,7 @@ Wraps ``ConsumerProblem`` from the original durables example
 and exposes the numerical resources needed by stage operators.
 """
 
+import numpy as np
 import interpolation.splines as _splines
 
 # Patch UCGrid to skip the numba type assertion that fails
@@ -104,8 +105,10 @@ class DurablesModel:
             'a': self.asset_grid_A,
             'h': self.asset_grid_H,
             'we': self.asset_grid_WE,
-            'he': cp.asset_grid_HE,
-            'ac': cp.asset_grid_AC,
+            'he': getattr(cp, 'asset_grid_HE',
+                         self.asset_grid_H),
+            'ac': np.concatenate(
+                (np.array([self.b]), self.asset_grid_A)),
             'z': self.z_vals,
             'Pi': self.Pi,
             'X_all': self.X_all,
