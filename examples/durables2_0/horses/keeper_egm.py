@@ -40,23 +40,28 @@ def make_keeper_egm(model):
     refine_keeper : callable
         ``(egrid, vf, c, V, t, m_bar) -> (A, C, V, ...)``
     """
-    # Unpack into closure scope
-    z_vals = model.grids['z']
-    asset_grid_A = model.grids['a']
-    asset_grid_H = model.grids['h']
-    asset_grid_AC = model.grids['ac']
-    UGgrid_all = model.grids['UGgrid_all']
-    X_all = model.grids['X_all']
+    # Unpack into closure scope — must match the types
+    # that Operator_Factory uses, so numba sees the same
+    # captured-variable types for @njit closures.
+    cp = model.cp
+    z_vals = cp.z_vals
+    asset_grid_A = cp.asset_grid_A
+    asset_grid_H = cp.asset_grid_H
+    bg = np.zeros(len(cp.asset_grid_A))
+    bg.fill(cp.b)
+    asset_grid_AC = np.concatenate((bg, cp.asset_grid_A))
+    UGgrid_all = cp.UGgrid_all
+    X_all = cp.X_all
 
-    beta = model.beta
-    delta = model.delta
-    b = model.b
-    grid_max_A = model.cp.grid_max_A
+    beta = cp.beta
+    delta = cp.delta
+    b = cp.b
+    grid_max_A = cp.grid_max_A
 
-    u = model.callables['u']
-    du_c_inv = model.callables['du_c_inv']
+    u = cp.u
+    du_c_inv = cp.du_c_inv
 
-    return_grids = model.cp.return_grids
+    return_grids = cp.return_grids
 
     # --- InvEuler (2D interpolation for off-grid h') ---
 
@@ -152,44 +157,49 @@ def make_keeper_egm(model):
                 vf_raw = vf[iz, :, ih]
                 c_raw = c[iz, :, ih]
 
-                # Remove duplicates
-                eg_u, vf_u, c_u = uniqueEG(
-                    eg_raw, vf_raw, c_raw)
+                # Remove duplicates (uniqueEG returns indices)
+                uid = uniqueEG(eg_raw, vf_raw)
+                eg_u = eg_raw[uid]
+                vf_u = vf_raw[uid]
+                c_u = c_raw[uid]
+                ac_u = asset_grid_AC[uid]
+
+                # Sort by endogenous grid
+                sidx = np.argsort(eg_u)
+                eg_s = eg_u[sidx]
+                vf_s = vf_u[sidx]
+                c_s = c_u[sidx]
+                a_s = ac_u[sidx]
+                da_s = a_s.copy()
 
                 # FUES
-                eg_ref, vf_ref, c_ref, _ = FUES_jit(
-                    eg_u, vf_u, c_u,
+                (eg_ref, vf_ref, c_ref,
+                 a_ref, _) = FUES_jit(
+                    eg_s, vf_s, c_s, a_s, da_s,
                     m_bar, 10,
-                    _EPS_D, _EPS_SEP, _PAR_GUARD)
+                    False, 0.0,
+                    False, True, False, True,
+                    _EPS_D, _EPS_SEP, 0.05, _PAR_GUARD)
 
-                # Interpolate to asset grid
+                # Interpolate to asset grid (extrap=True)
+                a_interp = interp_as(
+                    eg_ref, a_ref, asset_grid_A,
+                    extrap=True)
                 c_interp = interp_as(
-                    eg_ref, c_ref, asset_grid_A)
+                    eg_ref, c_ref, asset_grid_A,
+                    extrap=True)
                 v_interp = interp_as(
-                    eg_ref, vf_ref, asset_grid_A)
+                    eg_ref, vf_ref, asset_grid_A,
+                    extrap=True)
 
                 # Clamp
+                a_interp = clamp_policy(
+                    a_interp, b, grid_max_A * 2)
                 c_interp = clamp_policy(
-                    c_interp, 1e-10, grid_max_A * 2)
+                    c_interp, 1e-10, 1e10)
                 v_interp = clamp_value(v_interp)
 
-                # Constrained region
-                min_eg = eg_ref[0] if len(eg_ref) > 0 \
-                    else asset_grid_A[0]
-                for ia in range(n_a):
-                    if asset_grid_A[ia] <= min_eg:
-                        c_interp[ia] = max(
-                            asset_grid_A[ia] - b, 1e-10)
-                        hp = asset_grid_H[ih] * (1 - delta)
-                        pt = np.array([b, hp])
-                        vp = beta * eval_linear(
-                            UGgrid_all, V[iz], pt,
-                            xto.LINEAR)
-                        v_interp[ia] = (
-                            u(c_interp[ia], hp, 0) + vp)
-
-                # Savings policy
-                a_pol = asset_grid_A - c_interp
+                a_pol = a_interp
 
                 Ckeeper[iz, :, ih] = c_interp
                 Vkeeper[iz, :, ih] = v_interp

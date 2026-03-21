@@ -108,7 +108,8 @@ class DurablesModel:
             'he': getattr(cp, 'asset_grid_HE',
                          self.asset_grid_H),
             'ac': np.concatenate(
-                (np.array([self.b]), self.asset_grid_A)),
+                (np.full(len(self.asset_grid_A), self.b),
+                 self.asset_grid_A)),
             'z': self.z_vals,
             'Pi': self.Pi,
             'X_all': self.X_all,
