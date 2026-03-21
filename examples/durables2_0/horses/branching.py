@@ -1,81 +1,151 @@
-"""Branching max: tenure stage dcsn_mover.
+"""Tenure stage: transitions + eval + max + chain rule.
 
-Pure max/argmax over keep vs adjust branches + marginal
-value computation. No interpolation, no continuation eval.
-Receives pre-interpolated values on the common (z,a,h) grid.
+dcsn_mover: interpolate keeper/adjuster at transition
+            points, max over branches, chain rule.
+arvl_mover: E_z conditioning.
 """
 
 import numpy as np
-from numba import njit
+from interpolation.splines import eval_linear
+from interpolation.splines import extrap_options as xto
+from dcsmm.fues.helpers.math_funcs import interp_as_scalar
+from kikku.asva.numerics import clamp_scalar as _clamp
 
 
-@njit
-def branching_max(v_keep, c_keep, a_keep, h_keep,
-                  phi_keep,
-                  v_adj, c_adj, a_adj, h_adj,
-                  X_all, du_c,
-                  beta, R, R_H, delta):
-    """Max over keep/adjust + marginal values.
+def make_tenure_ops(model, condition_V, condition_V_HD):
+    """Build tenure operators.
 
     Parameters
     ----------
-    v_keep, c_keep, a_keep, h_keep : ndarray (n_z,n_a,n_h)
-        Keeper arrival values on the state grid.
-    phi_keep : ndarray (n_z,n_a,n_h)
-        Keeper housing marginal Phi_t.
-    v_adj, c_adj, a_adj, h_adj : ndarray (n_z,n_a,n_h)
-        Adjuster arrival values on the state grid.
-    X_all : ndarray
-        State space indices.
-    du_c : callable
-        Marginal utility of consumption.
-    beta, R, R_H, delta : float
-        Model parameters.
-
-    Returns
-    -------
-    V, A, H, C, D, dV_a, dV_h : ndarray (n_z,n_a,n_h)
+    model : DurablesModel
+    condition_V, condition_V_HD : callable
+        E_z conditioning.
     """
-    shape = v_keep.shape
-    V = np.empty(shape)
-    C = np.empty(shape)
-    A = np.empty(shape)
-    H = np.empty(shape)
-    D = np.empty(shape)
-    dV_a = np.empty(shape)
-    dV_h = np.empty(shape)
+    cp = model.cp
+    R = cp.R
+    R_H = cp.R_H
+    delta = cp.delta
+    beta = cp.beta
+    b = cp.b
+    y_func = cp.y_func
+    du_c = cp.du_c
+    du_h = cp.du_h
+    z_vals = cp.z_vals
+    a_grid = cp.asset_grid_A
+    h_grid = cp.asset_grid_H
+    UGgrid_all = cp.UGgrid_all
+    n_z = len(z_vals)
+    n_a = len(a_grid)
+    n_h = len(h_grid)
+    h_keep = (1 - delta) * h_grid
 
-    for state in range(len(X_all)):
-        i_z = int(X_all[state][0])
-        i_a = X_all[state][1]
-        i_h = X_all[state][2]
+    def dcsn_mover(t, vlu_cntn,
+                   Akeeper, Ckeeper, Vkeeper,
+                   Aadj, Cadj, Hadj, Vadj):
+        """Tenure cntn_to_dcsn: transitions + eval + max.
 
-        vk = v_keep[i_z, i_a, i_h]
-        va = v_adj[i_z, i_a, i_h]
+        Receives raw keeper (on asset grid per h slice)
+        and adjuster (on wealth grid per z) outputs.
+        Computes branch transitions, interpolates at
+        transition points, takes max, chain rule.
+        """
+        V = vlu_cntn['V']
+        dV_h = vlu_cntn['dV']['h']
 
-        if va >= vk:
-            d = 1
-        else:
-            d = 0
+        V_out = np.empty((n_z, n_a, n_h))
+        C_out = np.empty((n_z, n_a, n_h))
+        A_out = np.empty((n_z, n_a, n_h))
+        H_out = np.empty((n_z, n_a, n_h))
+        D_out = np.empty((n_z, n_a, n_h))
+        dV_a_out = np.empty((n_z, n_a, n_h))
+        dV_h_out = np.empty((n_z, n_a, n_h))
 
-        D[i_z, i_a, i_h] = d
-        ck = c_keep[i_z, i_a, i_h]
-        ca = c_adj[i_z, i_a, i_h]
-        V[i_z, i_a, i_h] = d * va + (1 - d) * vk
-        C[i_z, i_a, i_h] = d * ca + (1 - d) * ck
-        A[i_z, i_a, i_h] = (
-            d * a_adj[i_z, i_a, i_h]
-            + (1 - d) * a_keep[i_z, i_a, i_h])
-        H[i_z, i_a, i_h] = (
-            d * h_adj[i_z, i_a, i_h]
-            + (1 - d) * h_keep[i_z, i_a, i_h])
+        for iz in range(n_z):
+            z = z_vals[iz]
+            for ia in range(n_a):
+                a = a_grid[ia]
+                w_k = R * a + y_func(t, z)
+                w_a = (R * a + R_H * (1 - delta)
+                       * h_grid[0] + y_func(t, z))
 
-        dV_a[i_z, i_a, i_h] = (
-            beta * R * (d * du_c(ca)
-                        + (1 - d) * du_c(ck)))
-        dV_h[i_z, i_a, i_h] = (
-            beta * R_H * (1 - delta)
-            * (d * du_c(ca)
-               + (1 - d) * phi_keep[i_z, i_a, i_h]))
+                for ih in range(n_h):
+                    h = h_grid[ih]
+                    hk = h_keep[ih]
 
-    return V, A, H, C, D, dV_a, dV_h
+                    # keep branch
+                    v_k = _clamp(interp_as_scalar(
+                        a_grid, Vkeeper[iz, :, ih],
+                        w_k), -1e10, 1e10, -1e10)
+                    c_k = _clamp(interp_as_scalar(
+                        a_grid, Ckeeper[iz, :, ih],
+                        w_k), 1e-10, 1e10, 1e-10)
+                    a_k = _clamp(interp_as_scalar(
+                        a_grid, Akeeper[iz, :, ih],
+                        w_k), b, 1e10, b)
+
+                    # adjust branch
+                    w_adj = (R * a
+                             + R_H * (1 - delta) * h
+                             + y_func(t, z))
+                    a_a = _clamp(interp_as_scalar(
+                        cp.asset_grid_WE, Aadj[iz],
+                        w_adj), b, 1e10, b)
+                    h_a = _clamp(interp_as_scalar(
+                        cp.asset_grid_WE, Hadj[iz],
+                        w_adj), b, 1e10, b)
+                    c_a = _clamp(
+                        w_adj - a_a - h_a * (1 + cp.tau),
+                        1e-10, 1e10, 1e-10)
+                    pts = np.array([a_a, h_a])
+                    v_a = (cp.u(c_a, h_a, cp.chi)
+                           + beta * eval_linear(
+                               UGgrid_all, V[iz],
+                               pts, xto.LINEAR))
+
+                    # max
+                    d = 1 if v_a >= v_k else 0
+                    V_out[iz, ia, ih] = (
+                        d * v_a + (1 - d) * v_k)
+                    C_out[iz, ia, ih] = (
+                        d * c_a + (1 - d) * c_k)
+                    A_out[iz, ia, ih] = (
+                        d * a_a + (1 - d) * a_k)
+                    H_out[iz, ia, ih] = (
+                        d * h_a + (1 - d) * hk)
+                    D_out[iz, ia, ih] = d
+
+                    # marginals (chain rule)
+                    dV_a_out[iz, ia, ih] = (
+                        beta * R
+                        * (d * du_c(c_a)
+                           + (1 - d) * du_c(c_k)))
+
+                    pt_k = np.array([a_k, hk])
+                    edvh = eval_linear(
+                        UGgrid_all, dV_h[iz],
+                        pt_k, xto.LINEAR)
+                    phi_k = du_h(hk) + edvh
+                    dV_h_out[iz, ia, ih] = (
+                        beta * R_H * (1 - delta)
+                        * (d * du_c(c_a)
+                           + (1 - d) * phi_k))
+
+        return (
+            {'V': V_out,
+             'dV': {'a': dV_a_out, 'h': dV_h_out}},
+            {'c': C_out, 'a_nxt': A_out,
+             'h_nxt': H_out, 'd': D_out},
+        )
+
+    def arvl_mover(vlu_dcsn):
+        """E_z conditioning."""
+        Ev, Edv_a, Edv_h = condition_V(
+            vlu_dcsn['V'],
+            vlu_dcsn['dV']['a'],
+            vlu_dcsn['dV']['h'])
+        return {'V': Ev, 'dV': {'a': Edv_a, 'h': Edv_h}}
+
+    def arvl_mover_hd(dV_h_hd):
+        return condition_V_HD(dV_h_hd)
+
+    return dcsn_mover, arvl_mover, arvl_mover_hd

@@ -117,7 +117,7 @@ def solve_period(stage_ops, vlu_cntn, t, model,
 
     # --- Wave 0: keeper_cons ---
     A_keep, C_keep, V_keep = stage_ops[
-        'keeper_cons']['dcsn_mover'](vlu_cntn, t)
+        'keeper_cons']['dcsn_mover'](vlu_cntn)
     t_keeper = time.perf_counter() - t0
 
     # --- Wave 0: adjuster_cons ---

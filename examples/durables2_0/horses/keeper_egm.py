@@ -13,6 +13,9 @@ dcsn_mover = EGM + FUES. Returns refined (A, C, V) on
 """
 
 import numpy as np
+from numba import njit
+from interpolation.splines import eval_linear
+from interpolation.splines import extrap_options as xto
 from kikku.asva.egm_1d import make_egm_1d
 from dcsmm.fues import FUES_jit
 from dcsmm.fues.fues_v0dev import uniqueEG
@@ -45,11 +48,32 @@ def make_keeper_ops(model):
     # Grids
     z_vals = cp.z_vals
     asset_grid_A = cp.asset_grid_A
+    asset_grid_H = cp.asset_grid_H
+    UGgrid_all = cp.UGgrid_all
 
     # Scalars
     b = cp.b
+    delta = cp.delta
     grid_max_A = cp.grid_max_A
     m_bar = cp.m_bar
+    n_a = len(asset_grid_A)
+    n_h = len(asset_grid_H)
+
+    # h_keep + AC grid
+    h_keep = (1 - delta) * asset_grid_H
+    bg = np.zeros(n_a)
+    bg[:] = b
+    asset_grid_AC = np.concatenate((bg, asset_grid_A))
+
+    @njit
+    def _eval_2d_at_h(arr_2d, h_val, a_grid):
+        n = len(a_grid)
+        out = np.zeros(n)
+        for i in range(n):
+            pt = np.array([a_grid[i], h_val])
+            out[i] = eval_linear(
+                UGgrid_all, arr_2d, pt, xto.LINEAR)
+        return out
 
     # Params + recipe callables
     egm_params = model.keeper_egm_params
@@ -68,41 +92,35 @@ def make_keeper_ops(model):
         Parameters
         ----------
         vlu_cntn : dict
-            Pre-evaluated 1D continuations from tenure::
-
-                {'dv': (n_z, n_ac, n_h),
-                 'v':  (n_z, n_ac, n_h),
-                 'ac': asset_grid_AC,
-                 'h_keep': (n_h,)}
+            ``{'V': (n_z, n_a, n_h),
+               'dV': {'a': ..., 'h': ...}}``.
 
         Returns
         -------
         Akeeper, Ckeeper, Vkeeper : ndarray (n_z, n_a, n_h)
         """
-        dv_all = vlu_cntn['dv']
-        v_all = vlu_cntn['v']
-        ac_grid = vlu_cntn['ac']
-        h_keep_grid = vlu_cntn['h_keep']
+        dV_a = vlu_cntn['dV']['a']
+        V = vlu_cntn['V']
+        n_z_loc = len(z_vals)
+        n_ac = len(asset_grid_AC)
 
-        n_z = len(z_vals)
-        n_a = len(asset_grid_A)
-        n_h = len(h_keep_grid)
+        Akeeper = np.empty((n_z_loc, n_a, n_h))
+        Ckeeper = np.empty((n_z_loc, n_a, n_h))
+        Vkeeper = np.empty((n_z_loc, n_a, n_h))
 
-        Akeeper = np.empty((n_z, n_a, n_h))
-        Ckeeper = np.empty((n_z, n_a, n_h))
-        Vkeeper = np.empty((n_z, n_a, n_h))
-
-        for iz in range(n_z):
+        for iz in range(n_z_loc):
             for ih in range(n_h):
-                h_keep = h_keep_grid[ih]
+                hk = h_keep[ih]
 
-                # Already pre-evaluated by tenure
-                dv_1d = dv_all[iz, :, ih]
-                v_1d = v_all[iz, :, ih]
+                # Pre-eval 2D continuation at h_keep
+                dv_1d = _eval_2d_at_h(
+                    dV_a[iz], hk, asset_grid_AC)
+                v_1d = _eval_2d_at_h(
+                    V[iz], hk, asset_grid_AC)
 
                 # --- EGM: constrained region ---
                 c0 = fns['inv_euler'](
-                    dv_1d[0], h_keep, egm_params)
+                    dv_1d[0], hk, egm_params)
                 C_arr = np.linspace(
                     1e-08, max(1e-08, c0 - 1e-10), n_a)
 
@@ -113,15 +131,15 @@ def make_keeper_ops(model):
                 for k in range(n_a):
                     vf[k] = fns['bellman_rhs'](
                         C_arr[k], v_1d[0],
-                        h_keep, egm_params)
+                        hk, egm_params)
                     egrid[k] = C_arr[k] + b
                     c_raw[k] = C_arr[k]
 
                 # --- EGM: unconstrained via make_egm_1d ---
-                x_cntn = ac_grid[n_a:]
+                x_cntn = asset_grid_AC[n_a:]
                 c_hat, v_hat, x_hat, _ = _egm_step(
                     dv_1d[n_a:], np.zeros(n_a),
-                    v_1d[n_a:], x_cntn, h_keep)
+                    v_1d[n_a:], x_cntn, hk)
 
                 for k in range(n_a):
                     idx = n_a + k
@@ -134,7 +152,7 @@ def make_keeper_ops(model):
                 eg_u = egrid[uid]
                 vf_u = vf[uid]
                 c_u = c_raw[uid]
-                ac_u = ac_grid[uid]
+                ac_u = asset_grid_AC[uid]
 
                 sidx = np.argsort(eg_u)
                 (eg_ref, vf_ref, c_ref,
