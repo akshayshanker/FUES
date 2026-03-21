@@ -116,24 +116,24 @@ def solve_period(stage_ops, vlu_cntn, t, model,
     t0 = time.perf_counter()
 
     # --- Wave 0: keeper_cons ---
-    A_keep, C_keep, V_keep = stage_ops[
-        'keeper_cons']['dcsn_mover'](vlu_cntn)
+    A_keep, C_keep, V_keep, dVw_keep, phi_keep = \
+        stage_ops['keeper_cons']['dcsn_mover'](vlu_cntn)
     t_keeper = time.perf_counter() - t0
 
     # --- Wave 0: adjuster_cons ---
     t1 = time.perf_counter()
-    Aadj, Cadj, Hadj, Vadj = stage_ops[
+    Aadj, Cadj, Hadj, Vadj, dVw_adj = stage_ops[
         'adjuster_cons']['dcsn_mover'](vlu_cntn, t, m_bar)
     t_adj = time.perf_counter() - t1
 
-    # --- Wave 1: tenure dcsn_mover ---
-    #   transitions + eval + max + chain rule
+    # --- Wave 1: tenure ---
     t2 = time.perf_counter()
     vlu_dcsn, pol_dcsn = stage_ops[
         'tenure']['dcsn_mover'](
             t, vlu_cntn,
             A_keep, C_keep, V_keep,
-            Aadj, Cadj, Hadj, Vadj)
+            dVw_keep, phi_keep,
+            Aadj, Cadj, Hadj, Vadj, dVw_adj)
     t_discrete = time.perf_counter() - t2
 
     # --- Wave 1: tenure arvl_mover (E_z) ---

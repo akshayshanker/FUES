@@ -13,7 +13,6 @@ dcsn_mover = EGM + FUES. Returns refined (A, C, V) on
 """
 
 import numpy as np
-from numba import njit
 from interpolation.splines import eval_linear
 from interpolation.splines import extrap_options as xto
 from kikku.asva.egm_1d import make_egm_1d
@@ -51,29 +50,19 @@ def make_keeper_ops(model):
     asset_grid_H = cp.asset_grid_H
     UGgrid_all = cp.UGgrid_all
 
-    # Scalars
+    # Scalars + callables
     b = cp.b
     delta = cp.delta
+    beta = cp.beta
     grid_max_A = cp.grid_max_A
     m_bar = cp.m_bar
+    du_c = cp.du_c
+    du_h = cp.du_h
     n_a = len(asset_grid_A)
     n_h = len(asset_grid_H)
 
-    # h_keep + AC grid
+    # h_keep grid (depreciated housing)
     h_keep = (1 - delta) * asset_grid_H
-    bg = np.zeros(n_a)
-    bg[:] = b
-    asset_grid_AC = np.concatenate((bg, asset_grid_A))
-
-    @njit
-    def _eval_2d_at_h(arr_2d, h_val, a_grid):
-        n = len(a_grid)
-        out = np.zeros(n)
-        for i in range(n):
-            pt = np.array([a_grid[i], h_val])
-            out[i] = eval_linear(
-                UGgrid_all, arr_2d, pt, xto.LINEAR)
-        return out
 
     # Params + recipe callables
     egm_params = model.keeper_egm_params
@@ -87,7 +76,7 @@ def make_keeper_ops(model):
     # --- dcsn_mover: EGM + FUES ---
 
     def dcsn_mover(vlu_cntn):
-        """B: EGM + FUES per (z, h) slice.
+        """EGM + FUES per (z, h) slice.
 
         Parameters
         ----------
@@ -97,30 +86,30 @@ def make_keeper_ops(model):
 
         Returns
         -------
-        Akeeper, Ckeeper, Vkeeper : ndarray (n_z, n_a, n_h)
+        Akeeper, Ckeeper, Vkeeper, dVw_keep, phi_keep
         """
         dV_a = vlu_cntn['dV']['a']
+        dV_h = vlu_cntn['dV']['h']
         V = vlu_cntn['V']
         n_z_loc = len(z_vals)
-        n_ac = len(asset_grid_AC)
 
         Akeeper = np.empty((n_z_loc, n_a, n_h))
         Ckeeper = np.empty((n_z_loc, n_a, n_h))
         Vkeeper = np.empty((n_z_loc, n_a, n_h))
+        dVw_keep = np.empty((n_z_loc, n_a, n_h))
+        phi_keep = np.empty((n_z_loc, n_a, n_h))
 
         for iz in range(n_z_loc):
             for ih in range(n_h):
                 hk = h_keep[ih]
 
-                # Pre-eval 2D continuation at h_keep
-                dv_1d = _eval_2d_at_h(
-                    dV_a[iz], hk, asset_grid_AC)
-                v_1d = _eval_2d_at_h(
-                    V[iz], hk, asset_grid_AC)
+                # Slice continuation at ih (housing is identity)
+                dv_slice = dV_a[iz, :, ih]
+                v_slice = V[iz, :, ih]
 
                 # --- EGM: constrained region ---
                 c0 = fns['inv_euler'](
-                    dv_1d[0], hk, egm_params)
+                    dv_slice[0], hk, egm_params)
                 C_arr = np.linspace(
                     1e-08, max(1e-08, c0 - 1e-10), n_a)
 
@@ -130,16 +119,15 @@ def make_keeper_ops(model):
 
                 for k in range(n_a):
                     vf[k] = fns['bellman_rhs'](
-                        C_arr[k], v_1d[0],
+                        C_arr[k], v_slice[0],
                         hk, egm_params)
                     egrid[k] = C_arr[k] + b
                     c_raw[k] = C_arr[k]
 
                 # --- EGM: unconstrained via make_egm_1d ---
-                x_cntn = asset_grid_AC[n_a:]
                 c_hat, v_hat, x_hat, _ = _egm_step(
-                    dv_1d[n_a:], np.zeros(n_a),
-                    v_1d[n_a:], x_cntn, hk)
+                    dv_slice, np.zeros(n_a),
+                    v_slice, asset_grid_A, hk)
 
                 for k in range(n_a):
                     idx = n_a + k
@@ -152,7 +140,11 @@ def make_keeper_ops(model):
                 eg_u = egrid[uid]
                 vf_u = vf[uid]
                 c_u = c_raw[uid]
-                ac_u = asset_grid_AC[uid]
+
+                # a_cntn for FUES: constrained = b, unconstrained = a_grid
+                ac_arr = np.concatenate((
+                    np.full(n_a, b), asset_grid_A))
+                ac_u = ac_arr[uid]
 
                 sidx = np.argsort(eg_u)
                 (eg_ref, vf_ref, c_ref,
@@ -177,13 +169,30 @@ def make_keeper_ops(model):
                     eg_ref, vf_ref, asset_grid_A,
                     extrap=True)
 
-                Akeeper[iz, :, ih] = clamp_policy(
+                a_clamped = clamp_policy(
                     a_interp, b, grid_max_A * 2)
-                Ckeeper[iz, :, ih] = clamp_policy(
+                c_clamped = clamp_policy(
                     c_interp, 1e-10, 1e10)
+
+                Akeeper[iz, :, ih] = a_clamped
+                Ckeeper[iz, :, ih] = c_clamped
                 Vkeeper[iz, :, ih] = clamp_value(
                     v_interp)
 
-        return Akeeper, Ckeeper, Vkeeper
+                # dV_w = du_c(c) for each grid point
+                for ia in range(n_a):
+                    dVw_keep[iz, ia, ih] = du_c(
+                        c_clamped[ia])
+
+                # phi = du_h(h_keep) + dV_h_cntn(a', h_keep)
+                # dV_h already includes beta from recursion
+                dv_h_slice = dV_h[iz, :, ih]
+                for ia in range(n_a):
+                    edvh = np.interp(
+                        a_clamped[ia], asset_grid_A,
+                        dv_h_slice)
+                    phi_keep[iz, ia, ih] = du_h(hk) + edvh
+
+        return Akeeper, Ckeeper, Vkeeper, dVw_keep, phi_keep
 
     return dcsn_mover

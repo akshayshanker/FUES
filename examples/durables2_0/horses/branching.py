@@ -28,8 +28,6 @@ def make_tenure_ops(model, condition_V, condition_V_HD):
     beta = cp.beta
     b = cp.b
     y_func = cp.y_func
-    du_c = cp.du_c
-    du_h = cp.du_h
     z_vals = cp.z_vals
     a_grid = cp.asset_grid_A
     h_grid = cp.asset_grid_H
@@ -41,7 +39,8 @@ def make_tenure_ops(model, condition_V, condition_V_HD):
 
     def dcsn_mover(t, vlu_cntn,
                    Akeeper, Ckeeper, Vkeeper,
-                   Aadj, Cadj, Hadj, Vadj):
+                   dVw_keeper, phi_keeper,
+                   Aadj, Cadj, Hadj, Vadj, dVw_adj):
         """Tenure cntn_to_dcsn: transitions + eval + max.
 
         Receives raw keeper (on asset grid per h slice)
@@ -50,7 +49,6 @@ def make_tenure_ops(model, condition_V, condition_V_HD):
         transition points, takes max, chain rule.
         """
         V = vlu_cntn['V']
-        dV_h = vlu_cntn['dV']['h']
 
         V_out = np.empty((n_z, n_a, n_h))
         D_out = np.empty((n_z, n_a, n_h))
@@ -69,16 +67,10 @@ def make_tenure_ops(model, condition_V, condition_V_HD):
                     h = h_grid[ih]
                     hk = h_keep[ih]
 
-                    # keep branch
+                    # keep branch: value only
                     v_k = _clamp(interp_as_scalar(
                         a_grid, Vkeeper[iz, :, ih],
                         w_k), -1e10, 1e10, -1e10)
-                    c_k = _clamp(interp_as_scalar(
-                        a_grid, Ckeeper[iz, :, ih],
-                        w_k), 1e-10, 1e10, 1e-10)
-                    a_k = _clamp(interp_as_scalar(
-                        a_grid, Akeeper[iz, :, ih],
-                        w_k), b, 1e10, b)
 
                     # adjust branch
                     w_adj = (R * a
@@ -105,21 +97,23 @@ def make_tenure_ops(model, condition_V, condition_V_HD):
                         d * v_a + (1 - d) * v_k)
                     D_out[iz, ia, ih] = d
 
-                    # marginals (chain rule)
+                    # chain rule: marginals from leaves
+                    dvw_k = interp_as_scalar(
+                        a_grid,
+                        dVw_keeper[iz, :, ih], w_k)
+                    dvw_a = interp_as_scalar(
+                        cp.asset_grid_WE,
+                        dVw_adj[iz], w_adj)
+                    pk = interp_as_scalar(
+                        a_grid,
+                        phi_keeper[iz, :, ih], w_k)
+
                     dV_a_out[iz, ia, ih] = (
                         beta * R
-                        * (d * du_c(c_a)
-                           + (1 - d) * du_c(c_k)))
-
-                    pt_k = np.array([a_k, hk])
-                    edvh = eval_linear(
-                        UGgrid_all, dV_h[iz],
-                        pt_k, xto.LINEAR)
-                    phi_k = du_h(hk) + edvh
+                        * (d * dvw_a + (1 - d) * dvw_k))
                     dV_h_out[iz, ia, ih] = (
                         beta * R_H * (1 - delta)
-                        * (d * du_c(c_a)
-                           + (1 - d) * phi_k))
+                        * (d * dvw_a + (1 - d) * pk))
 
         return (
             {'V': V_out,

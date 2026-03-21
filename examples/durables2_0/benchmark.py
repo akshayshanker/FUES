@@ -76,13 +76,10 @@ def run_comparison(syntax_dir, calib_overrides=None,
         kp = sol['keeper_cons']
         aj = sol['adjuster_cons']
 
-        # Compare tenure VF + keeper/adjuster policies
+        # Compare keeper/adjuster policies (C, A, H)
         for name, new_arr, old_key in [
-            ('V_tenure', ad['vlu_dcsn']['V'], 'VF'),
-            ('d', ad['pol']['d'], 'D'),
             ('C_keep', kp['C'], 'Ckeeper'),
             ('A_keep', kp['A'], 'Akeeper'),
-            ('V_keep', kp['V'], 'Vadj'),  # old stores keeper V as 'Vadj'
             ('A_adj', aj['A'], 'Aadj'),
             ('C_adj', aj['C'], 'Cadj'),
             ('H_adj', aj['H'], 'Hadj'),
