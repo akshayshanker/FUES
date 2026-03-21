@@ -1,0 +1,24 @@
+name: DurablesLifecycle
+
+periods:
+  - durables_period: !period    # index 0
+  - durables_period: !period    # index 1
+  # ... (repeat for T periods)
+  - terminal: !period           # index T
+
+# Inter-period connectors (renaming dicts).
+# Poststates from consumption stages -> prestates of next period's branching stage.
+# The branching stage computes w_keep/w_adj from (a, h) + y(z),
+# so the connector maps the raw asset poststates to (a, h).
+inter_connectors:
+  - {a_nxt: a, h_nxt: h}
+  # Note: the actual inter-period transition involves
+  #   a <- R * a_nxt + y(z')     (financial return + income)
+  #   h <- h_nxt                 (housing carries over)
+  # Income and return are applied at the branching stage's
+  # dcsn_to_cntn_transition, not in the connector.
+  # The connector passes raw poststate values.
+
+terminal:
+  V_terminal: |
+    theta * alpha * (K + a + R_H * (1 - delta) * h)^(1 - gamma_c) / (1 - gamma_c)

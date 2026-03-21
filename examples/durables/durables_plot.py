@@ -16,7 +16,10 @@ import time
 import yaml
 from interpolation.splines import UCGrid, eval_linear
 from interpolation.splines import extrap_options as xto
-from mpi4py import MPI
+try:
+    from mpi4py import MPI
+except (ImportError, RuntimeError):
+    MPI = None
 import os
 import sys
 import dill as pickle
@@ -420,7 +423,7 @@ def initVal(cp):
 
 
 def solveVFI(cp, verbose=False):
-    iterVFI, _, condition_V, _, _ = Operator_Factory(cp)
+    iterVFI, _, condition_V, _, _, _ = Operator_Factory(cp)
 
     # Initial VF
     EVnxt, _, _ = initVal(cp)
@@ -467,7 +470,7 @@ def solveVFI(cp, verbose=False):
     return results
 
 def solveEGM(cp, LS=True, verbose=True, plot_age=58):
-    _, iterEGM, condition_V, condition_V_HD, _ = Operator_Factory(cp)
+    _, iterEGM, condition_V, condition_V_HD, _, _ = Operator_Factory(cp)
 
     # Initial values
     EVnxt, ELambdaAnxt, ELambdaHnxt = initVal(cp)
@@ -540,7 +543,7 @@ def solveEGM(cp, LS=True, verbose=True, plot_age=58):
     return results
 
 def solveNEGM(cp, LS=True, verbose=True):
-    iterVFI, iterEGM, condition_V, condition_V_HD, iterNEGM = Operator_Factory(cp)
+    iterVFI, iterEGM, condition_V, condition_V_HD, iterNEGM, _ = Operator_Factory(cp)
 
     # Initial values
     EVnxt, ELambdaAnxt, ELambdaHnxt = initVal(cp)

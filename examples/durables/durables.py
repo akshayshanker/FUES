@@ -24,28 +24,11 @@ from consav import golden_section_search
 cwd = os.getcwd()
 sys.path.append('..')
 os.chdir(cwd)
-from dcsmm.fues import FUES_jit_core, get_fues_defaults  # JIT-compiled core
+from dcsmm.fues import FUES, FUES_jit  # Production FUES + JIT-callable version
 from dcsmm.fues.fues_v0dev import uniqueEG  # Duplicate removal utility
 from dcsmm.fues.helpers.math_funcs import interp_as_scalar  # 1D scalar interpolation
-
-# Extract FUES defaults as module-level constants for numba compatibility
-_fd = get_fues_defaults()
-_FUES_ENDOG_MBAR = _fd['endog_mbar']
-_FUES_INCLUDE_INTER = _fd['include_intersections']
-_FUES_NO_DOUBLE = _fd['no_double_jumps']
-_FUES_SINGLE_INTER = _fd['single_intersection']
-_FUES_DISABLE_CHECKS = _fd['disable_jump_checks']
-_FUES_LEFT_STRICT = _fd['left_turn_no_jump_strict']
-_FUES_POST_STATE = _fd['use_post_state_jump_test']
-_FUES_DETECT_DEC = _fd['detect_decreasing_policy']
-_FUES_POST_CLEAN = _fd['post_clean']
-_FUES_PAD_MBAR = _fd['padding_mbar']
-_FUES_JUMP_TOL = _fd['jump_check_tol']
-_FUES_EPS_D = _fd['eps_d']
-_FUES_EPS_SEP = _fd['eps_sep']
-_FUES_EPS_FWD = _fd['eps_fwd_back']
-_FUES_PAR_GUARD = _fd['parallel_guard']
-del _fd
+from dcsmm.fues.fues_v0_2dev import EPS_D as _FUES_EPS_D, EPS_SEP as _FUES_EPS_SEP
+from dcsmm.fues.fues_v0_2dev import EPS_fwd_back as _FUES_EPS_FWD, PARALLEL_GUARD as _FUES_PAR_GUARD
 from dcsmm.fues.rfc_simple import rfc
 from dcsmm.fues.helpers.math_funcs import (interp_as, rootsearch, rootsearch_wf,
                                              bisect_wf, correct_jumps1d_arr,
@@ -53,45 +36,10 @@ from dcsmm.fues.helpers.math_funcs import (interp_as, rootsearch, rootsearch_wf,
 
 
 # =============================================================================
-# NaN/Inf Clamping Helpers (prevents crashes from interpolation edge cases)
+# NaN/Inf Clamping Helpers (from kikku.asva.numerics)
 # =============================================================================
 
-@njit
-def clamp_value(arr, nan_val=-1e10):
-    """Clamp NaN/inf in value functions. NaN → large negative so state is never chosen."""
-    result = arr.copy()
-    for i in range(len(result)):
-        if np.isnan(result[i]) or np.isinf(result[i]):
-            result[i] = nan_val
-    return result
-
-
-@njit
-def clamp_policy(arr, min_val, max_val):
-    """Clamp NaN/inf in policy functions to valid bounds."""
-    result = arr.copy()
-    for i in range(len(result)):
-        if np.isnan(result[i]):
-            result[i] = min_val
-        elif result[i] < min_val:
-            result[i] = min_val
-        elif result[i] > max_val or np.isinf(result[i]):
-            result[i] = max_val
-    return result
-
-
-@njit
-def clamp_scalar(val, min_val, max_val, nan_replacement):
-    """Clamp a single scalar value. Returns nan_replacement if NaN."""
-    if np.isnan(val):
-        return nan_replacement
-    elif np.isinf(val):
-        return max_val if val > 0 else min_val
-    elif val < min_val:
-        return min_val
-    elif val > max_val:
-        return max_val
-    return val
+from kikku.asva.numerics import clamp_value, clamp_policy, clamp_scalar
 
 
 class ConsumerProblem:
@@ -1127,11 +1075,10 @@ def Operator_Factory(cp):
 
         return endog_grid_unrefined, vf_unrefined, c_unrefined
 
-    @njit
     def _refineKeeper(endog_grid_unrefined,
                       vf_unrefined, c_unrefined, V_prime, t, m_bar=1.1, return_grids=0):
         """
-        Refine EGM grid for non-adjusters using FUES (JIT-compiled).
+        Refine EGM grid for non-adjusters using FUES.
 
         If return_grids=1, also returns intermediate grids for plotting.
         """
@@ -1160,64 +1107,25 @@ def Operator_Factory(cp):
                 c_unrefined_points = c_unrefined_points[uniqueIds]
                 asset_grid_AC_unique = asset_grid_AC[uniqueIds]
                 
-                # Sort inputs by e_grid (required by FUES_jit_core)
+                # Sort inputs by e_grid (required by FUES_jit)
                 sortidx = np.argsort(endog_grid_unrefined_points)
                 e_sorted = endog_grid_unrefined_points[sortidx]
                 v_sorted = vf_unrefined_points[sortidx]
                 c_sorted = c_unrefined_points[sortidx]
                 a_sorted = asset_grid_AC_unique[sortidx]
+                del_a_sorted = a_sorted.copy()
 
-                _FUES_POST_STATE = True
-                _FUES_POST_CLEAN = False
-                _FUES_INCLUDE_INTER = False
-                _FUES_DISABLE_CHECKS = True
-                _FUES_EPS_FWD = 0.05
-                
-                # Call FUES_jit_core with all parameters (post_clean=0 for keeper)
-                keep, intersections, n_inter, final_mask, n_final = FUES_jit_core(
-                    e_sorted, v_sorted, c_sorted, a_sorted, a_sorted,  # e, v, p1, p2, del_a
-                    m_bar, 10,  # m_bar, LB
-                    _FUES_ENDOG_MBAR, _FUES_INCLUDE_INTER, _FUES_NO_DOUBLE,
-                    _FUES_SINGLE_INTER, _FUES_DISABLE_CHECKS, _FUES_LEFT_STRICT,
-                    _FUES_POST_STATE, _FUES_DETECT_DEC, 0,  # post_clean=0
-                    _FUES_PAD_MBAR, _FUES_JUMP_TOL,
-                    _FUES_EPS_D, _FUES_EPS_SEP, _FUES_EPS_FWD, _FUES_PAR_GUARD
+                e_grid_clean, vf_clean, c_clean, a_prime_clean, _ = FUES_jit(
+                    e_sorted, v_sorted, c_sorted, a_sorted, del_a_sorted,
+                    m_bar, 10,
+                    False, 0.0,       # endog_mbar, padding_mbar
+                    False,            # include_intersections
+                    True,             # no_double_jumps
+                    False,            # single_intersection
+                    True,             # disable_jump_checks
+                    _FUES_EPS_D, _FUES_EPS_SEP, 0.05, _FUES_PAR_GUARD,
                 )
 
-                # Pre-allocate and copy directly (faster than concatenate)
-                n_kept = np.sum(keep)
-                n_total = n_kept + n_inter
-                e_grid_clean = np.empty(n_total)
-                vf_clean = np.empty(n_total)
-                c_clean = np.empty(n_total)
-                a_prime_clean = np.empty(n_total)
-
-                # Copy kept points
-                idx = 0
-                for i in range(len(keep)):
-                    if keep[i]:
-                        e_grid_clean[idx] = e_sorted[i]
-                        vf_clean[idx] = v_sorted[i]
-                        c_clean[idx] = c_sorted[i]
-                        a_prime_clean[idx] = a_sorted[i]
-                        idx += 1
-
-                # Copy intersections directly
-                for i in range(n_inter):
-                    e_grid_clean[idx] = intersections[i, 0]
-                    vf_clean[idx] = intersections[i, 1]
-                    c_clean[idx] = intersections[i, 2]
-                    a_prime_clean[idx] = intersections[i, 3]
-                    idx += 1
-
-                # Sort if we have intersections
-                if n_inter > 0:
-                    sortindex = np.argsort(e_grid_clean)
-                    e_grid_clean = e_grid_clean[sortindex]
-                    vf_clean = vf_clean[sortindex]
-                    c_clean = c_clean[sortindex]
-                    a_prime_clean = a_prime_clean[sortindex]
-                
                 # Interpolate to output grid
                 new_a_prime_refined[index_z, :, index_h_today] = interp_as(
                     e_grid_clean, a_prime_clean, asset_grid_A, extrap=True)
@@ -1353,62 +1261,24 @@ def Operator_Factory(cp):
             aprime_unrefined_points = aprime_unrefined_points[uniqueIds]
             hprime_unrefined_points = hprime_unrefined_points[uniqueIds]
 
-            # Sort inputs by e_grid (required by FUES_jit_core)
+            # Sort inputs by e_grid (required by FUES_jit)
             sortidx = np.argsort(egrid_unref_points)
             e_sorted = egrid_unref_points[sortidx]
             v_sorted = vf_unrefined_points[sortidx]
             a_sorted = aprime_unrefined_points[sortidx]
             h_sorted = hprime_unrefined_points[sortidx]
             c_sorted = c_unrefined_points[sortidx]
-            _FUES_POST_STATE = True
-            _FUES_POST_CLEAN = False
-            _FUES_INCLUDE_INTER = False
-            _FUES_DISABLE_CHECKS = True
-            _FUES_EPS_FWD = 0.05
-            # Call FUES_jit_core with all parameters
-            keep, intersections, n_inter, final_mask, n_final = FUES_jit_core(
-                e_sorted, v_sorted, h_sorted, a_sorted, c_sorted,  # e, v, p1, p2, del_a
-                m_bar, 5,  # m_bar, LB
-                0, _FUES_INCLUDE_INTER, _FUES_NO_DOUBLE,  # endog_mbar=False
-                _FUES_SINGLE_INTER, _FUES_DISABLE_CHECKS, _FUES_LEFT_STRICT,
-                _FUES_POST_STATE, _FUES_DETECT_DEC, _FUES_POST_CLEAN,
-                _FUES_PAD_MBAR, _FUES_JUMP_TOL,
-                _FUES_EPS_D, _FUES_EPS_SEP, _FUES_EPS_FWD, _FUES_PAR_GUARD
+
+            e_grid_clean, vf_clean, hprime_clean, a_prime_clean, _ = FUES_jit(
+                e_sorted, v_sorted, h_sorted, a_sorted, c_sorted,
+                m_bar, 5,
+                False, 0.0,       # endog_mbar, padding_mbar
+                False,            # include_intersections
+                True,             # no_double_jumps
+                False,            # single_intersection
+                True,             # disable_jump_checks
+                _FUES_EPS_D, _FUES_EPS_SEP, 0.05, _FUES_PAR_GUARD,
             )
-
-            # Pre-allocate and copy directly (faster than concatenate)
-            n_kept = np.sum(keep)
-            n_total = n_kept + n_inter
-            e_grid_clean = np.empty(n_total)
-            vf_clean = np.empty(n_total)
-            a_prime_clean = np.empty(n_total)
-            hprime_clean = np.empty(n_total)
-
-            # Copy kept points
-            idx = 0
-            for i in range(len(keep)):
-                if keep[i]:
-                    e_grid_clean[idx] = e_sorted[i]
-                    vf_clean[idx] = v_sorted[i]
-                    a_prime_clean[idx] = a_sorted[i]
-                    hprime_clean[idx] = h_sorted[i]
-                    idx += 1
-
-            # Copy intersections directly
-            for i in range(n_inter):
-                e_grid_clean[idx] = intersections[i, 0]
-                vf_clean[idx] = intersections[i, 1]
-                a_prime_clean[idx] = intersections[i, 2]
-                hprime_clean[idx] = intersections[i, 3]
-                idx += 1
-
-            # Sort if we have intersections
-            if n_inter > 0:
-                sortindex = np.argsort(e_grid_clean)
-                e_grid_clean = e_grid_clean[sortindex]
-                vf_clean = vf_clean[sortindex]
-                a_prime_clean = a_prime_clean[sortindex]
-                hprime_clean = hprime_clean[sortindex]
 
             # Recompute c_clean from values
             c_clean = e_grid_clean - hprime_clean * tau_adj - a_prime_clean
@@ -1443,6 +1313,175 @@ def Operator_Factory(cp):
                     e_grid_clean, vf_clean, hprime_clean, a_prime_clean,
                     vf_unrefined_points, hprime_unrefined_points,
                     aprime_unrefined_points, egrid_unref_points)
+
+    @njit
+    def _keeper_to_state_grid(t, Akeeper, Ckeeper, Vkeeper,
+                              ELambdaHnxt, ELambdaH_HD_nxt):
+        """Interpolate keeper policies onto (z, a, h) state grid.
+
+        Also computes Phi_t = du_h(h') + E_z[d_h V](a', h')
+        per grid point (the housing marginal for keepers).
+        """
+        shape = (len(z_vals), len(asset_grid_A),
+                 len(asset_grid_H))
+        v_keep = np.empty(shape)
+        c_keep = np.empty(shape)
+        a_keep = np.empty(shape)
+        h_keep = np.empty(shape)
+        phi_keep = np.empty(shape)
+
+        for state in range(len(X_all)):
+            a = asset_grid_A[X_all[state][1]]
+            h = asset_grid_H[X_all[state][2]]
+            i_a = X_all[state][1]
+            i_h = X_all[state][2]
+            i_z = int(X_all[state][0])
+            z = z_vals[i_z]
+
+            wealth_nadj = R * a + y_func(t, z)
+            v_val = interp_as_scalar(
+                asset_grid_A, Vkeeper[i_z, :, i_h],
+                wealth_nadj)
+            c_val = interp_as_scalar(
+                asset_grid_A, Ckeeper[i_z, :, i_h],
+                wealth_nadj)
+            a_val = interp_as_scalar(
+                asset_grid_A, Akeeper[i_z, :, i_h],
+                wealth_nadj)
+            h_val = (1 - delta) * h
+
+            v_val = clamp_scalar(v_val, -1e10, 1e10, -1e10)
+            c_val = clamp_scalar(c_val, 1e-10, 1e10, 1e-10)
+            a_val = clamp_scalar(
+                a_val, b, grid_max_A * 2, b)
+
+            v_keep[i_z, i_a, i_h] = v_val
+            c_keep[i_z, i_a, i_h] = c_val
+            a_keep[i_z, i_a, i_h] = a_val
+            h_keep[i_z, i_a, i_h] = h_val
+
+            # Phi_t for housing marginal
+            point_nadj = np.array([a_val, h_val])
+            if use_hd_lambda:
+                phi = du_h(h_val) + eval_linear(
+                    UGgrid_HD, ELambdaH_HD_nxt[i_z],
+                    point_nadj, xto.LINEAR)
+            else:
+                phi = du_h(h_val) + eval_linear(
+                    UGgrid_all, ELambdaHnxt[i_z],
+                    point_nadj, xto.LINEAR)
+            phi_keep[i_z, i_a, i_h] = phi
+
+        return v_keep, c_keep, a_keep, h_keep, phi_keep
+
+    @njit
+    def _adjuster_to_state_grid(t, Aadj, Cadj, Hadj,
+                                V_prime, c_from_budget=1):
+        """Interpolate adjuster policies onto (z, a, h)
+        state grid and evaluate the Bellman."""
+        shape = (len(z_vals), len(asset_grid_A),
+                 len(asset_grid_H))
+        v_adj = np.empty(shape)
+        c_adj = np.empty(shape)
+        a_adj = np.empty(shape)
+        h_adj = np.empty(shape)
+        tau_adj = 1.0 + tau
+
+        for state in range(len(X_all)):
+            a = asset_grid_A[X_all[state][1]]
+            h = asset_grid_H[X_all[state][2]]
+            i_a = X_all[state][1]
+            i_h = X_all[state][2]
+            i_z = int(X_all[state][0])
+            z = z_vals[i_z]
+
+            wealth = (R * a + R_H * h * (1 - delta)
+                      + y_func(t, z))
+            a_val = interp_as_scalar(
+                asset_grid_WE, Aadj[i_z, :], wealth)
+            h_val = interp_as_scalar(
+                asset_grid_WE, Hadj[i_z, :], wealth)
+
+            a_val = clamp_scalar(
+                a_val, b, grid_max_A * 2, b)
+            h_val = clamp_scalar(
+                h_val, b, grid_max_H * 2, b)
+
+            if c_from_budget == 1:
+                c_val = wealth - a_val - h_val * tau_adj
+            else:
+                c_val = interp_as_scalar(
+                    asset_grid_WE, Cadj[i_z, :], wealth)
+            c_val = clamp_scalar(
+                c_val, 1e-10, 1e10, 1e-10)
+
+            points = np.array([a_val, h_val])
+            v_val = (u(c_val, h_val, chi)
+                     + beta * eval_linear(
+                         UGgrid_all, V_prime[i_z],
+                         points, xto.LINEAR))
+
+            v_adj[i_z, i_a, i_h] = v_val
+            c_adj[i_z, i_a, i_h] = c_val
+            a_adj[i_z, i_a, i_h] = a_val
+            h_adj[i_z, i_a, i_h] = h_val
+
+        return v_adj, c_adj, a_adj, h_adj
+
+    @njit
+    def _branching_max(v_keep, c_keep, a_keep, h_keep,
+                       phi_keep,
+                       v_adj, c_adj, a_adj, h_adj):
+        """Max over keep/adjust + marginal values.
+
+        Pure branching: no interpolation, no continuation
+        evaluation. Receives pre-interpolated branch values
+        on the common (z, a, h) grid.
+        """
+        shape = v_keep.shape
+        V = np.empty(shape)
+        C = np.empty(shape)
+        A = np.empty(shape)
+        H = np.empty(shape)
+        D = np.empty(shape)
+        dV_a = np.empty(shape)
+        dV_h = np.empty(shape)
+
+        for state in range(len(X_all)):
+            i_z = int(X_all[state][0])
+            i_a = X_all[state][1]
+            i_h = X_all[state][2]
+
+            vk = v_keep[i_z, i_a, i_h]
+            va = v_adj[i_z, i_a, i_h]
+
+            if va >= vk:
+                d = 1
+            else:
+                d = 0
+
+            D[i_z, i_a, i_h] = d
+            ck = c_keep[i_z, i_a, i_h]
+            ca = c_adj[i_z, i_a, i_h]
+            V[i_z, i_a, i_h] = d * va + (1 - d) * vk
+            C[i_z, i_a, i_h] = d * ca + (1 - d) * ck
+            A[i_z, i_a, i_h] = (
+                d * a_adj[i_z, i_a, i_h]
+                + (1 - d) * a_keep[i_z, i_a, i_h])
+            H[i_z, i_a, i_h] = (
+                d * h_adj[i_z, i_a, i_h]
+                + (1 - d) * h_keep[i_z, i_a, i_h])
+
+            # Marginal values
+            dV_a[i_z, i_a, i_h] = (
+                beta * R * (d * du_c(ca)
+                            + (1 - d) * du_c(ck)))
+            dV_h[i_z, i_a, i_h] = (
+                beta * R_H * (1 - delta)
+                * (d * du_c(ca)
+                   + (1 - d) * phi_keep[i_z, i_a, i_h]))
+
+        return V, A, H, C, D, dV_a, dV_h
 
     @njit
     def _discrete_choice_loop(t, V_prime, ELambdaHnxt,
@@ -1913,4 +1952,18 @@ def Operator_Factory(cp):
 
         return new_HD
 
-    return iterVFI, iterEGM, condition_V, condition_V_HD, iterNEGM
+    # Stage-level internals (exported for durables2_0 operators)
+    _stage_internals = {
+        '_keeperEGM': _keeperEGM,
+        '_refineKeeper': _refineKeeper,
+        '_adjEGM': _adjEGM,
+        'refine_adj': refine_adj,
+        '_discrete_choice_loop': _discrete_choice_loop,
+        # Phase 2: split functions for clean DDSL operators
+        '_keeper_to_state_grid': _keeper_to_state_grid,
+        '_adjuster_to_state_grid': _adjuster_to_state_grid,
+        '_branching_max': _branching_max,
+    }
+
+    return (iterVFI, iterEGM, condition_V,
+            condition_V_HD, iterNEGM, _stage_internals)

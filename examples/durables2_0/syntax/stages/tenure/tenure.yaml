@@ -1,0 +1,82 @@
+name: AdjustmentDecision
+kind: branching
+branch_control: agent
+
+symbols:
+  spaces:
+    Xa: '@def R+'          # financial assets domain
+    Xh: '@def R+'          # housing stock domain
+    Xw: '@def R+'          # total wealth / cash-on-hand domain
+
+  prestate:
+    a: '@in Xa'            # financial assets (arrival)
+    h: '@in Xh'            # housing stock (arrival)
+
+  states:
+    a: '@in Xa'            # financial assets (pass-through)
+    h: '@in Xh'            # housing stock (pass-through)
+
+  exogenous:
+    z: '@dist MarkovChain(Pi)'
+
+  poststates:
+    keep:
+      w_keep: '@in Xw'    # keeper cash-on-hand = R * a_d + y(z)
+      h_keep: '@in Xh'    # housing stock passed to keeper = h_d
+    adjust:
+      w_adj: '@in Xw'     # total wealth = R * a_d + R_H * (1 - delta) * h_d + y(z)
+
+  controls:
+    d: '@in {keep, adjust}'
+
+  values:
+    V[<]: '@in R'
+    V: '@in R'
+    V[>]:
+      keep: '@in R'
+      adjust: '@in R'
+
+  values_marginal:
+    d_{a}V[<]: '@in R'          # partial_a v at arrival
+    d_{h}V[<]: '@in R'          # partial_h v at arrival
+    d_{a}V: '@in R'             # partial_a v at decision
+    d_{h}V: '@in R'             # partial_h v at decision
+    d_{w_keep}V[>]: '@in R'     # keep branch: partial_{w_keep} v[>]
+    d_{h_keep}V[>]: '@in R'     # keep branch: partial_{h_keep} v[>]
+    d_{w_adj}V[>]: '@in R'      # adjust branch: partial_{w_adj} v[>]
+  
+  parameters:
+    R: '@in R+'            # gross financial return (1 + r)
+    R_H: '@in R+'          # gross housing return (1 + r_H)
+    delta: '@in [0,1]'     # housing depreciation rate
+    y: '@in R+'            # income (deterministic given z, age)
+
+equations:
+  arvl_to_dcsn_transition: |
+    a = a[<]
+    h = h[<]
+
+  dcsn_to_cntn_transition:
+    keep: |
+      w_keep[>] = R * a + y(z)
+      h_keep[>] = h
+    adjust: |
+      w_adj[>] = R * a + R_H * (1 - delta) * h + y(z)
+
+  cntn_to_dcsn_mover:
+    Bellman: |
+      V = max_{d}(V[>][keep], V[>][adjust])
+    MarginalBellman:
+      keep: |
+        d_{a}V = R * d_{w_keep}V[>]
+        d_{h}V = d_{h_keep}V[>]
+      adjust: |
+        d_{a}V = R * d_{w_adj}V[>]
+        d_{h}V = R_H * (1 - delta) * d_{w_adj}V[>]
+
+  dcsn_to_arvl_mover:
+    Bellman: |
+      V[<] = E_{z}(V)
+    MarginalBellman: |
+      d_{a}V[<] = E_{z}(d_{a}V)
+      d_{h}V[<] = E_{z}(d_{h}V)

@@ -1,0 +1,50 @@
+# Calibration for the durables / housing adjustment cost model
+# Reference: Dobrescu & Shanker, Application 2
+# Values from settings.yml (paper configuration)
+calibration:
+  # Financial returns
+  r: 0.045
+  R: 1.045
+  r_H: 0
+  R_H: 1.0
+
+  # Preferences
+  beta: 0.945
+  alpha: 0.7
+  gamma_c: 3.5
+  gamma_h: 1.5
+  kappa: 0.06
+  sigma: 0.001
+
+  # Housing frictions
+  delta: 0
+  tau: 0.12
+  chi: 0
+
+  # Constraints
+  b: 1.0e-08
+
+  # Terminal value
+  theta: 1.3498
+  K: 1.3
+
+  # Horizon
+  T: 60
+  t0: 20
+
+  # Wage / income process (AR(1) via Tauchen)
+  phi_w: 0.8170411
+  sigma_w: 0.1117012
+  N_wage: 3
+
+  # Wage function polynomial
+  lambdas:
+    - 4.329982
+    - 0.610214
+    - -0.0209832
+    - 0.0003132
+    - -0.00000172
+    - 0.0199949
+    - 0.0000476
+  tau_av: 30
+  normalisation: 1.0e-05
