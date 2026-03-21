@@ -115,12 +115,19 @@ def solve_period(stage_ops, vlu_cntn, t, model,
     use_hd = model.N_HD_LAMBDA > 1
     t0 = time.perf_counter()
 
-    # --- Tenure arvl_to_dcsn (compute branch grids) ---
-    br = stage_ops['tenure']['arvl_to_dcsn'](t)
+    # --- Tenure arvl_to_dcsn (branch grids + pre-eval) ---
+    br = stage_ops['tenure']['arvl_to_dcsn'](t, vlu_cntn)
 
     # --- Wave 0: keeper_cons ---
+    # Keeper receives pre-evaluated 1D continuations
+    # from tenure (no 2D interpolation needed)
+    keeper_cntn = {
+        'dv': br['dv_keep'],
+        'v': br['v_keep'],
+        'ac': br['asset_grid_AC'],
+    }
     A_keep, C_keep, V_keep = stage_ops['keeper_cons'][
-        'dcsn_mover'](vlu_cntn, br['h_keep'], t, m_bar)
+        'dcsn_mover'](keeper_cntn, br['h_keep'], t, m_bar)
     pol_keep, vlu_keep = stage_ops['keeper_cons'][
         'arvl_mover'](A_keep, C_keep, V_keep,
                       br['w_keep'], br['h_keep'],

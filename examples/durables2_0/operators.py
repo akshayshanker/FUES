@@ -14,6 +14,9 @@ branch-keyed results — no continuation values.
 """
 
 import numpy as np
+from numba import njit
+from interpolation.splines import eval_linear
+from interpolation.splines import extrap_options as xto
 from examples.durables.durables import Operator_Factory
 from .horses.keeper_egm import make_keeper_ops
 
@@ -111,20 +114,36 @@ def build_stage_ops(model):
     R_H = cp.R_H
     y_func = cp.y_func
 
-    def tenure_arvl_to_dcsn(t):
-        """Tenure arvl_to_dcsn: compute branch grids.
+    UGgrid_all = cp.UGgrid_all
+
+    @njit
+    def _eval_2d_at_h(arr_2d, h_val, a_grid):
+        """Evaluate 2D array at fixed h along a_grid."""
+        n = len(a_grid)
+        out = np.zeros(n)
+        for i in range(n):
+            pt = np.array([a_grid[i], h_val])
+            out[i] = eval_linear(
+                UGgrid_all, arr_2d, pt, xto.LINEAR)
+        return out
+
+    def tenure_arvl_to_dcsn(t, vlu_cntn):
+        """Tenure arvl_to_dcsn: compute branch grids +
+        pre-evaluate continuation at branch coordinates.
 
         Per YAML dcsn_to_cntn_transition:
           keep:   w_keep = R*a + y(z), h_keep = (1-delta)*h
           adjust: w_adj = R*a + R_H*(1-delta)*h + y(z)
 
-        Returns wealth/housing grids for each branch.
+        Pre-evaluates dV_a and V at h_keep for the keeper
+        so it receives pure 1D arrays (no 2D interpolation).
         """
         z = cp.z_vals
         a = cp.asset_grid_A
         h = cp.asset_grid_H
         n_z, n_a, n_h = len(z), len(a), len(h)
 
+        # Branch grids
         w_keep = np.empty((n_z, n_a))
         for iz in range(n_z):
             w_keep[iz, :] = R * a + y_func(t, z[iz])
@@ -138,10 +157,32 @@ def build_stage_ops(model):
 
         h_keep = (1 - delta) * h
 
+        # Pre-evaluate continuation at h_keep for keeper
+        # dV_a_keep[iz, :, ih] = dV_a(a_grid, h_keep[ih])
+        bg = np.zeros(n_a)
+        bg[:] = cp.b
+        asset_grid_AC = np.concatenate((bg, a))
+
+        dV_a = vlu_cntn['dV']['a']
+        V = vlu_cntn['V']
+        n_ac = len(asset_grid_AC)
+
+        dv_keep = np.empty((n_z, n_ac, n_h))
+        v_keep = np.empty((n_z, n_ac, n_h))
+        for iz in range(n_z):
+            for ih in range(n_h):
+                dv_keep[iz, :, ih] = _eval_2d_at_h(
+                    dV_a[iz], h_keep[ih], asset_grid_AC)
+                v_keep[iz, :, ih] = _eval_2d_at_h(
+                    V[iz], h_keep[ih], asset_grid_AC)
+
         return {
             'w_keep': w_keep,
             'h_keep': h_keep,
             'w_adj': w_adj,
+            'dv_keep': dv_keep,
+            'v_keep': v_keep,
+            'asset_grid_AC': asset_grid_AC,
         }
 
     def tenure_dcsn_mover(branches):

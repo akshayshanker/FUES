@@ -13,9 +13,6 @@ dcsn_mover = EGM + FUES. Returns refined (A, C, V) on
 """
 
 import numpy as np
-from numba import njit
-from interpolation.splines import eval_linear
-from interpolation.splines import extrap_options as xto
 from kikku.asva.egm_1d import make_egm_1d
 from dcsmm.fues import FUES_jit
 from dcsmm.fues.fues_v0dev import uniqueEG
@@ -49,15 +46,10 @@ def make_keeper_ops(model):
     z_vals = cp.z_vals
     asset_grid_A = cp.asset_grid_A
     asset_grid_H = cp.asset_grid_H
-    bg = np.zeros(len(asset_grid_A))
-    bg.fill(cp.b)
-    asset_grid_AC = np.concatenate((bg, asset_grid_A))
-    UGgrid_all = cp.UGgrid_all
 
-    # Scalars + callables
+    # Scalars
     b = cp.b
     grid_max_A = cp.grid_max_A
-    du_h = cp.du_h
 
     # Params + recipe callables
     egm_params = model.keeper_egm_params
@@ -68,36 +60,26 @@ def make_keeper_ops(model):
         egm_params,
     )
 
-    @njit
-    def _eval_at_hprime(arr_2d, h_keep, a_grid):
-        """Evaluate 2D array at fixed h_keep along a_grid."""
-        n = len(a_grid)
-        out = np.zeros(n)
-        for i in range(n):
-            pt = np.array([a_grid[i], h_keep])
-            out[i] = eval_linear(
-                UGgrid_all, arr_2d, pt, xto.LINEAR)
-        return out
-
     # --- dcsn_mover: EGM + FUES ---
 
-    def dcsn_mover(vlu_cntn, h_keep_grid, t, m_bar=1.1):
+    def dcsn_mover(keeper_cntn, h_keep_grid, t, m_bar=1.1):
         """B: EGM + FUES per (z, h) slice.
 
         Parameters
         ----------
-        vlu_cntn : dict
-            ``{'V', 'dV': {'a', 'h'}}``.
+        keeper_cntn : dict
+            Pre-evaluated 1D continuations from tenure:
+            ``{'dv': (n_z, n_ac, n_h),
+               'v':  (n_z, n_ac, n_h),
+               'ac': asset_grid_AC}``.
         h_keep_grid : ndarray (n_h,)
-            Depreciated housing grid, from tenure's
-            branch transition: ``(1-delta) * asset_grid_H``.
+            Depreciated housing from tenure.
         t : int
         m_bar : float
 
         Returns
         -------
         Akeeper, Ckeeper, Vkeeper : ndarray (n_z, n_a, n_h)
-            Refined policies on the asset grid.
         """
         n_z = len(z_vals)
         n_a = len(asset_grid_A)
@@ -107,18 +89,17 @@ def make_keeper_ops(model):
         Ckeeper = np.empty((n_z, n_a, n_h))
         Vkeeper = np.empty((n_z, n_a, n_h))
 
-        dV_a = vlu_cntn['dV']['a']
-        V = vlu_cntn['V']
+        dv_all = keeper_cntn['dv']
+        v_all = keeper_cntn['v']
+        ac_grid = keeper_cntn['ac']
 
         for iz in range(n_z):
             for ih in range(n_h):
                 h_keep = h_keep_grid[ih]
 
-                # Pre-eval continuation at h_keep
-                dv_1d = _eval_at_hprime(
-                    dV_a[iz], h_keep, asset_grid_AC)
-                v_1d = _eval_at_hprime(
-                    V[iz], h_keep, asset_grid_AC)
+                # Already pre-evaluated by tenure
+                dv_1d = dv_all[iz, :, ih]
+                v_1d = v_all[iz, :, ih]
 
                 # --- EGM: constrained region ---
                 c0 = fns['inv_euler'](
@@ -138,7 +119,7 @@ def make_keeper_ops(model):
                     c_raw[k] = C_arr[k]
 
                 # --- EGM: unconstrained via make_egm_1d ---
-                x_cntn = asset_grid_AC[n_a:]
+                x_cntn = ac_grid[n_a:]
                 c_hat, v_hat, x_hat, _ = _egm_step(
                     dv_1d[n_a:], np.zeros(n_a),
                     v_1d[n_a:], x_cntn, h_keep)
@@ -154,7 +135,7 @@ def make_keeper_ops(model):
                 eg_u = egrid[uid]
                 vf_u = vf[uid]
                 c_u = c_raw[uid]
-                ac_u = asset_grid_AC[uid]
+                ac_u = ac_grid[uid]
 
                 sidx = np.argsort(eg_u)
                 (eg_ref, vf_ref, c_ref,
