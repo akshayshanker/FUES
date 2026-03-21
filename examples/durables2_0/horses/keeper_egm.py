@@ -45,11 +45,11 @@ def make_keeper_ops(model):
     # Grids
     z_vals = cp.z_vals
     asset_grid_A = cp.asset_grid_A
-    asset_grid_H = cp.asset_grid_H
 
     # Scalars
     b = cp.b
     grid_max_A = cp.grid_max_A
+    m_bar = cp.m_bar
 
     # Params + recipe callables
     egm_params = model.keeper_egm_params
@@ -62,36 +62,35 @@ def make_keeper_ops(model):
 
     # --- dcsn_mover: EGM + FUES ---
 
-    def dcsn_mover(keeper_cntn, h_keep_grid, t, m_bar=1.1):
+    def dcsn_mover(vlu_cntn):
         """B: EGM + FUES per (z, h) slice.
 
         Parameters
         ----------
-        keeper_cntn : dict
-            Pre-evaluated 1D continuations from tenure:
-            ``{'dv': (n_z, n_ac, n_h),
-               'v':  (n_z, n_ac, n_h),
-               'ac': asset_grid_AC}``.
-        h_keep_grid : ndarray (n_h,)
-            Depreciated housing from tenure.
-        t : int
-        m_bar : float
+        vlu_cntn : dict
+            Pre-evaluated 1D continuations from tenure::
+
+                {'dv': (n_z, n_ac, n_h),
+                 'v':  (n_z, n_ac, n_h),
+                 'ac': asset_grid_AC,
+                 'h_keep': (n_h,)}
 
         Returns
         -------
         Akeeper, Ckeeper, Vkeeper : ndarray (n_z, n_a, n_h)
         """
+        dv_all = vlu_cntn['dv']
+        v_all = vlu_cntn['v']
+        ac_grid = vlu_cntn['ac']
+        h_keep_grid = vlu_cntn['h_keep']
+
         n_z = len(z_vals)
         n_a = len(asset_grid_A)
-        n_h = len(asset_grid_H)
+        n_h = len(h_keep_grid)
 
         Akeeper = np.empty((n_z, n_a, n_h))
         Ckeeper = np.empty((n_z, n_a, n_h))
         Vkeeper = np.empty((n_z, n_a, n_h))
-
-        dv_all = keeper_cntn['dv']
-        v_all = keeper_cntn['v']
-        ac_grid = keeper_cntn['ac']
 
         for iz in range(n_z):
             for ih in range(n_h):

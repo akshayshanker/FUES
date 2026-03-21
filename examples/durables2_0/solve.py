@@ -121,13 +121,14 @@ def solve_period(stage_ops, vlu_cntn, t, model,
     # --- Wave 0: keeper_cons ---
     # Keeper receives pre-evaluated 1D continuations
     # from tenure (no 2D interpolation needed)
-    keeper_cntn = {
+    vlu_cntn_keep = {
         'dv': br['dv_keep'],
         'v': br['v_keep'],
         'ac': br['asset_grid_AC'],
+        'h_keep': br['h_keep'],
     }
     A_keep, C_keep, V_keep = stage_ops['keeper_cons'][
-        'dcsn_mover'](keeper_cntn, br['h_keep'], t, m_bar)
+        'dcsn_mover'](vlu_cntn_keep)
     pol_keep, vlu_keep = stage_ops['keeper_cons'][
         'arvl_mover'](A_keep, C_keep, V_keep,
                       br['w_keep'], br['h_keep'],

@@ -42,7 +42,6 @@ def build_stage_ops(model):
 
     _adjEGM = internals['_adjEGM']
     _refine_adj = internals['refine_adj']
-    _keeper_to_grid = internals['_keeper_to_state_grid']
     _adjuster_to_grid = internals['_adjuster_to_state_grid']
     _branching_max = internals['_branching_max']
 
@@ -57,21 +56,59 @@ def build_stage_ops(model):
     # Caller (solve_period) passes h_keep_grid from
     # the tenure branch transition.
 
+    from dcsmm.fues.helpers.math_funcs import interp_as_scalar
+    from kikku.asva.numerics import clamp_scalar as _clamp
+
+    du_h = cp.du_h
+    UGgrid_all_op = cp.UGgrid_all
+    a_grid = cp.asset_grid_A
+    h_grid = cp.asset_grid_H
+    b_val = cp.b
+    gmax_A = cp.grid_max_A
+
     def keeper_arvl_mover(Akeeper, Ckeeper, Vkeeper,
                           w_keep, h_keep, vlu_cntn, t):
-        """I: interp keeper onto state grid via w_keep.
+        """I: interp keeper onto (z,a,h) via w_keep + phi.
 
-        w_keep and h_keep come from tenure branch_transitions.
-        Interpolates keeper policies (on asset grid) to the
-        state grid using w_keep[z, a] = R*a + y(t,z).
-        Also computes phi (housing marginal).
+        w_keep[iz, ia] = R*a + y(t,z) from tenure.
+        h_keep[ih] = (1-delta)*h from tenure.
         """
-        v_out, c_out, a_out, h_out, phi_out = \
-            _keeper_to_grid(
-                t, Akeeper, Ckeeper, Vkeeper,
-                vlu_cntn['dV']['h'],
-                vlu_cntn['dV'].get('h_hd',
-                    np.zeros((1, 1, 1))))
+        n_z = len(cp.z_vals)
+        n_a = len(a_grid)
+        n_h = len(h_grid)
+
+        v_out = np.empty((n_z, n_a, n_h))
+        c_out = np.empty((n_z, n_a, n_h))
+        a_out = np.empty((n_z, n_a, n_h))
+        h_out = np.empty((n_z, n_a, n_h))
+        phi_out = np.empty((n_z, n_a, n_h))
+
+        dV_h = vlu_cntn['dV']['h']
+
+        for iz in range(n_z):
+            for ih in range(n_h):
+                for ia in range(n_a):
+                    w = w_keep[iz, ia]
+                    hk = h_keep[ih]
+
+                    v_out[iz, ia, ih] = _clamp(
+                        interp_as_scalar(a_grid, Vkeeper[iz, :, ih], w),
+                        -1e10, 1e10, -1e10)
+                    c_val = _clamp(
+                        interp_as_scalar(a_grid, Ckeeper[iz, :, ih], w),
+                        1e-10, 1e10, 1e-10)
+                    c_out[iz, ia, ih] = c_val
+                    a_val = _clamp(
+                        interp_as_scalar(a_grid, Akeeper[iz, :, ih], w),
+                        b_val, gmax_A * 2, b_val)
+                    a_out[iz, ia, ih] = a_val
+                    h_out[iz, ia, ih] = hk
+
+                    # phi = du_h(h_keep) + E_z[d_h V](a', h_keep)
+                    pt = np.array([a_val, hk])
+                    edvh = eval_linear(UGgrid_all_op, dV_h[iz], pt, xto.LINEAR)
+                    phi_out[iz, ia, ih] = du_h(hk) + edvh
+
         return (
             {'c': c_out, 'a_nxt': a_out, 'h_nxt': h_out},
             {'V': v_out, 'phi': phi_out},
