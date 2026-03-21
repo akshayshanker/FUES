@@ -1,41 +1,23 @@
 """Stage operator factories for the durables model.
 
-Three stages matching the YAML period template:
-
-- ``keeper_cons``: keeper EGM + FUES + interp to state grid
-- ``adjuster_cons``: partial EGM + FUES + Bellman eval on state grid
-- ``tenure``: branching max + E_z
-
-Each factory returns ``{'dcsn_mover', 'arvl_mover'}``.
-
-Phase 2: leaf arvl_movers interpolate onto the common
-(z, a, h) grid. The branching stage receives only
-branch-keyed results — no continuation values.
+Three stages:
+  keeper_cons: EGM + FUES (from horses/keeper_egm.py)
+  adjuster_cons: partial EGM + FUES (from Operator_Factory)
+  tenure: transitions + eval + max + chain rule + E_z
 """
 
 import numpy as np
 from numba import njit
 from interpolation.splines import eval_linear
 from interpolation.splines import extrap_options as xto
+from dcsmm.fues.helpers.math_funcs import interp_as_scalar
+from kikku.asva.numerics import clamp_scalar as _clamp
 from examples.durables.durables import Operator_Factory
 from .horses.keeper_egm import make_keeper_ops
 
 
 def build_stage_ops(model):
-    """Build all three stage operators.
-
-    Keeper: from horses/keeper_egm.py (make_egm_1d + FUES).
-    Adjuster + tenure: from Operator_Factory internals.
-
-    Parameters
-    ----------
-    model : DurablesModel
-
-    Returns
-    -------
-    dict
-        Stage operators keyed by YAML stage name.
-    """
+    """Build all three stage operators."""
     cp = model.cp
     (_, _, condition_V,
      condition_V_HD, _, internals) = Operator_Factory(cp)
@@ -43,84 +25,76 @@ def build_stage_ops(model):
     _adjEGM = internals['_adjEGM']
     _refine_adj = internals['refine_adj']
     _adjuster_to_grid = internals['_adjuster_to_state_grid']
-    _branching_max = internals['_branching_max']
-
     return_grids = cp.return_grids
-    delta = cp.delta
 
-    # --- keeper_cons (from horse) ---
-
+    # Keeper horse (self-contained, no Operator_Factory)
     _keeper_dcsn = make_keeper_ops(model)
 
-    # keeper_dcsn_mover is _keeper_dcsn directly.
-    # Caller (solve_period) passes h_keep_grid from
-    # the tenure branch transition.
-
-    from dcsmm.fues.helpers.math_funcs import interp_as_scalar
-    from kikku.asva.numerics import clamp_scalar as _clamp
-
+    # Tenure closure variables
+    R = cp.R
+    R_H = cp.R_H
+    delta = cp.delta
+    beta = cp.beta
+    b = cp.b
+    y_func = cp.y_func
+    du_c = cp.du_c
     du_h = cp.du_h
-    UGgrid_all_op = cp.UGgrid_all
+    z_vals = cp.z_vals
     a_grid = cp.asset_grid_A
     h_grid = cp.asset_grid_H
-    b_val = cp.b
-    gmax_A = cp.grid_max_A
+    UGgrid_all = cp.UGgrid_all
+    n_z = len(z_vals)
+    n_a = len(a_grid)
+    n_h = len(h_grid)
 
-    def keeper_arvl_mover(Akeeper, Ckeeper, Vkeeper,
-                          w_keep, h_keep, vlu_cntn, t):
-        """I: interp keeper onto (z,a,h) via w_keep + phi.
+    h_keep = (1 - delta) * h_grid
 
-        w_keep[iz, ia] = R*a + y(t,z) from tenure.
-        h_keep[ih] = (1-delta)*h from tenure.
+    # AC grid for keeper pre-eval
+    bg = np.zeros(n_a)
+    bg[:] = b
+    asset_grid_AC = np.concatenate((bg, a_grid))
+    n_ac = len(asset_grid_AC)
+
+    @njit
+    def _eval_2d_at_h(arr_2d, h_val, a_grid_loc):
+        n = len(a_grid_loc)
+        out = np.zeros(n)
+        for i in range(n):
+            pt = np.array([a_grid_loc[i], h_val])
+            out[i] = eval_linear(
+                UGgrid_all, arr_2d, pt, xto.LINEAR)
+        return out
+
+    # --- keeper_cons ---
+
+    def keeper_dcsn_mover(vlu_cntn, t):
+        """Keeper EGM + FUES.
+
+        Pre-evaluates continuation at h_keep, then calls
+        the keeper horse.
         """
-        n_z = len(cp.z_vals)
-        n_a = len(a_grid)
-        n_h = len(h_grid)
+        dV_a = vlu_cntn['dV']['a']
+        V = vlu_cntn['V']
 
-        v_out = np.empty((n_z, n_a, n_h))
-        c_out = np.empty((n_z, n_a, n_h))
-        a_out = np.empty((n_z, n_a, n_h))
-        h_out = np.empty((n_z, n_a, n_h))
-        phi_out = np.empty((n_z, n_a, n_h))
-
-        dV_h = vlu_cntn['dV']['h']
-
+        dv_keep = np.empty((n_z, n_ac, n_h))
+        v_keep = np.empty((n_z, n_ac, n_h))
         for iz in range(n_z):
             for ih in range(n_h):
-                for ia in range(n_a):
-                    w = w_keep[iz, ia]
-                    hk = h_keep[ih]
+                dv_keep[iz, :, ih] = _eval_2d_at_h(
+                    dV_a[iz], h_keep[ih], asset_grid_AC)
+                v_keep[iz, :, ih] = _eval_2d_at_h(
+                    V[iz], h_keep[ih], asset_grid_AC)
 
-                    v_out[iz, ia, ih] = _clamp(
-                        interp_as_scalar(a_grid, Vkeeper[iz, :, ih], w),
-                        -1e10, 1e10, -1e10)
-                    c_val = _clamp(
-                        interp_as_scalar(a_grid, Ckeeper[iz, :, ih], w),
-                        1e-10, 1e10, 1e-10)
-                    c_out[iz, ia, ih] = c_val
-                    a_val = _clamp(
-                        interp_as_scalar(a_grid, Akeeper[iz, :, ih], w),
-                        b_val, gmax_A * 2, b_val)
-                    a_out[iz, ia, ih] = a_val
-                    h_out[iz, ia, ih] = hk
-
-                    # phi = du_h(h_keep) + E_z[d_h V](a', h_keep)
-                    pt = np.array([a_val, hk])
-                    edvh = eval_linear(UGgrid_all_op, dV_h[iz], pt, xto.LINEAR)
-                    phi_out[iz, ia, ih] = du_h(hk) + edvh
-
-        return (
-            {'c': c_out, 'a_nxt': a_out, 'h_nxt': h_out},
-            {'V': v_out, 'phi': phi_out},
-        )
+        vlu_cntn_keep = {
+            'dv': dv_keep, 'v': v_keep,
+            'ac': asset_grid_AC, 'h_keep': h_keep,
+        }
+        return _keeper_dcsn(vlu_cntn_keep)
 
     # --- adjuster_cons ---
 
     def adjuster_dcsn_mover(vlu_cntn, t, m_bar=1.4):
-        """B: partial EGM + root-finding + FUES.
-
-        Returns refined policies on the wealth grid.
-        """
+        """Adjuster partial EGM + root-finding + FUES."""
         egrid, vf, a_nxt, h_nxt = _adjEGM(
             vlu_cntn['dV']['a'], vlu_cntn['dV']['h'],
             vlu_cntn['V'], t)
@@ -130,139 +104,109 @@ def build_stage_ops(model):
             m_bar=m_bar, return_grids=return_grids)
         return Aadj, Cadj, Hadj, Vadj
 
-    def adjuster_arvl_mover(Aadj, Cadj, Hadj, Vadj,
-                            w_adj, vlu_cntn, t,
-                            c_from_budget=1):
-        """I: interp adjuster onto state grid via w_adj.
-
-        w_adj comes from tenure branch_transitions.
-        """
-        v_out, c_out, a_out, h_out = _adjuster_to_grid(
-            t, Aadj, Cadj, Hadj,
-            vlu_cntn['V'], c_from_budget)
-        return (
-            {'c': c_out, 'a_nxt': a_out, 'h_nxt': h_out},
-            {'V': v_out},
-        )
-
     # --- tenure ---
 
-    R = cp.R
-    R_H = cp.R_H
-    y_func = cp.y_func
-    UGgrid_all = cp.UGgrid_all
-    z_vals_op = cp.z_vals
-    a_grid_op = cp.asset_grid_A
-    h_grid_op = cp.asset_grid_H
-    n_z_op = len(z_vals_op)
-    n_a_op = len(a_grid_op)
-    n_h_op = len(h_grid_op)
+    def tenure_dcsn_mover(t, vlu_cntn,
+                          Akeeper, Ckeeper, Vkeeper,
+                          Aadj, Cadj, Hadj, Vadj):
+        """Tenure cntn_to_dcsn: transitions + eval + max.
 
-    # h_keep: depreciated housing (stationary, computed once)
-    h_keep = (1 - delta) * h_grid_op
+        Per YAML dcsn_to_cntn_transition:
+          keep:   w_keep = R*a + y(z), h_keep = (1-delta)*h
+          adjust: w_adj = R*a + R_H*(1-delta)*h + y(z)
 
-    # asset_grid_AC: [b, b, ..., b, a_0, a_1, ...]
-    bg = np.zeros(n_a_op)
-    bg[:] = cp.b
-    asset_grid_AC = np.concatenate((bg, a_grid_op))
-    n_ac = len(asset_grid_AC)
-
-    @njit
-    def _eval_2d_at_h(arr_2d, h_val, a_grid):
-        n = len(a_grid)
-        out = np.zeros(n)
-        for i in range(n):
-            pt = np.array([a_grid[i], h_val])
-            out[i] = eval_linear(
-                UGgrid_all, arr_2d, pt, xto.LINEAR)
-        return out
-
-    def tenure_branch_cntn(t, vlu_cntn):
-        """Tenure dcsn_to_cntn: branch grids + pre-eval.
-
-        Computes w_keep, h_keep, w_adj and pre-evaluates
-        the continuation at h_keep for the keeper.
+        Evaluates keeper/adjuster at transition points,
+        takes pointwise max, applies chain rule for
+        marginal values.
         """
-        dV_a = vlu_cntn['dV']['a']
-        V = vlu_cntn['V']
+        V_out = np.empty((n_z, n_a, n_h))
+        C_out = np.empty((n_z, n_a, n_h))
+        A_out = np.empty((n_z, n_a, n_h))
+        H_out = np.empty((n_z, n_a, n_h))
+        D_out = np.empty((n_z, n_a, n_h))
+        dV_a_out = np.empty((n_z, n_a, n_h))
+        dV_h_out = np.empty((n_z, n_a, n_h))
 
-        w_keep = np.empty((n_z_op, n_a_op))
-        for iz in range(n_z_op):
-            w_keep[iz, :] = (
-                R * a_grid_op
-                + y_func(t, z_vals_op[iz]))
+        for iz in range(n_z):
+            z = z_vals[iz]
+            for ia in range(n_a):
+                a = a_grid[ia]
+                for ih in range(n_h):
+                    h = h_grid[ih]
 
-        w_adj = np.empty((n_z_op, n_a_op, n_h_op))
-        for iz in range(n_z_op):
-            for ih in range(n_h_op):
-                w_adj[iz, :, ih] = (
-                    R * a_grid_op
-                    + R_H * (1 - delta) * h_grid_op[ih]
-                    + y_func(t, z_vals_op[iz]))
+                    # --- keep branch ---
+                    w_k = R * a + y_func(t, z)
+                    hk = h_keep[ih]
+                    v_k = _clamp(interp_as_scalar(
+                        a_grid, Vkeeper[iz, :, ih], w_k),
+                        -1e10, 1e10, -1e10)
+                    c_k = _clamp(interp_as_scalar(
+                        a_grid, Ckeeper[iz, :, ih], w_k),
+                        1e-10, 1e10, 1e-10)
+                    a_k = _clamp(interp_as_scalar(
+                        a_grid, Akeeper[iz, :, ih], w_k),
+                        b, 1e10, b)
 
-        dv_keep = np.empty((n_z_op, n_ac, n_h_op))
-        v_keep = np.empty((n_z_op, n_ac, n_h_op))
-        for iz in range(n_z_op):
-            for ih in range(n_h_op):
-                dv_keep[iz, :, ih] = _eval_2d_at_h(
-                    dV_a[iz], h_keep[ih], asset_grid_AC)
-                v_keep[iz, :, ih] = _eval_2d_at_h(
-                    V[iz], h_keep[ih], asset_grid_AC)
+                    # --- adjust branch ---
+                    w_a = (R * a + R_H * (1 - delta) * h
+                           + y_func(t, z))
+                    a_a = _clamp(interp_as_scalar(
+                        cp.asset_grid_WE, Aadj[iz, :], w_a),
+                        b, 1e10, b)
+                    h_a = _clamp(interp_as_scalar(
+                        cp.asset_grid_WE, Hadj[iz, :], w_a),
+                        b, 1e10, b)
+                    c_a = _clamp(
+                        w_a - a_a - h_a * (1 + cp.tau),
+                        1e-10, 1e10, 1e-10)
+                    pts = np.array([a_a, h_a])
+                    v_a = (cp.u(c_a, h_a, cp.chi)
+                           + beta * eval_linear(
+                               UGgrid_all, vlu_cntn['V'][iz],
+                               pts, xto.LINEAR))
 
-        return {
-            'w_keep': w_keep,
-            'h_keep': h_keep,
-            'w_adj': w_adj,
-            'dv_keep': dv_keep,
-            'v_keep': v_keep,
-            'ac': asset_grid_AC,
+                    # --- max ---
+                    if v_a >= v_k:
+                        d = 1
+                    else:
+                        d = 0
+
+                    V_out[iz, ia, ih] = d * v_a + (1 - d) * v_k
+                    C_out[iz, ia, ih] = d * c_a + (1 - d) * c_k
+                    A_out[iz, ia, ih] = d * a_a + (1 - d) * a_k
+                    H_out[iz, ia, ih] = d * h_a + (1 - d) * hk
+                    D_out[iz, ia, ih] = d
+
+                    # --- chain rule for marginals ---
+                    dV_a_out[iz, ia, ih] = (
+                        beta * R * (d * du_c(c_a)
+                                    + (1 - d) * du_c(c_k)))
+
+                    # phi_keep for keeper branch
+                    pt_k = np.array([a_k, hk])
+                    edvh = eval_linear(
+                        UGgrid_all,
+                        vlu_cntn['dV']['h'][iz],
+                        pt_k, xto.LINEAR)
+                    phi_k = du_h(hk) + edvh
+
+                    dV_h_out[iz, ia, ih] = (
+                        beta * R_H * (1 - delta)
+                        * (d * du_c(c_a)
+                           + (1 - d) * phi_k))
+
+        vlu_dcsn = {
+            'V': V_out,
+            'dV': {'a': dV_a_out, 'h': dV_h_out},
         }
-
-    def tenure_dcsn_mover(t, vlu_cntn, branches):
-        """Tenure operator: branch transitions + max.
-
-        1. Computes branch grids (w_keep, h_keep, w_adj).
-        2. Pre-evaluates continuation at h_keep for keeper.
-        3. Calls keeper and adjuster dcsn_movers.
-        4. Interpolates keeper/adjuster onto state grid.
-        5. Max over branches.
-
-        But currently steps 1-4 are done in solve_period.
-        This function only does step 5 (max).
-        Steps 1-4 will be folded in here in a future pass.
-
-        Parameters
-        ----------
-        t : int
-        vlu_cntn : dict (currently unused — for future)
-        branches : dict
-
-        Returns
-        -------
-        vlu_dcsn : dict
-        pol : dict
-        """
-        keep = branches['keep']
-        adj = branches['adjust']
-
-        V, A, H, C, D, dV_a, dV_h = _branching_max(
-            keep['vlu']['V'],
-            keep['pol']['c'],
-            keep['pol']['a_nxt'],
-            keep['pol']['h_nxt'],
-            keep['vlu']['phi'],
-            adj['vlu']['V'],
-            adj['pol']['c'],
-            adj['pol']['a_nxt'],
-            adj['pol']['h_nxt'],
-        )
-
-        vlu_dcsn = {'V': V, 'dV': {'a': dV_a, 'h': dV_h}}
-        pol = {'c': C, 'a_nxt': A, 'h_nxt': H, 'd': D}
+        pol = {
+            'c': C_out, 'a_nxt': A_out,
+            'h_nxt': H_out, 'd': D_out,
+        }
         return vlu_dcsn, pol
 
     def tenure_arvl_mover(vlu_dcsn):
-        """I: E_z conditioning (Pi @ arrays)."""
+        """E_z conditioning: Pi @ arrays."""
         Ev, Edv_a, Edv_h = condition_V(
             vlu_dcsn['V'],
             vlu_dcsn['dV']['a'],
@@ -270,20 +214,16 @@ def build_stage_ops(model):
         return {'V': Ev, 'dV': {'a': Edv_a, 'h': Edv_h}}
 
     def tenure_arvl_mover_hd(dV_h_hd):
-        """I: E_z conditioning for HD grid."""
         return condition_V_HD(dV_h_hd)
 
     return {
         'keeper_cons': {
-            'dcsn_mover': _keeper_dcsn,
-            'arvl_mover': keeper_arvl_mover,
+            'dcsn_mover': keeper_dcsn_mover,
         },
         'adjuster_cons': {
             'dcsn_mover': adjuster_dcsn_mover,
-            'arvl_mover': adjuster_arvl_mover,
         },
         'tenure': {
-            'branch_cntn': tenure_branch_cntn,
             'dcsn_mover': tenure_dcsn_mover,
             'arvl_mover': tenure_arvl_mover,
             'arvl_mover_hd': tenure_arvl_mover_hd,

@@ -115,49 +115,28 @@ def solve_period(stage_ops, vlu_cntn, t, model,
     use_hd = model.N_HD_LAMBDA > 1
     t0 = time.perf_counter()
 
-    # --- Tenure dcsn_to_cntn transition ---
-    br = stage_ops['tenure']['branch_cntn'](t, vlu_cntn)
-
     # --- Wave 0: keeper_cons ---
-    # Keeper receives pre-evaluated 1D continuations
-    # from tenure (no 2D interpolation needed)
-    vlu_cntn_keep = {
-        'dv': br['dv_keep'],
-        'v': br['v_keep'],
-        'ac': br['ac'],
-        'h_keep': br['h_keep'],
-    }
-    A_keep, C_keep, V_keep = stage_ops['keeper_cons'][
-        'dcsn_mover'](vlu_cntn_keep)
-    pol_keep, vlu_keep = stage_ops['keeper_cons'][
-        'arvl_mover'](A_keep, C_keep, V_keep,
-                      br['w_keep'], br['h_keep'],
-                      vlu_cntn, t)
+    A_keep, C_keep, V_keep = stage_ops[
+        'keeper_cons']['dcsn_mover'](vlu_cntn, t)
     t_keeper = time.perf_counter() - t0
 
     # --- Wave 0: adjuster_cons ---
     t1 = time.perf_counter()
     Aadj, Cadj, Hadj, Vadj = stage_ops[
         'adjuster_cons']['dcsn_mover'](vlu_cntn, t, m_bar)
-    pol_adj, vlu_adj = stage_ops[
-        'adjuster_cons']['arvl_mover'](
-            Aadj, Cadj, Hadj, Vadj,
-            br['w_adj'], vlu_cntn, t)
     t_adj = time.perf_counter() - t1
 
-    # --- Wave 1: tenure (B then I) ---
+    # --- Wave 1: tenure dcsn_mover ---
+    #   transitions + eval + max + chain rule
     t2 = time.perf_counter()
-
-    branches = {
-        'keep':   {'pol': pol_keep, 'vlu': vlu_keep},
-        'adjust': {'pol': pol_adj,  'vlu': vlu_adj},
-    }
-
     vlu_dcsn, pol_dcsn = stage_ops[
-        'tenure']['dcsn_mover'](t, vlu_cntn, branches)
+        'tenure']['dcsn_mover'](
+            t, vlu_cntn,
+            A_keep, C_keep, V_keep,
+            Aadj, Cadj, Hadj, Vadj)
     t_discrete = time.perf_counter() - t2
 
-    # arvl_mover: E_z conditioning
+    # --- Wave 1: tenure arvl_mover (E_z) ---
     vlu_arvl = stage_ops[
         'tenure']['arvl_mover'](vlu_dcsn)
 
@@ -176,12 +155,10 @@ def solve_period(stage_ops, vlu_cntn, t, model,
     return {
         't': t,
         'keeper_cons': {
-            'pol': pol_keep,
-            'vlu': vlu_keep,
+            'A': A_keep, 'C': C_keep, 'V': V_keep,
         },
         'adjuster_cons': {
-            'pol': pol_adj,
-            'vlu': vlu_adj,
+            'A': Aadj, 'C': Cadj, 'H': Hadj, 'V': Vadj,
         },
         'tenure': {
             'pol': pol_dcsn,
