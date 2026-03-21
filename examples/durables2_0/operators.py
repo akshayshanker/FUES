@@ -15,10 +15,14 @@ branch-keyed results — no continuation values.
 
 import numpy as np
 from examples.durables.durables import Operator_Factory
+from .horses.keeper_egm import make_keeper_ops
 
 
 def build_stage_ops(model):
     """Build all three stage operators.
+
+    Keeper: from horses/keeper_egm.py (make_egm_1d + FUES).
+    Adjuster + tenure: from Operator_Factory internals.
 
     Parameters
     ----------
@@ -33,8 +37,6 @@ def build_stage_ops(model):
     (_, _, condition_V,
      condition_V_HD, _, internals) = Operator_Factory(cp)
 
-    _keeperEGM = internals['_keeperEGM']
-    _refineKeeper = internals['_refineKeeper']
     _adjEGM = internals['_adjEGM']
     _refine_adj = internals['refine_adj']
     _keeper_to_grid = internals['_keeper_to_state_grid']
@@ -42,44 +44,34 @@ def build_stage_ops(model):
     _branching_max = internals['_branching_max']
 
     return_grids = cp.return_grids
-    use_hd = cp.N_HD_LAMBDA > 1
+    delta = cp.delta
 
-    # --- keeper_cons ---
+    # --- keeper_cons (from horse) ---
+
+    _keeper_dcsn = make_keeper_ops(model)
 
     def keeper_dcsn_mover(vlu_cntn, t):
-        """B: InvEuler + endogenous grid (pre-FUES)."""
-        return _keeperEGM(
-            vlu_cntn['dV']['a'], vlu_cntn['V'], t)
+        """B: EGM + FUES via kikku make_egm_1d.
 
-    def keeper_arvl_mover(x_hat, v_hat, c_hat,
-                          vlu_cntn, t, m_bar=1.1):
-        """I: FUES + interp to (z, a, h) state grid.
-
-        Returns branch-ready values on the common grid
-        including Phi_t (housing marginal).
-
-        Returns
-        -------
-        pol : dict
-            ``{'c', 'a_nxt', 'h_nxt'}`` on state grid.
-        vlu : dict
-            ``{'V', 'phi'}`` on state grid.
-            ``phi`` = du_h(h') + E_z[d_h V](a', h').
+        Tenure transition h_keep = (1-delta)*h applied here.
         """
-        (Akeeper, Ckeeper, Vkeeper,
-         _, _, _, _) = _refineKeeper(
-            x_hat, v_hat, c_hat,
-            vlu_cntn['V'], t, m_bar=m_bar,
-            return_grids=return_grids)
+        h_keep_grid = (1 - delta) * cp.asset_grid_H
+        return _keeper_dcsn(
+            vlu_cntn, h_keep_grid, t, m_bar=cp.m_bar)
 
-        # Interp to state grid + compute Phi_t
+    def keeper_arvl_mover(Akeeper, Ckeeper, Vkeeper,
+                          vlu_cntn, t):
+        """I: interp to (z,a,h) state grid + compute phi.
+
+        Uses _keeper_to_state_grid from Operator_Factory
+        (Phase 3 WIP — will be extracted to horse).
+        """
         v_sg, c_sg, a_sg, h_sg, phi_sg = \
             _keeper_to_grid(
                 t, Akeeper, Ckeeper, Vkeeper,
                 vlu_cntn['dV']['h'],
                 vlu_cntn['dV'].get('h_hd',
                     np.zeros((1, 1, 1))))
-
         return (
             {'c': c_sg, 'a_nxt': a_sg, 'h_nxt': h_sg},
             {'V': v_sg, 'phi': phi_sg},
