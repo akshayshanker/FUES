@@ -54,9 +54,10 @@ def make_keeper_ops(model):
     asset_grid_AC = np.concatenate((bg, asset_grid_A))
     UGgrid_all = cp.UGgrid_all
 
-    # Scalars
+    # Scalars + callables
     b = cp.b
     grid_max_A = cp.grid_max_A
+    du_h = cp.du_h
 
     # Params + recipe callables
     egm_params = model.keeper_egm_params
@@ -86,7 +87,7 @@ def make_keeper_ops(model):
         Parameters
         ----------
         vlu_cntn : dict
-            ``{'V', 'dV': {'a'}}``.
+            ``{'V', 'dV': {'a', 'h'}}``.
         h_keep_grid : ndarray (n_h,)
             Depreciated housing grid, from tenure's
             branch transition: ``(1-delta) * asset_grid_H``.
@@ -96,7 +97,7 @@ def make_keeper_ops(model):
         Returns
         -------
         Akeeper, Ckeeper, Vkeeper : ndarray (n_z, n_a, n_h)
-            Refined policies on the arrival asset grid.
+            Refined policies on the asset grid.
         """
         n_z = len(z_vals)
         n_a = len(asset_grid_A)
