@@ -113,6 +113,15 @@ def build_stage_ops(model):
 
     # --- tenure ---
 
+    def tenure_branch_transitions():
+        """Compute branch transitions (arvl_to_dcsn).
+
+        Returns h_keep_grid for the keep branch.
+        The adjust branch has no transition (identity).
+        """
+        h_keep_grid = (1 - delta) * cp.asset_grid_H
+        return {'h_keep_grid': h_keep_grid}
+
     def decision_dcsn_mover(t, branches):
         """B: max over keep/adjust branches.
 
@@ -172,6 +181,7 @@ def build_stage_ops(model):
             'arvl_mover': adjuster_arvl_mover,
         },
         'tenure': {
+            'branch_transitions': tenure_branch_transitions,
             'dcsn_mover': decision_dcsn_mover,
             'arvl_mover': decision_arvl_mover,
             'arvl_mover_hd': decision_arvl_mover_hd,

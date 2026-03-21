@@ -115,9 +115,11 @@ def solve_period(stage_ops, vlu_cntn, t, model,
     use_hd = model.N_HD_LAMBDA > 1
     t0 = time.perf_counter()
 
-    # --- Wave 0: keeper_cons (B then I) ---
-    # Tenure branch transition: h_keep = (1-delta)*h
-    h_keep_grid = (1 - model.delta) * model.asset_grid_H
+    # --- Tenure branch transitions (arvl_to_dcsn) ---
+    br_trans = stage_ops['tenure']['branch_transitions']()
+    h_keep_grid = br_trans['h_keep_grid']
+
+    # --- Wave 0: keeper_cons ---
     A_keep, C_keep, V_keep = stage_ops['keeper_cons'][
         'dcsn_mover'](vlu_cntn, h_keep_grid, t, m_bar)
     pol_keep, vlu_keep = stage_ops['keeper_cons'][
