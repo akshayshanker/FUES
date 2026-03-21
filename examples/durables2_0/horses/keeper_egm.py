@@ -7,9 +7,9 @@ The keeper receives ``h_keep`` (already depreciated by the
 tenure stage's branch transition ``h_keep = (1-delta)*h``).
 The keeper does NOT know about delta.
 
-dcsn_mover = EGM + FUES (returns refined arrays on
-             the endogenous grid).
-arvl_mover = interpolation onto the arrival asset grid.
+dcsn_mover = EGM + FUES. Returns refined (A, C, V) on
+             the arrival asset grid. No separate arvl_mover
+             — interpolation is inside dcsn_mover.
 """
 
 import numpy as np
@@ -40,11 +40,8 @@ def make_keeper_ops(model):
     -------
     dcsn_mover : callable
         ``(vlu_cntn, h_keep_grid, t, m_bar)``
-        -> ``(A_ref, C_ref, V_ref)`` on the endogenous
-        grid (post-FUES).
-    arvl_mover : callable
-        ``(A_ref, C_ref, V_ref)``
-        -> ``(pol, vlu)`` on the arrival asset grid.
+        -> ``(Akeeper, Ckeeper, Vkeeper)`` on the asset
+        grid (post-EGM + FUES + interpolation).
     """
     cp = model.cp
 
@@ -190,33 +187,4 @@ def make_keeper_ops(model):
 
         return Akeeper, Ckeeper, Vkeeper
 
-    # --- arvl_mover: interpolation to state grid ---
-
-    def arvl_mover(Akeeper, Ckeeper, Vkeeper,
-                   vlu_cntn, h_keep_grid, t):
-        """I: interpolate keeper onto (z, a, h) state grid.
-
-        Computes wealth = R*a + y(t,z) per state point,
-        interpolates keeper policies, and returns Phi_t
-        (housing marginal).
-
-        Returns
-        -------
-        pol : dict
-            ``{'c', 'a_nxt', 'h_nxt'}`` on state grid.
-        vlu : dict
-            ``{'V', 'phi'}`` on state grid.
-        """
-        # arvl_mover delegates to interp_to_grid
-        # (extracted separately in Phase 3)
-        # For now, return the keeper arrays directly
-        # (they're already on the asset grid from dcsn_mover)
-        return (
-            {'c': Ckeeper, 'a_nxt': Akeeper,
-             'h_nxt': np.broadcast_to(
-                 h_keep_grid[np.newaxis, np.newaxis, :],
-                 Akeeper.shape).copy()},
-            {'V': Vkeeper},
-        )
-
-    return dcsn_mover, arvl_mover
+    return dcsn_mover
