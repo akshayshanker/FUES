@@ -50,14 +50,9 @@ def build_stage_ops(model):
 
     _keeper_dcsn = make_keeper_ops(model)
 
-    def keeper_dcsn_mover(vlu_cntn, t):
-        """B: EGM + FUES via kikku make_egm_1d.
-
-        Tenure transition h_keep = (1-delta)*h applied here.
-        """
-        h_keep_grid = (1 - delta) * cp.asset_grid_H
-        return _keeper_dcsn(
-            vlu_cntn, h_keep_grid, t, m_bar=cp.m_bar)
+    # keeper_dcsn_mover is _keeper_dcsn directly.
+    # Caller (solve_period) passes h_keep_grid from
+    # the tenure branch transition.
 
     def keeper_arvl_mover(Akeeper, Ckeeper, Vkeeper,
                           vlu_cntn, t):
@@ -169,7 +164,7 @@ def build_stage_ops(model):
 
     return {
         'keeper_cons': {
-            'dcsn_mover': keeper_dcsn_mover,
+            'dcsn_mover': _keeper_dcsn,
             'arvl_mover': keeper_arvl_mover,
         },
         'adjuster_cons': {
