@@ -150,12 +150,25 @@ def build_stage_ops(model):
     R = cp.R
     R_H = cp.R_H
     y_func = cp.y_func
-
     UGgrid_all = cp.UGgrid_all
+    z_vals_op = cp.z_vals
+    a_grid_op = cp.asset_grid_A
+    h_grid_op = cp.asset_grid_H
+    n_z_op = len(z_vals_op)
+    n_a_op = len(a_grid_op)
+    n_h_op = len(h_grid_op)
+
+    # h_keep: depreciated housing (stationary, computed once)
+    h_keep = (1 - delta) * h_grid_op
+
+    # asset_grid_AC: [b, b, ..., b, a_0, a_1, ...]
+    bg = np.zeros(n_a_op)
+    bg[:] = cp.b
+    asset_grid_AC = np.concatenate((bg, a_grid_op))
+    n_ac = len(asset_grid_AC)
 
     @njit
     def _eval_2d_at_h(arr_2d, h_val, a_grid):
-        """Evaluate 2D array at fixed h along a_grid."""
         n = len(a_grid)
         out = np.zeros(n)
         for i in range(n):
@@ -164,50 +177,33 @@ def build_stage_ops(model):
                 UGgrid_all, arr_2d, pt, xto.LINEAR)
         return out
 
-    def tenure_arvl_to_dcsn(t, vlu_cntn):
-        """Tenure arvl_to_dcsn: compute branch grids +
-        pre-evaluate continuation at branch coordinates.
+    def tenure_branch_cntn(t, vlu_cntn):
+        """Tenure dcsn_to_cntn: branch grids + pre-eval.
 
-        Per YAML dcsn_to_cntn_transition:
-          keep:   w_keep = R*a + y(z), h_keep = (1-delta)*h
-          adjust: w_adj = R*a + R_H*(1-delta)*h + y(z)
-
-        Pre-evaluates dV_a and V at h_keep for the keeper
-        so it receives pure 1D arrays (no 2D interpolation).
+        Computes w_keep, h_keep, w_adj and pre-evaluates
+        the continuation at h_keep for the keeper.
         """
-        z = cp.z_vals
-        a = cp.asset_grid_A
-        h = cp.asset_grid_H
-        n_z, n_a, n_h = len(z), len(a), len(h)
-
-        # Branch grids
-        w_keep = np.empty((n_z, n_a))
-        for iz in range(n_z):
-            w_keep[iz, :] = R * a + y_func(t, z[iz])
-
-        w_adj = np.empty((n_z, n_a, n_h))
-        for iz in range(n_z):
-            for ih in range(n_h):
-                w_adj[iz, :, ih] = (
-                    R * a + R_H * (1 - delta) * h[ih]
-                    + y_func(t, z[iz]))
-
-        h_keep = (1 - delta) * h
-
-        # Pre-evaluate continuation at h_keep for keeper
-        # dV_a_keep[iz, :, ih] = dV_a(a_grid, h_keep[ih])
-        bg = np.zeros(n_a)
-        bg[:] = cp.b
-        asset_grid_AC = np.concatenate((bg, a))
-
         dV_a = vlu_cntn['dV']['a']
         V = vlu_cntn['V']
-        n_ac = len(asset_grid_AC)
 
-        dv_keep = np.empty((n_z, n_ac, n_h))
-        v_keep = np.empty((n_z, n_ac, n_h))
-        for iz in range(n_z):
-            for ih in range(n_h):
+        w_keep = np.empty((n_z_op, n_a_op))
+        for iz in range(n_z_op):
+            w_keep[iz, :] = (
+                R * a_grid_op
+                + y_func(t, z_vals_op[iz]))
+
+        w_adj = np.empty((n_z_op, n_a_op, n_h_op))
+        for iz in range(n_z_op):
+            for ih in range(n_h_op):
+                w_adj[iz, :, ih] = (
+                    R * a_grid_op
+                    + R_H * (1 - delta) * h_grid_op[ih]
+                    + y_func(t, z_vals_op[iz]))
+
+        dv_keep = np.empty((n_z_op, n_ac, n_h_op))
+        v_keep = np.empty((n_z_op, n_ac, n_h_op))
+        for iz in range(n_z_op):
+            for ih in range(n_h_op):
                 dv_keep[iz, :, ih] = _eval_2d_at_h(
                     dV_a[iz], h_keep[ih], asset_grid_AC)
                 v_keep[iz, :, ih] = _eval_2d_at_h(
@@ -219,20 +215,27 @@ def build_stage_ops(model):
             'w_adj': w_adj,
             'dv_keep': dv_keep,
             'v_keep': v_keep,
-            'asset_grid_AC': asset_grid_AC,
+            'ac': asset_grid_AC,
         }
 
-    def tenure_dcsn_mover(branches):
-        """B: max over keep/adjust branches.
+    def tenure_dcsn_mover(t, vlu_cntn, branches):
+        """Tenure operator: branch transitions + max.
 
-        Clean DDSL interface: receives only branch-keyed
-        results from the leaf stages.
+        1. Computes branch grids (w_keep, h_keep, w_adj).
+        2. Pre-evaluates continuation at h_keep for keeper.
+        3. Calls keeper and adjuster dcsn_movers.
+        4. Interpolates keeper/adjuster onto state grid.
+        5. Max over branches.
+
+        But currently steps 1-4 are done in solve_period.
+        This function only does step 5 (max).
+        Steps 1-4 will be folded in here in a future pass.
 
         Parameters
         ----------
+        t : int
+        vlu_cntn : dict (currently unused — for future)
         branches : dict
-            ``{'keep':   {'pol': {...}, 'vlu': {...}},
-               'adjust': {'pol': {...}, 'vlu': {...}}}``
 
         Returns
         -------
@@ -280,7 +283,7 @@ def build_stage_ops(model):
             'arvl_mover': adjuster_arvl_mover,
         },
         'tenure': {
-            'arvl_to_dcsn': tenure_arvl_to_dcsn,
+            'branch_cntn': tenure_branch_cntn,
             'dcsn_mover': tenure_dcsn_mover,
             'arvl_mover': tenure_arvl_mover,
             'arvl_mover_hd': tenure_arvl_mover_hd,
