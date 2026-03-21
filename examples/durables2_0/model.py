@@ -67,6 +67,51 @@ class DurablesModel:
         self.term_du = self.cp.term_du
         self.N_HD_LAMBDA = self.cp.N_HD_LAMBDA
 
+    @property
+    def params(self):
+        """Scalar model parameters as named dict."""
+        cp = self.cp
+        return {
+            'beta': self.beta, 'R': self.R,
+            'R_H': self.R_H, 'delta': self.delta,
+            'tau': self.tau, 'b': self.b,
+            'chi': cp.chi, 'alpha': self.alpha,
+            'gamma_c': cp.gamma_c, 'gamma_h': cp.gamma_h,
+            'kappa': cp.kappa, 'K': cp.K,
+            'theta': cp.theta,
+            'grid_max_A': cp.grid_max_A,
+            'grid_max_H': cp.grid_max_H,
+        }
+
+    @property
+    def callables(self):
+        """Equation callables (njit functions from cp)."""
+        cp = self.cp
+        return {
+            'u': cp.u, 'du_c': cp.du_c,
+            'du_c_inv': cp.du_c_inv,
+            'du_h': cp.du_h,
+            'y_func': cp.y_func,
+            'term_u': cp.term_u,
+            'term_du': cp.term_du,
+        }
+
+    @property
+    def grids(self):
+        """Grid arrays and state-space infrastructure."""
+        cp = self.cp
+        return {
+            'a': self.asset_grid_A,
+            'h': self.asset_grid_H,
+            'we': self.asset_grid_WE,
+            'he': cp.asset_grid_HE,
+            'ac': cp.asset_grid_AC,
+            'z': self.z_vals,
+            'Pi': self.Pi,
+            'X_all': self.X_all,
+            'UGgrid_all': cp.UGgrid_all,
+        }
+
     @classmethod
     def from_period(cls, period, calibration, settings):
         """Construct from a DDSL calibrated period.
