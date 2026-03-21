@@ -53,9 +53,6 @@ def make_tenure_ops(model, condition_V, condition_V_HD):
         dV_h = vlu_cntn['dV']['h']
 
         V_out = np.empty((n_z, n_a, n_h))
-        C_out = np.empty((n_z, n_a, n_h))
-        A_out = np.empty((n_z, n_a, n_h))
-        H_out = np.empty((n_z, n_a, n_h))
         D_out = np.empty((n_z, n_a, n_h))
         dV_a_out = np.empty((n_z, n_a, n_h))
         dV_h_out = np.empty((n_z, n_a, n_h))
@@ -106,12 +103,6 @@ def make_tenure_ops(model, condition_V, condition_V_HD):
                     d = 1 if v_a >= v_k else 0
                     V_out[iz, ia, ih] = (
                         d * v_a + (1 - d) * v_k)
-                    C_out[iz, ia, ih] = (
-                        d * c_a + (1 - d) * c_k)
-                    A_out[iz, ia, ih] = (
-                        d * a_a + (1 - d) * a_k)
-                    H_out[iz, ia, ih] = (
-                        d * h_a + (1 - d) * hk)
                     D_out[iz, ia, ih] = d
 
                     # marginals (chain rule)
@@ -133,8 +124,7 @@ def make_tenure_ops(model, condition_V, condition_V_HD):
         return (
             {'V': V_out,
              'dV': {'a': dV_a_out, 'h': dV_h_out}},
-            {'c': C_out, 'a_nxt': A_out,
-             'h_nxt': H_out, 'd': D_out},
+            {'d': D_out},
         )
 
     def arvl_mover(vlu_dcsn):

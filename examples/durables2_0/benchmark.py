@@ -76,13 +76,16 @@ def run_comparison(syntax_dir, calib_overrides=None,
         kp = sol['keeper_cons']
         aj = sol['adjuster_cons']
 
-        # Compare on the common (z, a, h) state grid
-        # (branching output — both pipelines agree here)
+        # Compare tenure VF + keeper/adjuster policies
         for name, new_arr, old_key in [
-            ('v', ad['vlu_dcsn']['V'], 'VF'),
-            ('c', ad['pol']['c'], 'C'),
-            ('h_nxt', ad['pol']['h_nxt'], 'H'),
+            ('V_tenure', ad['vlu_dcsn']['V'], 'VF'),
             ('d', ad['pol']['d'], 'D'),
+            ('C_keep', kp['C'], 'Ckeeper'),
+            ('A_keep', kp['A'], 'Akeeper'),
+            ('V_keep', kp['V'], 'Vadj'),  # old stores keeper V as 'Vadj'
+            ('A_adj', aj['A'], 'Aadj'),
+            ('C_adj', aj['C'], 'Cadj'),
+            ('H_adj', aj['H'], 'Hadj'),
         ]:
             if old_key in o:
                 d = np.max(np.abs(new_arr - o[old_key]))
