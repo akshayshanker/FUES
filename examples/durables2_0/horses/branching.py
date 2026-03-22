@@ -12,32 +12,27 @@ from dcsmm.fues.helpers.math_funcs import interp_as_scalar
 from kikku.asva.numerics import clamp_scalar as _clamp
 
 
-def make_tenure_ops(model, condition_V, condition_V_HD):
+def make_tenure_ops(cp, callables, y_func, condition_V, condition_V_HD):
     """Build tenure operators.
 
     Parameters
     ----------
-    model : DurablesModel
+    cp : ConsumerProblem
+    callables : dict
+    y_func : callable
+        Age-bound income function y_func(z).
     condition_V, condition_V_HD : callable
         E_z conditioning.
     """
-    cp = model.cp
     R = cp.R
     R_H = cp.R_H
     delta = cp.delta
     beta = cp.beta
     b = cp.b
-    y_func = cp.y_func
-    z_vals = cp.z_vals
-    a_grid = cp.asset_grid_A
-    h_grid = cp.asset_grid_H
-    UGgrid_all = cp.UGgrid_all
-    n_z = len(z_vals)
-    n_a = len(a_grid)
-    n_h = len(h_grid)
-    h_keep = (1 - delta) * h_grid
-
-    def dcsn_mover(t, vlu_cntn,
+    tau = cp.tau
+    chi = cp.chi
+    u_fn = callables["u"]
+    def dcsn_mover(vlu_cntn, grids,
                    Akeeper, Ckeeper, Vkeeper,
                    dVw_keeper, phi_keeper,
                    Aadj, Cadj, Hadj, Vadj, dVw_adj):
@@ -48,6 +43,16 @@ def make_tenure_ops(model, condition_V, condition_V_HD):
         Computes branch transitions, interpolates at
         transition points, takes max, chain rule.
         """
+        z_vals = grids["z"]
+        a_grid = grids["a"]
+        h_grid = grids["h"]
+        we_grid = grids["we"]
+        UGgrid_all = grids["UGgrid_all"]
+        n_z = len(z_vals)
+        n_a = len(a_grid)
+        n_h = len(h_grid)
+        h_keep = (1 - delta) * h_grid
+
         V = vlu_cntn['V']
 
         V_out = np.empty((n_z, n_a, n_h))
@@ -59,9 +64,9 @@ def make_tenure_ops(model, condition_V, condition_V_HD):
             z = z_vals[iz]
             for ia in range(n_a):
                 a = a_grid[ia]
-                w_k = R * a + y_func(t, z)
+                w_k = R * a + y_func(z)
                 w_a = (R * a + R_H * (1 - delta)
-                       * h_grid[0] + y_func(t, z))
+                       * h_grid[0] + y_func(z))
 
                 for ih in range(n_h):
                     h = h_grid[ih]
@@ -75,18 +80,18 @@ def make_tenure_ops(model, condition_V, condition_V_HD):
                     # adjust branch
                     w_adj = (R * a
                              + R_H * (1 - delta) * h
-                             + y_func(t, z))
+                             + y_func(z))
                     a_a = _clamp(interp_as_scalar(
-                        cp.asset_grid_WE, Aadj[iz],
+                        we_grid, Aadj[iz],
                         w_adj), b, 1e10, b)
                     h_a = _clamp(interp_as_scalar(
-                        cp.asset_grid_WE, Hadj[iz],
+                        we_grid, Hadj[iz],
                         w_adj), b, 1e10, b)
                     c_a = _clamp(
-                        w_adj - a_a - h_a * (1 + cp.tau),
+                        w_adj - a_a - h_a * (1 + tau),
                         1e-10, 1e10, 1e-10)
                     pts = np.array([a_a, h_a])
-                    v_a = (cp.u(c_a, h_a, cp.chi)
+                    v_a = (u_fn(c_a, h_a, chi)
                            + beta * eval_linear(
                                UGgrid_all, V[iz],
                                pts, xto.LINEAR))
@@ -102,7 +107,7 @@ def make_tenure_ops(model, condition_V, condition_V_HD):
                         a_grid,
                         dVw_keeper[iz, :, ih], w_k)
                     dvw_a = interp_as_scalar(
-                        cp.asset_grid_WE,
+                        we_grid,
                         dVw_adj[iz], w_adj)
                     pk = interp_as_scalar(
                         a_grid,
@@ -116,8 +121,7 @@ def make_tenure_ops(model, condition_V, condition_V_HD):
                         * (d * dvw_a + (1 - d) * pk))
 
         return (
-            {'V': V_out,
-             'dV': {'a': dV_a_out, 'h': dV_h_out}},
+            {'V': V_out, 'd_aV': dV_a_out, 'd_hV': dV_h_out},
             {'d': D_out},
         )
 
@@ -125,9 +129,9 @@ def make_tenure_ops(model, condition_V, condition_V_HD):
         """E_z conditioning."""
         Ev, Edv_a, Edv_h = condition_V(
             vlu_dcsn['V'],
-            vlu_dcsn['dV']['a'],
-            vlu_dcsn['dV']['h'])
-        return {'V': Ev, 'dV': {'a': Edv_a, 'h': Edv_h}}
+            vlu_dcsn['d_aV'],
+            vlu_dcsn['d_hV'])
+        return {'V': Ev, 'd_aV': Edv_a, 'd_hV': Edv_h}
 
     def arvl_mover_hd(dV_h_hd):
         return condition_V_HD(dV_h_hd)

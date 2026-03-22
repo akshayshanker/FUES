@@ -30,12 +30,11 @@ calibration:
 
   # Horizon
   T: 60
-  t0: 20
+  t0: 40
 
   # Wage / income process (AR(1) via Tauchen)
   phi_w: 0.8170411
   sigma_w: 0.1117012
-  N_wage: 3
 
   # Wage function polynomial
   lambdas:

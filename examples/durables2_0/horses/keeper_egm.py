@@ -28,12 +28,13 @@ from kikku.asva.numerics import clamp_value, clamp_policy
 from ..model import KEEPER_EGM_FNS
 
 
-def make_keeper_ops(model):
+def make_keeper_ops(cp, callables):
     """Build keeper dcsn_mover + arvl_mover.
 
     Parameters
     ----------
-    model : DurablesModel
+    cp : ConsumerProblem
+    callables : dict
 
     Returns
     -------
@@ -42,30 +43,22 @@ def make_keeper_ops(model):
         -> ``(Akeeper, Ckeeper, Vkeeper)`` on the asset
         grid (post-EGM + FUES + interpolation).
     """
-    cp = model.cp
-
-    # Grids
-    z_vals = cp.z_vals
-    asset_grid_A = cp.asset_grid_A
-    asset_grid_H = cp.asset_grid_H
-    UGgrid_all = cp.UGgrid_all
-
     # Scalars + callables
     b = cp.b
     delta = cp.delta
     beta = cp.beta
     grid_max_A = cp.grid_max_A
     m_bar = cp.m_bar
-    du_c = cp.du_c
-    du_h = cp.du_h
-    n_a = len(asset_grid_A)
-    n_h = len(asset_grid_H)
-
-    # h_keep grid (depreciated housing)
-    h_keep = (1 - delta) * asset_grid_H
-
-    # Params + recipe callables
-    egm_params = model.keeper_egm_params
+    du_c = callables["du_c"]
+    du_h = callables["du_h"]
+    # Params + recipe callables (built here, not on a wrapper object)
+    egm_params = np.array([
+        cp.beta,      # [0]
+        cp.alpha,     # [1]
+        cp.gamma_c,   # [2]
+        cp.gamma_h,   # [3]
+        cp.kappa,     # [4]
+    ])
     fns = KEEPER_EGM_FNS
     _egm_step = make_egm_1d(
         fns['inv_euler'], fns['bellman_rhs'],
@@ -75,7 +68,7 @@ def make_keeper_ops(model):
 
     # --- dcsn_mover: EGM + FUES ---
 
-    def dcsn_mover(vlu_cntn):
+    def dcsn_mover(vlu_cntn, grids):
         """EGM + FUES per (z, h) slice.
 
         Parameters
@@ -88,10 +81,16 @@ def make_keeper_ops(model):
         -------
         Akeeper, Ckeeper, Vkeeper, dVw_keep, phi_keep
         """
-        dV_a = vlu_cntn['dV']['a']
-        dV_h = vlu_cntn['dV']['h']
+        dV_a = vlu_cntn['d_aV']
+        dV_h = vlu_cntn['d_hV']
         V = vlu_cntn['V']
+        z_vals = grids["z"]
+        asset_grid_A = grids["a"]
+        asset_grid_H = grids["h"]
         n_z_loc = len(z_vals)
+        n_a = len(asset_grid_A)
+        n_h = len(asset_grid_H)
+        h_keep = (1 - delta) * asset_grid_H
 
         Akeeper = np.empty((n_z_loc, n_a, n_h))
         Ckeeper = np.empty((n_z_loc, n_a, n_h))

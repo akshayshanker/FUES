@@ -7,13 +7,13 @@ tenure:       transitions + eval + max + E_z (horses/branching.py)
 
 import numpy as np
 from examples.durables.durables import Operator_Factory
+from .model import make_y_func
 from .horses.keeper_egm import make_keeper_ops
 from .horses.branching import make_tenure_ops
 
 
-def build_stage_ops(model):
-    """Build all three stage operators."""
-    cp = model.cp
+def build_stage_ops(cp, callables, age):
+    """Build period operators for a specific age."""
     (_, _, condition_V,
      condition_V_HD, _, internals) = Operator_Factory(cp)
 
@@ -22,29 +22,30 @@ def build_stage_ops(model):
     return_grids = cp.return_grids
 
     # Keeper (self-contained horse)
-    _keeper_dcsn = make_keeper_ops(model)
+    _keeper_dcsn = make_keeper_ops(cp, callables)
 
     # Tenure (self-contained horse)
+    y_func_h = make_y_func(cp, age)
     _tenure_dcsn, _tenure_arvl, _tenure_arvl_hd = \
         make_tenure_ops(
-            model, condition_V, condition_V_HD)
+            cp, callables, y_func_h, condition_V, condition_V_HD)
 
     # --- adjuster_cons (still from Operator_Factory) ---
 
-    du_c_op = cp.du_c
+    du_c_op = callables["du_c"]
 
-    def adjuster_dcsn_mover(vlu_cntn, t, m_bar=1.4):
+    def adjuster_dcsn_mover(vlu_cntn, grids):
         """Adjuster partial EGM + root-finding + FUES.
 
         Returns policies + dV_w (marginal value of wealth).
         """
         egrid, vf, a_nxt, h_nxt = _adjEGM(
-            vlu_cntn['dV']['a'], vlu_cntn['dV']['h'],
-            vlu_cntn['V'], t)
+            vlu_cntn['d_aV'], vlu_cntn['d_hV'],
+            vlu_cntn['V'], age)
         (Aadj, Cadj, Hadj, Vadj,
          _, _, _, _, _, _, _, _) = _refine_adj(
             egrid, vf, a_nxt, h_nxt,
-            m_bar=m_bar, return_grids=return_grids)
+            m_bar=cp.m_bar, return_grids=return_grids)
         # dV_w = du_c(c) for each z on wealth grid
         n_z_loc = Cadj.shape[0]
         n_w = Cadj.shape[1]

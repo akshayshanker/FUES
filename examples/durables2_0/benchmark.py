@@ -16,7 +16,6 @@ def _patch(*args):
                    for a, b, n in args])
 _splines.UCGrid = _patch
 
-from examples.durables.durables import ConsumerProblem
 from examples.durables.durables_plot import solveEGM
 
 from .solve import solve
@@ -45,7 +44,7 @@ def run_comparison(syntax_dir, calib_overrides=None,
     # --- New pipeline (DDSL) ---
     print("\n--- New (solve_nest from YAML) ---")
     t0 = time.time()
-    nest, model, stage_ops, waves = solve(
+    nest, cp, grids, callables = solve(
         syntax_dir,
         calib_overrides=calib_overrides,
         config_overrides=config_overrides,
@@ -53,12 +52,10 @@ def run_comparison(syntax_dir, calib_overrides=None,
     )
     solutions = nest["solutions"]
     print(f"  Time: {time.time() - t0:.2f}s")
-    print(f"  Waves: {waves}")
     print(f"  Periods solved: {len(solutions)}")
 
     # --- Original pipeline ---
     print("\n--- Original (solveEGM) ---")
-    cp = model.cp  # reuse same ConsumerProblem
     t0 = time.time()
     old = solveEGM(cp, verbose=False)
     print(f"  Time: {time.time() - t0:.2f}s")
@@ -72,17 +69,16 @@ def run_comparison(syntax_dir, calib_overrides=None,
         if t not in old:
             continue
         o = old[t]
-        ad = sol['tenure']
-        kp = sol['keeper_cons']
-        aj = sol['adjuster_cons']
+        kp = sol['keeper_cons']['dcsn']
+        aj = sol['adjuster_cons']['dcsn']
 
-        # Compare keeper/adjuster policies (C, A, H)
+        # Compare keeper/adjuster policies (c, a, h)
         for name, new_arr, old_key in [
-            ('C_keep', kp['C'], 'Ckeeper'),
-            ('A_keep', kp['A'], 'Akeeper'),
-            ('A_adj', aj['A'], 'Aadj'),
-            ('C_adj', aj['C'], 'Cadj'),
-            ('H_adj', aj['H'], 'Hadj'),
+            ('c_keep', kp['c'], 'Ckeeper'),
+            ('a_keep', kp['a'], 'Akeeper'),
+            ('a_adj', aj['a'], 'Aadj'),
+            ('c_adj', aj['c'], 'Cadj'),
+            ('h_adj', aj['h'], 'Hadj'),
         ]:
             if old_key in o:
                 d = np.max(np.abs(new_arr - o[old_key]))
