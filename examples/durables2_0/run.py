@@ -1,169 +1,127 @@
-"""Run the durables2_0 DDSL pipeline and plot policies.
+"""Run the durables2_0 DDSL pipeline and plot policies."""
 
-Also runs the original solver for comparison plots.
-"""
-
+import os
+import numpy as np
 from .solve import solve
-from .plot import plot_policies
-
-
-def _plot_original(cp, grids, plot_t, output_dir='plots_original'):
-    """Run original solver and plot in same format."""
-    import os
-    import numpy as np
-    import matplotlib
-    matplotlib.use('Agg')
-    import matplotlib.pyplot as plt
-    import seaborn as sns
-    from matplotlib.ticker import FormatStrFormatter
-    from examples.durables.durables_plot import solveEGM
-    from .plot import _insert_nan_at_jumps
-
-    old = solveEGM(cp, verbose=False)
-    a_grid = grids['a']
-    h_grid = grids['h']
-    we_grid = grids['we']
-    n_h = len(h_grid)
-    i_h = n_h // 2
-    i_z = 0
-
-    available = [t for t in range(plot_t - 2, plot_t + 1) if t in old]
-    colors = ['blue', 'red', 'green']
-
-    sns.set(style="white", rc={
-        "font.size": 11, "axes.titlesize": 11, "axes.labelsize": 11})
-
-    age_dir = os.path.join(output_dir, f'age_{plot_t}')
-    os.makedirs(age_dir, exist_ok=True)
-
-    # Adjuster housing
-    fig, ax = plt.subplots(1, 1, figsize=(6, 5))
-    for idx, t in enumerate(available):
-        y, x = _insert_nan_at_jumps(old[t]['Hadj'][i_z], we_grid, 2.0)
-        ax.plot(x, y, color=colors[idx % 3], label=f't = {t}', linewidth=1)
-    ax.set_xlabel(r'Total wealth at time $t$', fontsize=11)
-    ax.set_ylabel(r'Housing assets at time $t+1$', fontsize=11)
-    ax.set_xlim(0, we_grid[-1])
-    ax.spines['right'].set_visible(False)
-    ax.spines['top'].set_visible(False)
-    ax.tick_params(labelsize=9)
-    ax.yaxis.set_major_formatter(FormatStrFormatter("%.0f"))
-    ax.xaxis.set_major_formatter(FormatStrFormatter("%.0f"))
-    ax.grid(True)
-    ax.legend(frameon=False, prop={'size': 10})
-    fig.tight_layout()
-    fig.savefig(os.path.join(age_dir, 'policy_adj_housing.pdf'))
-    plt.close(fig)
-
-    # Adjuster assets
-    fig, ax = plt.subplots(1, 1, figsize=(6, 5))
-    for idx, t in enumerate(available):
-        y, x = _insert_nan_at_jumps(old[t]['Aadj'][i_z], we_grid, 1.0)
-        ax.plot(x, y, color=colors[idx % 3], label=f't = {t}', linewidth=0.75)
-    ax.set_xlabel(r'Total wealth at time $t$', fontsize=11)
-    ax.set_ylabel(r'End of period financial assets', fontsize=11)
-    ax.set_xlim(0, 50)
-    ax.spines['right'].set_visible(False)
-    ax.spines['top'].set_visible(False)
-    ax.tick_params(labelsize=9)
-    ax.yaxis.set_major_formatter(FormatStrFormatter("%.1f"))
-    ax.xaxis.set_major_formatter(FormatStrFormatter("%.0f"))
-    ax.grid(True)
-    ax.legend(frameon=False, prop={'size': 10})
-    fig.tight_layout()
-    fig.savefig(os.path.join(age_dir, 'policy_adj_assets.pdf'))
-    plt.close(fig)
-
-    # Keeper value
-    fig, ax = plt.subplots(1, 1, figsize=(6, 5))
-    for idx, t in enumerate(available):
-        # old stores keeper V as 'Vadj'
-        ax.plot(a_grid, old[t]['Vadj'][i_z, :, i_h],
-                color=colors[idx % 3], label=f't = {t}', linewidth=1)
-    ax.set_xlabel(r'Financial assets at time $t$', fontsize=11)
-    ax.set_ylabel('Value', fontsize=11)
-    ax.spines['right'].set_visible(False)
-    ax.spines['top'].set_visible(False)
-    ax.tick_params(labelsize=9)
-    ax.grid(True)
-    ax.legend(frameon=False, prop={'size': 10})
-    ax.set_title(f'Keeper value ($h = {h_grid[i_h]:.1f}$)')
-    fig.tight_layout()
-    fig.savefig(os.path.join(age_dir, 'value_keeper.pdf'))
-    plt.close(fig)
-
-    # Keeper consumption
-    fig, ax = plt.subplots(1, 1, figsize=(6, 5))
-    for idx, t in enumerate(available):
-        ax.plot(a_grid, old[t]['Ckeeper'][i_z, :, i_h],
-                color=colors[idx % 3], label=f't = {t}', linewidth=1)
-    ax.set_xlabel(r'Financial assets at time $t$', fontsize=11)
-    ax.set_ylabel(r'Consumption $c$', fontsize=11)
-    ax.spines['right'].set_visible(False)
-    ax.spines['top'].set_visible(False)
-    ax.tick_params(labelsize=9)
-    ax.grid(True)
-    ax.legend(frameon=False, prop={'size': 10})
-    ax.set_title(f'Keeper consumption ($h = {h_grid[i_h]:.1f}$)')
-    fig.tight_layout()
-    fig.savefig(os.path.join(age_dir, 'policy_keeper_consumption.pdf'))
-    plt.close(fig)
-
-    # Keeper savings
-    fig, ax = plt.subplots(1, 1, figsize=(6, 5))
-    for idx, t in enumerate(available):
-        ax.plot(a_grid, old[t]['Akeeper'][i_z, :, i_h],
-                color=colors[idx % 3], label=f't = {t}', linewidth=1)
-    ax.set_xlabel(r'Financial assets at time $t$', fontsize=11)
-    ax.set_ylabel(r'End of period financial assets', fontsize=11)
-    ax.spines['right'].set_visible(False)
-    ax.spines['top'].set_visible(False)
-    ax.tick_params(labelsize=9)
-    ax.grid(True)
-    ax.legend(frameon=False, prop={'size': 10})
-    ax.set_title(f'Keeper savings ($h = {h_grid[i_h]:.1f}$)')
-    fig.tight_layout()
-    fig.savefig(os.path.join(age_dir, 'policy_keeper_assets.pdf'))
-    plt.close(fig)
-
-    # Discrete choice
-    fig, ax = plt.subplots(1, 1, figsize=(6, 5))
-    t_plot = available[-1]
-    d = old[t_plot]['D'][i_z, :, :]
-    im = ax.pcolormesh(a_grid, h_grid, d.T,
-                       cmap='RdBu', vmin=0, vmax=1, shading='auto')
-    ax.set_xlabel(r'Financial assets $a$', fontsize=11)
-    ax.set_ylabel(r'Housing $h$', fontsize=11)
-    ax.set_title(f'Discrete choice (t = {t_plot})')
-    ax.tick_params(labelsize=9)
-    fig.colorbar(im, ax=ax, label=r'$d$ (0=keep, 1=adjust)')
-    fig.tight_layout()
-    fig.savefig(os.path.join(age_dir, 'discrete_choice.pdf'))
-    plt.close(fig)
-
-    print(f'Original plots saved to {age_dir}/')
+from .outputs import (
+    plot_policies, plot_grids, plot_lifecycle, get_timing, derive_savings,
+)
+from .simulate import euler_errors
 
 
 def run(syntax_dir='examples/durables2_0/syntax',
-        output_dir='plots_durables2_0', verbose=True,
-        compare=False):
+        output_dir='results/durables2_0/plots',
+        verbose=True, store_cntn=False, plot_ages=None,
+        calib_overrides=None, config_overrides=None,
+        sim=False, N_sim=10000, seed=42,
+        use_empirical_init=False):
+    """Solve and plot.
+
+    Parameters
+    ----------
+    syntax_dir : str
+    output_dir : str
+        Default follows readme_examples.md convention.
+    verbose : bool
+    store_cntn : bool
+        Store cntn perch (EGM grids) and produce EGM plots.
+    plot_ages : list of int, optional
+        Ages to plot. Each age gets its own subfolder.
+        Default: third-to-last age only.
+    calib_overrides : dict, optional
+        Calibration overrides (e.g. ``{'t0': 20}``).
+    config_overrides : dict, optional
+        Settings overrides.
+    """
+    os.environ['FUES_RETURN_GRIDS'] = '1' if store_cntn else '0'
+
+    cfg = dict(config_overrides or {})
+    if store_cntn:
+        cfg['store_cntn'] = 1
+
     nest, cp, grids, callables = solve(
-        syntax_dir, verbose=verbose)
+        syntax_dir, verbose=verbose,
+        calib_overrides=calib_overrides,
+        config_overrides=cfg if cfg else None)
     print(f'{len(nest["solutions"])} periods solved')
 
+    timing = get_timing(nest)
+    print(f'Mean timing — solve: {timing["solve_time"]*1000:.1f}ms, '
+          f'keeper: {timing["keeper_ms"]:.1f}ms, '
+          f'adj: {timing["adj_ms"]:.1f}ms, '
+          f'discrete: {timing["discrete_ms"]:.1f}ms')
+
     all_t = sorted(s['t'] for s in nest['solutions'])
-    plot_t = all_t[-3] if len(all_t) >= 3 else all_t[-1]
 
-    plot_policies(nest, grids, output_dir=output_dir, plot_t=plot_t)
+    if plot_ages is None:
+        plot_ages = [all_t[-3] if len(all_t) >= 3 else all_t[-1]]
 
-    if compare:
-        _plot_original(cp, grids, plot_t,
-                       output_dir='plots_original')
+    savings = derive_savings(nest, grids, cp.tau)
+
+    for age in plot_ages:
+        if age not in all_t:
+            print(f'Age {age} not in solution (range {all_t[0]}–{all_t[-1]}), skipping.')
+            continue
+        plot_policies(nest, grids, savings, output_dir=output_dir, plot_t=age)
+        if store_cntn:
+            plot_grids(nest, grids, output_dir=output_dir, plot_t=age)
+
+    if sim:
+        euler, sim_data = euler_errors(
+            nest, cp, grids, callables, N=N_sim, seed=seed,
+            use_empirical_init=use_empirical_init)
+
+        valid = euler[~np.isnan(euler)]
+        d = sim_data['discrete']
+        keep_mask = (d == 0) & ~np.isnan(euler)
+        adj_mask = (d == 1) & ~np.isnan(euler)
+
+        print(f"\nEuler errors (log10):")
+        if len(valid) == 0:
+            print("  WARNING: zero finite Euler observations — "
+                  "check simulation diagnostics")
+        else:
+            print(f"  Combined: mean={np.mean(valid):.4f}, "
+                  f"median={np.median(valid):.4f}")
+            if np.any(keep_mask):
+                print(f"  Keeper:   mean={np.mean(euler[keep_mask]):.4f}")
+            if np.any(adj_mask):
+                print(f"  Adjuster: mean={np.mean(euler[adj_mask]):.4f}")
+        print(f"  Adj rate: {np.mean(d[d >= 0])*100:.1f}%")
+        print(f"  Agents:   {N_sim}, periods: {cp.T - cp.t0}")
+
+        # Utility stats
+        if 'npv_utility' in sim_data:
+            npv = sim_data['npv_utility']
+            print(f"  NPV utility: mean={np.mean(npv):.4f}, "
+                  f"std={np.std(npv):.4f}")
+
+        # Lifecycle plots
+        plot_lifecycle(sim_data, euler, cp, output_dir=output_dir)
 
     return nest, cp, grids, callables
 
 
 if __name__ == '__main__':
     import sys
-    compare = '--compare' in sys.argv
-    run(compare=compare)
+
+    store = '--grids' in sys.argv
+    simulate = '--simulate' in sys.argv
+    empirical = '--empirical-init' in sys.argv
+
+    ages = None
+    for i, arg in enumerate(sys.argv):
+        if arg == '--ages' and i + 1 < len(sys.argv):
+            ages = [int(a) for a in sys.argv[i + 1].split(',')]
+
+    out_dir = 'results/durables2_0/plots'
+    calib_ov = {}
+    for i, arg in enumerate(sys.argv):
+        if arg == '--output-dir' and i + 1 < len(sys.argv):
+            out_dir = sys.argv[i + 1]
+        if arg == '--t0' and i + 1 < len(sys.argv):
+            calib_ov['t0'] = int(sys.argv[i + 1])
+
+    run(store_cntn=store, plot_ages=ages, output_dir=out_dir,
+        calib_overrides=calib_ov or None, sim=simulate,
+        use_empirical_init=empirical)

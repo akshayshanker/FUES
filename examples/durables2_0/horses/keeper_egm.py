@@ -28,30 +28,31 @@ from kikku.asva.numerics import clamp_value, clamp_policy
 from ..model import KEEPER_EGM_FNS
 
 
-def make_keeper_ops(cp, callables):
-    """Build keeper dcsn_mover + arvl_mover.
+def make_keeper_ops(cp, callables, transitions):
+    """Build keeper dcsn_mover.
 
     Parameters
     ----------
     cp : ConsumerProblem
     callables : dict
+    transitions : dict
+        From make_transitions(). Uses tenure.dcsn_to_cntn.keep_h.
 
     Returns
     -------
     dcsn_mover : callable
-        ``(vlu_cntn, h_keep_grid, t, m_bar)``
-        -> ``(Akeeper, Ckeeper, Vkeeper)`` on the asset
-        grid (post-EGM + FUES + interpolation).
+        ``(vlu_cntn, grids)``
+        -> ``(Akeeper, Ckeeper, Vkeeper, dVw_keep, phi_keep, cntn_data)``
+        where cntn_data is None or dict per solution_scheme.md.
     """
-    # Scalars + callables
     b = cp.b
-    delta = cp.delta
     beta = cp.beta
+    g_keep_h = transitions["tenure"]["dcsn_to_cntn"]["keep_h"]
     grid_max_A = cp.grid_max_A
     m_bar = cp.m_bar
+    return_grids = getattr(cp, 'return_grids', False)
     du_c = callables["du_c"]
     du_h = callables["du_h"]
-    # Params + recipe callables (built here, not on a wrapper object)
     egm_params = np.array([
         cp.beta,      # [0]
         cp.alpha,     # [1]
@@ -66,20 +67,12 @@ def make_keeper_ops(cp, callables):
         egm_params,
     )
 
-    # --- dcsn_mover: EGM + FUES ---
-
     def dcsn_mover(vlu_cntn, grids):
         """EGM + FUES per (z, h) slice.
 
-        Parameters
-        ----------
-        vlu_cntn : dict
-            ``{'V': (n_z, n_a, n_h),
-               'dV': {'a': ..., 'h': ...}}``.
-
         Returns
         -------
-        Akeeper, Ckeeper, Vkeeper, dVw_keep, phi_keep
+        Akeeper, Ckeeper, Vkeeper, dVw_keep, phi_keep, cntn_data
         """
         dV_a = vlu_cntn['d_aV']
         dV_h = vlu_cntn['d_hV']
@@ -90,7 +83,7 @@ def make_keeper_ops(cp, callables):
         n_z_loc = len(z_vals)
         n_a = len(asset_grid_A)
         n_h = len(asset_grid_H)
-        h_keep = (1 - delta) * asset_grid_H
+        h_keep = np.array([g_keep_h(h) for h in asset_grid_H])
 
         Akeeper = np.empty((n_z_loc, n_a, n_h))
         Ckeeper = np.empty((n_z_loc, n_a, n_h))
@@ -98,11 +91,17 @@ def make_keeper_ops(cp, callables):
         dVw_keep = np.empty((n_z_loc, n_a, n_h))
         phi_keep = np.empty((n_z_loc, n_a, n_h))
 
+        if return_grids:
+            cntn_c = {}
+            cntn_m_endog = {}
+        else:
+            cntn_c = None
+            cntn_m_endog = None
+
         for iz in range(n_z_loc):
             for ih in range(n_h):
                 hk = h_keep[ih]
 
-                # Slice continuation at ih (housing is identity)
                 dv_slice = dV_a[iz, :, ih]
                 v_slice = V[iz, :, ih]
 
@@ -140,7 +139,6 @@ def make_keeper_ops(cp, callables):
                 vf_u = vf[uid]
                 c_u = c_raw[uid]
 
-                # a_cntn for FUES: constrained = b, unconstrained = a_grid
                 ac_arr = np.concatenate((
                     np.full(n_a, b), asset_grid_A))
                 ac_u = ac_arr[uid]
@@ -156,6 +154,10 @@ def make_keeper_ops(cp, callables):
                     False, True, False, True,
                     _EPS_D, _EPS_SEP, 0.05,
                     _PAR_GUARD)
+
+                if cntn_c is not None:
+                    cntn_c[(iz, ih)] = c_ref.copy()
+                    cntn_m_endog[(iz, ih)] = eg_ref.copy()
 
                 # --- Interpolate to asset grid ---
                 a_interp = interp_as(
@@ -178,13 +180,10 @@ def make_keeper_ops(cp, callables):
                 Vkeeper[iz, :, ih] = clamp_value(
                     v_interp)
 
-                # dV_w = du_c(c) for each grid point
                 for ia in range(n_a):
                     dVw_keep[iz, ia, ih] = du_c(
                         c_clamped[ia])
 
-                # phi = du_h(h_keep) + dV_h_cntn(a', h_keep)
-                # dV_h already includes beta from recursion
                 dv_h_slice = dV_h[iz, :, ih]
                 for ia in range(n_a):
                     edvh = np.interp(
@@ -192,6 +191,78 @@ def make_keeper_ops(cp, callables):
                         dv_h_slice)
                     phi_keep[iz, ia, ih] = du_h(hk) + edvh
 
-        return Akeeper, Ckeeper, Vkeeper, dVw_keep, phi_keep
+        cntn_data = None
+        if cntn_c is not None:
+            cntn_data = {
+                'c': cntn_c,
+                'm_endog': cntn_m_endog,
+            }
+
+        return Akeeper, Ckeeper, Vkeeper, dVw_keep, phi_keep, cntn_data
 
     return dcsn_mover
+
+
+# ------------------------------------------------------------------
+# Forward (simulation) operator
+# ------------------------------------------------------------------
+
+def make_keeper_forward(C_keep_t, cp, UG,
+                        edata_next, grids, callables,
+                        euler_panel, t_val):
+    """StageForward for keeper_cons with inline Euler.
+
+    Composes: arvl_to_dcsn (identity) -> policy (C interp)
+    -> dcsn_to_cntn (budget constraint + Euler side-channel).
+
+    Euler values are written to ``euler_panel[t_val, idx]``
+    via the ``_idx`` side-channel, NOT emitted in poststates.
+    """
+    from kikku.asva.simulate import StageForward
+    from ..simulate import keeper_euler, _eval_keeper_c
+
+    b, gA, gH = cp.b, cp.grid_max_A, cp.grid_max_H
+
+    def arvl_to_dcsn(particles, shocks):
+        return particles
+
+    def policy(particles):
+        w = particles['w_keep']
+        h = particles['h_keep']
+        z_idx = particles['z_idx']
+        N = len(w)
+        c = np.empty(N)
+        for i in range(N):
+            c[i] = _eval_keeper_c(w[i], h[i], int(z_idx[i]),
+                                   C_keep_t, UG)
+        return {'c': c}
+
+    def dcsn_to_cntn(particles, controls, shocks):
+        w = particles['w_keep']
+        h_keep = particles['h_keep']
+        c = controls['c']
+        z_idx = particles['z_idx']
+        N = len(w)
+        a_nxt = np.clip(w - c, b, gA)
+        h_nxt = np.clip(h_keep, b, gH)
+
+        idx = particles.get('_idx')
+        if edata_next is not None and idx is not None:
+            for i in range(N):
+                ci, ai, hi = c[i], a_nxt[i], h_nxt[i]
+                if ci > 0.1 and ai > 0.1:
+                    euler_panel[t_val, int(idx[i])] = keeper_euler(
+                        ci, ai, hi, int(z_idx[i]),
+                        edata_next, grids, cp, callables)
+
+        out = {'a_nxt': a_nxt, 'h_nxt': h_nxt,
+               'z_idx': z_idx.copy()}
+        if idx is not None:
+            out['_idx'] = idx.copy()
+        return out
+
+    return StageForward(
+        arvl_to_dcsn=arvl_to_dcsn, policy=policy,
+        dcsn_to_cntn=dcsn_to_cntn,
+        shock_draw_arvl=None, shock_draw_cntn=None,
+    )

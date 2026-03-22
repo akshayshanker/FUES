@@ -12,15 +12,15 @@ from dcsmm.fues.helpers.math_funcs import interp_as_scalar
 from kikku.asva.numerics import clamp_scalar as _clamp
 
 
-def make_tenure_ops(cp, callables, y_func, condition_V, condition_V_HD):
+def make_tenure_ops(cp, callables, transitions, condition_V, condition_V_HD):
     """Build tenure operators.
 
     Parameters
     ----------
     cp : ConsumerProblem
     callables : dict
-    y_func : callable
-        Age-bound income function y_func(z).
+    transitions : dict
+        Transition callables from make_transitions().
     condition_V, condition_V_HD : callable
         E_z conditioning.
     """
@@ -32,6 +32,9 @@ def make_tenure_ops(cp, callables, y_func, condition_V, condition_V_HD):
     tau = cp.tau
     chi = cp.chi
     u_fn = callables["u"]
+    g_keep_w = transitions["tenure"]["dcsn_to_cntn"]["keep_w"]
+    g_keep_h = transitions["tenure"]["dcsn_to_cntn"]["keep_h"]
+    g_adj_w = transitions["tenure"]["dcsn_to_cntn"]["adj_w"]
     def dcsn_mover(vlu_cntn, grids,
                    Akeeper, Ckeeper, Vkeeper,
                    dVw_keeper, phi_keeper,
@@ -64,9 +67,7 @@ def make_tenure_ops(cp, callables, y_func, condition_V, condition_V_HD):
             z = z_vals[iz]
             for ia in range(n_a):
                 a = a_grid[ia]
-                w_k = R * a + y_func(z)
-                w_a = (R * a + R_H * (1 - delta)
-                       * h_grid[0] + y_func(z))
+                w_k = g_keep_w(a, z)
 
                 for ih in range(n_h):
                     h = h_grid[ih]
@@ -78,9 +79,7 @@ def make_tenure_ops(cp, callables, y_func, condition_V, condition_V_HD):
                         w_k), -1e10, 1e10, -1e10)
 
                     # adjust branch
-                    w_adj = (R * a
-                             + R_H * (1 - delta) * h
-                             + y_func(z))
+                    w_adj = g_adj_w(a, h, z)
                     a_a = _clamp(interp_as_scalar(
                         we_grid, Aadj[iz],
                         w_adj), b, 1e10, b)
@@ -137,3 +136,71 @@ def make_tenure_ops(cp, callables, y_func, condition_V, condition_V_HD):
         return condition_V_HD(dV_h_hd)
 
     return dcsn_mover, arvl_mover, arvl_mover_hd
+
+
+# ------------------------------------------------------------------
+# Forward (simulation) operator
+# ------------------------------------------------------------------
+
+def make_tenure_forward(D_t, trans_t, grids, UG):
+    """BranchingForward for the tenure stage.
+
+    Composes: arvl_to_dcsn (identity) -> branch_policy (D interp)
+    -> dcsn_to_cntn per branch (transition callables).
+
+    Passes ``_idx`` through both branches so downstream leaf
+    stages can map back to the full population.
+    """
+    from kikku.asva.simulate import BranchingForward
+
+    z_vals = grids['z']
+
+    def arvl_to_dcsn(particles, shocks):
+        return particles
+
+    def branch_policy(particles):
+        a = particles['a']
+        h = particles['h']
+        z_idx = particles['z_idx']
+        N = len(a)
+        labels = np.empty(N, dtype='<U6')
+        for i in range(N):
+            pt = np.array([a[i], h[i]])
+            d = eval_linear(UG, D_t[int(z_idx[i])], pt, xto.LINEAR)
+            labels[i] = "adjust" if round(min(max(d, 0), 1)) == 1 else "keep"
+        return labels
+
+    def dcsn_to_cntn_keep(particles, shocks):
+        a, h, z_idx = particles['a'], particles['h'], particles['z_idx']
+        N = len(a)
+        w = np.empty(N)
+        hk = np.empty(N)
+        for i in range(N):
+            z = z_vals[int(z_idx[i])]
+            w[i] = trans_t['tenure']['dcsn_to_cntn']['keep_w'](a[i], z)
+            hk[i] = trans_t['tenure']['dcsn_to_cntn']['keep_h'](h[i])
+        out = {'w_keep': w, 'h_keep': hk, 'z_idx': z_idx.copy()}
+        if '_idx' in particles:
+            out['_idx'] = particles['_idx'].copy()
+        return out
+
+    def dcsn_to_cntn_adj(particles, shocks):
+        a, h, z_idx = particles['a'], particles['h'], particles['z_idx']
+        N = len(a)
+        w = np.empty(N)
+        for i in range(N):
+            z = z_vals[int(z_idx[i])]
+            w[i] = trans_t['tenure']['dcsn_to_cntn']['adj_w'](a[i], h[i], z)
+        out = {'w_adj': w, 'z_idx': z_idx.copy()}
+        if '_idx' in particles:
+            out['_idx'] = particles['_idx'].copy()
+        return out
+
+    return BranchingForward(
+        arvl_to_dcsn=arvl_to_dcsn,
+        branch_policy=branch_policy,
+        dcsn_to_cntn={"keep": dcsn_to_cntn_keep,
+                      "adjust": dcsn_to_cntn_adj},
+        shock_draw_arvl=None,
+        shock_draw_cntn=None,
+    )
