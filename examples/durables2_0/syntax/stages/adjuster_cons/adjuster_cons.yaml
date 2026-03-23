@@ -69,5 +69,5 @@ equations:
   dcsn_to_arvl_mover:
     Bellman: |
       V[<] = V
-    MarginalBellman: |
+    ShadowBellman: |
       d_{w}V[<] = d_{w}V

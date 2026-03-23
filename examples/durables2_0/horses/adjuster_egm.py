@@ -29,39 +29,41 @@ from dcsmm.fues.helpers.math_funcs import (
 from kikku.asva.numerics import clamp_value, clamp_policy
 
 
-def make_adjuster_ops(cp, callables):
+def make_adjuster_ops(callables, grids, settings):
     """Build age-invariant adjuster dcsn_mover.
 
     Parameters
     ----------
-    cp : ConsumerProblem
     callables : dict
-        Structural callables (u, du_c, du_c_inv, du_h).
+        adjuster_cons stage callables.
+    grids : dict
+    settings : dict
 
     Returns
     -------
     dict
         ``{'dcsn_mover': callable}``
     """
-    b = cp.b
-    beta = cp.beta
-    tau = cp.tau
-    chi = cp.chi
-    m_bar = cp.m_bar
-    grid_max_A = cp.grid_max_A
-    grid_max_H = cp.grid_max_H
-    return_grids = cp.return_grids
-    root_eps = cp.root_eps
-    egm_n = cp.EGM_N
+    b = settings["b"]
+    m_bar = settings["m_bar"]
+    grid_max_A = settings["grid_max_A"]
+    grid_max_H = settings["grid_max_H"]
+    return_grids = settings["return_grids"]
+    root_eps = settings["root_eps"]
+    egm_n = settings["egm_n"]
 
-    z_vals = cp.z_vals
-    a_grid = cp.asset_grid_A
-    h_choice_grid = cp.asset_grid_HE
+    z_vals = grids["z"]
+    a_grid = grids["a"]
+    h_choice_grid = grids["h_choice"]
 
     u_fn = callables["u"]
-    du_c_fn = callables["du_c"]
-    du_c_inv_fn = callables["du_c_inv"]
-    du_h_fn = callables["du_h"]
+    du_c_fn = callables["d_c_u"]
+    du_h_fn = callables["d_h_u"]
+    bellman_discount = callables["bellman_discount"]
+    housing_cost = callables["housing_cost"]
+    invEuler_foc_h_residual = callables["invEuler_foc_h_residual"]
+    invEuler_foc_h_c = callables["invEuler_foc_h_c"]
+    fac_housing = float(housing_cost(1.0))
 
     # ================================================================
     # InvEuler: housing Euler residual root-finder
@@ -95,16 +97,18 @@ def make_adjuster_ops(cp, callables):
             for k in range(n_samples):
                 idx = min(k * step, n_a - 1)
                 sample_grid[k] = a_grid[idx]
-                resid[k] = (
-                    dv_a_cntn[idx] * (1.0 + tau)
-                    - dv_h_cntn[idx]
-                    - du_h_val
+                resid[k] = invEuler_foc_h_residual(
+                    dv_a_cntn[idx], dv_h_cntn[idx], h_choice
                 )
             a_nxt_cntn, n_roots = find_roots_piecewise_linear(
                 resid, sample_grid, egm_n, 0.0
             )
         else:
-            resid = dv_a_cntn * (1.0 + tau) - dv_h_cntn - du_h_val
+            resid = np.empty(n_a)
+            for j in range(n_a):
+                resid[j] = invEuler_foc_h_residual(
+                    dv_a_cntn[j], dv_h_cntn[j], h_choice
+                )
             a_nxt_cntn, n_roots = find_roots_piecewise_linear(
                 resid, a_grid, egm_n, 0.0
             )
@@ -115,8 +119,8 @@ def make_adjuster_ops(cp, callables):
             a_p = a_nxt_cntn[j]
             if a_p > 0.0:
                 dv_h_val = interp_as_scalar(a_grid, dv_h_cntn, a_p)
-                c = du_c_inv_fn((dv_h_val + du_h_val) / (1.0 + tau))
-                m_cntn_raw[j] = c + a_p + h_choice * (1.0 + tau)
+                c = invEuler_foc_h_c(du_h_val, dv_h_val)
+                m_cntn_raw[j] = c + a_p + housing_cost(h_choice)
 
         # Add borrowing constraint point
         has_b = False
@@ -126,9 +130,9 @@ def make_adjuster_ops(cp, callables):
                 break
         if not has_b:
             dv_h_val = interp_as_scalar(a_grid, dv_h_cntn, b)
-            c_at_b = du_c_inv_fn((dv_h_val + du_h_val) / (1.0 + tau))
+            c_at_b = invEuler_foc_h_c(du_h_val, dv_h_val)
             a_nxt_cntn[-1] = b
-            m_cntn_raw[-1] = c_at_b + b + h_choice * (1.0 + tau)
+            m_cntn_raw[-1] = c_at_b + b + housing_cost(h_choice)
 
         return a_nxt_cntn, m_cntn_raw
 
@@ -144,7 +148,6 @@ def make_adjuster_ops(cp, callables):
         """
         n_z = len(z_vals)
         n_he = len(h_choice_grid)
-        tau_adj = 1.0 + tau
 
         m_cntn_raw = np.zeros((n_z, n_he, egm_n))
         v_cntn_raw = np.zeros((n_z, n_he, egm_n))
@@ -153,7 +156,7 @@ def make_adjuster_ops(cp, callables):
 
         for ihp in range(n_he):
             h_choice = h_choice_grid[ihp]
-            h_cost = h_choice * tau_adj
+            h_cost = housing_cost(h_choice)
 
             for iz in range(n_z):
                 dv_a_1d = dv_a_cntn[iz, :, ihp]
@@ -171,8 +174,10 @@ def make_adjuster_ops(cp, callables):
                     a_p = a_roots[i]
                     if a_p > 0.0:
                         c_val = m_roots[i] - h_cost - a_p
-                        v_prime = beta * interp_as_scalar(a_grid, v_1d, a_p)
-                        v_cntn_raw[iz, ihp, i] = u_fn(c_val, h_choice, chi) + v_prime
+                        v_at_ap = interp_as_scalar(a_grid, v_1d, a_p)
+                        v_cntn_raw[iz, ihp, i] = (
+                            u_fn(c_val, h_choice) + bellman_discount(v_at_ap)
+                        )
                         h_choice_cntn[iz, ihp, i] = h_choice
 
         return m_cntn_raw, v_cntn_raw, a_nxt_cntn, h_choice_cntn
@@ -200,7 +205,6 @@ def make_adjuster_ops(cp, callables):
         """
         n_z = len(z_vals)
         n_w = len(m_grid)
-        tau_adj = 1.0 + tau
 
         a_nxt = np.empty((n_z, n_w))
         h_choice_out = np.empty((n_z, n_w))
@@ -216,7 +220,7 @@ def make_adjuster_ops(cp, callables):
             h_pts = h_choice_cntn[iz].ravel()[mask]
             a_pts = a_flat[mask]
             m_pts = m_cntn_raw[iz].ravel()[mask]
-            c_pts = m_pts - h_pts * tau_adj - a_pts
+            c_pts = m_pts - h_pts * fac_housing - a_pts
 
             uid = uniqueEG(m_pts, v_pts)
             m_pts = m_pts[uid]
@@ -248,7 +252,7 @@ def make_adjuster_ops(cp, callables):
                 'a_nxt_eval': a_clean.copy(),
             }
 
-            c_clean = m_clean - h_clean * tau_adj - a_clean
+            c_clean = m_clean - h_clean * fac_housing - a_clean
 
             a_nxt[iz] = clamp_policy(
                 interp_as(m_clean, a_clean, m_grid, extrap=True),
@@ -305,11 +309,10 @@ def make_adjuster_ops(cp, callables):
 
         cntn_data = None
         if return_grids:
-            tau_adj = 1.0 + tau
             m_arr = np.asarray(m_cntn_raw)
             a_arr = np.asarray(a_nxt_cntn)
             h_arr = np.asarray(h_choice_cntn)
-            c_raw = m_arr - h_arr * tau_adj - a_arr
+            c_raw = m_arr - h_arr * fac_housing - a_arr
             cntn_data = {
                 'c': c_raw,
                 'm_endog': m_arr,
@@ -327,8 +330,8 @@ def make_adjuster_ops(cp, callables):
 # Forward (simulation) operator
 # ------------------------------------------------------------------
 
-def make_adjuster_forward(C_adj_t, H_adj_t, cp, we_grid,
-                          edata_next, grids, callables,
+def make_adjuster_forward(C_adj_t, H_adj_t, we_grid,
+                          edata_next, grids, callables, settings,
                           euler_panel, t_val):
     """StageForward for adjuster_cons with inline Euler.
 
@@ -342,7 +345,11 @@ def make_adjuster_forward(C_adj_t, H_adj_t, cp, we_grid,
     from dcsmm.fues.helpers.math_funcs import interp_as_scalar
     from ..simulate import adjuster_euler
 
-    b, gA, gH, tau = cp.b, cp.grid_max_A, cp.grid_max_H, cp.tau
+    b = settings["b"]
+    gA = settings["grid_max_A"]
+    gH = settings["grid_max_H"]
+    housing_cost_fn = callables["adjuster_cons"]["housing_cost"]
+    fac_housing = float(housing_cost_fn(1.0))
 
     def arvl_to_dcsn(particles, shocks):
         return particles
@@ -366,7 +373,7 @@ def make_adjuster_forward(C_adj_t, H_adj_t, cp, we_grid,
         hc = controls['h_choice']
         z_idx = particles['z_idx']
         N = len(w)
-        a_nxt = np.clip(w - c - (1 + tau) * hc, b, gA)
+        a_nxt = np.clip(w - c - fac_housing * hc, b, gA)
         h_nxt = np.clip(hc, b, gH)
 
         idx = particles.get('_idx')
@@ -376,7 +383,7 @@ def make_adjuster_forward(C_adj_t, H_adj_t, cp, we_grid,
                 if ci > 0.1 and ai > 0.1:
                     euler_panel[t_val, int(idx[i])] = adjuster_euler(
                         ci, hi, ai, int(z_idx[i]),
-                        edata_next, grids, cp, callables)
+                        edata_next, grids, callables)
 
         out = {'a_nxt': a_nxt, 'h_nxt': h_nxt,
                'z_idx': z_idx.copy()}

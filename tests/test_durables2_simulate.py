@@ -29,13 +29,13 @@ class TestDurables2Simulate(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         """Solve at t0=50 (10 periods) and simulate."""
-        cls.nest, cls.cp, cls.grids, cls.callables = solve(
+        cls.nest, cls.cp, cls.grids, cls.callables, cls.settings = solve(
             SYNTAX_DIR,
             calib_overrides={'t0': 50},
             config_overrides={'n_a': 30, 'n_h': 30, 'n_w': 30},
         )
         cls.euler, cls.sim_data = euler_errors(
-            cls.nest, cls.cp, cls.grids, cls.callables,
+            cls.nest, cls.cp, cls.grids, cls.callables, cls.settings,
             N=N_SIM, seed=SEED,
         )
 

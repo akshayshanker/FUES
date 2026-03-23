@@ -11,7 +11,6 @@ import os
 import sys
 import yaml
 
-# Ensure `dcsmm` is importable when running from a repo checkout.
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 _REPO_ROOT = os.path.dirname(os.path.dirname(_THIS_DIR))
 _SRC_ROOT = os.path.join(_REPO_ROOT, "src")
@@ -24,16 +23,17 @@ from pathlib import Path
 from .solve import solve_nest
 from .outputs import (
     generate_timing_table_combined, generate_accuracy_table,
-    plot_egrids, plot_cons_pol, plot_dcegm_cf,
-    get_policy, get_timing, get_solution_at_age,
+    get_policy, get_timing,
     euler, consumption_deviation,
 )
+from kikku.run.sweep import sweep, param_grid
 
 SYNTAX_DIR = Path(__file__).resolve().parent / "syntax"
 
-# Load baseline calibration + settings from syntax dir (cached).
 _cal_path = SYNTAX_DIR / "calibration.yaml"
 _set_path = SYNTAX_DIR / "settings.yaml"
+
+METHODS = ('RFC', 'FUES', 'DCEGM', 'CONSAV')
 
 
 def _load_baseline():
@@ -51,7 +51,10 @@ def test_Timings(grid_sizes, delta_values, n=3, results_dir="results",
                  latex_grids=None):
     """Run timing benchmarks across grid sizes and delta values.
 
-    All runs go through the canonical pipeline (solve_nest).
+    Uses ``kikku.run.sweep`` to iterate over the
+    ``(grid_size, delta)`` Cartesian product.  For each point
+    the solve_fn loops over all four UE methods internally,
+    preserving the per-row table structure.
 
     Parameters
     ----------
@@ -68,10 +71,10 @@ def test_Timings(grid_sizes, delta_values, n=3, results_dir="results",
     true_method : str
         Method used for "true" reference solution. Default is 'DCEGM'.
     calib_overrides : dict, optional
-        Extra calibration overrides (e.g. from --override-file).
+        Extra calibration overrides.
         ``delta`` is always overridden per sweep row.
     config_overrides : dict, optional
-        Extra config overrides (e.g. from --override-file).
+        Extra config overrides.
         ``grid_size`` and ``padding_mbar`` are always overridden per sweep row.
     latex_grids : list of int, optional
         Subset of grid_sizes to include in LaTeX tables.
@@ -80,21 +83,14 @@ def test_Timings(grid_sizes, delta_values, n=3, results_dir="results",
     extra_calib = dict(calib_overrides or {})
     extra_config = dict(config_overrides or {})
     base_cal, base_settings = _load_baseline()
-    # Merge CLI overrides into baseline for metadata
     base_cal.update(extra_calib)
     base_settings.update(extra_config)
 
-    # Build a benchmark params dict for table metadata
     benchmark_params = {**base_cal, **base_settings,
                         'true_grid_size': true_grid_size,
                         'true_method': true_method}
 
-    latex_errors_data = []
-    latex_timings_data = []
-    latex_total_timing_data = []
-    latex_cdev_data = []
-
-    # Pre-compute "true" solutions for each delta value
+    # ── Pre-compute "true" solutions per delta (before sweep) ──
     true_solutions = {}
     for delta in delta_values:
         print(f"\nComputing true solution for delta={delta} "
@@ -104,94 +100,99 @@ def test_Timings(grid_sizes, delta_values, n=3, results_dir="results",
         cfg_ov = {**extra_config, 'grid_size': true_grid_size,
                   'padding_mbar': -0.011}
         # Warmup
-        _, _, _, _ = solve_nest(
-            SYNTAX_DIR, method=true_method,
-            calib_overrides=cal_ov,
-            config_overrides=cfg_ov,
-        )
+        solve_nest(SYNTAX_DIR, method=true_method,
+                   calib_overrides=cal_ov, config_overrides=cfg_ov)
         # Actual run
         nest_true, model_true, _, _ = solve_nest(
             SYNTAX_DIR, method=true_method,
-            calib_overrides=cal_ov,
-            config_overrides=cfg_ov,
-        )
-        c_true = get_policy(nest_true, 'c')
+            calib_overrides=cal_ov, config_overrides=cfg_ov)
         true_solutions[delta] = {
-            'c_true': c_true,
+            'c_true': get_policy(nest_true, 'c'),
             'a_grid': model_true.asset_grid_A,
         }
         print(f"  True solution computed.")
 
-    for g_size in grid_sizes:
-        for delta in delta_values:
-            print(f"\nTesting with grid size: {g_size} and delta: {delta}")
+    # ── Build sweep grid ──
+    grid = param_grid(grid_size=grid_sizes, delta=delta_values)
 
-            c_true = true_solutions[delta]['c_true']
-            a_grid_true = true_solutions[delta]['a_grid']
+    # ── solve_fn: all 4 methods per point ──
+    def solve_fn(ov):
+        gs = ov['grid_size']
+        d = ov['delta']
+        c_true = true_solutions[d]['c_true']
+        a_grid_true = true_solutions[d]['a_grid']
 
-            best = {m: {'time': float('inf'), 'total': float('inf'),
-                        'error': float('inf'), 'cdev': float('inf')}
-                    for m in ('RFC', 'FUES', 'DCEGM', 'CONSAV')}
-
-            for _ in range(n):
-                for method in ('RFC', 'FUES', 'DCEGM', 'CONSAV'):
-                    nest, model, _, _ = solve_nest(
-                        SYNTAX_DIR, method=method,
-                        calib_overrides={**extra_calib, 'delta': delta},
-                        config_overrides={**extra_config, 'grid_size': g_size,
-                                          'padding_mbar': -0.011},
-                    )
-                    c_refined = get_policy(nest, 'c')
-                    timing = get_timing(nest)
-                    err = euler(model, c_refined)
-                    cdev = consumption_deviation(
-                        model, c_refined, c_true, a_grid_true,
-                    )
-
-                    best[method]['time'] = min(
-                        best[method]['time'], timing[0])
-                    best[method]['total'] = min(
-                        best[method]['total'], timing[1])
-                    best[method]['error'] = min(
-                        best[method]['error'], err)
-                    best[method]['cdev'] = min(
-                        best[method]['cdev'], cdev)
-
-            methods = ('RFC', 'FUES', 'DCEGM', 'CONSAV')
-            latex_errors_data.append([
-                g_size, delta,
-                *[best[m]['error'] for m in methods],
-            ])
-            latex_timings_data.append([
-                g_size, delta,
-                *[best[m]['time'] * 1000 for m in methods],
-            ])
-            latex_total_timing_data.append([
-                g_size, delta,
-                *[best[m]['total'] * 1000 for m in methods],
-            ])
-            latex_cdev_data.append([
-                g_size, delta,
-                *[best[m]['cdev'] for m in methods],
-            ])
-
-            print(
-                f'Euler errors: '
-                + ', '.join(f'{m}: {best[m]["error"]:.6f}'
-                            for m in methods)
+        bundle = {}
+        for method in METHODS:
+            nest, model, _, _ = solve_nest(
+                SYNTAX_DIR, method=method,
+                calib_overrides={**extra_calib, 'delta': d},
+                config_overrides={**extra_config, 'grid_size': gs,
+                                  'padding_mbar': -0.011},
             )
-            print(
-                f'Cons. dev (log10): '
-                + ', '.join(f'{m}: {best[m]["cdev"]:.6f}'
-                            for m in methods)
-            )
-            print(
-                f'Timings (s): '
-                + ', '.join(f'{m}: {best[m]["time"]:.6f}'
-                            for m in methods)
-            )
+            c_refined = get_policy(nest, 'c')
+            timing = get_timing(nest)
+            bundle[method] = {
+                'ue_time': timing[0],
+                'total_time': timing[1],
+                'error': euler(model, c_refined),
+                'cdev': consumption_deviation(
+                    model, c_refined, c_true, a_grid_true),
+            }
+        return bundle
 
-    # Generate tables
+    # ── Metric extractors (sweep selects best rep by primary key) ──
+    metric_fns = {}
+    for method in METHODS:
+        metric_fns[f'{method}_ue_time'] = (
+            lambda r, m=method: r[m]['ue_time'])
+        metric_fns[f'{method}_total_time'] = (
+            lambda r, m=method: r[m]['total_time'])
+        metric_fns[f'{method}_error'] = (
+            lambda r, m=method: r[m]['error'])
+        metric_fns[f'{method}_cdev'] = (
+            lambda r, m=method: r[m]['cdev'])
+
+    results = sweep(solve_fn, grid, metric_fns,
+                    n_reps=n, warmup=True, best='min')
+
+    # ── Reshape into row format for table generators ──
+    # Each row: [grid_size, delta, RFC_val, FUES_val, DCEGM_val, CONSAV_val]
+    latex_errors_data = []
+    latex_timings_data = []
+    latex_total_timing_data = []
+    latex_cdev_data = []
+
+    for r in results:
+        gs, d = r['grid_size'], r['delta']
+        latex_errors_data.append([
+            gs, d,
+            *[r[f'{m}_error'] for m in METHODS],
+        ])
+        latex_timings_data.append([
+            gs, d,
+            *[r[f'{m}_ue_time'] * 1000 for m in METHODS],
+        ])
+        latex_total_timing_data.append([
+            gs, d,
+            *[r[f'{m}_total_time'] * 1000 for m in METHODS],
+        ])
+        latex_cdev_data.append([
+            gs, d,
+            *[r[f'{m}_cdev'] for m in METHODS],
+        ])
+
+        print(
+            f'\nGrid={gs}, delta={d}:\n'
+            f'  Euler errors: '
+            + ', '.join(f'{m}: {r[f"{m}_error"]:.6f}' for m in METHODS)
+            + f'\n  Cons. dev (log10): '
+            + ', '.join(f'{m}: {r[f"{m}_cdev"]:.6f}' for m in METHODS)
+            + f'\n  Timings (s): '
+            + ', '.join(f'{m}: {r[f"{m}_ue_time"]:.6f}' for m in METHODS)
+        )
+
+    # ── Generate tables ──
     generate_timing_table_combined(
         latex_timings_data, latex_total_timing_data,
         "timing", "Retirement model", results_dir,
@@ -205,53 +206,12 @@ def test_Timings(grid_sizes, delta_values, n=3, results_dir="results",
 
 
 if __name__ == "__main__":
-    grid_sizes = [500, 1000, 2000, 3000, 10000]
-    delta_values = [0.25, 0.5, 1, 2]
-    egrid_plot_age = 17
-
-    save_path = os.path.join('results', 'plots', 'retirement')
-    os.makedirs(save_path, exist_ok=True)
-
-    test_Timings(grid_sizes, delta_values)
-
-    # Generate baseline solution and plots via canonical pipeline
-    nest, model, _, _ = solve_nest(SYNTAX_DIR, method='RFC')
-
-    results = {}
-    for method in ['RFC', 'FUES', 'DCEGM', 'CONSAV']:
-        nest, model, _, _ = solve_nest(SYNTAX_DIR, method=method)
-        results[method] = {
-            'nest': nest,
-            'c': get_policy(nest, 'c'),
-            'timing': get_timing(nest),
-            'euler': euler(model, get_policy(nest, 'c')),
-        }
-
-    print()
-    print("| Method | Euler Error    | Avg UE time(ms) | Total time(ms) |")
-    print("|--------|----------------|-----------------|----------------|")
-    for method in ['RFC', 'FUES', 'DCEGM', 'CONSAV']:
-        r = results[method]
-        print(
-            f"| {method:<6} | {r['euler']:<14.6f} "
-            f"| {r['timing'][0]*1000:<15.3f} | {r['timing'][1]*1000:<14.3f} |"
-        )
-    print()
-
-    # Generate plots
-    nest_rfc = results['RFC']['nest']
-    e_grid = get_policy(nest_rfc, 'x_dcsn_hat', stage='work_cons')
-    vf_work = get_policy(nest_rfc, 'v_dcsn_hat', stage='work_cons')
-    c_worker = get_policy(nest_rfc, 'c_dcsn_hat', stage='work_cons')
-    dela = get_policy(nest_rfc, 'dela_dcsn_hat', stage='work_cons')
-
-    plot_egrids(
-        egrid_plot_age, e_grid, vf_work, c_worker, dela,
-        3000, model, save_path, tag='sigma0',
-    )
-    plot_cons_pol(results['FUES']['c'], model, save_path)
-    plot_dcegm_cf(
-        egrid_plot_age, 3000, e_grid, vf_work, c_worker,
-        dela, model.asset_grid_A, model, save_path,
-        tag='sigma0', plot=True,
-    )
+    from examples.retirement.run import main
+    sys.argv = [
+        sys.argv[0], '--run-timings',
+        '--sweep-grids', '500',
+        '--sweep-deltas', '0.5',
+        '--sweep-runs', '1',
+        '--output-dir', 'results/retirement',
+    ]
+    main()

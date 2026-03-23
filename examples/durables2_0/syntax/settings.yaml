@@ -19,10 +19,19 @@ settings:
   w_max: 30.0
 
   # FUES upper envelope
-  m_bar: 1.1
+  m_bar: 1.01
 
   # Wage discretisation
   N_wage: 4
 
   # HD Lambda
   N_HD_LAMBDA: 1
+
+  # Store raw EGM (cntn perch) grids in solution
+  store_cntn: 0
+
+  # Plot ages (empty list = auto: third-to-last period)
+  plot_ages: []
+
+  # Simulation initial conditions: 'standard' or 'empirical'
+  init_method: standard

@@ -47,7 +47,6 @@ def make_retire_cons(model, callables):
         callables['bellman_rhs'],
         callables['cntn_to_dcsn'],
         callables['concavity'],
-        egm_params,
     )
 
     _compose = make_compose_interp(
@@ -112,7 +111,6 @@ def make_work_cons(model, callables, ue_method='FUES'):
         callables['bellman_rhs'],
         callables['cntn_to_dcsn'],
         callables['concavity'],
-        egm_params,
     )
 
     _compose = make_compose_interp(

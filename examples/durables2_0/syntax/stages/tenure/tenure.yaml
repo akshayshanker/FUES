@@ -27,7 +27,7 @@ symbols:
       w_adj: '@in Xw'     # total wealth = R * a_d + R_H * (1 - delta) * h_d + y(z)
 
   controls:
-    d: '@in {keep, adjust}'
+    adj: '@in (0,1)'
 
   values:
     V[<]: '@in R'
@@ -66,17 +66,13 @@ equations:
   cntn_to_dcsn_mover:
     Bellman: |
       V = max_{d}(V[>][keep], V[>][adjust])
-    MarginalBellman:
-      keep: |
-        d_{a}V = R * d_{w_keep}V[>]
-        d_{h}V = (1 - delta) * d_{h_keep}V[>]
-      adjust: |
-        d_{a}V = R * d_{w_adj}V[>]
-        d_{h}V = R_H * (1 - delta) * d_{w_adj}V[>]
+    MarginalBellman: |
+      d_{a}V = adj * R * d_{w_adj}V[>] + (1 - adj) * R * d_{w_keep}V[>]
+      d_{h}V = adj * R_H * (1 - delta) * d_{w_adj}V[>] + (1 - adj) * (1 - delta) * d_{h_keep}V[>]
 
   dcsn_to_arvl_mover:
     Bellman: |
       V[<] = E_{z}(V)
-    MarginalBellman: |
+    ShadowBellman: |
       d_{a}V[<] = E_{z}(d_{a}V)
       d_{h}V[<] = E_{z}(d_{h}V)

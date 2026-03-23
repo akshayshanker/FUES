@@ -15,8 +15,7 @@ from .plots import (
     plot_lifecycle,
 )
 from .tables import (
-    generate_timing_table,
-    generate_accuracy_table,
+    generate_comparison_table,
 )
 
 __all__ = [
@@ -30,6 +29,5 @@ __all__ = [
     "plot_policies",
     "plot_grids",
     "plot_lifecycle",
-    "generate_timing_table",
-    "generate_accuracy_table",
+    "generate_comparison_table",
 ]

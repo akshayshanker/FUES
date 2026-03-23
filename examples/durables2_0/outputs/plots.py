@@ -176,14 +176,14 @@ def plot_policies(nest, grids, savings, output_dir=None,
     # 7. Discrete choice
     t_plot = available[-1]
     fig, ax = plt.subplots(1, 1, figsize=(6, 5))
-    d = new_by_t[t_plot]['tenure']['dcsn']['d'][i_z, :, :]
-    im = ax.pcolormesh(a_grid, h_grid, d.T,
+    adj_arr = new_by_t[t_plot]['tenure']['dcsn']['adj'][i_z, :, :]
+    im = ax.pcolormesh(a_grid, h_grid, adj_arr.T,
                        cmap='RdBu', vmin=0, vmax=1, shading='auto')
     ax.set_xlabel(r'Financial assets $a$', fontsize=11)
     ax.set_ylabel(r'Housing $h$', fontsize=11)
     ax.set_title(f'Discrete choice (t = {t_plot})')
     ax.tick_params(labelsize=9)
-    fig.colorbar(im, ax=ax, label=r'$d$ (0=keep, 1=adjust)')
+    fig.colorbar(im, ax=ax, label=r'adj (0=keep, 1=adjust)')
     fig.tight_layout()
     fig.savefig(os.path.join(age_dir, 'discrete_choice.png'))
     plt.close(fig)

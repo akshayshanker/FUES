@@ -17,3 +17,8 @@ settings:
   # FUES
   m_bar: 1.01            # jump detection threshold (work branch only)
   padding_mbar: 0        # padding for m_bar
+
+  # Runner defaults
+  plot_age: 5             # age index for EGM grid plots
+  run_timings: 0          # 1 to run timing comparison sweep
+  sweep_deltas: '0.25,0.5,1,2'

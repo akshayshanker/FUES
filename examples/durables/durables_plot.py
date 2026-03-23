@@ -1046,7 +1046,7 @@ if __name__ == "__main__":
                      m_bar=float(cp_settings.get('M_bar', 1.4)),
                      theta=float(cp_settings.get('theta', 1.3498)),
                      stat=cp_settings.get('stat', False),
-                     T=int(cp_settings.get('max_iter', 60)),
+                     T=int(cp_settings.get('fv', 60)),
                      t0=int(cp_settings.get('t0', 20)),
                      N_wage=int(cp_settings.get('N_wage', 4)),
                      phi_w=float(cp_settings.get('phi_w', 0.8170411)),

@@ -1,7 +1,7 @@
 """Keeper consumption stage: EGM + FUES via kikku.
 
-Uses ``make_egm_1d`` from kikku with module-level recipe
-callables from ``model.py``.
+Uses ``make_egm_1d`` from kikku with EGM recipe callables from
+``make_callables`` (keeper_egm_fns).
 
 The keeper receives ``h_keep`` (already depreciated by the
 tenure stage's branch transition ``h_keep = (1-delta)*h``).
@@ -15,7 +15,6 @@ dcsn_mover = EGM + FUES. Returns refined (A, C, V) on
 import numpy as np
 from interpolation.splines import eval_linear
 from interpolation.splines import extrap_options as xto
-from kikku.asva.egm_1d import make_egm_1d
 from dcsmm.fues import FUES_jit
 from dcsmm.fues.fues_v0dev import uniqueEG
 from dcsmm.fues.fues_v0_2dev import (
@@ -24,19 +23,20 @@ from dcsmm.fues.fues_v0_2dev import (
 )
 from dcsmm.fues.helpers.math_funcs import interp_as
 from kikku.asva.numerics import clamp_value, clamp_policy
+from kikku.asva.egm_1d import make_egm_1d
 
-from ..model import KEEPER_EGM_FNS
 
-
-def make_keeper_ops(cp, callables, transitions):
+def make_keeper_ops(callables, keep_h_fn, grids, settings):
     """Build keeper dcsn_mover.
 
     Parameters
     ----------
-    cp : ConsumerProblem
     callables : dict
-    transitions : dict
-        From make_transitions(). Uses tenure.dcsn_to_cntn.keep_h.
+        Stage dict for keeper_cons (includes keeper_egm_fns).
+    keep_h_fn : callable
+        ``h -> (1-delta)*h`` from tenure transitions.
+    grids : dict
+    settings : dict
 
     Returns
     -------
@@ -45,26 +45,19 @@ def make_keeper_ops(cp, callables, transitions):
         -> ``(Akeeper, Ckeeper, Vkeeper, dVw_keep, phi_keep, cntn_data)``
         where cntn_data is None or dict per solution_scheme.md.
     """
-    b = cp.b
-    beta = cp.beta
-    g_keep_h = transitions["tenure"]["dcsn_to_cntn"]["keep_h"]
-    grid_max_A = cp.grid_max_A
-    m_bar = cp.m_bar
-    return_grids = getattr(cp, 'return_grids', False)
-    du_c = callables["du_c"]
-    du_h = callables["du_h"]
-    egm_params = np.array([
-        cp.beta,      # [0]
-        cp.alpha,     # [1]
-        cp.gamma_c,   # [2]
-        cp.gamma_h,   # [3]
-        cp.kappa,     # [4]
-    ])
-    fns = KEEPER_EGM_FNS
+    b = settings["b"]
+    g_keep_h = keep_h_fn
+    grid_max_A = settings["grid_max_A"]
+    m_bar = settings["m_bar"]
+    return_grids = settings["return_grids"]
+    d_c_u = callables["d_c_u"]
+    d_h_u = callables["d_h_u"]
+    fns = callables["keeper_egm_fns"]
     _egm_step = make_egm_1d(
-        fns['inv_euler'], fns['bellman_rhs'],
-        fns['cntn_to_dcsn'], fns['concavity'],
-        egm_params,
+        fns["inv_euler"],
+        fns["bellman_rhs"],
+        fns["cntn_to_dcsn"],
+        fns["concavity"],
     )
 
     def dcsn_mover(vlu_cntn, grids):
@@ -106,8 +99,7 @@ def make_keeper_ops(cp, callables, transitions):
                 v_slice = V[iz, :, ih]
 
                 # --- EGM: constrained region ---
-                c0 = fns['inv_euler'](
-                    dv_slice[0], hk, egm_params)
+                c0 = fns['inv_euler'](dv_slice[0], hk)
                 C_arr = np.linspace(
                     1e-08, max(1e-08, c0 - 1e-10), n_a)
 
@@ -116,9 +108,7 @@ def make_keeper_ops(cp, callables, transitions):
                 c_raw = np.ones(n_a * 2)
 
                 for k in range(n_a):
-                    vf[k] = fns['bellman_rhs'](
-                        C_arr[k], v_slice[0],
-                        hk, egm_params)
+                    vf[k] = fns['bellman_rhs'](C_arr[k], v_slice[0], hk)
                     egrid[k] = C_arr[k] + b
                     c_raw[k] = C_arr[k]
 
@@ -181,7 +171,7 @@ def make_keeper_ops(cp, callables, transitions):
                     v_interp)
 
                 for ia in range(n_a):
-                    dVw_keep[iz, ia, ih] = du_c(
+                    dVw_keep[iz, ia, ih] = d_c_u(
                         c_clamped[ia])
 
                 dv_h_slice = dV_h[iz, :, ih]
@@ -189,7 +179,7 @@ def make_keeper_ops(cp, callables, transitions):
                     edvh = np.interp(
                         a_clamped[ia], asset_grid_A,
                         dv_h_slice)
-                    phi_keep[iz, ia, ih] = du_h(hk) + edvh
+                    phi_keep[iz, ia, ih] = d_h_u(hk) + edvh
 
         cntn_data = None
         if cntn_c is not None:
@@ -207,8 +197,8 @@ def make_keeper_ops(cp, callables, transitions):
 # Forward (simulation) operator
 # ------------------------------------------------------------------
 
-def make_keeper_forward(C_keep_t, cp, UG,
-                        edata_next, grids, callables,
+def make_keeper_forward(C_keep_t, UG,
+                        edata_next, grids, callables, settings,
                         euler_panel, t_val):
     """StageForward for keeper_cons with inline Euler.
 
@@ -221,7 +211,9 @@ def make_keeper_forward(C_keep_t, cp, UG,
     from kikku.asva.simulate import StageForward
     from ..simulate import keeper_euler, _eval_keeper_c
 
-    b, gA, gH = cp.b, cp.grid_max_A, cp.grid_max_H
+    b = settings["b"]
+    gA = settings["grid_max_A"]
+    gH = settings["grid_max_H"]
 
     def arvl_to_dcsn(particles, shocks):
         return particles
@@ -253,7 +245,7 @@ def make_keeper_forward(C_keep_t, cp, UG,
                 if ci > 0.1 and ai > 0.1:
                     euler_panel[t_val, int(idx[i])] = keeper_euler(
                         ci, ai, hi, int(z_idx[i]),
-                        edata_next, grids, cp, callables)
+                        edata_next, grids, callables)
 
         out = {'a_nxt': a_nxt, 'h_nxt': h_nxt,
                'z_idx': z_idx.copy()}

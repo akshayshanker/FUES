@@ -36,69 +36,64 @@ def _default_ddu(c):
 # ============================================================================
 # EGM sub-equation callables (cntn_to_dcsn_mover)
 #
-# Each callable follows a standardized signature:
-#   fn(pointwise_inputs..., fixed_state, params)
-#
-# - `fixed_state`: non-optimized state variables held constant
-#   during the EGM inversion (e.g. housing stock h, exog shock z
-#   for a durables keeper).  For the retirement model this is
-#   unused (0.0 placeholder).
-# - `params`: model-specific scalar array.
-#
-# Retirement params layout:
-#   params[0] = beta,  params[1] = R,  params[2] = delta
-#
-# Signatures (the "EGM recipe"):
-#   fn_inv_euler(dv_cntn_i, fixed_state, params)          → c_i
-#   fn_bellman_rhs(c_i, v_cntn_i, fixed_state, params)    → v_i
-#   fn_cntn_to_dcsn(c_i, x_cntn_i, fixed_state, params)  → x_dcsn_i
-#   fn_concavity(c_i, ddv_cntn_i, fixed_state, params)    → del_a_i
+# Signature: fn(pointwise_inputs..., fixed_state) → result
+# Parameters are baked in via the factories below.
 # ============================================================================
 
-@njit(cache=True)
-def fn_inv_euler(dv_cntn_i, fixed_state, params):
-    """InvEuler: c = (beta * R * dV[>])^{-1}  (log utility)."""
-    beta, R = params[0], params[1]
-    return 1.0 / (beta * R * dv_cntn_i)
+def make_worker_egm_fns(beta, R, delta, _y):
+    """EGM recipe dict for work_cons (log utility, work cost delta)."""
+
+    @njit(cache=True)
+    def fn_inv_euler(dv_cntn_i, fixed_state):
+        return 1.0 / (beta * R * dv_cntn_i)
+
+    @njit(cache=True)
+    def fn_bellman_rhs(c_i, v_cntn_i, fixed_state):
+        return np.log(c_i) + beta * v_cntn_i - delta
+
+    @njit(cache=True)
+    def fn_cntn_to_dcsn(c_i, x_cntn_i, fixed_state):
+        return c_i + x_cntn_i
+
+    @njit(cache=True)
+    def fn_concavity(c_i, ddv_cntn_i, fixed_state):
+        ddu_c = -1.0 / (c_i ** 2)
+        return R * ddu_c / (ddu_c + beta * R * ddv_cntn_i)
+
+    return {
+        'inv_euler': fn_inv_euler,
+        'bellman_rhs': fn_bellman_rhs,
+        'cntn_to_dcsn': fn_cntn_to_dcsn,
+        'concavity': fn_concavity,
+    }
 
 
-@njit(cache=True)
-def fn_bellman_rhs(c_i, v_cntn_i, fixed_state, params):
-    """Bellman RHS: V = u(c) + beta * V[>] - delta."""
-    beta, delta = params[0], params[2]
-    return np.log(c_i) + beta * v_cntn_i - delta
+def make_retiree_egm_fns(beta, R, _delta, _y):
+    """EGM recipe dict for retire_cons (no work cost; a' = (c+a')/R)."""
 
+    @njit(cache=True)
+    def fn_inv_euler(dv_cntn_i, fixed_state):
+        return 1.0 / (beta * R * dv_cntn_i)
 
-@njit(cache=True)
-def fn_cntn_to_dcsn(c_i, x_cntn_i, fixed_state, params):
-    """cntn_to_dcsn transition: w[>] = c + a."""
-    return c_i + x_cntn_i
+    @njit(cache=True)
+    def fn_bellman_rhs(c_i, v_cntn_i, fixed_state):
+        return np.log(c_i) + beta * v_cntn_i
 
+    @njit(cache=True)
+    def fn_cntn_to_dcsn(c_i, x_cntn_i, fixed_state):
+        return (c_i + x_cntn_i) / R
 
-@njit(cache=True)
-def fn_concavity(c_i, ddv_cntn_i, fixed_state, params):
-    """Concavity factor: del_a = R * u''(c) / (u''(c) + beta*R*d²V)."""
-    beta, R = params[0], params[1]
-    ddu_c = -1.0 / (c_i ** 2)
-    return R * ddu_c / (ddu_c + beta * R * ddv_cntn_i)
+    @njit(cache=True)
+    def fn_concavity(c_i, ddv_cntn_i, fixed_state):
+        ddu_c = -1.0 / (c_i ** 2)
+        return R * ddu_c / (ddu_c + beta * R * ddv_cntn_i)
 
-
-# ── Retiree-specific overrides ──
-# The retiree has no work cost (delta=0) and a different
-# cntn_to_dcsn transition: a_ret = (c + b_ret) / R.
-
-@njit(cache=True)
-def fn_bellman_rhs_ret(c_i, v_cntn_i, fixed_state, params):
-    """Bellman RHS (retiree): V = u(c) + beta * V[>]  (no delta)."""
-    beta = params[0]
-    return np.log(c_i) + beta * v_cntn_i
-
-
-@njit(cache=True)
-def fn_cntn_to_dcsn_ret(c_i, x_cntn_i, fixed_state, params):
-    """cntn_to_dcsn transition (retiree): a_ret = (c + b_ret) / R."""
-    R = params[1]
-    return (c_i + x_cntn_i) / R
+    return {
+        'inv_euler': fn_inv_euler,
+        'bellman_rhs': fn_bellman_rhs,
+        'cntn_to_dcsn': fn_cntn_to_dcsn,
+        'concavity': fn_concavity,
+    }
 
 
 DEFAULT_CALLABLES = {
@@ -106,20 +101,6 @@ DEFAULT_CALLABLES = {
     'du': _default_du,
     'uc_inv': _default_uc_inv,
     'ddu': _default_ddu,
-}
-
-WORKER_EGM_FNS = {
-    'inv_euler': fn_inv_euler,
-    'bellman_rhs': fn_bellman_rhs,
-    'cntn_to_dcsn': fn_cntn_to_dcsn,
-    'concavity': fn_concavity,
-}
-
-RETIREE_EGM_FNS = {
-    'inv_euler': fn_inv_euler,
-    'bellman_rhs': fn_bellman_rhs_ret,
-    'cntn_to_dcsn': fn_cntn_to_dcsn_ret,
-    'concavity': fn_concavity,
 }
 
 # ============================================================================

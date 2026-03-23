@@ -40,7 +40,7 @@ def get_policy(nest, key, stage='keeper_cons', perch='dcsn'):
         Solved nest from ``solve()``.
     key : str
         Field name within the stage/perch dict
-        (e.g. ``"c"``, ``"V"``, ``"a"``, ``"h"``, ``"d"``).
+        (e.g. ``"c"``, ``"V"``, ``"a"``, ``"h"``, ``"adj"``).
     stage : str
         Stage name: ``'keeper_cons'``, ``'adjuster_cons'``, or ``'tenure'``.
     perch : str

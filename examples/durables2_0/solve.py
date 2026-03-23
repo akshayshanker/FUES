@@ -11,8 +11,8 @@ from dolo.compiler.calibration import (
     calibrate as calibrate_stage,
 )
 
-from .model import make_cp, make_grids, make_callables, make_y_func
-from .transitions import make_transitions
+from .model import make_cp, make_grids, make_settings
+from .callables import make_callables, make_y_func
 from .horses.keeper_egm import make_keeper_ops
 from .horses.branching import make_tenure_ops
 from .horses.adjuster_egm import make_adjuster_ops
@@ -20,15 +20,16 @@ from .horses.adjuster_negm import make_adjuster_negm_ops
 from .horses.conditioning import make_conditioners
 
 
-def _terminal_vlu_cntn(cp, grids, callables, transitions):
+def _terminal_vlu_cntn(grids, tenure_callables):
     """Terminal condition: consume everything."""
     z_vals = grids["z"]
     a_grid = grids["a"]
     h_grid = grids["h"]
     x_all = grids["X_all"]
-    term_u = callables["term_u"]
-    term_du = callables["term_du"]
-    g_w = transitions["terminal"]
+    term_u = tenure_callables["term_u"]
+    d_a_term = tenure_callables["marginalBellman_d_a_terminal"]
+    d_h_term = tenure_callables["marginalBellman_d_h_terminal"]
+    g_w = tenure_callables["transitions"]["terminal_wealth"]
 
     shape = (len(z_vals), len(a_grid), len(h_grid))
     V = np.empty(shape)
@@ -41,8 +42,8 @@ def _terminal_vlu_cntn(cp, grids, callables, transitions):
         h = h_grid[i_h]
         w = g_w(a, h)
         V[i_z, i_a, i_h] = term_u(w)
-        d_aV[i_z, i_a, i_h] = cp.beta * cp.R * term_du(w)
-        d_hV[i_z, i_a, i_h] = cp.beta * cp.R_H * term_du(w) * (1 - cp.delta)
+        d_aV[i_z, i_a, i_h] = d_a_term(w)
+        d_hV[i_z, i_a, i_h] = d_h_term(w)
 
     return {"V": V, "d_aV": d_aV, "d_hV": d_hV}
 
@@ -149,7 +150,7 @@ def solve_period(stage_ops, vlu_cntn, grids, store_cntn=False,
             "V": vlu_dcsn["V"],
             "d_aV": vlu_dcsn["d_aV"],
             "d_hV": vlu_dcsn["d_hV"],
-            "d": pol_dcsn["d"],
+            "adj": pol_dcsn["adj"],
         },
         "arvl": vlu_arvl,
     }
@@ -187,23 +188,26 @@ def solve_period(stage_ops, vlu_cntn, grids, store_cntn=False,
 
 def accrete_and_solve(
     H, period_inst, inter_conn, params_for_age, cp, grids, callables,
+    settings,
     method="FUES", store_cntn=False, verbose=False,
 ):
     """Accrete backward, solving each period."""
     nest = {"periods": [], "twisters": [], "solutions": []}
 
-    # Age-invariant transitions (for terminal condition + keeper/adjuster)
-    transitions_base = make_transitions(cp, lambda z: 0.0)
+    keep_h_fn = callables["tenure"]["transitions"]["keep_h"]
 
     # Build age-invariant pieces once.
-    keeper_ops = {"dcsn_mover": make_keeper_ops(cp, callables, transitions_base)}
+    keeper_ops = {"dcsn_mover": make_keeper_ops(
+        callables["keeper_cons"], keep_h_fn, grids, settings)}
     condition_V, condition_V_HD = make_conditioners(grids["Pi"])
     if method == "NEGM":
-        adjuster_ops = make_adjuster_negm_ops(cp, callables)
+        adjuster_ops = make_adjuster_negm_ops(
+            callables["adjuster_cons"], grids, settings)
     else:
-        adjuster_ops = make_adjuster_ops(cp, callables)
+        adjuster_ops = make_adjuster_ops(
+            callables["adjuster_cons"], grids, settings)
 
-    vlu_cntn = _terminal_vlu_cntn(cp, grids, callables, transitions_base)
+    vlu_cntn = _terminal_vlu_cntn(grids, callables["tenure"])
 
     for h in range(H + 1):
         age = cp.T - h
@@ -215,12 +219,13 @@ def accrete_and_solve(
         if h > 0:
             vlu_cntn = _apply_twister(nest["solutions"][h - 1], nest["twisters"][h])
 
-        # Per-period transitions (y_func bound to age)
+        # Per-period income transitions (y_func bound to age)
         y_func_h = make_y_func(cp, age)
-        transitions_h = make_transitions(cp, y_func_h)
+        income_trans_h = callables["tenure"]["make_income_transitions"](y_func_h)
 
         tenure_dcsn, tenure_arvl, tenure_arvl_hd = make_tenure_ops(
-            cp, callables, transitions_h, condition_V, condition_V_HD
+            callables["tenure"], income_trans_h, grids, settings,
+            condition_V, condition_V_HD,
         )
         stage_ops_h = {
             "keeper_cons": keeper_ops,
@@ -249,24 +254,27 @@ def solve(
     cp=None,
     grids=None,
     callables=None,
+    settings=None,
     verbose=False,
 ):
     """Full DDSL pipeline: load -> accrete+solve."""
     syntax_dir = Path(syntax_dir)
 
-    calibration, settings, stage_sources, period_template, inter_conn = load_syntax(
+    calibration, yaml_settings, stage_sources, period_template, inter_conn = load_syntax(
         syntax_dir, calib_overrides, config_overrides
     )
     period_inst = instantiate_period(
-        calibration, settings, stage_sources, period_template
+        calibration, yaml_settings, stage_sources, period_template
     )
 
     if cp is None:
-        cp = make_cp(calibration, settings)
+        cp = make_cp(calibration, yaml_settings)
     if grids is None:
         grids = make_grids(cp)
     if callables is None:
         callables = make_callables(cp)
+    if settings is None:
+        settings = make_settings(cp)
 
     # Keep wave derivation for diagnostics.
     graph = period_to_graph(period_inst)
@@ -275,10 +283,11 @@ def solve(
         print(f"Waves: {waves}")
 
     H = cp.T - cp.t0
-    store_cntn = bool(int(settings.get("store_cntn", 0)))
+    store_cntn = bool(int(yaml_settings.get("store_cntn", 0)))
     params_for_age = make_params_for_age(calibration, cp.T)
     nest = accrete_and_solve(
         H, period_inst, inter_conn, params_for_age, cp, grids, callables,
+        settings,
         method=method, store_cntn=store_cntn, verbose=verbose,
     )
 
@@ -287,4 +296,4 @@ def solve(
     nest["graph"] = graph
     nest["inter_conn"] = inter_conn
 
-    return nest, cp, grids, callables
+    return nest, cp, grids, callables, settings
