@@ -1,7 +1,7 @@
 """Policy and EGM grid plots for durables2_0.
 
 Plot functions receive pre-computed data (nest, grids, savings).
-No model objects (cp) — budget-constraint derivations belong
+No legacy wrapper object — budget-constraint derivations belong
 in diagnostics.derive_savings, called by the orchestrator.
 """
 
@@ -19,12 +19,619 @@ matplotlib.rcParams['font.family'] = 'DejaVu Sans'
 
 import seaborn as sns
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
 from matplotlib.ticker import FormatStrFormatter, MaxNLocator
 import os
 
 
+# ── Notebook theme (aligned with retirement notebook) ──
+
+_NB_THEMES = {
+    'light': {
+        'fg': '#1a1a2e', 'bg': '#fafafa', 'panel': '#ffffff',
+        'grid': '#e5e7eb', 'spine': '#d1d5db', 'muted': '#64748b',
+        'accent': '#4361ee', 'accent2': '#e07c3e',
+        'raw': '#b23a48', 'cross': '#2ec4b6',
+        'reference': '#9ca3af',
+    },
+    'dark': {
+        'fg': '#e8e8ed', 'bg': '#16161e', 'panel': '#1e1e2a',
+        'grid': '#3b4252', 'spine': '#4b5565', 'muted': '#a7b0c0',
+        'accent': '#7b8cde', 'accent2': '#ffb074',
+        'raw': '#ff8fab', 'cross': '#54e1d1',
+        'reference': '#8b95a7',
+    },
+}
+
+def _nb_theme():
+    return _NB_THEMES['light']
+
+
+def _build_notebook_style_block():
+    """Notebook CSS + JS aligned with MkDocs Material theme."""
+    light = _NB_THEMES['light']
+    dark = _NB_THEMES['dark']
+    return f"""
+<style id="durables-notebook-theme">
+  .jp-RenderedHTMLCommon, .rendered_html, .jp-RenderedMarkdown, .text_cell_render {{
+    font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    line-height: 1.7;
+    color: {light['fg']};
+  }}
+  .jp-RenderedHTMLCommon h1, .jp-RenderedMarkdown h1, .rendered_html h1, .text_cell_render h1 {{
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    color: {light['fg']};
+  }}
+  .jp-RenderedHTMLCommon h2, .jp-RenderedMarkdown h2, .rendered_html h2, .text_cell_render h2 {{
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    border-bottom: 2px solid {light['accent']};
+    padding-bottom: 0.25em;
+  }}
+  .jp-RenderedHTMLCommon code, .jp-RenderedMarkdown code, .rendered_html code, .text_cell_render code,
+  .jp-OutputArea-output pre, .output_area pre {{
+    font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  }}
+  .jp-RenderedMarkdown pre, .rendered_html pre, .text_cell_render pre, .jp-OutputArea-output pre, .output_area pre {{
+    background: #f4f4f8;
+    border: 1px solid {light['grid']};
+    border-radius: 8px;
+    padding: 0.9em 1em;
+  }}
+  .jp-RenderedHTMLCommon blockquote, .jp-RenderedMarkdown blockquote, .rendered_html blockquote, .text_cell_render blockquote {{
+    border-left: 4px solid {light['accent']};
+    background: rgba(67, 97, 238, 0.03);
+    padding: 0.5em 1.1em;
+    margin: 1.25em 0;
+  }}
+  .jp-RenderedHTMLCommon table, .jp-RenderedMarkdown table, .rendered_html table, .text_cell_render table {{
+    border-collapse: collapse;
+    font-size: 0.92rem;
+  }}
+  .jp-RenderedHTMLCommon th, .jp-RenderedMarkdown th, .rendered_html th, .text_cell_render th {{
+    background: #f0f0f5;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-size: 0.76rem;
+  }}
+  .jp-RenderedHTMLCommon th, .jp-RenderedMarkdown th, .rendered_html th, .text_cell_render th,
+  .jp-RenderedHTMLCommon td, .jp-RenderedMarkdown td, .rendered_html td, .text_cell_render td {{
+    border: 1px solid {light['grid']};
+    padding: 0.5em 0.75em;
+  }}
+  @media (prefers-color-scheme: dark) {{
+    .jp-RenderedHTMLCommon, .rendered_html, .jp-RenderedMarkdown, .text_cell_render {{
+      color: {dark['fg']};
+    }}
+    .jp-RenderedHTMLCommon h2, .jp-RenderedMarkdown h2, .rendered_html h2, .text_cell_render h2 {{
+      border-bottom-color: {dark['accent']};
+    }}
+    .jp-RenderedMarkdown pre, .rendered_html pre, .text_cell_render pre, .jp-OutputArea-output pre, .output_area pre {{
+      background: {dark['panel']};
+      border-color: {dark['spine']};
+      color: {dark['fg']};
+    }}
+    .jp-RenderedHTMLCommon th, .jp-RenderedMarkdown th, .rendered_html th, .text_cell_render th {{
+      background: #242433;
+    }}
+    .jp-RenderedHTMLCommon th, .jp-RenderedMarkdown th, .rendered_html th, .text_cell_render th,
+    .jp-RenderedHTMLCommon td, .jp-RenderedMarkdown td, .rendered_html td, .text_cell_render td {{
+      border-color: {dark['spine']};
+    }}
+  }}
+</style>
+"""
+
+
+def setup_nb_style():
+    """Apply notebook-quality rcParams + CSS (matches retirement notebook)."""
+    t = _nb_theme()
+    matplotlib.rcParams.update({
+        'font.family': 'sans-serif',
+        'font.sans-serif': ['Inter', 'Helvetica Neue', 'Arial'],
+        'font.size': 10.5,
+        'axes.titlesize': 11.5,
+        'axes.titleweight': '700',
+        'axes.labelsize': 10,
+        'axes.titlelocation': 'left',
+        'figure.facecolor': t['panel'],
+        'axes.facecolor': t['panel'],
+        'axes.grid': True,
+        'grid.alpha': 0.55,
+        'grid.linewidth': 0.6,
+        'grid.color': t['grid'],
+        'axes.edgecolor': t['spine'],
+        'axes.linewidth': 0.8,
+        'text.color': t['fg'],
+        'axes.labelcolor': t['fg'],
+        'xtick.color': t['fg'],
+        'ytick.color': t['fg'],
+        'xtick.labelsize': 9,
+        'ytick.labelsize': 9,
+        'legend.fontsize': 9,
+        'legend.framealpha': 0.9,
+        'legend.edgecolor': t['spine'],
+        'legend.facecolor': t['panel'],
+        'figure.dpi': 150,
+        'savefig.dpi': 150,
+        'savefig.bbox': 'tight',
+        'savefig.facecolor': t['panel'],
+        'savefig.edgecolor': t['panel'],
+    })
+    try:
+        from IPython.display import HTML, display
+        display(HTML(_build_notebook_style_block()))
+    except Exception:
+        pass
+
+
+def _style_nb_ax(ax):
+    """Apply notebook axis styling."""
+    t = _nb_theme()
+    for s in ax.spines.values():
+        s.set_color(t['spine'])
+        s.set_linewidth(0.8)
+    ax.tick_params(colors=t['fg'], labelsize=9)
+    ax.set_facecolor(t['panel'])
+
+
+def _adjuster_euler_series(euler_results, methods, euler_key):
+    """Adjuster rows only (discrete == 1), finite errors, per method."""
+    out = {}
+    for method in methods:
+        euler = euler_results[method][euler_key]
+        discrete = euler_results[method]['sim_data']['discrete']
+        mask = (discrete == 1) & np.isfinite(euler)
+        out[method] = euler[mask]
+    return out
+
+
+def _keeper_euler_series(euler_results, methods, euler_key):
+    """Keeper rows only (discrete == 0), finite errors, per method."""
+    out = {}
+    for method in methods:
+        euler = euler_results[method][euler_key]
+        discrete = euler_results[method]['sim_data']['discrete']
+        mask = (discrete == 0) & np.isfinite(euler)
+        out[method] = euler[mask]
+    return out
+
+
+def _histogram_fues_negm_ax(ax, errors_by_method, methods, colors, t, *,
+                           xlabel, title, empty_msg='No observations'):
+    """Draw overlapping histograms on *ax*; bins from pooled 1–99 percentiles."""
+    nonempty = [errors_by_method[m] for m in methods if len(errors_by_method[m]) > 0]
+    if not nonempty:
+        ax.set_title(title, fontweight='bold')
+        ax.text(0.5, 0.5, empty_msg, ha='center', va='center',
+                transform=ax.transAxes, color=t['fg'])
+        _style_nb_ax(ax)
+        return
+    all_adj = np.concatenate(nonempty)
+    lo = np.percentile(all_adj, 1)
+    hi = np.percentile(all_adj, 99)
+    bins = np.linspace(lo, hi, 50)
+
+    for method in methods:
+        vals = errors_by_method[method]
+        if len(vals) == 0:
+            continue
+        mn = np.mean(vals)
+        ax.hist(vals, bins=bins, color=colors[method], alpha=0.55,
+                edgecolor='white', linewidth=0.3,
+                label=f'{method} (mean = {mn:.2f}, n = {len(vals):,})')
+        ax.axvline(mn, color=colors[method], ls='--', lw=1.3)
+
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel('Count')
+    ax.set_title(title, fontweight='bold')
+    ax.legend(frameon=False, fontsize=8)
+    _style_nb_ax(ax)
+
+
+def plot_euler_histogram(euler_results, output_dir=None):
+    """FUES vs NEGM Euler error histograms (1×2 when dual keys present).
+
+    Left: keeper consumption FOC (``discrete == 0``). Right: adjuster housing
+    FOC (``discrete == 1``). Otherwise a single panel: ``euler_h`` or legacy
+    ``euler`` on adjuster rows.
+
+    Parameters
+    ----------
+    euler_results : dict
+        Per method: ``euler_c``, ``euler_h`` (optional), legacy ``euler``,
+        plus ``sim_data`` with ``discrete`` (0 = keeper, 1 = adjuster).
+    output_dir : str, optional
+    """
+    t = _nb_theme()
+    methods = [m for m in ['FUES', 'NEGM'] if m in euler_results]
+    colors = {'FUES': t['accent'], 'NEGM': t['accent2']}
+
+    sample = euler_results[methods[0]] if methods else {}
+    dual = methods and all(
+        'euler_c' in euler_results[m] and 'euler_h' in euler_results[m]
+        for m in methods)
+
+    if dual:
+        fig, axes = plt.subplots(1, 2, figsize=(11, 3.5))
+        ec_keep = _keeper_euler_series(euler_results, methods, 'euler_c')
+        eh_adj = _adjuster_euler_series(euler_results, methods, 'euler_h')
+        _histogram_fues_negm_ax(
+            axes[0], ec_keep, methods, colors, t,
+            xlabel=r'log$_{10}$ consumption Euler error',
+            title='Keeper consumption FOC',
+            empty_msg='No keeper Euler observations')
+        _histogram_fues_negm_ax(
+            axes[1], eh_adj, methods, colors, t,
+            xlabel=r'log$_{10}$ housing FOC error',
+            title='Adjuster housing FOC',
+            empty_msg='No adjuster housing FOC observations')
+        fig.suptitle('Euler FOC accuracy: FUES vs NEGM', fontweight='bold', y=1.02)
+        fig.tight_layout()
+        fname = 'euler_adjuster_histogram_c_h.png'
+    else:
+        euler_key = 'euler_h' if sample.get('euler_h') is not None else 'euler'
+        adj_errors = _adjuster_euler_series(euler_results, methods, euler_key)
+        fig, ax = plt.subplots(1, 1, figsize=(7, 3.5))
+        is_h = euler_key == 'euler_h'
+        _histogram_fues_negm_ax(
+            ax, adj_errors, methods, colors, t,
+            xlabel=(r'log$_{10}$ housing FOC error' if is_h
+                    else r'log$_{10}$ adjuster Euler error'),
+            title=('Adjuster housing FOC accuracy' if is_h
+                   else 'Adjuster Euler error'))
+        fig.tight_layout()
+        fname = 'euler_adjuster_histogram.png'
+
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
+        path = os.path.join(output_dir, fname)
+        fig.savefig(path, dpi=150, bbox_inches='tight')
+        plt.close(fig)
+        return path
+    return fig
+
+
+# ====================================================================
+# Notebook-style multi-panel plots (return fig, caller displays)
+# ====================================================================
+
+def nb_plot_policies_comparison(results, grids, plot_t, i_z=0, i_h=None):
+    """2-row x 3-col comparison: FUES (top) vs NEGM (bottom).
+
+    Columns: keeper consumption | adjuster housing | discrete choice.
+
+    Parameters
+    ----------
+    results : dict  ``{'FUES': {'nest': ...}, 'NEGM': {'nest': ...}}``
+    grids : dict
+    plot_t : int  Age to plot.
+    i_z : int  Shock index.
+    i_h : int or None  Housing index for keeper (default: mid).
+
+    Returns
+    -------
+    matplotlib.figure.Figure
+    """
+    t = _nb_theme()
+    a_grid = grids['a']
+    h_grid = grids['h']
+    we_grid = grids['we']
+    n_h = len(h_grid)
+    if i_h is None:
+        i_h = n_h // 2
+
+    methods = [m for m in ['FUES', 'NEGM'] if m in results]
+    colors = {'FUES': t['accent'], 'NEGM': t['accent2']}
+
+    fig, axes = plt.subplots(len(methods), 3, figsize=(13, 3.5 * len(methods)),
+                             squeeze=False)
+
+    for row, method in enumerate(methods):
+        nest = results[method]['nest']
+        sol_by_t = {s['t']: s for s in nest['solutions']}
+        if plot_t not in sol_by_t:
+            continue
+        sol = sol_by_t[plot_t]
+        col = colors[method]
+
+        # Keeper consumption
+        ax = axes[row, 0]
+        c_keep = sol['keeper_cons']['dcsn']['c'][i_z, :, i_h]
+        y, x = _insert_nan_at_jumps(c_keep, a_grid, 0.3)
+        ax.plot(x, y, color=col, linewidth=1.4)
+        ax.set_xlabel('Financial assets $a$')
+        ax.set_ylabel('Consumption $c$')
+        ax.set_title(f'{method}: Keeper consumption ($h={h_grid[i_h]:.0f}$)',
+                     fontweight='600')
+        _style_nb_ax(ax)
+
+        # Adjuster housing
+        ax = axes[row, 1]
+        h_adj = sol['adjuster_cons']['dcsn']['h_choice'][i_z]
+        y, x = _insert_nan_at_jumps(h_adj, we_grid, 2.0)
+        ax.plot(x, y, color=col, linewidth=1.4)
+        ax.set_xlabel('Total wealth $w$')
+        ax.set_ylabel('Housing choice $h\'$')
+        ax.set_xlim(0, we_grid[-1])
+        ax.set_title(f'{method}: Adjuster housing', fontweight='600')
+        _style_nb_ax(ax)
+
+        # Discrete choice
+        ax = axes[row, 2]
+        adj = sol['tenure']['dcsn']['adj'][i_z, :, :]
+        im = ax.pcolormesh(a_grid, h_grid, adj.T,
+                           cmap='RdBu_r', vmin=0, vmax=1, shading='auto')
+        ax.set_xlabel('Financial assets $a$')
+        ax.set_ylabel('Housing $h$')
+        ax.set_title(f'{method}: Adjust region', fontweight='600')
+        _style_nb_ax(ax)
+
+    fig.tight_layout()
+    return fig
+
+
+def nb_plot_keeper_ages(results, grids, ages, i_z=0, i_h=None):
+    """Keeper consumption at multiple ages, FUES vs NEGM overlaid.
+
+    Parameters
+    ----------
+    results : dict
+    grids : dict
+    ages : list of int
+    """
+    t = _nb_theme()
+    a_grid = grids['a']
+    h_grid = grids['h']
+    n_h = len(h_grid)
+    if i_h is None:
+        i_h = n_h // 2
+
+    methods = [m for m in ['FUES', 'NEGM'] if m in results]
+    colors = {'FUES': t['accent'], 'NEGM': t['accent2']}
+    styles = {'FUES': '-', 'NEGM': '--'}
+
+    fig, axes = plt.subplots(1, len(ages), figsize=(4.3 * len(ages), 3.5))
+    if len(ages) == 1:
+        axes = [axes]
+
+    for ax, age in zip(axes, ages):
+        for method in methods:
+            sol_by_t = {s['t']: s for s in results[method]['nest']['solutions']}
+            if age not in sol_by_t:
+                continue
+            c = sol_by_t[age]['keeper_cons']['dcsn']['c'][i_z, :, i_h]
+            y, x = _insert_nan_at_jumps(c, a_grid, 0.3)
+            ax.plot(x, y, color=colors[method], ls=styles[method],
+                    linewidth=1.4, label=method)
+        ax.set_xlabel('Financial assets $a$')
+        ax.set_ylabel('Consumption $c$')
+        ax.set_title(f'Age {age} ($h = {h_grid[i_h]:.0f}$)', fontweight='600')
+        ax.legend(frameon=False, fontsize=8)
+        _style_nb_ax(ax)
+
+    fig.tight_layout()
+    return fig
+
+
+def _tau_from_results(results, methods):
+    """Transaction cost ``tau`` from the first available solved nest."""
+    if not methods:
+        return 0.0
+    st = results[methods[0]]['nest']['periods'][0]['stages']['keeper_cons']
+    return float(st.calibration['tau'])
+
+
+_METHOD_LABELS = {'FUES': 'EGM(FUES)', 'NEGM': 'NEGM(FUES)'}
+
+
+def nb_plot_adjuster_comparison(results, grids, plot_t, i_z=0,
+                                 methods_filter=None, xlim=15):
+    """Two-panel adjuster comparison: financial assets $a'$ + housing.
+
+    Savings on the wealth grid: $a' = m - c - (1+\\tau)h'$ with $m$ on ``we``.
+
+    Parameters
+    ----------
+    results : dict  ``{'FUES': {'nest': ...}, 'NEGM': {'nest': ...}}``
+    grids : dict
+    plot_t : int or list of int
+        Single age or list of ages. Multiple ages use distinct colours (viridis);
+        methods differ by linestyle.
+    i_z : int
+    methods_filter : list of str, optional
+        Subset of methods to plot (e.g. ``['FUES']``). Default: all available.
+    xlim : float
+        Maximum x-axis value (adjuster wealth m).
+
+    Returns
+    -------
+    matplotlib.figure.Figure
+    """
+    t = _nb_theme()
+    we_grid = grids['we']
+    all_methods = [m for m in ['FUES', 'NEGM'] if m in results]
+    methods = methods_filter if methods_filter else all_methods
+    methods = [m for m in methods if m in results]
+    base_colors = {'FUES': t['accent'], 'NEGM': t['accent2']}
+    # Solid lines when only one method shown; dashed NEGM when overlaid
+    if len(methods) == 1:
+        styles = {methods[0]: '-'}
+    else:
+        styles = {'FUES': '-', 'NEGM': '--'}
+    labels = _METHOD_LABELS
+    tau = _tau_from_results(results, methods)
+    tau_adj = 1.0 + tau
+
+    ages = plot_t if isinstance(plot_t, (list, tuple)) else [plot_t]
+    n_age = len(ages)
+    age_colors = plt.cm.viridis(np.linspace(0.2, 0.85, max(n_age, 1)))
+
+    fig, axes = plt.subplots(1, 2, figsize=(10, 3.8))
+
+    for method in methods:
+        sol_by_t = {s['t']: s for s in results[method]['nest']['solutions']}
+
+        for ai, age in enumerate(ages):
+            if age not in sol_by_t:
+                continue
+            adj = sol_by_t[age]['adjuster_cons']['dcsn']
+            col = age_colors[ai] if n_age > 1 else base_colors[method]
+            lbl = f'age {age}' if n_age > 1 else labels.get(method, method)
+
+            c = adj['c'][i_z]
+            h = adj['h_choice'][i_z]
+            a_nxt = we_grid - c - tau_adj * h
+            y, x = _insert_nan_at_jumps(a_nxt, we_grid, 1.0)
+            axes[0].plot(x, y, color=col, ls=styles[method],
+                         linewidth=1.4, label=lbl)
+
+            yh, xh = _insert_nan_at_jumps(h, we_grid, 2.0)
+            axes[1].plot(xh, yh, color=col, ls=styles[method],
+                         linewidth=1.4, label=lbl)
+
+    title_ages = ', '.join(str(a) for a in ages)
+    method_title = labels.get(methods[0], methods[0]) if len(methods) == 1 else 'FUES vs NEGM'
+    axes[0].set_xlabel('Adjuster wealth $m$')
+    axes[0].set_ylabel("Financial assets $a'$")
+    axes[0].set_title(f'{method_title}: savings (age {title_ages})', fontweight='600')
+    axes[0].set_xlim(0, xlim)
+    if n_age > 1:
+        age_handles = [
+            Line2D([0], [0], color=age_colors[j], lw=1.4, label=f'age {ages[j]}')
+            for j in range(n_age)]
+        meth_handles = [
+            Line2D([0], [0], color=t['muted'], ls=styles[m], lw=1.4,
+                   label=labels.get(m, m))
+            for m in methods]
+        leg_age = axes[0].legend(handles=age_handles, frameon=False, fontsize=8,
+                                 title='Age', loc='upper left')
+        axes[0].add_artist(leg_age)
+        axes[0].legend(handles=meth_handles, frameon=False, fontsize=8,
+                       title='Method', loc='lower right')
+    else:
+        axes[0].legend(frameon=False, fontsize=8)
+    _style_nb_ax(axes[0])
+
+    axes[1].set_xlabel('Adjuster wealth $m$')
+    axes[1].set_ylabel("Housing choice $h'$")
+    axes[1].set_title(f'{method_title}: housing (age {title_ages})', fontweight='600')
+    axes[1].set_xlim(0, xlim)
+    if n_age > 1:
+        leg_age_b = axes[1].legend(handles=[
+            Line2D([0], [0], color=age_colors[j], lw=1.4, label=f'age {ages[j]}')
+            for j in range(n_age)], frameon=False, fontsize=8,
+            title='Age', loc='upper left')
+        axes[1].add_artist(leg_age_b)
+        axes[1].legend(handles=[
+            Line2D([0], [0], color=t['muted'], ls=styles[m], lw=1.4,
+                   label=labels.get(m, m))
+            for m in methods], frameon=False, fontsize=8,
+            title='Method', loc='lower right')
+    else:
+        axes[1].legend(frameon=False, fontsize=8)
+    _style_nb_ax(axes[1])
+
+    fig.tight_layout()
+    return fig
+
+
+def nb_plot_adjuster_egm(nest, grids, plot_t=None, i_z=0, xlim=25):
+    """Adjuster EGM scatter: raw points + FUES refined (notebook style).
+
+    Shows why DCEGM/LTM cannot work: the 2D EGM correspondence
+    from the partial EGM (over h_choice grid) produces a dense
+    cloud of crossing segments that require a full upper-envelope
+    scan, not a simple kink-detection heuristic.
+
+    Requires ``store_cntn=True`` in settings.
+
+    Returns
+    -------
+    matplotlib.figure.Figure or None
+    """
+    t = _nb_theme()
+    sol_by_t = {s['t']: s for s in nest['solutions']}
+    all_t = sorted(sol_by_t.keys())
+    if plot_t is None:
+        plot_t = all_t[-3] if len(all_t) >= 3 else all_t[-1]
+
+    sol = sol_by_t.get(plot_t)
+    if sol is None:
+        print(f'Age {plot_t} not in solution')
+        return None
+
+    adj_cntn = sol.get('adjuster_cons', {}).get('cntn')
+    if adj_cntn is None or 'm_endog' not in adj_cntn:
+        print('No cntn data — run with store_cntn=True')
+        return None
+
+    m_raw = adj_cntn['m_endog'][i_z]
+    a_eval = adj_cntn['a_nxt_eval'][i_z]
+    h_eval = adj_cntn['h_nxt_eval'][i_z]
+
+    mask = a_eval.ravel() > 0.0
+    m_pts = m_raw.ravel()[mask]
+    h_pts = h_eval.ravel()[mask]
+    a_pts = a_eval.ravel()[mask]
+
+    # Refined (post-FUES)
+    refined = adj_cntn.get('_refined', {})
+    has_refined = i_z in refined
+
+    fig, axes = plt.subplots(1, 2, figsize=(10, 4))
+
+    # Panel 1 (left): financial assets a'
+    ax = axes[0]
+    ax.scatter(m_pts, a_pts, s=3, alpha=0.25, color=t['raw'],
+               label='Raw EGM', rasterized=True, edgecolors='none')
+    if has_refined:
+        rf = refined[i_z]
+        sidx = np.argsort(rf['m_endog'])
+        ax.plot(rf['m_endog'][sidx], rf['a_nxt_eval'][sidx],
+                color=t['accent'], linewidth=1.3, label='FUES envelope',
+                zorder=5)
+        ax.scatter(rf['m_endog'], rf['a_nxt_eval'],
+                   s=10, color=t['accent'], marker='x', linewidth=0.7,
+                   zorder=6)
+    ax.set_xlabel('Endogenous wealth $\\hat{m}$')
+    ax.set_ylabel("Financial assets $a'$")
+    ax.set_title(f'Financial assets (age {plot_t}, $z_{{{i_z}}}$)', fontweight='600')
+    ax.set_xlim(0, xlim)
+    ax.legend(frameon=False, fontsize=8)
+    _style_nb_ax(ax)
+
+    # Panel 2 (right): housing
+    ax = axes[1]
+    ax.scatter(m_pts, h_pts, s=3, alpha=0.25, color=t['raw'],
+               label='Raw EGM', rasterized=True, edgecolors='none')
+    if has_refined:
+        rf = refined[i_z]
+        sidx = np.argsort(rf['m_endog'])
+        ax.plot(rf['m_endog'][sidx], rf['h_nxt_eval'][sidx],
+                color=t['accent'], linewidth=1.3, label='FUES envelope',
+                zorder=5)
+        ax.scatter(rf['m_endog'], rf['h_nxt_eval'],
+                   s=10, color=t['accent'], marker='x', linewidth=0.7,
+                   zorder=6)
+    ax.set_xlabel('Endogenous wealth $\\hat{m}$')
+    ax.set_ylabel("Housing choice $h'$")
+    ax.set_title(f'Housing (age {plot_t}, $z_{{{i_z}}}$)', fontweight='600')
+    ax.set_xlim(0, xlim)
+    ax.legend(frameon=False, fontsize=8)
+    _style_nb_ax(ax)
+
+    fig.tight_layout()
+    return fig
+
+
 def _insert_nan_at_jumps(y, x, threshold):
-    """Insert NaN where |dy| > threshold for clean line plots."""
+    """Insert NaN where |dy| > *threshold* so discrete jumps render as gaps, not diagonals.
+
+    Threshold is in the same units as *y* (e.g. ~0.3 for keeper *c* on ``a``;
+    larger for housing or financial assets on ``we``).
+    """
     pos = np.where(np.abs(np.diff(y)) > threshold)[0] + 1
     return np.insert(y, pos, np.nan), np.insert(x, pos, np.nan)
 
@@ -134,7 +741,8 @@ def plot_policies(nest, grids, savings, output_dir=None,
     fig, ax = plt.subplots(1, 1, figsize=(6, 5))
     for idx, t in enumerate(available):
         c = new_by_t[t]['keeper_cons']['dcsn']['c'][i_z, :, i_h_index]
-        ax.plot(a_grid, c, color=colors[idx % 3],
+        y, x = _insert_nan_at_jumps(c, a_grid, 0.3)
+        ax.plot(x, y, color=colors[idx % 3],
                 label=f't = {t}', linewidth=1)
     ax.set_xlabel(r'Financial assets at time $t$', fontsize=11)
     ax.set_ylabel(r'Consumption $c$', fontsize=11)
@@ -148,7 +756,8 @@ def plot_policies(nest, grids, savings, output_dir=None,
     fig, ax = plt.subplots(1, 1, figsize=(6, 5))
     for idx, t in enumerate(available):
         a_pol = savings[t]['keeper'][i_z, :, i_h_index]
-        ax.plot(a_grid, a_pol, color=colors[idx % 3],
+        y, x = _insert_nan_at_jumps(a_pol, a_grid, 0.3)
+        ax.plot(x, y, color=colors[idx % 3],
                 label=f't = {t}', linewidth=1)
     ax.set_xlabel(r'Financial assets at time $t$', fontsize=11)
     ax.set_ylabel(r'End of period financial assets', fontsize=11)
@@ -241,21 +850,21 @@ def plot_grids(nest, grids, output_dir=None, plot_t=None, i_z=0):
 
             fig, ax = plt.subplots(1, 2, figsize=(10, 4))
 
-            ax[0].scatter(m_ref[1:], c_ref[1:], color='blue',
+            ax[0].scatter(m_ref[1:], a_ref[1:], color='blue',
                           s=15, marker='x', linewidth=0.75,
                           label='FUES optimal points')
-            ax[0].plot(m_ref[1:], c_ref[1:], linewidth=1,
-                       label='Consumption function')
-            ax[0].set_ylabel(r'Consumption $c$', fontsize=11)
+            ax[0].plot(m_ref[1:], a_ref[1:], linewidth=1,
+                       label='Financial assets')
+            ax[0].set_ylabel(r"Financial assets $a'$", fontsize=11)
             _clean_ax(ax[0])
             ax[0].yaxis.set_major_locator(MaxNLocator(6))
 
-            ax[1].scatter(m_ref[1:], a_ref[1:], color='blue',
+            ax[1].scatter(m_ref[1:], c_ref[1:], color='blue',
                           s=15, marker='x', linewidth=0.75,
                           label='FUES optimal points')
-            ax[1].plot(m_ref[1:], a_ref[1:], linewidth=1,
-                       label='Savings function')
-            ax[1].set_ylabel(r"Savings $a'$", fontsize=11)
+            ax[1].plot(m_ref[1:], c_ref[1:], linewidth=1,
+                       label='Consumption function')
+            ax[1].set_ylabel(r'Consumption $c$', fontsize=11)
             _clean_ax(ax[1])
             ax[1].yaxis.set_major_locator(MaxNLocator(6))
 
@@ -352,7 +961,7 @@ def plot_grids(nest, grids, output_dir=None, plot_t=None, i_z=0):
 # Simulation lifecycle plots
 # ------------------------------------------------------------------
 
-def plot_lifecycle(sim_data, euler, cp, output_dir=None):
+def plot_lifecycle(sim_data, euler, nest, output_dir=None):
     """Plot lifecycle means with percentile bands from simulation.
 
     Produces a 3x2 panel: income, consumption, housing, liquid
@@ -364,15 +973,16 @@ def plot_lifecycle(sim_data, euler, cp, output_dir=None):
         From ``euler_errors()``.
     euler : ndarray(T, N)
         Log10 Euler errors.
-    cp : ConsumerProblem
-        For ``t0``, ``T``.
+    nest : dict
+        Solved nest; ``t0`` and ``T`` read from the first period stage.
     output_dir : str, optional
     """
     if output_dir is None:
         output_dir = 'results/durables2_0/plots'
 
-    t0 = cp.t0
-    T = cp.T
+    stage0 = nest["periods"][0]["stages"]["keeper_cons"]
+    t0 = int(stage0.calibration["t0"])
+    T = int(stage0.settings["T"])
     T_end = T - 1
     age = np.arange(t0, T)
 

@@ -1,23 +1,42 @@
 """Backward induction for the durables model (DDSL)."""
 
-import numpy as np
 import time
+import numpy as np
 from pathlib import Path
 from kikku.dynx import (
     load_syntax, instantiate_period,
     period_to_graph, backward_paths,
 )
+from kikku.dynx.methods import override_methods
 from dolo.compiler.calibration import (
     calibrate as calibrate_stage,
 )
 
-from .model import make_cp, make_grids, make_settings
-from .callables import make_callables, make_y_func
+from .model import make_grids
+from .callables import make_callables
 from .horses.keeper_egm import make_keeper_ops
 from .horses.branching import make_tenure_ops
 from .horses.adjuster_egm import make_adjuster_ops
-from .horses.adjuster_negm import make_adjuster_negm_ops
 from .horses.conditioning import make_conditioners
+
+METHOD_SHORTCUT = [
+    ('adjuster_cons', 'cntn_to_dcsn_mover', 'upper_envelope'),
+]
+
+
+def read_scheme_method(stage, scheme_name, mover='cntn_to_dcsn_mover',
+                       default='FUES'):
+    """Read method tag for a scheme from stage.methods."""
+    if not hasattr(stage, 'methods'):
+        return default
+    mover_dict = stage.methods.get(mover, {})
+    for scheme in mover_dict.get('schemes', []):
+        if scheme.get('scheme') == scheme_name:
+            tag = scheme.get('method', {})
+            if isinstance(tag, dict):
+                return tag.get('__yaml_tag__', default)
+            return str(tag)
+    return default
 
 
 def _terminal_vlu_cntn(grids, tenure_callables):
@@ -48,14 +67,6 @@ def _terminal_vlu_cntn(grids, tenure_callables):
     return {"V": V, "d_aV": d_aV, "d_hV": d_hV}
 
 
-def _apply_twister(prev_sol, twister):
-    """Twister: previous arvl -> next vlu_cntn.
-
-    Identity map because state space (a, h) is period-invariant.
-    """
-    return prev_sol["tenure"]["arvl"]
-
-
 def recalibrate_period(period, calib_h):
     """Pure fn: return new period with updated calibration."""
     new_stages = {}
@@ -67,20 +78,15 @@ def recalibrate_period(period, calib_h):
     }
 
 
-def make_params_for_age(base_calibration, T):
-    """Age-specific calibration schedule."""
+def solve_period(stage_ops, vlu_cntn, grids, age,
+                 store_cntn=False, verbose=False):
+    """Solve one period in wave order.
 
-    def params_for_age(h):
-        calib = dict(base_calibration)
-        calib["age"] = T - h
-        return calib
-
-    return params_for_age
-
-
-def solve_period(stage_ops, vlu_cntn, grids, store_cntn=False,
-                 verbose=False):
-    """Solve one period in wave order."""
+    Parameters
+    ----------
+    age : int
+        Calendar age for this period (passed to tenure income transitions).
+    """
     t0 = time.perf_counter()
 
     A_keep, C_keep, V_keep, dVw_keep, phi_keep, keeper_egm = (
@@ -102,6 +108,7 @@ def solve_period(stage_ops, vlu_cntn, grids, store_cntn=False,
     vlu_dcsn, pol_dcsn = stage_ops["tenure"]["dcsn_mover"](
         vlu_cntn,
         grids,
+        age,
         A_keep,
         C_keep,
         V_keep,
@@ -120,7 +127,7 @@ def solve_period(stage_ops, vlu_cntn, grids, store_cntn=False,
     solve_time = time.perf_counter() - t0
     if verbose:
         print(
-            "  keeper: {:.1f}ms, adj: {:.1f}ms, discrete: {:.1f}ms".format(
+            "  keeper: {:.1f}ms, adj: {:.1f}ms, tenure_choice: {:.1f}ms".format(
                 t_keeper * 1000, t_adj * 1000, t_discrete * 1000
             )
         )
@@ -187,108 +194,232 @@ def solve_period(stage_ops, vlu_cntn, grids, store_cntn=False,
 
 
 def accrete_and_solve(
-    H, period_inst, inter_conn, params_for_age, cp, grids, callables,
-    settings,
-    method="FUES", store_cntn=False, verbose=False,
+    H, period_inst, calibration, grids,
+    store_cntn=False, verbose=False, progress=None,
 ):
-    """Accrete backward, solving each period."""
-    nest = {"periods": [], "twisters": [], "solutions": []}
+    """Accrete backward, solving each period.
 
-    keep_h_fn = callables["tenure"]["transitions"]["keep_h"]
+    Parameters
+    ----------
+    verbose : bool or str
+        ``True``: per-period header and sub-stage timings (default, unchanged).
+        ``False``: quiet.
+        ``'summary'``: no per-period output; one summary line at the end.
+    progress : str, optional
+        ``'bar'``: tqdm progress bar (requires ``tqdm``); suppresses per-period
+        text unless ``verbose`` is ``True`` (sub-stage timings still off during bar).
+    """
+    nest = {"periods": [], "solutions": []}
 
-    # Build age-invariant pieces once.
-    keeper_ops = {"dcsn_mover": make_keeper_ops(
-        callables["keeper_cons"], keep_h_fn, grids, settings)}
+    stage_ref = period_inst["stages"]["keeper_cons"]
+    T = int(stage_ref.settings["T"])
+    warmup = int(stage_ref.settings.get("warmup_periods", 3))
+
     condition_V, condition_V_HD = make_conditioners(grids["Pi"])
-    if method == "NEGM":
-        adjuster_ops = make_adjuster_negm_ops(
-            callables["adjuster_cons"], grids, settings)
+    vlu_cntn = None
+
+    # Callables are age-invariant (income transitions accept age as arg).
+    # Build once; reuse across all periods.
+    callables = make_callables(period_inst)
+
+    # Operators are also age-invariant — build once.
+    # Tenure dcsn_mover receives age as a runtime argument.
+    stages = period_inst["stages"]
+    for _sk in ("keeper_cons", "adjuster_cons", "tenure"):
+        stages[_sk].calibration["return_grids"] = store_cntn
+
+    keeper_ops = {"dcsn_mover": make_keeper_ops(
+        callables, grids, stages["keeper_cons"])}
+    adjuster_ops = make_adjuster_ops(
+        callables, grids, stages["adjuster_cons"])
+    tenure_dcsn, tenure_arvl, tenure_arvl_hd = make_tenure_ops(
+        callables, grids, stages["tenure"],
+        condition_V, condition_V_HD,
+    )
+    stage_ops = {
+        "keeper_cons": keeper_ops,
+        "adjuster_cons": adjuster_ops,
+        "tenure": {
+            "dcsn_mover": tenure_dcsn,
+            "arvl_mover": tenure_arvl,
+            "arvl_mover_hd": tenure_arvl_hd,
+        },
+    }
+
+    if verbose:
+        cal = stage_ref.calibration
+        sett = stage_ref.settings
+        ue_method = read_scheme_method(stages["adjuster_cons"], 'upper_envelope')
+        print(f"  Method: {ue_method}")
+        print(f"  Horizon: ages {int(cal['t0'])}–{T} ({H+1} periods)")
+        print(f"  Grids: n_a={len(grids['a'])}, n_h={len(grids['h'])}, "
+              f"n_w={len(grids['we'])}, N_wage={len(grids['z'])}")
+        print(f"  Params: beta={cal['beta']}, R={cal['R']}, "
+              f"tau={cal['tau']}, delta={cal['delta']}")
+        print(f"  Shocks: phi_w={cal['phi_w']}, sigma_w={cal['sigma_w']}, "
+              f"z_grid={grids['z']}")
+        print(f"  Solver: m_bar={sett['m_bar']}, root_eps={sett['root_eps']}, "
+              f"egm_n={sett['egm_n']}")
+
+    use_bar = progress == "bar"
+    if use_bar:
+        try:
+            from tqdm.auto import tqdm
+        except ImportError as exc:
+            raise ImportError(
+                "progress='bar' requires tqdm; install with pip install tqdm"
+            ) from exc
+        pbar = tqdm(range(H + 1), desc="Solving")
+        loop_iter = pbar
     else:
-        adjuster_ops = make_adjuster_ops(
-            callables["adjuster_cons"], grids, settings)
+        pbar = None
+        loop_iter = range(H + 1)
 
-    vlu_cntn = _terminal_vlu_cntn(grids, callables["tenure"])
+    show_period_header = verbose is True and not use_bar
+    period_timing_verbose = verbose is True and not use_bar
 
-    for h in range(H + 1):
-        age = cp.T - h
+    for h in loop_iter:
+        age = T - h
 
-        period_h = recalibrate_period(period_inst, params_for_age(h))
+        # Recalibrate period with age — this is the DDSL contract:
+        # each period carries its own calibration as source of truth.
+        calib_h = {**calibration, "age": age}
+        period_h = recalibrate_period(period_inst, calib_h)
         nest["periods"].append(period_h)
-        nest["twisters"].append(None if h == 0 else inter_conn)
 
-        if h > 0:
-            vlu_cntn = _apply_twister(nest["solutions"][h - 1], nest["twisters"][h])
+        if h == 0:
+            vlu_cntn = _terminal_vlu_cntn(grids, callables["tenure"])
+        else:
+            vlu_cntn = nest["solutions"][h - 1]["tenure"]["arvl"]
 
-        # Per-period income transitions (y_func bound to age)
-        y_func_h = make_y_func(cp, age)
-        income_trans_h = callables["tenure"]["make_income_transitions"](y_func_h)
-
-        tenure_dcsn, tenure_arvl, tenure_arvl_hd = make_tenure_ops(
-            callables["tenure"], income_trans_h, grids, settings,
-            condition_V, condition_V_HD,
-        )
-        stage_ops_h = {
-            "keeper_cons": keeper_ops,
-            "adjuster_cons": adjuster_ops,
-            "tenure": {
-                "dcsn_mover": tenure_dcsn,
-                "arvl_mover": tenure_arvl,
-                "arvl_mover_hd": tenure_arvl_hd,
-            },
-        }
-
-        sol = solve_period(stage_ops_h, vlu_cntn, grids,
-                           store_cntn=store_cntn, verbose=verbose)
+        if show_period_header:
+            print(f"  Solving age {age} (h={h})...")
+        sol = solve_period(stage_ops, vlu_cntn, grids, age,
+                           store_cntn=store_cntn, verbose=period_timing_verbose)
         sol["h"] = h
         sol["t"] = age
+        sol["callables"] = callables
         nest["solutions"].append(sol)
+
+        if pbar is not None:
+            steady = [s for s in nest["solutions"] if s["h"] > warmup]
+            if steady:
+                n = len(steady)
+                avg_k = sum(s["keeper_ms"] for s in steady) / n
+                avg_a = sum(s["adj_ms"] for s in steady) / n
+                pbar.set_postfix(
+                    age=age,
+                    avg_keeper_ms=f"{avg_k:.0f}",
+                    avg_adj_ms=f"{avg_a:.0f}",
+                )
+            else:
+                pbar.set_postfix(age=age, warmup=True)
+
+    if verbose == "summary":
+        sols = nest["solutions"]
+        nper = len(sols)
+        steady = [s for s in sols if s["h"] > warmup]
+        if not steady:
+            steady = sols
+        n_steady = len(steady)
+        if nper > 0:
+            total_s = sum(s["solve_time"] for s in sols)
+            mk = sum(s["keeper_ms"] for s in steady) / n_steady
+            maj = sum(s["adj_ms"] for s in steady) / n_steady
+            md = sum(s["discrete_ms"] for s in steady) / n_steady
+            print(
+                f"Backward induction: {nper} periods in {total_s:.2f}s "
+                f"(mean excl. {warmup} warmup: "
+                f"keeper {mk:.0f} ms, adj {maj:.0f} ms, "
+                f"tenure {md:.0f} ms)"
+            )
 
     return nest
 
 
+def precompile(syntax_dir='examples/durables2_0/syntax', method=None):
+    """Warm Numba JIT caches with a tiny solve (small grids, 2 periods).
+
+    Call once before timed solves to avoid JIT compilation overhead
+    in the measurement. All @njit dispatchers are compiled on the first
+    call; subsequent calls with any grid size reuse the cached machine code.
+    """
+    tiny_config = {'n_a': 10, 'n_h': 10, 'n_w': 10, 't0': 40, 'N_wage': 2}
+    solve(syntax_dir, method=method,
+          setting_overrides=tiny_config, verbose=False)
+
+
 def solve(
     syntax_dir,
-    method="FUES",
+    method=None,
+    method_overrides=None,
     calib_overrides=None,
-    config_overrides=None,
-    cp=None,
+    setting_overrides=None,
     grids=None,
-    callables=None,
-    settings=None,
     verbose=False,
+    progress=None,
 ):
-    """Full DDSL pipeline: load -> accrete+solve."""
+    """Full DDSL pipeline: load -> accrete+solve.
+
+    Parameters
+    ----------
+    method : str, optional
+        If given (e.g. ``\"NEGM\"``), applies to each target in
+        :data:`METHOD_SHORTCUT` before instantiation. If ``None``, YAML
+        defaults apply unless ``method_overrides`` is set.
+    method_overrides : dict, optional
+        ``{(stage, target, scheme): tag, ...}`` merged after the ``method``
+        shortcut expansion; passed to :func:`kikku.dynx.methods.override_methods`.
+    verbose : bool or str
+        ``True``: print waves (unless ``progress='bar'``) and per-period solve output.
+        ``False``: minimal.
+        ``'summary'``: final timing summary only from backward induction.
+    progress : str, optional
+        ``'bar'``: tqdm progress bar during accretion (see :func:`accrete_and_solve`).
+
+    Returns
+    -------
+    nest, grids
+    """
     syntax_dir = Path(syntax_dir)
 
+    # All stages share the same calibration and settings in this model.
+    # CLI overrides (--calib-override, --setting-override) apply to ALL stages
+    # because load_syntax merges calibration into every stage source.
     calibration, yaml_settings, stage_sources, period_template, inter_conn = load_syntax(
-        syntax_dir, calib_overrides, config_overrides
+        syntax_dir, calib_overrides, setting_overrides
     )
+    all_method_overrides = {}
+    if method is not None:
+        for target in METHOD_SHORTCUT:
+            all_method_overrides[target] = method
+    if method_overrides:
+        all_method_overrides.update(method_overrides)
+    if all_method_overrides:
+        stage_sources = override_methods(stage_sources, all_method_overrides)
     period_inst = instantiate_period(
         calibration, yaml_settings, stage_sources, period_template
     )
 
-    if cp is None:
-        cp = make_cp(calibration, yaml_settings)
     if grids is None:
-        grids = make_grids(cp)
-    if callables is None:
-        callables = make_callables(cp)
-    if settings is None:
-        settings = make_settings(cp)
+        grids = make_grids(calibration, yaml_settings)
+
+    # T, t0 are period-level calibration; any stage carries them after merge.
+    stage_ref = period_inst["stages"]["keeper_cons"]
+    T = int(stage_ref.settings["T"])
+    t0 = int(stage_ref.calibration["t0"])
 
     # Keep wave derivation for diagnostics.
     graph = period_to_graph(period_inst)
     waves = backward_paths(graph, inter_conn)
-    if verbose:
+    if verbose is True and progress != "bar":
         print(f"Waves: {waves}")
 
-    H = cp.T - cp.t0
+    H = T - t0
     store_cntn = bool(int(yaml_settings.get("store_cntn", 0)))
-    params_for_age = make_params_for_age(calibration, cp.T)
     nest = accrete_and_solve(
-        H, period_inst, inter_conn, params_for_age, cp, grids, callables,
-        settings,
-        method=method, store_cntn=store_cntn, verbose=verbose,
+        H, period_inst, calibration, grids,
+        store_cntn=store_cntn, verbose=verbose, progress=progress,
     )
 
     # Expose topology so the forward simulator uses the same graph
@@ -296,4 +427,4 @@ def solve(
     nest["graph"] = graph
     nest["inter_conn"] = inter_conn
 
-    return nest, cp, grids, callables, settings
+    return nest, grids

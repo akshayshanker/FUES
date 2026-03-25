@@ -16,13 +16,13 @@ over kikku's topology-derived wave ordering.  Operator composition
 T = I ∘ B is visible inline in solve_period.
 """
 
-import copy
 import numpy as np
 import time
 from pathlib import Path
 
 from kikku.dynx import period_to_graph, backward_paths
 from kikku.dynx import load_syntax, instantiate_period
+from kikku.dynx.methods import override_methods
 
 from .model import RetirementModel
 from .operators import make_retire_cons, make_work_cons, make_labour_mkt_decision
@@ -30,41 +30,38 @@ from .model import make_worker_egm_fns, make_retiree_egm_fns
 
 
 # ============================================================
+# Method shortcut (--method expands before instantiate_period)
+# ============================================================
+
+METHOD_SHORTCUT = [
+    ('work_cons', 'cntn_to_dcsn_mover', 'upper_envelope'),
+    ('retire_cons', 'cntn_to_dcsn_mover', 'upper_envelope'),
+    ('labour_mkt_decision', 'cntn_to_dcsn_mover', 'upper_envelope'),
+]
+
+
+# ============================================================
 # Syntax helpers
 # ============================================================
 
-def _read_ue_method(period):
-    """Extract the UE method tag from the work_cons stage's methods."""
-    stages = period["stages"] if "stages" in period else period
-    work = stages.get("work_cons")
-    if work and hasattr(work, "methods"):
-        mover = work.methods.get("cntn_to_dcsn_mover", {})
-        for scheme in mover.get("schemes", []):
-            if scheme.get("scheme") == "upper_envelope":
-                tag = scheme.get("method", {})
-                if isinstance(tag, dict):
-                    return tag.get("__yaml_tag__", "FUES")
-                return str(tag)
-    return "FUES"
+def read_scheme_method(stage, scheme_name,
+                       mover='cntn_to_dcsn_mover',
+                       default='FUES'):
+    """Read the method tag for a scheme from an instantiated stage.
 
-
-# ============================================================
-# Methodization override (re-binding, no mutation)
-# ============================================================
-
-def _override_ue_method(stage_sources, method):
-    """Return a copy of *stage_sources* with the UE method patched."""
-    patched = copy.deepcopy(stage_sources)
-    for src in patched.values():
-        methods = src.get("methods", {})
-        for entry in methods.get("methods", []):
-            for scheme in entry.get("schemes", []):
-                if scheme.get("scheme") == "upper_envelope":
-                    scheme["method"] = {
-                        "__yaml_tag__": method.upper(),
-                        "value": "",
-                    }
-    return patched
+    Inspects ``stage.methods[mover]['schemes']`` for a scheme
+    entry matching ``scheme_name`` and returns its ``__yaml_tag__``.
+    """
+    if not hasattr(stage, 'methods'):
+        return default
+    mover_dict = stage.methods.get(mover, {})
+    for scheme in mover_dict.get('schemes', []):
+        if scheme.get('scheme') == scheme_name:
+            tag = scheme.get('method', {})
+            if isinstance(tag, dict):
+                return tag.get('__yaml_tag__', default)
+            return str(tag)
+    return default
 
 
 # ============================================================
@@ -180,13 +177,14 @@ def solve_backward(T, model, stage_ops, waves):
 
 def solve_nest(syntax_dir, method='FUES',
                calib_overrides=None, config_overrides=None,
-               model=None, stage_ops=None, waves=None):
+               model=None, stage_ops=None, waves=None,
+               method_overrides=None):
     """Canonical pipeline: load → build → solve backward.
 
     Composition algebra::
 
         load_syntax → calibration, settings, sources, template
-        _override_ue_method(sources, method)
+        override_methods (shortcut + explicit overrides)
         instantiate_period → period
         period_to_graph → graph → backward_paths → waves
         RetirementModel(period) → model
@@ -202,8 +200,10 @@ def solve_nest(syntax_dir, method='FUES',
     ----------
     syntax_dir : str or Path
         Root syntax directory.
-    method : str
-        Upper-envelope method (FUES/DCEGM/RFC/CONSAV).
+    method : str or None
+        Upper-envelope method (FUES/DCEGM/RFC/CONSAV). Expanded to
+        ``METHOD_SHORTCUT`` before instantiation. If ``None``, only
+        ``method_overrides`` and YAML defaults apply.
     calib_overrides, config_overrides : dict, optional
         Sparse overrides.
     model : RetirementModel, optional
@@ -212,6 +212,9 @@ def solve_nest(syntax_dir, method='FUES',
         Reuse to skip JIT recompilation.
     waves : list[list[str]], optional
         Reuse to skip graph construction.
+    method_overrides : dict, optional
+        ``{(stage, target, scheme): tag, ...}`` merged after the
+        ``method`` shortcut; passed to ``override_methods``.
 
     Returns
     -------
@@ -227,7 +230,14 @@ def solve_nest(syntax_dir, method='FUES',
             period_template, inter_conn = load_syntax(
                 syntax_dir, calib_overrides, config_overrides,
             )
-        stage_sources = _override_ue_method(stage_sources, method)
+        all_method_overrides = {}
+        if method is not None:
+            for target in METHOD_SHORTCUT:
+                all_method_overrides[target] = method
+        if method_overrides:
+            all_method_overrides.update(method_overrides)
+        if all_method_overrides:
+            stage_sources = override_methods(stage_sources, all_method_overrides)
         period = instantiate_period(
             calibration, settings, stage_sources, period_template,
         )
@@ -236,7 +246,9 @@ def solve_nest(syntax_dir, method='FUES',
         if model is None:
             model = RetirementModel(period)
         if stage_ops is None:
-            ue = _read_ue_method(period) if method is None else method
+            stages_dict = period["stages"] if "stages" in period else period
+            work_stage = stages_dict["work_cons"]
+            ue = read_scheme_method(work_stage, 'upper_envelope')
             beta, R = model.beta, model.R
             delta, y = model.delta, model.y
             stage_ops = {

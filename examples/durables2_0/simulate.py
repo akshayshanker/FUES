@@ -1,22 +1,17 @@
-"""Forward simulation and Euler errors for durables2_0.
+"""Forward simulation and post-hoc Euler evaluation for durables2_0.
 
 Orchestrator — a thin combinator that composes:
 
-  1. **Stage forward operators** from ``horses/`` (same modules
-     that house the backward ops) into per-period operator
-     bundles.
+  1. **Stage forward operators** from ``horses/`` into per-period
+     bundles (pure simulation; no Euler side channels).
   2. **kikku.asva.simulate.simulate** for the topology-driven
      lifecycle walk.
   3. **Records-to-panels** transform for the output arrays.
 
-The period graph and inter-period connector come from ``nest``
-(stored by ``solve()``), so the forward simulator is guaranteed
-to use the same topology that was solved.
-
-Euler errors are computed inline inside each leaf stage's
-``dcsn_to_cntn`` and written to a pre-allocated panel via
-agent indices (``_idx``).  See ``horses/keeper_egm.py`` and
-``horses/adjuster_egm.py`` for the forward-operator construction.
+Euler errors are evaluated after simulation via
+:func:`evaluate_euler_c` and :func:`evaluate_euler_h` using the
+same scalar kernels as before (:func:`keeper_euler`,
+:func:`adjuster_euler`).
 """
 
 import numpy as np
@@ -26,10 +21,14 @@ from dcsmm.fues.helpers.math_funcs import interp_as_scalar
 
 from kikku.asva.simulate import simulate, draw_shocks
 
-from .callables import make_y_func
 from .horses.branching import make_tenure_forward
 from .horses.keeper_egm import make_keeper_forward
 from .horses.adjuster_egm import make_adjuster_forward
+
+
+def _base_stage(nest):
+    """First period in the accretion list (terminal age); shared period calibration."""
+    return nest["periods"][0]["stages"]["keeper_cons"]
 
 
 # ------------------------------------------------------------------
@@ -69,6 +68,7 @@ def keeper_euler(c, a_nxt, h_nxt, iz,
     n_z = len(z_vals)
 
     income_trans_next = edata_next['income_trans']
+    age_next = edata_next['age']
     adj_next = edata_next['adj']
     C_keep_next = edata_next['C_keep']
     C_adj_next = edata_next['C_adj']
@@ -79,10 +79,10 @@ def keeper_euler(c, a_nxt, h_nxt, iz,
         z2 = z_vals[iz2]
         d2 = _eval_adj(a_nxt, h_nxt, iz2, adj_next, UG)
         if d2 == 1:
-            w2 = income_trans_next['adj_w'](a_nxt, h_nxt, z2)
+            w2 = income_trans_next['adj_w'](a_nxt, h_nxt, z2, age_next)
             c2 = max(interp_as_scalar(we_grid, C_adj_next[iz2], w2), 1e-10)
         else:
-            w2 = income_trans_next['keep_w'](a_nxt, z2)
+            w2 = income_trans_next['keep_w'](a_nxt, z2, age_next)
             c2 = _eval_keeper_c(w2, h_nxt, iz2, C_keep_next, UG)
         rhs += prob * marginal_a(du_c(max(c2, 1e-10)))
 
@@ -110,65 +110,109 @@ def adjuster_euler(c, h_nxt, a_nxt, iz,
 # ------------------------------------------------------------------
 # Compile: nest solutions -> per-period forward operator bundles
 #
-# Two-pass:
-#   pass 1  collect Euler-lookahead data for every period
-#   pass 2  compose StageForward / BranchingForward per period
-#           binding edata[t+1] + euler_panel into each leaf stage
-#
-# The composition is:
 #   period[t] = tenure(D_t, trans_t)
-#               ∘ { keep -> keeper(C_t, edata[t+1])
-#                   adj  -> adjuster(C_t, H_t, edata[t+1]) }
+#               ∘ { keep -> keeper(C_t)
+#                   adj  -> adjuster(C_t, H_t) }
 # ------------------------------------------------------------------
 
-def build_period_pushforwards(nest, cp, grids, callables, settings, euler_panel):
-    """Per-period forward operator bundles with inline Euler.
-
-    Returns
-    -------
-    pushforward_by_t : dict[int, dict]
-    stage_solution_by_t : dict[int, dict]
-    """
+def build_period_pushforwards(nest, grids):
+    """Per-period forward operator bundles (pure simulation)."""
     sol_by_t = {sol['t']: sol for sol in nest['solutions']}
-    UG = grids['UGgrid_all']
-    we_grid = grids['we']
 
-    keep_h_fn = callables["tenure"]["transitions"]["keep_h"]
-
-    # --- pass 1: Euler lookahead data ---
-    stage_solution_by_t = {}
-    for t, sol in sol_by_t.items():
-        y_func_t = make_y_func(cp, age=t)
-        income_trans = callables["tenure"]["make_income_transitions"](y_func_t)
-        stage_solution_by_t[t] = {
-            'adj': sol['tenure']['dcsn']['adj'],
-            'C_keep': sol['keeper_cons']['dcsn']['c'],
-            'C_adj': sol['adjuster_cons']['dcsn']['c'],
-            'H_adj': sol['adjuster_cons']['dcsn']['h_choice'],
-            'd_hV_arvl': sol['tenure']['arvl']['d_hV'],
-            'income_trans': income_trans,
-        }
-
-    # --- pass 2: compose forward operators ---
     pushforward_by_t = {}
-    for t in stage_solution_by_t:
-        ed = stage_solution_by_t[t]
-        edata_next = stage_solution_by_t.get(t + 1)
+    for t, sol in sol_by_t.items():
+        c_t = sol["callables"]
+        period_stages = nest["periods"][sol["h"]]["stages"]
 
         pushforward_by_t[t] = {
             'tenure': make_tenure_forward(
-                ed['adj'], ed['income_trans'], keep_h_fn, grids, UG),
+                sol['tenure']['dcsn']['adj'], c_t, grids, t),
             'keeper_cons': make_keeper_forward(
-                ed['C_keep'], UG,
-                edata_next, grids, callables, settings,
-                euler_panel, t),
+                sol['keeper_cons']['dcsn']['c'], c_t, grids,
+                period_stages["keeper_cons"]),
             'adjuster_cons': make_adjuster_forward(
-                ed['C_adj'], ed['H_adj'], we_grid,
-                edata_next, grids, callables, settings,
-                euler_panel, t),
+                sol['adjuster_cons']['dcsn']['c'],
+                sol['adjuster_cons']['dcsn']['h_choice'],
+                c_t, grids, period_stages["adjuster_cons"]),
         }
 
-    return pushforward_by_t, stage_solution_by_t
+    return pushforward_by_t
+
+
+def _build_lookahead(sol_next):
+    """Next-period policy bundle for Euler kernels (post-hoc)."""
+    c_next = sol_next["callables"]
+    income_trans = {
+        "keep_w": c_next["tenure"]["transitions"]["keep_w"],
+        "adj_w": c_next["tenure"]["transitions"]["adj_w"],
+    }
+    return {
+        'adj': sol_next['tenure']['dcsn']['adj'],
+        'C_keep': sol_next['keeper_cons']['dcsn']['c'],
+        'C_adj': sol_next['adjuster_cons']['dcsn']['c'],
+        'H_adj': sol_next['adjuster_cons']['dcsn']['h_choice'],
+        'd_hV_arvl': sol_next['tenure']['arvl']['d_hV'],
+        'income_trans': income_trans,
+        'age': sol_next['t'],
+    }
+
+
+def evaluate_euler_c(sim_data, nest, grids):
+    """Consumption Euler error for all agents (log10 relative), shape (T, N)."""
+    T, N = sim_data['c'].shape
+    cal = _base_stage(nest).calibration
+    t0 = int(cal["t0"])
+    euler_c = np.full((T, N), np.nan)
+    sol_by_t = {sol['t']: sol for sol in nest['solutions']}
+
+    for t in range(t0, T - 1):
+        if t not in sol_by_t or (t + 1) not in sol_by_t:
+            continue
+        edata_next = _build_lookahead(sol_by_t[t + 1])
+        callables_t = sol_by_t[t]["callables"]
+
+        for i in range(N):
+            c_ti = sim_data['c'][t, i]
+            a_ti = sim_data['a_nxt'][t, i]
+            h_ti = sim_data['h_nxt'][t, i]
+            z_ti = int(sim_data['z_idx'][t, i])
+            if np.isnan(c_ti) or c_ti <= 0.1 or a_ti <= 0.1:
+                continue
+            euler_c[t, i] = keeper_euler(
+                c_ti, a_ti, h_ti, z_ti,
+                edata_next, grids, callables_t)
+
+    return euler_c
+
+
+def evaluate_euler_h(sim_data, nest, grids):
+    """Housing FOC error for adjusters only (log10 relative), shape (T, N)."""
+    T, N = sim_data['c'].shape
+    cal = _base_stage(nest).calibration
+    t0 = int(cal["t0"])
+    euler_h = np.full((T, N), np.nan)
+    sol_by_t = {sol['t']: sol for sol in nest['solutions']}
+
+    for t in range(t0, T - 1):
+        if t not in sol_by_t or (t + 1) not in sol_by_t:
+            continue
+        edata_next = _build_lookahead(sol_by_t[t + 1])
+        callables_t = sol_by_t[t]["callables"]
+
+        for i in range(N):
+            if sim_data['discrete'][t, i] != 1:
+                continue
+            c_ti = sim_data['c'][t, i]
+            a_ti = sim_data['a_nxt'][t, i]
+            h_ti = sim_data['h_nxt'][t, i]
+            z_ti = int(sim_data['z_idx'][t, i])
+            if np.isnan(c_ti) or c_ti <= 0.1 or a_ti <= 0.1:
+                continue
+            euler_h[t, i] = adjuster_euler(
+                c_ti, h_ti, a_ti, z_ti,
+                edata_next, grids, callables_t)
+
+    return euler_h
 
 
 # ------------------------------------------------------------------
@@ -200,10 +244,16 @@ def _make_markov_draw(grids):
 # no budget-constraint re-derivation needed.
 # ------------------------------------------------------------------
 
-def _records_to_panels(history, cp, N):
+def _records_to_panels(history, nest, N):
     """Reshape kikku history records into (T, N) lifecycle panels."""
-    T = cp.T
-    t0 = cp.t0
+    stage0 = _base_stage(nest)
+    cal = stage0.calibration
+    sett = stage0.settings
+    T = int(sett["T"])
+    t0 = int(cal["t0"])
+    R = float(cal["R"])
+    R_H = float(cal["R_H"])
+    delta = float(cal["delta"])
 
     a = np.full((T, N), np.nan)
     h = np.full((T, N), np.nan)
@@ -242,7 +292,7 @@ def _records_to_panels(history, cp, N):
         if 'c' in kc and np.any(keep):
             c[t, keep] = kc['c'][keep]
         if 'w_keep' in ks and np.any(keep):
-            y[t, keep] = ks['w_keep'][keep] - cp.R * a[t, keep]
+            y[t, keep] = ks['w_keep'][keep] - R * a[t, keep]
         if 'a_nxt' in kp and np.any(keep):
             a_nxt[t, keep] = kp['a_nxt'][keep]
         if 'h_nxt' in kp and np.any(keep):
@@ -256,8 +306,8 @@ def _records_to_panels(history, cp, N):
         if 'c' in ac and np.any(adj):
             c[t, adj] = ac['c'][adj]
         if 'w_adj' in ast and np.any(adj):
-            y[t, adj] = (ast['w_adj'][adj] - cp.R * a[t, adj]
-                         - cp.R_H * (1 - cp.delta) * h[t, adj])
+            y[t, adj] = (ast['w_adj'][adj] - R * a[t, adj]
+                         - R_H * (1 - delta) * h[t, adj])
         if 'a_nxt' in ap and np.any(adj):
             a_nxt[t, adj] = ap['a_nxt'][adj]
         if 'h_nxt' in ap and np.any(adj):
@@ -274,10 +324,12 @@ def _records_to_panels(history, cp, N):
 # Utility stats
 # ------------------------------------------------------------------
 
-def _compute_utility_stats(sim_data, cp, callables):
+def _compute_utility_stats(sim_data, nest, callables):
     """NPV utility and per-branch period counts."""
     T, N = sim_data['a'].shape
-    t0 = cp.t0
+    cal = _base_stage(nest).calibration
+    t0 = int(cal["t0"])
+    beta = float(cal["beta"])
     # chi is captured inside u_fn; if chi > 0, adjuster needs its own u_adj callable
     u_fn = callables['keeper_cons']['u']
 
@@ -288,7 +340,7 @@ def _compute_utility_stats(sim_data, cp, callables):
     n_keep = np.zeros(N, dtype=np.int64)
 
     for t in range(t0, T):
-        discount = cp.beta ** (t - t0)
+        discount = beta ** (t - t0)
         for i in range(N):
             ci = sim_data['c'][t, i]
             hi = sim_data['h_nxt'][t, i]
@@ -316,7 +368,7 @@ def _compute_utility_stats(sim_data, cp, callables):
 # I/O boundary: initial conditions
 # ------------------------------------------------------------------
 
-def make_initial_particles(N, cp, grids, seed=42,
+def make_initial_particles(N, grids, nest, seed=42,
                            use_empirical=False,
                            dispersion=0.0, gender='male'):
     """Construct initial particle dict (I/O boundary).
@@ -324,7 +376,14 @@ def make_initial_particles(N, cp, grids, seed=42,
     Returns ``{'a', 'h', 'z_idx', '_idx'}`` clamped to grid bounds.
     """
     n_z = len(grids['z'])
-    b, gA, gH = cp.b, cp.grid_max_A, cp.grid_max_H
+    stage0 = _base_stage(nest)
+    cal = stage0.calibration
+    sett = stage0.settings
+    b = float(sett["b"])
+    gA = float(sett["a_max"])
+    gH = float(sett["h_max"])
+    t0 = int(cal["t0"])
+    normalisation = float(sett["normalisation"])
 
     rng = np.random.default_rng(seed + 1)
     z_idx = rng.choice(n_z, size=N).astype(np.int64)
@@ -334,9 +393,8 @@ def make_initial_particles(N, cp, grids, seed=42,
             from examples.durables.init_conditions import (
                 initialize_simulation,
             )
-            normalisation = getattr(cp, 'normalisation', 1.0)
             init = initialize_simulation(
-                N, cp.t0, gender=gender,
+                N, t0, gender=gender,
                 normalisation=normalisation,
                 dispersion=dispersion, seed=seed)
             a = init['a_init']
@@ -363,24 +421,24 @@ def make_initial_particles(N, cp, grids, seed=42,
 #
 # Composition:
 #   initial_particles
-#     -> build_period_pushforwards(nest, ..., euler_panel)  [stage ops]
+#     -> build_period_pushforwards  [stage ops]
 #     -> simulate(graph, twister, pushforward_by_t, ...)   [kikku]
 #     -> _records_to_panels(history)                  [reshape]
 #     -> _compute_utility_stats(panels)               [aggregate]
 # ------------------------------------------------------------------
 
-def simulate_and_euler(nest, cp, grids, callables, settings,
+def simulate_lifecycle(nest, grids,
                        N=10000, seed=42,
                        use_empirical_init=False,
                        init_dispersion=0.0, init_gender='male'):
-    """Forward-simulate and compute Euler errors.
+    """Forward-simulate the lifecycle (no Euler; use evaluate_euler_* post-hoc).
 
     Parameters
     ----------
     nest : dict
         Solved nest from ``solve()``.  Must contain ``'graph'``
-        and ``'inter_conn'``.
-    cp, grids, callables, settings : from ``solve()``
+        and ``'inter_conn'``. Each solution entry carries ``'callables'``.
+    grids : dict
     N : int
     seed : int
     use_empirical_init, init_dispersion, init_gender :
@@ -388,10 +446,13 @@ def simulate_and_euler(nest, cp, grids, callables, settings,
 
     Returns
     -------
-    euler : ndarray(T, N)
     sim_data : dict
+        ``(T, N)`` panels including ``c``, ``a_nxt``, ``h_nxt``,
+        ``z_idx``, ``discrete``, utility aggregates, etc.
     """
-    T, t0, T_end = cp.T, cp.t0, cp.T - 1
+    stage0 = _base_stage(nest)
+    t0 = int(stage0.calibration["t0"])
+    T_end = int(stage0.settings["T"]) - 1
 
     # topology from the solved nest
     graph = nest['graph']
@@ -400,12 +461,7 @@ def simulate_and_euler(nest, cp, grids, callables, settings,
         {k: v for d in ic for k, v in d.items()}
         if isinstance(ic, list) else dict(ic or {}))
 
-    # Euler side-channel
-    euler_panel = np.full((T, N), np.nan)
-
-    # compose per-period forward operators (horses/)
-    pushforward_by_t, _ = build_period_pushforwards(
-        nest, cp, grids, callables, settings, euler_panel)
+    pushforward_by_t = build_period_pushforwards(nest, grids)
 
     # exogenous shocks
     markov_draw = _make_markov_draw(grids)
@@ -416,7 +472,7 @@ def simulate_and_euler(nest, cp, grids, callables, settings,
 
     # I/O boundary: initial conditions
     particles = make_initial_particles(
-        N, cp, grids, seed=seed,
+        N, grids, nest, seed=seed,
         use_empirical=use_empirical_init,
         dispersion=init_dispersion, gender=init_gender)
 
@@ -429,7 +485,8 @@ def simulate_and_euler(nest, cp, grids, callables, settings,
         t0=t0, T_end=T_end, draws=draws)
 
     # records -> panels -> utility stats
-    sim_data = _records_to_panels(history, cp, N)
-    sim_data.update(_compute_utility_stats(sim_data, cp, callables))
+    sim_data = _records_to_panels(history, nest, N)
+    sim_data.update(_compute_utility_stats(
+        sim_data, nest, nest["solutions"][0]["callables"]))
 
-    return euler_panel, sim_data
+    return sim_data

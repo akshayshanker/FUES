@@ -5,3 +5,6 @@ methods:
     schemes:
       - scheme: branching_aggregator
         method: !max
+
+      - scheme: upper_envelope
+        method: !FUES

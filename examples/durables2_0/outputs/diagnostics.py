@@ -59,15 +59,17 @@ def get_policy(nest, key, stage='keeper_cons', perch='dcsn'):
     }
 
 
-def get_timing(nest, warmup=3):
+def get_timing(nest, warmup=None):
     """Mean timing across periods, skipping initial warmup.
 
     Parameters
     ----------
     nest : dict
         Solved nest.
-    warmup : int
+    warmup : int, optional
         Number of initial backward periods to skip (JIT warmup).
+        If None, reads ``warmup_periods`` from the stage settings
+        (default 3 if not set).
 
     Returns
     -------
@@ -75,6 +77,9 @@ def get_timing(nest, warmup=3):
         ``{'solve_time', 'keeper_ms', 'adj_ms', 'discrete_ms'}``
         as mean values in the appropriate units.
     """
+    if warmup is None:
+        stage = nest["periods"][0]["stages"]["keeper_cons"]
+        warmup = int(stage.settings.get("warmup_periods", 3))
     sols = [s for s in nest['solutions'] if s['h'] > warmup]
     if not sols:
         sols = nest['solutions']

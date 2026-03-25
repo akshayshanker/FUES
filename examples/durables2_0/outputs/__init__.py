@@ -10,12 +10,21 @@ from .diagnostics import (
     consumption_deviation,
 )
 from .plots import (
+    setup_nb_style,
+    nb_plot_policies_comparison,
+    nb_plot_keeper_ages,
+    nb_plot_adjuster_comparison,
+    nb_plot_adjuster_egm,
     plot_policies,
     plot_grids,
     plot_lifecycle,
+    plot_euler_histogram,
 )
 from .tables import (
+    format_euler_detail,
     generate_comparison_table,
+    generate_sweep_table,
+    write_euler_detail,
 )
 
 __all__ = [
@@ -26,8 +35,13 @@ __all__ = [
     "compute_euler_stats",
     "print_euler_stats",
     "consumption_deviation",
+    "setup_nb_style",
     "plot_policies",
     "plot_grids",
     "plot_lifecycle",
+    "plot_euler_histogram",
+    "format_euler_detail",
     "generate_comparison_table",
+    "generate_sweep_table",
+    "write_euler_detail",
 ]

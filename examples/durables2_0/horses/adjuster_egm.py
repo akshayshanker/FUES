@@ -12,7 +12,7 @@ YAML sub-equations implemented:
 """
 
 import numpy as np
-from numba import njit
+from numba import njit, prange
 from dcsmm.fues import FUES_jit
 from dcsmm.fues.fues_v0dev import uniqueEG
 from dcsmm.fues.fues_v0_2dev import (
@@ -27,42 +27,214 @@ from dcsmm.fues.helpers.math_funcs import (
     correct_jumps1d_arr,
 )
 from kikku.asva.numerics import clamp_value, clamp_policy
+from interpolation.splines import eval_linear
+from interpolation.splines import extrap_options as xto
+from consav import golden_section_search
 
 
-def make_adjuster_ops(callables, grids, settings):
-    """Build age-invariant adjuster dcsn_mover.
+def _make_negm_adjuster(callables, grids, stage):
+    """NEGM path: nested optimisation (golden-section over h, keeper for c)."""
+    adj = callables["adjuster_cons"]
+    cal = stage.calibration
+    sett = stage.settings
+    b = float(cal["b"])
+    grid_max_A = float(sett["a_max"])
+    grid_max_H = float(sett["h_max"])
+    UGgrid_all = grids["UGgrid_all"]
+
+    u_fn = adj["u"]
+    du_c_fn = adj["d_c_u"]
+    bellman_obj = adj["bellman_obj"]
+    housing_cost = adj["housing_cost"]
+    fac_housing = float(housing_cost(1.0))
+
+    _keeper_c = [None]
+    _keeper_a = [None]
+
+    def inject_keeper(C_keep, A_keep):
+        _keeper_c[0] = C_keep
+        _keeper_a[0] = A_keep
+
+    @njit
+    def _obj_interior(h_prime, wealth, i_z, V_cntn, keeper_c_iz):
+        w_residual = wealth - housing_cost(h_prime)
+
+        if w_residual <= 0 or h_prime <= 0 or h_prime > grid_max_H:
+            return -np.inf
+        if w_residual > grid_max_A:
+            return -np.inf
+
+        pt = np.array([w_residual, h_prime])
+        c_keeper = eval_linear(UGgrid_all, keeper_c_iz, pt, xto.LINEAR)
+
+        if c_keeper <= 0 or c_keeper > w_residual:
+            return -np.inf
+
+        a_prime = max(b, w_residual - c_keeper)
+        if a_prime > grid_max_A:
+            return -np.inf
+
+        pt_v = np.array([a_prime, h_prime])
+        Ev = eval_linear(UGgrid_all, V_cntn[i_z], pt_v, xto.LINEAR)
+
+        return bellman_obj(u_fn(c_keeper, h_prime), Ev)
+
+    @njit
+    def _obj_interior_neg(h_prime, wealth, i_z, V_cntn, keeper_c_iz):
+        return -_obj_interior(h_prime, wealth, i_z, V_cntn, keeper_c_iz)
+
+    @njit
+    def _obj_boundary(h_prime, wealth, i_z, V_cntn, keeper_c_iz):
+        w_residual = wealth - housing_cost(h_prime)
+
+        if w_residual <= 0 or h_prime < b or h_prime > grid_max_H:
+            return -np.inf
+
+        c_val = w_residual - b
+        if c_val <= 0:
+            return -np.inf
+
+        pt = np.array([b, h_prime])
+        Ev = eval_linear(UGgrid_all, V_cntn[i_z], pt, xto.LINEAR)
+
+        return bellman_obj(u_fn(c_val, h_prime), Ev)
+
+    @njit
+    def _obj_boundary_neg(h_prime, wealth, i_z, V_cntn, keeper_c_iz):
+        return -_obj_boundary(h_prime, wealth, i_z, V_cntn, keeper_c_iz)
+
+    @njit
+    def _gs_max(obj, obj_neg, lo, hi, args, n_sections=1, xtol=1e-6):
+        if hi - lo < xtol:
+            return lo, obj(lo, *args)
+
+        x_opts = np.zeros(n_sections)
+        vals = np.full(n_sections, -1e250)
+
+        section_w = (hi - lo) / n_sections
+        for i in range(n_sections):
+            s_lo = lo + i * section_w
+            s_hi = lo + (i + 1) * section_w
+            if s_hi - s_lo < xtol:
+                continue
+            x_opt = golden_section_search.optimizer(
+                obj_neg, s_lo, s_hi, args=args, tol=xtol)
+            x_opts[i] = x_opt
+            vals[i] = obj(x_opt, *args)
+
+        best_idx = 0
+        best_val = vals[0]
+        for i in range(1, n_sections):
+            if vals[i] > best_val:
+                best_val = vals[i]
+                best_idx = i
+
+        if best_val < -1e200:
+            mid = (lo + hi) / 2.0
+            return mid, obj(mid, *args)
+
+        return x_opts[best_idx], best_val
+
+    def dcsn_mover(vlu_cntn, grids):
+        V_cntn = vlu_cntn["V"]
+        we_grid = grids["we"]
+        z_vals = grids["z"]
+        n_z = len(z_vals)
+        n_w = len(we_grid)
+
+        keeper_c = _keeper_c[0]
+        keeper_a = _keeper_a[0]
+        if keeper_c is None:
+            raise RuntimeError(
+                "inject_keeper() must be called before NEGM adjuster")
+
+        a_nxt = np.empty((n_z, n_w))
+        c = np.empty((n_z, n_w))
+        h_choice = np.empty((n_z, n_w))
+        V = np.empty((n_z, n_w))
+
+        for iw in range(n_w):
+            wealth = we_grid[iw]
+            for iz in range(n_z):
+                h_lo = b
+                h_hi = min(wealth / fac_housing + b, grid_max_H)
+
+                args = (wealth, iz, V_cntn, keeper_c[iz])
+
+                h_star, v_star = _gs_max(
+                    _obj_interior, _obj_interior_neg,
+                    h_lo, h_hi, args, n_sections=1, xtol=1e-6)
+
+                h_bound, v_bound = _gs_max(
+                    _obj_boundary, _obj_boundary_neg,
+                    h_lo, h_hi, args, n_sections=1, xtol=1e-6)
+
+                if v_bound > v_star:
+                    h_opt = h_bound
+                    w_res = wealth - housing_cost(h_opt)
+                    a_nxt[iz, iw] = b
+                    c[iz, iw] = max(1e-10, w_res - b)
+                    V[iz, iw] = v_bound
+                else:
+                    h_opt = h_star
+                    w_res = wealth - housing_cost(h_opt)
+                    pt = np.array([w_res, h_opt])
+                    a_val = eval_linear(
+                        UGgrid_all, keeper_a[iz], pt, xto.LINEAR)
+                    a_nxt[iz, iw] = min(max(a_val, b), grid_max_A * 2)
+                    c[iz, iw] = max(1e-10, w_res - a_nxt[iz, iw])
+                    V[iz, iw] = v_star
+
+                h_choice[iz, iw] = min(max(h_opt, b), grid_max_H * 2)
+
+        d_wV = np.empty((n_z, n_w))
+        for iz in range(n_z):
+            for iw in range(n_w):
+                d_wV[iz, iw] = du_c_fn(c[iz, iw])
+
+        return a_nxt, c, h_choice, V, d_wV, None
+
+    return {"dcsn_mover": dcsn_mover, "inject_keeper": inject_keeper}
+
+
+def _make_egm_adjuster(callables, grids, stage):
+    """EGM + FUES path for adjuster ``dcsn_mover``.
 
     Parameters
     ----------
     callables : dict
-        adjuster_cons stage callables.
+        Full per-period callables; uses ``adjuster_cons``.
     grids : dict
-    settings : dict
+    stage : dolo.compiler.model.SymbolicModel
+        Dolo+ stage.
 
     Returns
     -------
     dict
         ``{'dcsn_mover': callable}``
     """
-    b = settings["b"]
-    m_bar = settings["m_bar"]
-    grid_max_A = settings["grid_max_A"]
-    grid_max_H = settings["grid_max_H"]
-    return_grids = settings["return_grids"]
-    root_eps = settings["root_eps"]
-    egm_n = settings["egm_n"]
+    adj = callables["adjuster_cons"]
+    cal = stage.calibration
+    sett = stage.settings
+    b = float(cal["b"])
+    m_bar = float(sett["m_bar"])
+    grid_max_A = float(sett["a_max"])
+    grid_max_H = float(sett["h_max"])
+    return_grids = cal.get("return_grids", False)
+    root_eps = float(sett["root_eps"])
+    egm_n = int(sett["egm_n"])
 
     z_vals = grids["z"]
     a_grid = grids["a"]
     h_choice_grid = grids["h_choice"]
 
-    u_fn = callables["u"]
-    du_c_fn = callables["d_c_u"]
-    du_h_fn = callables["d_h_u"]
-    bellman_discount = callables["bellman_discount"]
-    housing_cost = callables["housing_cost"]
-    invEuler_foc_h_residual = callables["invEuler_foc_h_residual"]
-    invEuler_foc_h_c = callables["invEuler_foc_h_c"]
+    u_fn = adj["u"]
+    du_c_fn = adj["d_c_u"]
+    du_h_fn = adj["d_h_u"]
+    bellman_discount = adj["bellman_discount"]
+    housing_cost = adj["housing_cost"]
+    invEuler_foc_h_residual = adj["invEuler_foc_h_residual"]
+    invEuler_foc_h_c = adj["invEuler_foc_h_c"]
     fac_housing = float(housing_cost(1.0))
 
     # ================================================================
@@ -89,6 +261,7 @@ def make_adjuster_ops(callables, grids, settings):
         grid_range = a_grid[-1] - a_grid[0]
         avg_spacing = grid_range / (n_a - 1)
 
+        # root_eps from settings: 0 = full grid (exact), >0 = coarse scan
         if root_eps > avg_spacing:
             step = int(root_eps / avg_spacing)
             n_samples = (n_a - 1) // step + 1
@@ -104,6 +277,7 @@ def make_adjuster_ops(callables, grids, settings):
                 resid, sample_grid, egm_n, 0.0
             )
         else:
+            # Full grid: exact piecewise-linear roots (root_eps=0 recommended)
             resid = np.empty(n_a)
             for j in range(n_a):
                 resid[j] = invEuler_foc_h_residual(
@@ -238,9 +412,9 @@ def make_adjuster_ops(callables, grids, settings):
 
             m_clean, v_clean, h_clean, a_clean, _ = FUES_jit(
                 m_s, v_s, h_s, a_s, c_s,
-                m_bar, 5,
+                m_bar, 10,
                 False, 0.0,
-                False, True, False, True,
+                False, True, True, True,
                 _FUES_EPS_D, _FUES_EPS_SEP, 0.05,
                 _FUES_PAR_GUARD,
             )
@@ -326,30 +500,35 @@ def make_adjuster_ops(callables, grids, settings):
     return {"dcsn_mover": dcsn_mover}
 
 
+def make_adjuster_ops(callables, grids, stage):
+    """Build adjuster ``dcsn_mover``; reads ``upper_envelope`` method from stage."""
+    from ..solve import read_scheme_method
+
+    ue_method = read_scheme_method(stage, 'upper_envelope')
+    if ue_method == 'NEGM':
+        return _make_negm_adjuster(callables, grids, stage)
+    return _make_egm_adjuster(callables, grids, stage)
+
+
 # ------------------------------------------------------------------
 # Forward (simulation) operator
 # ------------------------------------------------------------------
 
-def make_adjuster_forward(C_adj_t, H_adj_t, we_grid,
-                          edata_next, grids, callables, settings,
-                          euler_panel, t_val):
-    """StageForward for adjuster_cons with inline Euler.
+def make_adjuster_forward(C_adj_t, H_adj_t, callables, grids, stage):
+    """StageForward for adjuster_cons (pure simulation, no Euler).
 
     Composes: arvl_to_dcsn (identity) -> policy (C, H interp)
-    -> dcsn_to_cntn (budget constraint + Euler side-channel).
-
-    Euler values are written to ``euler_panel[t_val, idx]``
-    via the ``_idx`` side-channel, NOT emitted in poststates.
+    -> dcsn_to_cntn (budget constraint).
     """
     from kikku.asva.simulate import StageForward
     from dcsmm.fues.helpers.math_funcs import interp_as_scalar
-    from ..simulate import adjuster_euler
 
-    b = settings["b"]
-    gA = settings["grid_max_A"]
-    gH = settings["grid_max_H"]
-    housing_cost_fn = callables["adjuster_cons"]["housing_cost"]
-    fac_housing = float(housing_cost_fn(1.0))
+    we_grid = grids["we"]
+    fac_housing = float(callables["adjuster_cons"]["housing_cost"](1.0))
+    sett = stage.settings
+    b = float(sett["b"])
+    gA = float(sett["a_max"])
+    gH = float(sett["h_max"])
 
     def arvl_to_dcsn(particles, shocks):
         return particles
@@ -377,14 +556,6 @@ def make_adjuster_forward(C_adj_t, H_adj_t, we_grid,
         h_nxt = np.clip(hc, b, gH)
 
         idx = particles.get('_idx')
-        if edata_next is not None and idx is not None:
-            for i in range(N):
-                ci, ai, hi = c[i], a_nxt[i], h_nxt[i]
-                if ci > 0.1 and ai > 0.1:
-                    euler_panel[t_val, int(idx[i])] = adjuster_euler(
-                        ci, hi, ai, int(z_idx[i]),
-                        edata_next, grids, callables)
-
         out = {'a_nxt': a_nxt, 'h_nxt': h_nxt,
                'z_idx': z_idx.copy()}
         if idx is not None:

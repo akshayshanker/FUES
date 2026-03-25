@@ -36,6 +36,12 @@ symbols:
     d_{c}u: 'c -> alpha * c^(-gamma_c)'
     d_{h}u: 'h -> (1 - alpha) * kappa^(1 - gamma_h) * h^(-gamma_h)'
 
+  settings:
+    m_bar: '@in R+'
+    n_w: '@in N+'
+    w_min: '@in R+'
+    w_max: '@in R+'
+
   parameters:
     alpha: '@in (0,1)'
     beta: '@in (0,1)'

@@ -6,41 +6,189 @@ arvl_mover: E_z conditioning.
 """
 
 import numpy as np
+from numba import njit
 from interpolation.splines import eval_linear
 from interpolation.splines import extrap_options as xto
 from dcsmm.fues.helpers.math_funcs import interp_as_scalar
-from kikku.asva.numerics import clamp_scalar as _clamp
 
 
-def make_tenure_ops(callables, income_transitions, grids, settings,
+@njit(cache=True)
+def _tenure_clamp_scalar(val, min_val, max_val, nan_replacement):
+    """Match kikku ``clamp_scalar`` (NaN/inf handling) for tenure kernel."""
+    if np.isnan(val):
+        return nan_replacement
+    if np.isinf(val):
+        return max_val if val > 0 else min_val
+    if val < min_val:
+        return min_val
+    if val > max_val:
+        return max_val
+    return val
+
+
+@njit
+def _tenure_dcsn_kernel(
+    z_vals,
+    a_grid,
+    h_grid,
+    h_keep,
+    we_grid,
+    V_cntn,
+    Vkeeper,
+    dVw_keeper,
+    phi_keeper,
+    Aadj,
+    Hadj,
+    dVw_adj,
+    UGgrid_all,
+    b,
+    age,
+    g_keep_w,
+    g_adj_w,
+    u_fn,
+    bellman_obj_fn,
+    housing_cost_fn,
+    marginal_a_fn,
+    marginal_h_keep_fn,
+    marginal_h_adj_fn,
+):
+    n_z = z_vals.shape[0]
+    n_a = a_grid.shape[0]
+    n_h = h_grid.shape[0]
+
+    V_out = np.empty((n_z, n_a, n_h))
+    adj_out = np.empty((n_z, n_a, n_h))
+    dV_a_out = np.empty((n_z, n_a, n_h))
+    dV_h_out = np.empty((n_z, n_a, n_h))
+
+    for iz in range(n_z):
+        z = z_vals[iz]
+        for ia in range(n_a):
+            a = a_grid[ia]
+            w_k = g_keep_w(a, z, age)
+            for ih in range(n_h):
+                h = h_grid[ih]
+
+                v_k = _tenure_clamp_scalar(
+                    interp_as_scalar(a_grid, Vkeeper[iz, :, ih], w_k),
+                    -1e10,
+                    1e10,
+                    -1e10,
+                )
+
+                w_adj = g_adj_w(a, h, z, age)
+                a_a = _tenure_clamp_scalar(
+                    interp_as_scalar(we_grid, Aadj[iz], w_adj),
+                    b,
+                    1e10,
+                    b,
+                )
+                h_a = _tenure_clamp_scalar(
+                    interp_as_scalar(we_grid, Hadj[iz], w_adj),
+                    b,
+                    1e10,
+                    b,
+                )
+                c_a = _tenure_clamp_scalar(
+                    w_adj - a_a - housing_cost_fn(h_a),
+                    1e-10,
+                    1e10,
+                    1e-10,
+                )
+                pts = np.empty(2, dtype=np.float64)
+                pts[0] = a_a
+                pts[1] = h_a
+                v_a = bellman_obj_fn(
+                    u_fn(c_a, h_a),
+                    eval_linear(UGgrid_all, V_cntn[iz], pts, xto.LINEAR),
+                )
+
+                adj = 1.0 if v_a >= v_k else 0.0
+                V_out[iz, ia, ih] = adj * v_a + (1.0 - adj) * v_k
+                adj_out[iz, ia, ih] = adj
+
+                dvw_k = interp_as_scalar(a_grid, dVw_keeper[iz, :, ih], w_k)
+                dvw_a = interp_as_scalar(we_grid, dVw_adj[iz], w_adj)
+                pk = interp_as_scalar(a_grid, phi_keeper[iz, :, ih], w_k)
+
+                dV_a_out[iz, ia, ih] = marginal_a_fn(
+                    adj * dvw_a + (1.0 - adj) * dvw_k
+                )
+                dV_h_out[iz, ia, ih] = (
+                    adj * marginal_h_adj_fn(dvw_a)
+                    + (1.0 - adj) * marginal_h_keep_fn(pk)
+                )
+
+    return V_out, adj_out, dV_a_out, dV_h_out
+
+
+@njit(cache=True)
+def _branch_policy_adj_vals(UG, adj_t, a, h, z_idx):
+    N = a.shape[0]
+    out = np.empty(N, dtype=np.float64)
+    for i in range(N):
+        pt = np.empty(2, dtype=np.float64)
+        pt[0] = a[i]
+        pt[1] = h[i]
+        iz = int(z_idx[i])
+        out[i] = eval_linear(UG, adj_t[iz], pt, xto.LINEAR)
+    return out
+
+
+@njit
+def _dcsn_to_cntn_keep_kernel(a, h, z_idx, z_vals, age, keep_w, keep_h):
+    N = a.shape[0]
+    w = np.empty(N, dtype=np.float64)
+    hk = np.empty(N, dtype=np.float64)
+    for i in range(N):
+        iz = int(z_idx[i])
+        z = z_vals[iz]
+        w[i] = keep_w(a[i], z, age)
+        hk[i] = keep_h(h[i])
+    return w, hk
+
+
+@njit
+def _dcsn_to_cntn_adj_kernel(a, h, z_idx, z_vals, age, adj_w):
+    N = a.shape[0]
+    w = np.empty(N, dtype=np.float64)
+    for i in range(N):
+        iz = int(z_idx[i])
+        z = z_vals[iz]
+        w[i] = adj_w(a[i], h[i], z, age)
+    return w
+
+
+def make_tenure_ops(callables, grids, stage,
                     condition_V, condition_V_HD):
     """Build tenure operators.
 
     Parameters
     ----------
     callables : dict
-        Stage dict for tenure.
-    income_transitions : dict
-        ``{"keep_w": ..., "adj_w": ...}`` from make_income_transitions.
+        Full per-period callables; uses ``tenure`` and its ``transitions``.
     grids : dict
-    settings : dict
+    stage : dolo.compiler.model.SymbolicModel
+        Dolo+ stage.
     condition_V, condition_V_HD : callable
         E_z conditioning.
     """
-    b = settings["b"]
-    u_fn = callables["u"]
-    bellman_obj_fn = callables["bellman_obj"]
-    housing_cost_fn = callables["housing_cost"]
-    marginal_a_fn = callables["marginalBellman_d_a"]
-    marginal_h_keep_fn = callables["marginalBellman_d_h_keep"]
-    marginal_h_adj_fn = callables["marginalBellman_d_h_adj"]
+    tenure = callables["tenure"]
+    income_transitions = tenure["transitions"]
+    b = float(stage.calibration["b"])
+    u_fn = tenure["u"]
+    bellman_obj_fn = tenure["bellman_obj"]
+    housing_cost_fn = tenure["housing_cost"]
+    marginal_a_fn = tenure["marginalBellman_d_a"]
+    marginal_h_keep_fn = tenure["marginalBellman_d_h_keep"]
+    marginal_h_adj_fn = tenure["marginalBellman_d_h_adj"]
     g_keep_w = income_transitions["keep_w"]
-    g_keep_h = callables["transitions"]["keep_h"]
+    g_keep_h = income_transitions["keep_h"]
     g_adj_w = income_transitions["adj_w"]
     h_grid = grids["h"]
-    h_keep = np.array([g_keep_h(hv) for hv in h_grid])
+    h_keep = np.array([g_keep_h(hv) for hv in h_grid], dtype=np.float64)
 
-    def dcsn_mover(vlu_cntn, grids,
+    def dcsn_mover(vlu_cntn, grids, age,
                    Akeeper, Ckeeper, Vkeeper,
                    dVw_keeper, phi_keeper,
                    Aadj, Cadj, Hadj, Vadj, dVw_adj):
@@ -51,89 +199,52 @@ def make_tenure_ops(callables, income_transitions, grids, settings,
         Computes branch transitions, interpolates at
         transition points, takes max, chain rule.
         """
-        z_vals = grids["z"]
-        a_grid = grids["a"]
-        we_grid = grids["we"]
+        z_vals = np.asarray(grids["z"], dtype=np.float64)
+        a_grid = np.asarray(grids["a"], dtype=np.float64)
+        we_grid = np.asarray(grids["we"], dtype=np.float64)
         UGgrid_all = grids["UGgrid_all"]
-        n_z = len(z_vals)
-        n_a = len(a_grid)
-        n_h = len(h_grid)
+        h_grid_loc = np.asarray(h_grid, dtype=np.float64)
 
-        V = vlu_cntn['V']
+        V = vlu_cntn["V"]
 
-        V_out = np.empty((n_z, n_a, n_h))
-        adj_out = np.empty((n_z, n_a, n_h))
-        dV_a_out = np.empty((n_z, n_a, n_h))
-        dV_h_out = np.empty((n_z, n_a, n_h))
-
-        for iz in range(n_z):
-            z = z_vals[iz]
-            for ia in range(n_a):
-                a = a_grid[ia]
-                w_k = g_keep_w(a, z)
-
-                for ih in range(n_h):
-                    h = h_grid[ih]
-                    hk = h_keep[ih]
-
-                    # keep branch: value only
-                    v_k = _clamp(interp_as_scalar(
-                        a_grid, Vkeeper[iz, :, ih],
-                        w_k), -1e10, 1e10, -1e10)
-
-                    # adjust branch
-                    w_adj = g_adj_w(a, h, z)
-                    a_a = _clamp(interp_as_scalar(
-                        we_grid, Aadj[iz],
-                        w_adj), b, 1e10, b)
-                    h_a = _clamp(interp_as_scalar(
-                        we_grid, Hadj[iz],
-                        w_adj), b, 1e10, b)
-                    c_a = _clamp(
-                        w_adj - a_a - housing_cost_fn(h_a),
-                        1e-10, 1e10, 1e-10)
-                    pts = np.array([a_a, h_a])
-                    v_a = bellman_obj_fn(
-                        u_fn(c_a, h_a),
-                        eval_linear(UGgrid_all, V[iz],
-                                    pts, xto.LINEAR))
-
-                    # max
-                    adj = 1 if v_a >= v_k else 0
-                    V_out[iz, ia, ih] = (
-                        adj * v_a + (1 - adj) * v_k)
-                    adj_out[iz, ia, ih] = adj
-
-                    # chain rule: marginals from leaves
-                    dvw_k = interp_as_scalar(
-                        a_grid,
-                        dVw_keeper[iz, :, ih], w_k)
-                    dvw_a = interp_as_scalar(
-                        we_grid,
-                        dVw_adj[iz], w_adj)
-                    pk = interp_as_scalar(
-                        a_grid,
-                        phi_keeper[iz, :, ih], w_k)
-
-                    dV_a_out[iz, ia, ih] = marginal_a_fn(
-                        adj * dvw_a + (1 - adj) * dvw_k)
-                    # T6a: keep uses marginalBellman_d_h_keep (NO R_H); adj uses marginalBellman_d_h_adj (HAS R_H)
-                    dV_h_out[iz, ia, ih] = (
-                        adj * marginal_h_adj_fn(dvw_a)
-                        + (1 - adj) * marginal_h_keep_fn(pk))
+        V_out, adj_out, dV_a_out, dV_h_out = _tenure_dcsn_kernel(
+            z_vals,
+            a_grid,
+            h_grid_loc,
+            h_keep,
+            we_grid,
+            V,
+            Vkeeper,
+            dVw_keeper,
+            phi_keeper,
+            Aadj,
+            Hadj,
+            dVw_adj,
+            UGgrid_all,
+            b,
+            float(age),
+            g_keep_w,
+            g_adj_w,
+            u_fn,
+            bellman_obj_fn,
+            housing_cost_fn,
+            marginal_a_fn,
+            marginal_h_keep_fn,
+            marginal_h_adj_fn,
+        )
 
         return (
-            {'V': V_out, 'd_aV': dV_a_out, 'd_hV': dV_h_out},
-            {'adj': adj_out},
+            {"V": V_out, "d_aV": dV_a_out, "d_hV": dV_h_out},
+            {"adj": adj_out},
         )
 
     def arvl_mover(vlu_dcsn):
         """E_z conditioning."""
         Ev, Edv_a, Edv_h = condition_V(
-            vlu_dcsn['V'],
-            vlu_dcsn['d_aV'],
-            vlu_dcsn['d_hV'])
-        return {'V': Ev, 'd_aV': Edv_a, 'd_hV': Edv_h}
+            vlu_dcsn["V"],
+            vlu_dcsn["d_aV"],
+            vlu_dcsn["d_hV"])
+        return {"V": Ev, "d_aV": Edv_a, "d_hV": Edv_h}
 
     def arvl_mover_hd(dV_h_hd):
         return condition_V_HD(dV_h_hd)
@@ -145,7 +256,7 @@ def make_tenure_ops(callables, income_transitions, grids, settings,
 # Forward (simulation) operator
 # ------------------------------------------------------------------
 
-def make_tenure_forward(adj_t, income_trans_t, keep_h_fn, grids, UG):
+def make_tenure_forward(adj_t, callables, grids, age):
     """BranchingForward for the tenure stage.
 
     Composes: arvl_to_dcsn (identity) -> branch_policy (D interp)
@@ -156,47 +267,46 @@ def make_tenure_forward(adj_t, income_trans_t, keep_h_fn, grids, UG):
     """
     from kikku.asva.simulate import BranchingForward
 
-    z_vals = grids['z']
+    UG = grids["UGgrid_all"]
+    income_trans_t = callables["tenure"]["transitions"]
+    g_keep_h = income_trans_t["keep_h"]
+    g_keep_w = income_trans_t["keep_w"]
+    g_adj_w = income_trans_t["adj_w"]
+    z_vals = np.asarray(grids["z"], dtype=np.float64)
+    age_f = float(age)
 
     def arvl_to_dcsn(particles, shocks):
         return particles
 
     def branch_policy(particles):
-        a = particles['a']
-        h = particles['h']
-        z_idx = particles['z_idx']
+        a = particles["a"]
+        h = particles["h"]
+        z_idx = particles["z_idx"]
         N = len(a)
-        labels = np.empty(N, dtype='<U6')
+        adj_vals = _branch_policy_adj_vals(UG, adj_t, a, h, z_idx)
+        labels = np.empty(N, dtype="<U7")
         for i in range(N):
-            pt = np.array([a[i], h[i]])
-            adj_val = eval_linear(UG, adj_t[int(z_idx[i])], pt, xto.LINEAR)
-            labels[i] = "adjust" if round(min(max(adj_val, 0), 1)) == 1 else "keep"
+            av = adj_vals[i]
+            r = round(min(max(av, 0.0), 1.0))
+            labels[i] = "adjust" if r == 1 else "keep"
         return labels
 
     def dcsn_to_cntn_keep(particles, shocks):
-        a, h, z_idx = particles['a'], particles['h'], particles['z_idx']
-        N = len(a)
-        w = np.empty(N)
-        hk = np.empty(N)
-        for i in range(N):
-            z = z_vals[int(z_idx[i])]
-            w[i] = income_trans_t["keep_w"](a[i], z)
-            hk[i] = keep_h_fn(h[i])
-        out = {'w_keep': w, 'h_keep': hk, 'z_idx': z_idx.copy()}
-        if '_idx' in particles:
-            out['_idx'] = particles['_idx'].copy()
+        a, h, z_idx = particles["a"], particles["h"], particles["z_idx"]
+        w, hk = _dcsn_to_cntn_keep_kernel(
+            a, h, z_idx, z_vals, age_f, g_keep_w, g_keep_h
+        )
+        out = {"w_keep": w, "h_keep": hk, "z_idx": z_idx.copy()}
+        if "_idx" in particles:
+            out["_idx"] = particles["_idx"].copy()
         return out
 
     def dcsn_to_cntn_adj(particles, shocks):
-        a, h, z_idx = particles['a'], particles['h'], particles['z_idx']
-        N = len(a)
-        w = np.empty(N)
-        for i in range(N):
-            z = z_vals[int(z_idx[i])]
-            w[i] = income_trans_t["adj_w"](a[i], h[i], z)
-        out = {'w_adj': w, 'z_idx': z_idx.copy()}
-        if '_idx' in particles:
-            out['_idx'] = particles['_idx'].copy()
+        a, h, z_idx = particles["a"], particles["h"], particles["z_idx"]
+        w = _dcsn_to_cntn_adj_kernel(a, h, z_idx, z_vals, age_f, g_adj_w)
+        out = {"w_adj": w, "z_idx": z_idx.copy()}
+        if "_idx" in particles:
+            out["_idx"] = particles["_idx"].copy()
         return out
 
     return BranchingForward(

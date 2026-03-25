@@ -10,6 +10,11 @@ methods:
         method: !Linear
         grid: endogenous
 
+      - scheme: upper_envelope
+        method: !FUES
+        settings:
+          m_bar: m_bar
+
   - on: dcsn_to_arvl_mover
     schemes:
       - scheme: interpolation

@@ -6,20 +6,24 @@ settings:
   # Financial asset grid
   n_a: 300
   a_min: 1.0e-08
-  a_max: 10.0
+  a_max: 7.5
 
   # Housing asset grid
   n_h: 300
   h_min: 1.0e-08
-  h_max: 20.0
+  h_max: 15.0
 
   # Total wealth grid (adjuster)
   n_w: 300
   w_min: 1.0e-08
-  w_max: 30.0
+  w_max: 22.5
 
   # FUES upper envelope
   m_bar: 1.01
+
+  # Adjuster EGM root scan: 0 = full grid (exact), >0 = coarse step size
+  root_eps: 0.0
+  egm_n: 25
 
   # Wage discretisation
   N_wage: 4
@@ -35,3 +39,9 @@ settings:
 
   # Simulation initial conditions: 'standard' or 'empirical'
   init_method: standard
+
+  # JIT warmup periods to skip when reporting timing averages
+  warmup_periods: 3
+
+  b: 1.0e-08
+  normalisation: 1.0e-05

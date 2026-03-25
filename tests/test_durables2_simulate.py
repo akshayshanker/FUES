@@ -14,7 +14,10 @@ sys.path.insert(0, SRC_ROOT)
 
 from pathlib import Path
 from examples.durables2_0.solve import solve
-from examples.durables2_0.simulate import euler_errors
+from examples.durables2_0.simulate import (
+    simulate_lifecycle,
+    evaluate_euler_c,
+)
 
 SYNTAX_DIR = Path(REPO_ROOT) / "examples" / "durables2_0" / "syntax"
 
@@ -24,19 +27,24 @@ SEED = 42
 
 
 class TestDurables2Simulate(unittest.TestCase):
-    """Forward simulation via kikku + inline Euler."""
+    """Forward simulation via kikku + post-hoc consumption Euler."""
 
     @classmethod
     def setUpClass(cls):
         """Solve at t0=50 (10 periods) and simulate."""
-        cls.nest, cls.cp, cls.grids, cls.callables, cls.settings = solve(
+        cls.nest, cls.grids = solve(
             SYNTAX_DIR,
             calib_overrides={'t0': 50},
-            config_overrides={'n_a': 30, 'n_h': 30, 'n_w': 30},
+            setting_overrides={'n_a': 30, 'n_h': 30, 'n_w': 30},
         )
-        cls.euler, cls.sim_data = euler_errors(
-            cls.nest, cls.cp, cls.grids, cls.callables, cls.settings,
+        cls.cal = next(iter(cls.nest["periods"][0]["stages"].values())).calibration
+        cls.sett = next(iter(cls.nest["periods"][0]["stages"].values())).settings
+        cls.sim_data = simulate_lifecycle(
+            cls.nest, cls.grids,
             N=N_SIM, seed=SEED,
+        )
+        cls.euler = evaluate_euler_c(
+            cls.sim_data, cls.nest, cls.grids,
         )
 
     def test_nest_has_topology(self):
@@ -46,7 +54,7 @@ class TestDurables2Simulate(unittest.TestCase):
 
     def test_output_shapes(self):
         """Euler and sim_data arrays have shape (T, N)."""
-        T = self.cp.T
+        T = int(self.cal["T"])
         self.assertEqual(self.euler.shape, (T, N_SIM))
         for key in ('a', 'h', 'c', 'y', 'z_idx', 'discrete',
                      'a_nxt', 'h_nxt'):
@@ -66,7 +74,7 @@ class TestDurables2Simulate(unittest.TestCase):
     def test_euler_finite(self):
         """At least 10% of (agent, period) cells should have finite Euler."""
         valid = self.euler[~np.isnan(self.euler)]
-        T_sim = self.cp.T - self.cp.t0
+        T_sim = int(self.cal["T"]) - int(self.cal["t0"])
         min_expected = int(0.10 * T_sim * N_SIM)
         self.assertGreater(
             len(valid), min_expected,
@@ -88,8 +96,9 @@ class TestDurables2Simulate(unittest.TestCase):
         valid = a[~np.isnan(a)]
         self.assertTrue(np.all(valid >= 0),
                         "Negative assets found")
-        self.assertTrue(np.all(valid <= self.cp.grid_max_A + 1),
-                        "Assets exceed grid_max_A")
+        a_max = float(self.sett["a_max"])
+        self.assertTrue(np.all(valid <= a_max + 1),
+                        "Assets exceed grid max")
 
     def test_utility_stats_present(self):
         """sim_data includes NPV utility and branch counts."""

@@ -312,6 +312,7 @@ def _fues_v0dev_engine(
 
 
 @register("DCEGM")
+@register("MSS")
 def _dcegm_engine(
     x_dcsn_hat: np.ndarray,
     v_hat: np.ndarray,

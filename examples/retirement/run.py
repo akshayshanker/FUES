@@ -3,28 +3,16 @@
 
 Usage:
     python -m examples.retirement.run
-    python -m examples.retirement.run --config-override grid_size=5000
     python -m examples.retirement.run --calib-override beta=0.96
-    python -m examples.retirement.run --config-override run_timings=1
-    python -m examples.retirement.run --config-override plot_age=10
+    python -m examples.retirement.run --setting-override grid_size=5000
+    python -m examples.retirement.run --setting-override run_timings=1
+    python -m examples.retirement.run --setting-override plot_age=10
 """
 
-import argparse
 import os
-import sys
 from pathlib import Path
 
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-REPO_ROOT = os.path.dirname(os.path.dirname(SCRIPT_DIR))
-SRC_ROOT = os.path.join(REPO_ROOT, "src")
-sys.path.insert(0, REPO_ROOT)
-sys.path.insert(0, SRC_ROOT)
-
-from kikku.run.cli import (
-    add_override_args, add_method_args,
-    add_output_args, add_sweep_args, build_overrides,
-    make_run_dir, load_effective_settings,
-)
+from kikku.run import parse_run
 
 from examples.retirement.solve import solve_nest
 from examples.retirement.outputs import (
@@ -33,35 +21,37 @@ from examples.retirement.outputs import (
 )
 from examples.retirement.benchmark import test_Timings
 
-SYNTAX_DIR = Path(__file__).resolve().parent / "syntax"
-SETTINGS_PATH = SYNTAX_DIR / 'settings.yaml'
-
 UE_METHODS = ('RFC', 'FUES', 'DCEGM', 'CONSAV')
 
 
+def _solver_config(run):
+    """Merge settings tier + config tier for ``load_syntax`` (settings.yaml overlay)."""
+    return {**dict(run.settings), **dict(run.config)}
+
+
 def main():
-    parser = argparse.ArgumentParser(
-        description='Run retirement model via canonical pipeline',
+    run = parse_run(
+        name='retirement',
+        syntax='examples/retirement/syntax',
+        methods=list(UE_METHODS),
+        modes=['sweep'],
+        output='results/retirement',
     )
-    add_override_args(parser)
-    add_method_args(parser, choices=list(UE_METHODS))
-    add_output_args(parser, default_dir='results/retirement')
-    add_sweep_args(parser)
 
-    args = parser.parse_args()
+    calib_overrides = run.calib or None
+    solver_cfg = _solver_config(run)
+    config_overrides = solver_cfg if solver_cfg else None
 
-    calib_overrides, config_overrides = build_overrides(
-        args, settings_path=SETTINGS_PATH)
-
-    eff = load_effective_settings(SETTINGS_PATH, config_overrides)
+    eff = dict(solver_cfg)
     plot_age = int(eff.get('plot_age', 5))
     run_timings = bool(int(eff.get('run_timings', 0)))
     sweep_deltas_str = str(eff.get('sweep_deltas', '0.25,0.5,1,2'))
     latex_grids_str = eff.get('latex_grids', None)
 
-    run_dir = make_run_dir(args.output_dir, tag=args.run_tag)
+    run_dir = str(run.output_dir)
+    syntax_dir = run.syntax_dir
 
-    print(f'Syntax dir: {SYNTAX_DIR}')
+    print(f'Syntax dir: {syntax_dir}')
     print(f'Output directory: {run_dir}')
     if calib_overrides:
         print(f'Calib overrides: {calib_overrides}')
@@ -73,18 +63,19 @@ def main():
     os.makedirs(os.path.join(run_dir, 'tables'), exist_ok=True)
 
     if run_timings:
-        grid_sizes_str = args.sweep_grids or '500,1000,2000,3000,10000'
+        grid_sizes_str = ','.join(str(g) for g in run.sweep_grids) \
+            if run.sweep_grids else '500,1000,2000,3000,10000'
         grid_sizes = [int(x) for x in grid_sizes_str.split(',')]
         delta_values = [float(x) for x in sweep_deltas_str.split(',')]
         print(f'\nRunning timing comparison...')
         print(f'  Grid sizes: {grid_sizes}')
         print(f'  Delta values: {delta_values}')
-        print(f'  Runs per config: {args.sweep_runs}')
+        print(f'  Runs per config: {run.sweep_runs}')
         latex_grids = None
         if latex_grids_str is not None:
             latex_grids = [int(x) for x in str(latex_grids_str).split(',')]
         test_Timings(
-            grid_sizes, delta_values, n=args.sweep_runs,
+            grid_sizes, delta_values, n=run.sweep_runs,
             results_dir=run_dir,
             calib_overrides=calib_overrides,
             config_overrides=config_overrides,
@@ -95,15 +86,17 @@ def main():
     solutions = {}
     for method in UE_METHODS:
         _, m_, ops_, w_ = solve_nest(
-            SYNTAX_DIR, method=method,
+            syntax_dir, method=method,
             calib_overrides=calib_overrides,
             config_overrides=config_overrides,
+            method_overrides=run.method_overrides,
         )
         nest, model, _, _ = solve_nest(
-            SYNTAX_DIR, method=method,
+            syntax_dir, method=method,
             calib_overrides=calib_overrides,
             config_overrides=config_overrides,
             model=m_, stage_ops=ops_, waves=w_,
+            method_overrides=run.method_overrides,
         )
         solutions[method] = {
             'nest': nest,

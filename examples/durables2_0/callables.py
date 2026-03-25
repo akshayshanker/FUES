@@ -1,13 +1,13 @@
 """Single source for all callable construction in durables2_0.
 
 Equation primitives (module-level @njit), EGM recipe callables baked
-into make_callables(cp), and age-varying income binding.  Transitions
-are stage-scoped inside make_callables; age-varying income transitions
-are produced by ``callables["tenure"]["make_income_transitions"](y_func)``.
+into make_callables(period_h). All callables are age-invariant —
+income transitions (keep_w, adj_w) accept age as a runtime argument
+so callables can be built once and reused across all periods.
 
 Sections:
   1. Equation primitives — raw @njit functions with explicit parameters
-  2. Equation callable factory — make_callables(cp), make_y_func(cp, age)
+  2. Equation callable factory — make_callables(period_h)
 """
 
 import numpy as np
@@ -86,26 +86,45 @@ def _y_func(t, xi, lambdas, tau_av, tzero, normalisation):
 
 
 # ============================================================
-# Section 2: Equation callable factory (stage-scoped)
+# Section 2: Equation callable factory (stage-scoped + age)
 # ============================================================
 
-def make_callables(cp):
-    """Return stage-scoped structural callables from ConsumerProblem.
+def make_callables(period_h):
+    """Return structural callables (age-invariant).
+
+    Reads all parameters from the calibrated stage objects' ``.calibration``
+    dict. Income transitions (``keep_w``, ``adj_w``) accept ``age`` as a
+    runtime argument rather than baking it in — this allows callables to be
+    constructed once and reused across all periods.
+
+    Parameters
+    ----------
+    period_h : dict
+        Dolo+ period after ``recalibrate_period``.
 
     All parameters are baked into @njit closures at construction time.
     """
-    chi = cp.chi
-    alpha = cp.alpha
-    gamma_c = cp.gamma_c
-    gamma_h = cp.gamma_h
-    kappa = cp.kappa
-    theta = cp.theta
-    K = cp.K
-    beta = cp.beta
-    R = cp.R
-    R_H = cp.R_H
-    delta = cp.delta
-    tau = cp.tau
+    # Period calibration is merged into every stage; keeper_cons holds the
+    # full preference / income block used by all three callable bundles.
+    cal = period_h["stages"]["keeper_cons"].calibration
+
+    chi = float(cal["chi"])
+    alpha = float(cal["alpha"])
+    gamma_c = float(cal["gamma_c"])
+    gamma_h = float(cal["gamma_h"])
+    kappa = float(cal["kappa"])
+    theta = float(cal["theta"])
+    K = float(cal["K"])
+    beta = float(cal["beta"])
+    R = float(cal["R"])
+    R_H = float(cal["R_H"])
+    delta = float(cal["delta"])
+    tau = float(cal["tau"])
+
+    lambdas = np.asarray(cal["lambdas"], dtype=np.float64)
+    tau_av = int(cal["tau_av"])
+    tzero = int(cal.get("tzero", 20))
+    normalisation = float(cal["normalisation"])
 
     @njit
     def u(c, h):
@@ -246,16 +265,19 @@ def make_callables(cp):
     def tr_terminal_wealth(a, h):
         return R * a + R_H * (1.0 - delta) * h
 
-    # --- Age-varying income transition sub-factory ---
+    # --- Income transitions (age is a runtime argument, not baked in) ---
 
-    def make_income_transitions(y_func):
-        @njit
-        def keep_w(a, z):
-            return R * a + y_func(z)
-        @njit
-        def adj_w(a, h, z):
-            return R * a + R_H * (1.0 - delta) * h + y_func(z)
-        return {"keep_w": keep_w, "adj_w": adj_w}
+    @njit
+    def y_func(age, xi):
+        return _y_func(age, xi, lambdas, tau_av, tzero, normalisation)
+
+    @njit
+    def keep_w(a, z, age):
+        return R * a + y_func(age, z)
+
+    @njit
+    def adj_w(a, h, z, age):
+        return R * a + R_H * (1.0 - delta) * h + y_func(age, z)
 
     return {
         "keeper_cons": {
@@ -303,22 +325,8 @@ def make_callables(cp):
             "transitions": {
                 "keep_h": tr_tenure_keep_h,
                 "terminal_wealth": tr_terminal_wealth,
+                "keep_w": keep_w,
+                "adj_w": adj_w,
             },
-            "make_income_transitions": make_income_transitions,
         },
     }
-
-
-def make_y_func(cp, age):
-    """Bind age-specific income callable y_func(z) for one period."""
-    lambdas = cp.lambdas
-    tau_av = cp.tau_av
-    tzero = cp.tzero
-    normalisation = cp.normalisation
-
-    @njit
-    def y_func(xi):
-        return _y_func(age, xi, lambdas, tau_av, tzero, normalisation)
-
-    return y_func
-
