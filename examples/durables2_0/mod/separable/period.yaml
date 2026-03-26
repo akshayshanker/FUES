@@ -1,0 +1,13 @@
+name: DurablesPeriod
+
+stages:
+  - tenure   # branching: keep vs adjust housing
+  - keeper_cons           # keeper consumption (1D EGM per (z, h) slice)
+  - adjuster_cons         # adjuster consumption (partial EGM, solve_{} system)
+
+wiring:
+  tenure.keep -> keeper_cons:
+    w_keep: w_keep
+    h_keep: h_keep
+  tenure.adjust -> adjuster_cons:
+    w_adj: w_adj

@@ -131,15 +131,18 @@ def make_callables(period_h):
         return _u(c, h, chi, alpha, gamma_c, gamma_h, kappa)
 
     @njit
-    def d_c_u(c):
+    def d_c_u(c, h):
+        """Marginal utility of c. h accepted for CD compatibility but ignored (separable)."""
         return _du_c(c, alpha, gamma_c)
 
     @njit
-    def d_c_u_inv(m):
+    def d_c_u_inv(m, h):
+        """Inverse marginal utility. h accepted for CD compatibility but ignored (separable)."""
         return _du_c_inv(m, alpha, gamma_c)
 
     @njit
-    def d_h_u(h):
+    def d_h_u(c, h):
+        """Marginal utility of h. c accepted for CD compatibility but ignored (separable)."""
         return _du_h(h, alpha, gamma_h, kappa)
 
     @njit
@@ -184,7 +187,10 @@ def make_callables(period_h):
 
     @njit
     def invEuler_foc_h_residual(dv_a, dv_h, h):
-        return (1.0 + tau) * dv_a - dv_h - d_h_u(h)
+        """For CD compat, d_h_u needs c — recovered from dv_a via Euler.
+        For separable, d_h_u(c, h) ignores c, so we pass a dummy."""
+        c = d_c_u_inv(dv_a, h)
+        return (1.0 + tau) * dv_a - dv_h - d_h_u(c, h)
 
     @njit
     def invEuler_foc_h_rhs(d_h_u_val, phi):
@@ -193,19 +199,22 @@ def make_callables(period_h):
     # --- FOC diagnostics and c-recovery (compose from bound closures) ---
 
     @njit
-    def euler_error_c(c, rhs):
-        c_hat = d_c_u_inv(rhs)
+    def euler_error_c(c, rhs, h):
+        """h accepted for CD compatibility but ignored (separable)."""
+        c_hat = d_c_u_inv(rhs, h)
         return np.log10(abs((c - c_hat) / c) + 1e-16)
 
     @njit
     def euler_error_h(c, h_nxt, phi):
-        lhs = invEuler_foc_h_rhs(d_h_u(h_nxt), phi)
-        c_hat = d_c_u_inv(lhs)
+        lhs = invEuler_foc_h_rhs(d_h_u(c, h_nxt), phi)
+        c_hat = d_c_u_inv(lhs, h_nxt)
         return np.log10(abs((c - c_hat) / c) + 1e-16)
 
     @njit
     def invEuler_foc_h_c(du_h_val, phi):
-        return d_c_u_inv(invEuler_foc_h_rhs(du_h_val, phi))
+        """Recover c from durable FOC (separable factoring).
+        For CD, the adjuster uses d_c_u_inv(dv_a, h) instead."""
+        return d_c_u_inv(invEuler_foc_h_rhs(du_h_val, phi), 0.0)
 
     # --- Keeper EGM recipe (params baked in; signature pointwise, fixed_state) ---
 

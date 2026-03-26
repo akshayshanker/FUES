@@ -1,0 +1,45 @@
+# Calibration for durables2_0 with Cobb-Douglas CRRA utility
+#
+# u(c, h) = (c^alpha * (h + d_ubar)^(1-alpha))^(1-rho) / (1-rho)
+#
+# Reference: durable-cons/utility.py (consav implementation)
+# Replaces: gamma_c, gamma_h, kappa, chi with rho, d_ubar
+calibration:
+  # Financial returns (unchanged)
+  r: 0.045
+  R: 1.045
+  r_H: 0
+  R_H: 1.0
+
+  # Preferences (Cobb-Douglas CRRA)
+  beta: 0.945
+  alpha: 0.7            # consumption share in Cobb-Douglas aggregate
+  rho: 2.0              # risk aversion over the composite good
+  d_ubar: 0.001         # durable floor / subsistence housing stock
+
+  # Housing frictions (unchanged)
+  delta: 0
+  tau: 0.12
+
+  # Terminal value
+  # With CD utility and budget c + (1+tau)*h = w, intratemporal FOC gives:
+  #   c* = alpha * (w + (1+tau)*d_ubar)
+  #   h* + d_ubar = (1-alpha) * (w + (1+tau)*d_ubar) / (1+tau)
+  # V_term(w) = theta * C^(1-rho) / (1-rho) where C = (c*)^alpha * (h*+d_ubar)^(1-alpha)
+  # theta is a free scaling parameter (will need recalibration for CD):
+  theta: 1.3498
+
+  # Wage / income process (unchanged)
+  phi_w: 0.8170411
+  sigma_w: 0.1117012
+
+  lambdas:
+    - 4.329982
+    - 0.610214
+    - -0.0209832
+    - 0.0003132
+    - -0.00000172
+    - 0.0199949
+    - 0.0000476
+  tau_av: 30
+  t0: 40

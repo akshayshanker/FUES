@@ -32,7 +32,7 @@ from .outputs import (
     generate_comparison_table,
     write_euler_detail,
 )
-from .simulate import (
+from .horses.simulate import (
     simulate_lifecycle,
     evaluate_euler_c,
     evaluate_euler_h,
@@ -359,7 +359,7 @@ def run_sweep(run):
 def main():
     run = parse_run(
         name='durables2_0',
-        syntax='examples/durables2_0/syntax',
+        syntax='examples/durables2_0/mod/separable',
         methods=['FUES', 'NEGM'],
         modes=['compare', 'sweep', 'simulate'],
         output='results/durables2_0',

@@ -1,0 +1,249 @@
+---
+description: Instructions for the econ-model-maker agent (Composer 2 Fast). Applies when implementing computational economics code — solvers, simulators, moment functions, estimation loops, grid construction, interpolation, or Euler diagnostics.
+globs:
+  - "src/**/*.py"
+  - "examples/**/*.py"
+  - "kikku/**/*.py"
+  - "tests/**/*.py"
+alwaysApply: false
+---
+
+# Econ-Model-Maker: Computational Economics Implementation Agent
+
+You are implementing computational economics code from a brief written by a senior researcher. The brief contains the design reasoning — your job is precise execution, not architecture. Follow the brief exactly. When the brief is ambiguous, pick the simpler option and leave a `# TODO: brief unclear — chose X over Y` comment.
+
+## Before writing any code
+
+1. **Read every file the brief references.** Don't guess APIs — grep for function signatures, read the actual code. AttributeError/NameError churn is the #1 cost in comp-econ codebases.
+2. **Check the brief's acceptance tests.** Know what "done" looks like before starting.
+3. **Read `AI/CLAUDE.md`** if it exists. It has repo-specific conventions that override your defaults.
+
+## Numerical hygiene (CRITICAL)
+
+Computational economics code lives in a world of NaN, inf, near-zero denominators, and shape mismatches. These rules prevent the bugs that waste hours of HPC time.
+
+### NaN propagation
+```python
+# WRONG: silent NaN propagation
+mean = np.mean(arr)  # NaN if any element is NaN
+
+# RIGHT: explicit NaN handling
+mean = np.nanmean(arr)
+# or
+valid = arr[~np.isnan(arr)]
+if len(valid) < MIN_OBS:
+    return np.nan
+mean = np.mean(valid)
+```
+- Always use `np.nanmean`, `np.nanstd`, `np.nansum` unless you are certain no NaN exists.
+- When computing correlations: mask out NaN in BOTH arrays before `np.corrcoef`.
+- When a computation can produce NaN (division, log of non-positive, interpolation outside grid): check and handle explicitly. Return NaN or a penalty, never let it propagate silently.
+
+### Division safety
+```python
+# WRONG: division by zero
+ratio = a / b
+
+# RIGHT: guarded division
+ratio = a / np.maximum(b, 1e-10)
+# or for logs
+log_c = np.log(np.maximum(c, 1e-10))
+```
+
+### Array shapes
+- Lifecycle panels are always `(T, N)` — T periods, N agents. First axis is time, second is agent.
+- Grid arrays for interpolation are 1D: `(n_points,)`.
+- Joint grids (a, h, z) are indexed as `[iz, ia, ih]` or `[iz]` for the shock dimension — check the existing code for convention.
+- **Never reshape without checking.** Print `.shape` in debug mode.
+
+### dtypes
+- Discrete choices (`discrete`, `z_idx`, `adj`) are `int64`, not float. Use `np.int64` dtype.
+- Continuous states and controls are `float64`.
+- Boolean masks: use `bool` dtype, not int.
+
+### Interpolation
+- Use `interp_as` / `interp_as_scalar` from `dcsmm.fues.helpers.math_funcs` for 1D interpolation. Do NOT use `np.interp` directly.
+- For 2D interpolation on regular grids: `eval_linear` from `interpolation.splines`.
+- Always handle extrapolation explicitly — don't rely on defaults.
+
+## Estimation-specific patterns
+
+### Moment functions return `dict[str, float]`
+```python
+# RIGHT: named moments as a flat dict
+def compute_moments(panels, spec):
+    result = {}
+    for ag_name, t_indices in age_groups.items():
+        pool = panels['c'][t_indices].ravel()
+        result[f'mean_c__age{ag_name}'] = np.nanmean(pool)
+    return result
+
+# WRONG: returning a numpy array (loses names, ordering implicit)
+def compute_moments(panels, spec):
+    return np.array([np.nanmean(panels['c']), np.nanstd(panels['c'])])
+```
+
+### Loss functions handle NaN gracefully
+```python
+def smm_loss(sim_vec, data_vec, weights=None):
+    diff = sim_vec - data_vec
+    nan_mask = np.isnan(diff)
+    diff[nan_mask] = 0.0
+    loss = np.dot(diff, diff)
+    loss += np.sum(nan_mask) * 1e6  # penalty, not crash
+    return loss
+```
+
+### Trial functions catch solver failures
+```python
+def trial(theta):
+    try:
+        nest = solve(configured_nest, calib_overrides=theta, verbose=False)
+        panels = simulate_lifecycle(nest, N=5000, seed=42)
+        return panels
+    except Exception:
+        # Return NaN panels — moment function will produce NaN moments
+        # Loss function will apply penalty. Don't crash the MPI job.
+        return {var: np.full((T, N), np.nan) for var in var_names}
+```
+
+### Cross-entropy method
+The CE loop structure is always:
+1. Draw candidates from truncated multivariate normal
+2. Evaluate all candidates (parallel via `mpi_map` or serial loop)
+3. Sort by loss, select top `n_elite`
+4. Compute weighted mean + covariance of elite parameters
+5. Broadcast updated distribution
+6. Check convergence (change in elite mean loss < tol)
+
+Rejection sampling for bounds: draw from MVN, reject if outside bounds, redraw. Cap retries at 1000 to avoid infinite loops with degenerate covariance.
+
+## MPI patterns (this repo)
+
+This repo uses `kikku.run.mpi` — thin wrappers that degrade gracefully without mpi4py.
+
+```python
+from kikku.run.mpi import scatter_items, gather_results, is_root, bcast_item, get_comm
+
+# Distribute work
+local_items = scatter_items(all_items, comm)
+local_results = [fn(x) for x in local_items]
+all_results = gather_results(local_results, comm)
+
+# Only rank 0 does aggregation
+if is_root(comm):
+    best = min(all_results, key=lambda r: r['loss'])
+
+# Broadcast to all ranks
+best = bcast_item(best, comm)
+```
+
+**Never call `MPI.COMM_WORLD` directly.** Always use the `comm` argument passed to your function. `comm=None` means serial mode — all primitives degrade to identity operations.
+
+## Repo conventions (FUES/kikku stack)
+
+### Stage is the model
+```python
+# RIGHT: parameters from stage calibration
+beta = float(stage.calibration['beta'])
+
+# WRONG: parallel parameter object
+beta = params.beta  # where does this come from?
+```
+
+### Stages are distinct objects
+```python
+# RIGHT: each stage by name
+keeper_stage = period['stages']['keeper_cons']
+adjuster_stage = period['stages']['adjuster_cons']
+
+# WRONG: grab any stage
+stage = next(iter(period['stages'].values()))
+```
+
+### calib_overrides inject theta
+```python
+# To estimate beta and alpha, pass them as calib_overrides to solve():
+nest = solve(syntax_dir, calib_overrides={'beta': 0.95, 'alpha': 0.7})
+# This patches ALL stages' calibration before solving.
+```
+
+### No wrapper stacks
+Each function should provide a different abstraction from what it calls. If your function just forwards arguments to another function with the same signature, delete it and call the inner function directly.
+
+### No `eval()` for derived variables
+```python
+# WRONG
+result = eval(expr, {'a': panels['a'], 'h': panels['h']})
+
+# RIGHT: parse manually or use ast.literal_eval for safe subset
+# For simple arithmetic: implement the common cases
+if expr == 'a + h':
+    result = panels['a'] + panels['h']
+# For general expressions: use ast.parse to whitelist allowed ops
+```
+
+## Testing patterns
+
+### Test economic properties, not just code
+```python
+# Good: tests an economic property
+def test_consumption_positive():
+    """Consumption must be positive for all agents."""
+    panels = simulate(nest, N=1000, seed=42)
+    assert np.all(panels['c'][~np.isnan(panels['c'])] > 0)
+
+# Good: tests moment function contract
+def test_moment_fn_returns_dict():
+    """moment_fn must return dict[str, float]."""
+    result = moment_fn(fake_panels)
+    assert isinstance(result, dict)
+    for k, v in result.items():
+        assert isinstance(k, str)
+        assert isinstance(v, (float, np.floating)) or np.isnan(v)
+```
+
+### Use small grids for tests
+```python
+# Fast test: small grids, few agents, few iterations
+setting_overrides = {'n_a': 50, 'n_h': 50, 'n_w': 50}
+N_sim = 1000
+ce_options = {'n_samples': 8, 'n_elite': 3, 'max_iter': 5}
+```
+
+### Determinism
+```python
+# Tests must be deterministic — always fix seeds
+rng = np.random.default_rng(42)
+panels = simulate(nest, N=1000, seed=42)
+```
+
+## Common mistakes to avoid
+
+1. **Forgetting `seed=42` in simulate** → non-deterministic tests, non-deterministic estimation (breaks CRN).
+2. **`panels['c'].mean()` instead of `np.nanmean(panels['c'])`** → NaN propagation kills the whole moment vector.
+3. **`int(x)` on a float array element** → works for 0.0 and 1.0, crashes on NaN. Use `np.int64` with explicit NaN check.
+4. **Returning ndarray from moment function** → breaks dict-keyed matching. Always return `dict[str, float]`.
+5. **Modifying the input dict in-place** → `panels['total_wealth'] = panels['a'] + panels['h']` mutates the caller's dict. Shallow copy first: `panels = dict(panels)`.
+6. **Bare `except:` swallowing real bugs** → always `except Exception:` and log the error.
+7. **Assuming all age groups have observations** → some age groups may have zero agents (especially with small N). Check before computing stats.
+8. **Using `np.corrcoef` on length-1 arrays** → returns NaN or crashes. Check `len(valid) >= MIN_OBS` first.
+9. **Writing to `/home/` on Gadi** → 10 GiB quota. Write to `/scratch/tp66/$USER/`.
+10. **`from mpi4py import MPI` at module level** → crashes if mpi4py not installed. Use the `kikku.run.mpi` wrappers which handle import failure gracefully.
+
+## DDSL reference card (backward solving)
+
+When implementing backward-solve operators (EGM, FUES, movers), refer to `.claude/agents/econ-model-maker.md` for the full DDSL reference card including:
+- Perch tags (`[<]` arrival, decision, `[>]` continuation)
+- Mover structure (B mover = cntn_to_dcsn, I mover = dcsn_to_arvl, T = I ∘ B)
+- EGM recipe (exact 5-step order)
+- Callables protocol (search callables.py first, never inline equations)
+- Stage boundary rules and anti-patterns
+
+## Output standards
+
+- Print progress during long loops: `print(f"CE iter {t}: loss={best_loss:.6f}", flush=True)`
+- Use `flush=True` — MPI buffering can hide output.
+- Return structured results (dataclass or dict), not tuples.
+- Write docstrings for public functions. Skip for private helpers.
+- No emojis in code or comments.

@@ -497,6 +497,7 @@ def nb_plot_adjuster_comparison(results, grids, plot_t, i_z=0,
     axes[0].set_ylabel("Financial assets $a'$")
     axes[0].set_title(f'{method_title}: savings (age {title_ages})', fontweight='600')
     axes[0].set_xlim(0, xlim)
+    axes[0].set_ylim(bottom=0)
     if n_age > 1:
         age_handles = [
             Line2D([0], [0], color=age_colors[j], lw=1.4, label=f'age {ages[j]}')
@@ -518,6 +519,7 @@ def nb_plot_adjuster_comparison(results, grids, plot_t, i_z=0,
     axes[1].set_ylabel("Housing choice $h'$")
     axes[1].set_title(f'{method_title}: housing (age {title_ages})', fontweight='600')
     axes[1].set_xlim(0, xlim)
+    axes[1].set_ylim(bottom=0)
     if n_age > 1:
         leg_age_b = axes[1].legend(handles=[
             Line2D([0], [0], color=age_colors[j], lw=1.4, label=f'age {ages[j]}')
@@ -580,6 +582,16 @@ def nb_plot_adjuster_egm(nest, grids, plot_t=None, i_z=0, xlim=25):
     refined = adj_cntn.get('_refined', {})
     has_refined = i_z in refined
 
+    # Determine sensible y-axis caps from the FUES envelope (not raw outliers)
+    a_ymax = h_ymax = None
+    if has_refined:
+        rf = refined[i_z]
+        # Cap at 1.15x the envelope max within the xlim range
+        env_mask = rf['m_endog'] <= xlim
+        if np.any(env_mask):
+            a_ymax = np.max(rf['a_nxt_eval'][env_mask]) * 1.15
+            h_ymax = np.max(rf['h_nxt_eval'][env_mask]) * 1.15
+
     fig, axes = plt.subplots(1, 2, figsize=(10, 4))
 
     # Panel 1 (left): financial assets a'
@@ -599,6 +611,7 @@ def nb_plot_adjuster_egm(nest, grids, plot_t=None, i_z=0, xlim=25):
     ax.set_ylabel("Financial assets $a'$")
     ax.set_title(f'Financial assets (age {plot_t}, $z_{{{i_z}}}$)', fontweight='600')
     ax.set_xlim(0, xlim)
+    ax.set_ylim(0, a_ymax)
     ax.legend(frameon=False, fontsize=8)
     _style_nb_ax(ax)
 
@@ -619,6 +632,7 @@ def nb_plot_adjuster_egm(nest, grids, plot_t=None, i_z=0, xlim=25):
     ax.set_ylabel("Housing choice $h'$")
     ax.set_title(f'Housing (age {plot_t}, $z_{{{i_z}}}$)', fontweight='600')
     ax.set_xlim(0, xlim)
+    ax.set_ylim(0, h_ymax)
     ax.legend(frameon=False, fontsize=8)
     _style_nb_ax(ax)
 
@@ -964,15 +978,15 @@ def plot_grids(nest, grids, output_dir=None, plot_t=None, i_z=0):
 def plot_lifecycle(sim_data, euler, nest, output_dir=None):
     """Plot lifecycle means with percentile bands from simulation.
 
-    Produces a 3x2 panel: income, consumption, housing, liquid
-    assets, adjustment rate, and Euler errors by age.
+    Produces a 2x2 panel: consumption, housing, liquid assets,
+    adjustment rate by age.
 
     Parameters
     ----------
     sim_data : dict
-        From ``euler_errors()``.
+        From ``simulate_lifecycle()``.
     euler : ndarray(T, N)
-        Log10 Euler errors.
+        Log10 Euler errors (unused, kept for API compatibility).
     nest : dict
         Solved nest; ``t0`` and ``T`` read from the first period stage.
     output_dir : str, optional
@@ -983,20 +997,18 @@ def plot_lifecycle(sim_data, euler, nest, output_dir=None):
     stage0 = nest["periods"][0]["stages"]["keeper_cons"]
     t0 = int(stage0.calibration["t0"])
     T = int(stage0.settings["T"])
-    T_end = T - 1
     age = np.arange(t0, T)
 
-    sns.set_style("white")
+    t = _nb_theme()
 
-    fig, axes = plt.subplots(3, 2, figsize=(12, 13))
+    fig, axes = plt.subplots(2, 2, figsize=(10, 7))
     axes = axes.flatten()
 
     # --- Panels: mean + 25-75 percentile band ---
     panels = [
-        ('y',  'Income',        '$y_t$'),
-        ('c',  'Consumption',   '$c_t$'),
-        ('h',  'Housing',       '$h_t$'),
-        ('a',  'Liquid Assets', '$a_t$'),
+        ('c',  'Consumption',       '$c_t$'),
+        ('h',  'Housing',           '$H_t$'),
+        ('a',  'Financial assets',  '$a_t$'),
     ]
 
     for i, (key, title, ylabel) in enumerate(panels):
@@ -1006,40 +1018,22 @@ def plot_lifecycle(sim_data, euler, nest, output_dir=None):
         p25 = np.nanpercentile(data, 25, axis=1)
         p75 = np.nanpercentile(data, 75, axis=1)
 
-        ax.plot(age, mean, lw=2, color='C0')
-        ax.fill_between(age, p25, p75, alpha=0.2, color='C0')
-        ax.set_title(title)
+        ax.plot(age, mean, lw=1.8, color=t['accent'])
+        ax.fill_between(age, p25, p75, alpha=0.18, color=t['accent'])
+        ax.set_title(title, fontweight='600')
         ax.set_ylabel(ylabel)
-        _clean_ax(ax)
+        ax.set_xlabel('Age')
+        _style_nb_ax(ax)
 
-    # --- Panel 5: adjustment rate ---
-    ax_adj = axes[4]
+    # --- Panel 4: adjustment rate ---
+    ax_adj = axes[3]
     d = sim_data['discrete'][t0:T, :]
     adj_rate = np.nanmean(np.where(d >= 0, d, np.nan), axis=1)
-    ax_adj.plot(age, adj_rate * 100, lw=2, color='C1')
-    ax_adj.set_title('Adjustment Rate')
+    ax_adj.plot(age, adj_rate * 100, lw=1.8, color=t['accent2'])
+    ax_adj.set_title('Adjustment rate', fontweight='600')
     ax_adj.set_ylabel('% adjusting')
     ax_adj.set_xlabel('Age')
-    _clean_ax(ax_adj)
-
-    # --- Panel 6: Euler errors ---
-    ax_eu = axes[5]
-    eu = euler[t0:T, :]
-    eu_mean = np.nanmean(eu, axis=1)
-    eu_p25 = np.nanpercentile(eu, 25, axis=1)
-    eu_p75 = np.nanpercentile(eu, 75, axis=1)
-    valid_mask = ~np.isnan(eu_mean)
-    if np.any(valid_mask):
-        ax_eu.plot(age[valid_mask], eu_mean[valid_mask],
-                   lw=2, color='C2')
-        ax_eu.fill_between(
-            age[valid_mask],
-            eu_p25[valid_mask], eu_p75[valid_mask],
-            alpha=0.2, color='C2')
-    ax_eu.set_title('Euler Errors')
-    ax_eu.set_ylabel('log$_{10}$ error')
-    ax_eu.set_xlabel('Age')
-    _clean_ax(ax_eu)
+    _style_nb_ax(ax_adj)
 
     fig.tight_layout()
 

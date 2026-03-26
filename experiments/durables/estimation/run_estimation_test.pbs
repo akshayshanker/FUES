@@ -1,0 +1,103 @@
+#!/bin/bash
+#PBS -N durables-est-test
+#PBS -P tp66
+#PBS -q expresssr
+#PBS -l ncpus=24,mem=200GB,walltime=01:00:00
+#PBS -l storage=scratch/tp66
+#PBS -l wd
+#PBS -j oe
+#PBS -r y
+#PBS -o logs/
+
+# ======================================================================
+#  Durables2_0 — Quick Estimation Test (small grids, few iterations)
+#
+#  Recovery test: simulate data at theta_true, estimate back.
+#  Small grids (100) + short horizon (t0=55) + 10 CE iterations.
+#  Uses 12 MPI ranks (n_samples=12) on a single node.
+#
+#  Expected runtime: ~10-15 minutes.
+# ======================================================================
+
+# Override defaults for quick test
+export GRID_SIZE=100
+export T0=55
+export N_SIM=5000
+export DATA_SOURCE=selfgen
+export VERSION=test
+
+# Source the main script with overrides
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+
+set -euo pipefail
+
+module purge
+module load python3/3.12.1
+module load openmpi/4.1.5
+
+VENV_PUBLIC="${VENV_PUBLIC:-/scratch/tp66/$USER/venvs/fues_public}"
+source "$VENV_PUBLIC/bin/activate"
+
+export FUES_HOME="$REPO_ROOT"
+export PYTHONPATH="$FUES_HOME/src:$FUES_HOME${PYTHONPATH:+:$PYTHONPATH}"
+cd "$FUES_HOME"
+
+export OMP_NUM_THREADS=1
+export NUMBA_NUM_THREADS=1
+export NUMBA_CACHE_DIR=/scratch/tp66/$USER/numba_cache
+mkdir -p "$NUMBA_CACHE_DIR"
+
+export OMPI_MCA_coll_hcoll_enable=0
+export OMPI_MCA_coll=^hcoll
+export PMIX_MCA_gds=hash
+export CUDA_VISIBLE_DEVICES=""
+export NUMBA_DISABLE_CUDA=1
+export MAKEMOD_QUIET=true
+export PERIOD_QUIET=true
+export SHOCKS_QUIET=true
+
+TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
+OUTPUT_DIR="/scratch/tp66/$USER/FUES/estimation/durables2_0/test_${TIMESTAMP}"
+LOG_DIR="$SCRIPT_DIR/logs"
+SPEC_FILE="$FUES_HOME/examples/durables2_0/estimation/baseline.yaml"
+
+mkdir -p "$LOG_DIR"
+mkdir -p "$OUTPUT_DIR"
+
+MPI_RANKS=12
+
+echo "========================================================"
+echo "Quick Estimation Test (recovery, small grids)"
+echo "========================================================"
+echo "MPI Ranks:  ${MPI_RANKS}"
+echo "Grids:      ${GRID_SIZE}"
+echo "Horizon:    t0=${T0}"
+echo "Output:     ${OUTPUT_DIR}"
+echo "========================================================"
+
+# Warmup
+python3 -c "
+from examples.durables2_0.solve import precompile
+precompile()
+print('Warmup done')
+"
+
+# Run with small CE settings
+mpirun -np ${MPI_RANKS} python3 -m examples.durables2_0.estimate \
+    --spec "${SPEC_FILE}" \
+    --data-source selfgen \
+    --output-dir "${OUTPUT_DIR}" \
+    --setting-override "n_a=100" "n_h=100" "n_w=100" \
+    --calib-override "t0=55" \
+    --n-sim 5000 \
+    --ce-samples 12 \
+    --ce-elite 4 \
+    --ce-iterations 10 \
+    --mpi \
+    --verbose \
+    2> >(tee "${LOG_DIR}/est_test_${TIMESTAMP}.err") \
+    1> >(tee "${LOG_DIR}/est_test_${TIMESTAMP}.log")
+
+echo ""
+echo "Test complete. Results: ${OUTPUT_DIR}"

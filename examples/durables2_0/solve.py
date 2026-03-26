@@ -12,8 +12,43 @@ from dolo.compiler.calibration import (
     calibrate as calibrate_stage,
 )
 
+import sys
+import importlib.util as _imputil
+
 from .model import make_grids
-from .callables import make_callables
+
+# Cache: {resolved_syntax_dir: make_callables_fn}
+_callables_cache: dict = {}
+
+
+def _load_callables_from_syntax(syntax_dir):
+    """Load make_callables from syntax_dir/callables.py.
+
+    Each syntax directory contains its own callables.py (separable, CD, etc.).
+    Uses a stable module name so numba caching works across runs.
+    """
+    syntax_dir = Path(syntax_dir).resolve()
+    key = str(syntax_dir)
+    if key in _callables_cache:
+        return _callables_cache[key]
+
+    callables_file = syntax_dir / "callables.py"
+    if not callables_file.exists():
+        raise FileNotFoundError(
+            f"No callables.py in {syntax_dir}. "
+            f"Each syntax directory must contain its own callables.py."
+        )
+
+    # Stable module name from directory name (e.g. "callables__syntax_cd")
+    mod_name = f"callables__{syntax_dir.name}"
+    spec = _imputil.spec_from_file_location(mod_name, str(callables_file))
+    mod = _imputil.module_from_spec(spec)
+    sys.modules[mod_name] = mod  # register so numba can cache
+    spec.loader.exec_module(mod)
+
+    fn = mod.make_callables
+    _callables_cache[key] = fn
+    return fn
 from .horses.keeper_egm import make_keeper_ops
 from .horses.branching import make_tenure_ops
 from .horses.adjuster_egm import make_adjuster_ops
@@ -196,6 +231,7 @@ def solve_period(stage_ops, vlu_cntn, grids, age,
 def accrete_and_solve(
     H, period_inst, calibration, grids,
     store_cntn=False, verbose=False, progress=None,
+    make_callables=None,
 ):
     """Accrete backward, solving each period.
 
@@ -220,6 +256,9 @@ def accrete_and_solve(
 
     # Callables are age-invariant (income transitions accept age as arg).
     # Build once; reuse across all periods.
+    # make_callables is loaded from the syntax dir (separable or CD).
+    if make_callables is None:
+        make_callables = _make_callables_default
     callables = make_callables(period_inst)
 
     # Operators are also age-invariant — build once.
@@ -250,16 +289,10 @@ def accrete_and_solve(
         cal = stage_ref.calibration
         sett = stage_ref.settings
         ue_method = read_scheme_method(stages["adjuster_cons"], 'upper_envelope')
-        print(f"  Method: {ue_method}")
-        print(f"  Horizon: ages {int(cal['t0'])}–{T} ({H+1} periods)")
-        print(f"  Grids: n_a={len(grids['a'])}, n_h={len(grids['h'])}, "
-              f"n_w={len(grids['we'])}, N_wage={len(grids['z'])}")
-        print(f"  Params: beta={cal['beta']}, R={cal['R']}, "
-              f"tau={cal['tau']}, delta={cal['delta']}")
-        print(f"  Shocks: phi_w={cal['phi_w']}, sigma_w={cal['sigma_w']}, "
-              f"z_grid={grids['z']}")
-        print(f"  Solver: m_bar={sett['m_bar']}, root_eps={sett['root_eps']}, "
-              f"egm_n={sett['egm_n']}")
+        nz = len(grids['z'])
+        print(f"  {ue_method} | ages {int(cal['t0'])}–{T} ({H+1} periods) | "
+              f"n_a={len(grids['a'])}, n_h={len(grids['h'])}, "
+              f"n_w={len(grids['we'])}, N_z={nz}")
 
     use_bar = progress == "bar"
     if use_bar:
@@ -417,9 +450,14 @@ def solve(
 
     H = T - t0
     store_cntn = bool(int(yaml_settings.get("store_cntn", 0)))
+
+    # Load callables from the syntax directory
+    make_callables_fn = _load_callables_from_syntax(syntax_dir)
+
     nest = accrete_and_solve(
         H, period_inst, calibration, grids,
         store_cntn=store_cntn, verbose=verbose, progress=progress,
+        make_callables=make_callables_fn,
     )
 
     # Expose topology so the forward simulator uses the same graph

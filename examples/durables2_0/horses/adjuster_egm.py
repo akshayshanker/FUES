@@ -190,7 +190,7 @@ def _make_negm_adjuster(callables, grids, stage):
         d_wV = np.empty((n_z, n_w))
         for iz in range(n_z):
             for iw in range(n_w):
-                d_wV[iz, iw] = du_c_fn(c[iz, iw])
+                d_wV[iz, iw] = du_c_fn(c[iz, iw], h_choice[iz, iw])
 
         return a_nxt, c, h_choice, V, d_wV, None
 
@@ -230,6 +230,7 @@ def _make_egm_adjuster(callables, grids, stage):
 
     u_fn = adj["u"]
     du_c_fn = adj["d_c_u"]
+    du_c_inv_fn = adj["d_c_u_inv"]
     du_h_fn = adj["d_h_u"]
     bellman_discount = adj["bellman_discount"]
     housing_cost = adj["housing_cost"]
@@ -255,7 +256,8 @@ def _make_egm_adjuster(callables, grids, stage):
         m_cntn_raw : ndarray
             Endogenous wealth m[>] at each root.
         """
-        du_h_val = du_h_fn(h_choice)
+        # du_h_val removed: was dead code (only used by invEuler_foc_h_c
+        # which is a placeholder for CD). The residual computes du_h internally.
 
         n_a = len(a_grid)
         grid_range = a_grid[-1] - a_grid[0]
@@ -287,13 +289,15 @@ def _make_egm_adjuster(callables, grids, stage):
                 resid, a_grid, egm_n, 0.0
             )
 
-        # Recover c and endogenous wealth at each root
+        # Recover c and endogenous wealth at each root.
+        # c from the asset Euler: c = du_c_inv(dv_a(a'), h_choice).
+        # This works for both separable (ignores h) and CD (uses h).
         m_cntn_raw = np.zeros(egm_n)
         for j in range(n_roots):
             a_p = a_nxt_cntn[j]
             if a_p > 0.0:
-                dv_h_val = interp_as_scalar(a_grid, dv_h_cntn, a_p)
-                c = invEuler_foc_h_c(du_h_val, dv_h_val)
+                dv_a_val = interp_as_scalar(a_grid, dv_a_cntn, a_p)
+                c = du_c_inv_fn(dv_a_val, h_choice)
                 m_cntn_raw[j] = c + a_p + housing_cost(h_choice)
 
         # Add borrowing constraint point
@@ -303,8 +307,8 @@ def _make_egm_adjuster(callables, grids, stage):
                 has_b = True
                 break
         if not has_b:
-            dv_h_val = interp_as_scalar(a_grid, dv_h_cntn, b)
-            c_at_b = invEuler_foc_h_c(du_h_val, dv_h_val)
+            dv_a_val_b = dv_a_cntn[0]  # at borrowing constraint (first grid point)
+            c_at_b = du_c_inv_fn(dv_a_val_b, h_choice)
             a_nxt_cntn[-1] = b
             m_cntn_raw[-1] = c_at_b + b + housing_cost(h_choice)
 
@@ -479,7 +483,7 @@ def _make_egm_adjuster(callables, grids, stage):
         d_wV = np.empty((n_z, n_w))
         for iz in range(n_z):
             for iw in range(n_w):
-                d_wV[iz, iw] = du_c_fn(c[iz, iw])
+                d_wV[iz, iw] = du_c_fn(c[iz, iw], h_choice[iz, iw])
 
         cntn_data = None
         if return_grids:

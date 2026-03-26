@@ -1,0 +1,36 @@
+name: DurablesLifecycle
+
+periods:
+  - durables_period: !period    # index 0
+  - durables_period: !period    # index 1
+  # ... (repeat for T periods)
+  - terminal: !period           # index T
+
+# Inter-period connectors (renaming dicts).
+# Poststates from consumption stages -> prestates of next period's branching stage.
+# The branching stage computes w_keep/w_adj from (a, h) + y(z),
+# so the connector maps the raw asset poststates to (a, h).
+inter_connectors:
+  - {a_nxt: a, h_nxt: h}
+  # Note: the actual inter-period transition involves
+  #   a <- R * a_nxt + y(z')     (financial return + income)
+  #   h <- h_nxt                 (housing carries over)
+  # Income and return are applied at the branching stage's
+  # dcsn_to_cntn_transition, not in the connector.
+  # The connector passes raw poststate values.
+
+terminal:
+  # Cobb-Douglas terminal value: agent optimally splits total wealth w between c and h.
+  # Total wealth at terminal: w = R * a + R_H * (1 - delta) * h
+  # Intratemporal FOC: alpha/c = (1-alpha)/((1+tau)*(h+d_ubar))
+  #   => c* = alpha * (w + (1+tau)*d_ubar)
+  #   => h* + d_ubar = (1-alpha) * (w + (1+tau)*d_ubar) / (1+tau)
+  # Composite: C = (c*)^alpha * (h* + d_ubar)^(1-alpha)
+  #            = alpha^alpha * ((1-alpha)/(1+tau))^(1-alpha) * (w + (1+tau)*d_ubar)
+  # V_term = theta * C^(1-rho) / (1-rho)
+  #
+  # In practice, the callables compute this analytically.
+  # The YAML expression is a placeholder — the actual terminal value
+  # is implemented in callables_cd.py:term_u(w).
+  V_terminal: |
+    theta * ((alpha^alpha * (1 - alpha)^(1 - alpha) / (1 + tau)^(1 - alpha)) * (R * a + R_H * (1 - delta) * h + (1 + tau) * d_ubar))^(1 - rho) / (1 - rho)

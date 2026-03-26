@@ -384,6 +384,83 @@ def generate_comparison_table(rows, fmt='md', caption=None, params=None):
     return _md_table(rows, cols, caption, params)
 
 
+def generate_vertical_comparison(rows, caption=None):
+    """Vertical comparison table: metrics as rows, methods as columns.
+
+    Designed for notebooks where horizontal space is limited.
+
+    Parameters
+    ----------
+    rows : list of dict
+        Each dict has keys: ``'Method'``, timing keys, Euler keys, ``'Adj Rate'``.
+    caption : str, optional
+
+    Returns
+    -------
+    str
+        Markdown table.
+    """
+    methods = [r['Method'] for r in rows]
+    by_method = {r['Method']: r for r in rows}
+
+    # Build metric rows: (label, format_fn)
+    metric_rows = []
+
+    # Timing section
+    metric_rows.append(('**Timing**', None))
+    metric_rows.append(('Keeper (ms/period)', lambda r: f"{r.get('Keeper (ms)', 0):.0f}"))
+    metric_rows.append(('Adjuster (ms/period)', lambda r: f"{r.get('Adj (ms)', 0):.0f}"))
+    metric_rows.append(('Total (ms/period)', lambda r: f"{r.get('Total (ms)', 0):.0f}"))
+
+    # Euler section
+    has_euler = any(
+        any(k in r for k in _EULER_COLS) for r in rows)
+    if has_euler:
+        metric_rows.append(('**Euler errors ($\\log_{10}$)**', None))
+        euler_metrics = [
+            ('Consumption: keeper', 'Euler c (keeper)'),
+            ('Consumption: adjuster', 'Euler c (adj)'),
+            ('Consumption: all', 'Euler c (all)'),
+            ('Housing: adjuster', 'Euler h (adj)'),
+        ]
+        for label, key in euler_metrics:
+            if any(key in r for r in rows):
+                def _fmt(r, k=key):
+                    v = r.get(k)
+                    if v is None or v == '':
+                        return '\u2014'
+                    if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
+                        return '\u2014'
+                    return f'{v:.2f}'
+                metric_rows.append((label, _fmt))
+
+    # Adjustment rate
+    if any('Adj Rate' in r for r in rows):
+        metric_rows.append(('**Simulation**', None))
+        metric_rows.append(('Adjustment rate (%)', lambda r: f"{r.get('Adj Rate', 0):.1f}"))
+
+    # Build markdown
+    lines = []
+    if caption:
+        lines.append(f'### {caption}\n')
+
+    # Header
+    hdr = '| | ' + ' | '.join(f'**{m}**' for m in methods) + ' |'
+    sep = '|:---|' + '|'.join(':---:' for _ in methods) + '|'
+    lines.extend([hdr, sep])
+
+    for label, fmt_fn in metric_rows:
+        if fmt_fn is None:
+            # Section header row
+            cells = ' | '.join('' for _ in methods)
+            lines.append(f'| {label} | {cells} |')
+        else:
+            cells = ' | '.join(fmt_fn(by_method[m]) for m in methods)
+            lines.append(f'| {label} | {cells} |')
+
+    return '\n'.join(lines)
+
+
 def format_euler_detail(euler_stats_by_method):
     """Format Euler error detail as markdown.
 

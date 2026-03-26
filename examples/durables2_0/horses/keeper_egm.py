@@ -113,13 +113,14 @@ def _make_keeper_fast(callables, grids, stage):
             dv_slice = dV_a[iz, :, ih]
             v_slice = V[iz, :, ih]
 
-            egrid = np.ones(n_a * 2)
-            vf = np.ones(n_a * 2)
-            c_raw = np.ones(n_a * 2)
+            n_pad = max(2, n_a // 10)
+            egrid = np.ones(n_pad + n_a)
+            vf = np.ones(n_pad + n_a)
+            c_raw = np.ones(n_pad + n_a)
 
             c0 = inv_euler_fn(dv_slice[0], hk)
-            C_arr = np.linspace(1e-08, max(1e-08, c0 - 1e-10), n_a)
-            for k in range(n_a):
+            C_arr = np.linspace(1e-08, max(1e-08, c0 - 1e-10), n_pad)
+            for k in range(n_pad):
                 vf[k] = bellman_rhs_fn(C_arr[k], v_slice[0], hk)
                 egrid[k] = C_arr[k] + b_in
                 c_raw[k] = C_arr[k]
@@ -129,11 +130,11 @@ def _make_keeper_fast(callables, grids, stage):
                 dv_slice, zwork, v_slice, asset_grid_A, hk
             )
             for k in range(n_a):
-                egrid[n_a + k] = x_hat[k]
-                vf[n_a + k] = v_hat[k]
-                c_raw[n_a + k] = c_hat[k]
+                egrid[n_pad + k] = x_hat[k]
+                vf[n_pad + k] = v_hat[k]
+                c_raw[n_pad + k] = c_hat[k]
 
-            ac_arr = np.concatenate((np.full(n_a, b_in), asset_grid_A))
+            ac_arr = np.concatenate((np.full(n_pad, b_in), asset_grid_A))
 
             uid = uniqueEG(egrid, vf)
             eg_u = egrid[uid]
@@ -180,14 +181,14 @@ def _make_keeper_fast(callables, grids, stage):
                 Akeeper[iz, ia, ih] = a_clamped[ia]
                 Ckeeper[iz, ia, ih] = c_clamped[ia]
                 Vkeeper[iz, ia, ih] = v_clamped[ia]
-                dVw_keep[iz, ia, ih] = d_c_u(c_clamped[ia])
+                dVw_keep[iz, ia, ih] = d_c_u(c_clamped[ia], hk)
 
             dv_h_slice = dV_h[iz, :, ih]
             for ia in range(n_a):
                 edvh = interp_as_scalar(
                     asset_grid_A, dv_h_slice, Akeeper[iz, ia, ih]
                 )
-                phi_keep[iz, ia, ih] = d_h_u(hk) + edvh
+                phi_keep[iz, ia, ih] = d_h_u(c_clamped[ia], hk) + edvh
 
     def dcsn_mover(vlu_cntn, grids):
         dV_a = vlu_cntn["d_aV"]
@@ -270,9 +271,10 @@ def _make_keeper_generic(callables, grids, stage):
     from ..solve import read_scheme_method
     ue_method = read_scheme_method(stage, "upper_envelope")
 
-    def _d_c_u_arr(c_arr):
-        """Vectorised marginal utility for EGM_UE (accepts arrays)."""
-        return np.array([d_c_u(c) for c in c_arr])
+    def _d_c_u_arr(c_arr, hk_val=0.0):
+        """Vectorised marginal utility for EGM_UE (accepts arrays).
+        hk_val passed for CD compatibility; separable ignores it."""
+        return np.array([d_c_u(c, hk_val) for c in c_arr])
 
     inv_euler_fn = fns["inv_euler"]
     bellman_rhs_fn = fns["bellman_rhs"]
@@ -388,13 +390,13 @@ def _make_keeper_generic(callables, grids, stage):
                 Vkeeper[iz, :, ih] = clamp_value(v_interp)
 
                 for ia in range(n_a):
-                    dVw_keep[iz, ia, ih] = d_c_u(c_clamped[ia])
+                    dVw_keep[iz, ia, ih] = d_c_u(c_clamped[ia], hk)
 
                 dv_h_slice = dV_h[iz, :, ih]
                 for ia in range(n_a):
                     edvh = interp_as_scalar(
                         asset_grid_A, dv_h_slice, a_clamped[ia])
-                    phi_keep[iz, ia, ih] = d_h_u(hk) + edvh
+                    phi_keep[iz, ia, ih] = d_h_u(c_clamped[ia], hk) + edvh
 
         cntn_data = None
         if cntn_c is not None:
@@ -420,7 +422,7 @@ def make_keeper_forward(C_keep_t, callables, grids, stage):
     ops makers); interpolation uses ``grids['UGgrid_all']``.
     """
     from kikku.asva.simulate import StageForward
-    from ..simulate import _eval_keeper_c
+    from .simulate import _eval_keeper_c
 
     UG = grids["UGgrid_all"]
     sett = stage.settings

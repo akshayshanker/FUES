@@ -21,9 +21,9 @@ from dcsmm.fues.helpers.math_funcs import interp_as_scalar
 
 from kikku.asva.simulate import simulate, draw_shocks
 
-from .horses.branching import make_tenure_forward
-from .horses.keeper_egm import make_keeper_forward
-from .horses.adjuster_egm import make_adjuster_forward
+from .branching import make_tenure_forward
+from .keeper_egm import make_keeper_forward
+from .adjuster_egm import make_adjuster_forward
 
 
 def _base_stage(nest):
@@ -84,9 +84,9 @@ def keeper_euler(c, a_nxt, h_nxt, iz,
         else:
             w2 = income_trans_next['keep_w'](a_nxt, z2, age_next)
             c2 = _eval_keeper_c(w2, h_nxt, iz2, C_keep_next, UG)
-        rhs += prob * marginal_a(du_c(max(c2, 1e-10)))
+        rhs += prob * marginal_a(du_c(max(c2, 1e-10), h_nxt))
 
-    return euler_error_c(c, rhs)
+    return euler_error_c(c, rhs, h_nxt)
 
 
 def adjuster_euler(c, h_nxt, a_nxt, iz,

@@ -23,6 +23,7 @@ from .plots import (
 from .tables import (
     format_euler_detail,
     generate_comparison_table,
+    generate_vertical_comparison,
     generate_sweep_table,
     write_euler_detail,
 )
@@ -42,6 +43,7 @@ __all__ = [
     "plot_euler_histogram",
     "format_euler_detail",
     "generate_comparison_table",
+    "generate_vertical_comparison",
     "generate_sweep_table",
     "write_euler_detail",
 ]
