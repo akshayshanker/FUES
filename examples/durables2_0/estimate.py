@@ -141,18 +141,22 @@ def main():
     # --- Build data moments ---
     data_source = moment_spec.get('data_source', 'precomputed')
     if data_source == 'selfgen':
-        # Generate data by solving at default calibration (no overrides)
+        # Generate data on rank 0 only, then broadcast
         if is_root(comm):
             print("  Data source: selfgen (solving at default calibration)...")
-        nest_data, grids_data = solve(
-            str(mod_dir),
-            setting_overrides=setting_overrides,
-            verbose=False,
-        )
-        data_panels = simulate_lifecycle(
-            nest_data, grids_data, N=N_sim, seed=simulation_seed)
-        data_moments = moment_fn(data_panels)
-        del nest_data, grids_data, data_panels
+            nest_data, grids_data = solve(
+                str(mod_dir),
+                setting_overrides=setting_overrides,
+                verbose=False,
+            )
+            data_panels = simulate_lifecycle(
+                nest_data, grids_data, N=N_sim, seed=simulation_seed)
+            data_moments = moment_fn(data_panels)
+            del nest_data, grids_data, data_panels
+        else:
+            data_moments = None
+        from kikku.run.mpi import bcast_item as _bcast
+        data_moments = _bcast(data_moments, comm, root=0)
     else:
         data_moments = spec['data_moments']
 
