@@ -1,6 +1,6 @@
 #!/bin/bash
 #PBS -P tp66
-#PBS -q normalsr
+#PBS -q expresssr 
 #PBS -N est_dur
 #PBS -l ncpus=520
 #PBS -l mem=2400GB
@@ -33,6 +33,14 @@ N_SIM="${N_SIM:-10000}"
 module purge
 module load python3/3.11.0
 module load openmpi/4.1.5
+
+# --- Navigate to repo root ---
+# The script lives at experiments/durables/estimation/ inside the repo.
+# Resolve repo root from the script's own location.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+cd "$REPO_ROOT"
+echo "  Repo root: $(pwd)"
 
 # --- Activate venv (must be set up beforehand via setup_venv.sh) ---
 VENV=/scratch/tp66/$USER/venvs/fues
