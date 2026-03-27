@@ -56,7 +56,7 @@ estimation:
 moments:
   # --- Data source ---
   # For recovery test: generate moments from model at theta_true
-  data_source: selfgen        # selfgen | precomputed
+  data_source: precomputed     # selfgen | precomputed
   data_file: moments_data.csv  # used only when data_source: precomputed
 
   # --- Panel structure ---

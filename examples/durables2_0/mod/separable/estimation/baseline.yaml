@@ -25,7 +25,7 @@ estimation:
     n_samples: 520
     n_elite: 20
     max_iter: 50
-    tol: 1e-6
+    tol: 1e-9
     sampling_seed: 42           # RNG for CE parameter draws (which thetas to try)
     simulation_seed: 99         # RNG for model simulation shocks (CRN — same for all thetas)
 
@@ -48,7 +48,7 @@ estimation:
 moments:
   # --- Data source ---
   # For recovery test: generate moments from model at theta_true
-  data_source: selfgen        # selfgen | precomputed
+  data_source: precomputed     # selfgen | precomputed
   data_file: moments_data.csv  # used only when data_source: precomputed
 
   # --- Panel structure ---
