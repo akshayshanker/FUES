@@ -51,6 +51,7 @@ if [[ -d "/scratch/tp66" ]]; then
     pip install "numba>=0.59" --quiet
     pip install "scipy>=1.12,<2.0" --quiet
     pip install matplotlib --quiet
+    pip install EconModel consav --quiet
 
     echo ""
     echo "=== Step 3: Install dcsmm (editable) ==="
