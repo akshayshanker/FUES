@@ -58,6 +58,7 @@ mpiexec -n $PBS_NCPUS \
         --scratch /scratch/tp66/$USER/durables_est \
         --results results/durables2_0/estimation \
         --setting-override n_a=$GRID n_h=$GRID n_w=$GRID \
+        --calib-override t0=20 \
         --N-sim $N_SIM
 
 echo "Finished at $(date)"
