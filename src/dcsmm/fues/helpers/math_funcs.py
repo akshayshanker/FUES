@@ -938,7 +938,8 @@ def _forced_intersection_twopoint(
         intr_x = mid
         intr_y = 0.5 * (yL + yR)
 
-        print(f"SCAN DEBUG: intr_x is NaN at i={dbg_i}, j={dbg_j}. Falling back to midpoint.")
+        # NaN intersection fallback — silent in production
+        pass
 
     interval_length = e_hi - e_lo
     if np.abs(interval_length) < eps_d:
