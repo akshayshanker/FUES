@@ -119,12 +119,43 @@ def _run_single_estimation(
               f"n_elite={method_options.get('n_elite')}")
         print(f"  Calib overrides: {calib_overrides}")
 
-    # --- Build moment function ---
-    moment_fn = make_moment_fn(moment_spec)
+    # --- Build moment function with denormalisation ---
+    # Model simulates in normalised units (normalisation = 1e-5 in settings).
+    # Data moments (CSV or selfgen) should be in natural units (AUD for
+    # means/SDs, dimensionless for correlations). Denormalise model moments
+    # so the loss function sees AUD vs AUD — this ensures the relative
+    # deviation weighting (1/data² for |data|>=1) treats all means/SDs
+    # consistently (all >> 1 in AUD) and correlations as absolute (|data| < 1).
+    raw_moment_fn = make_moment_fn(moment_spec)
+    from kikku.dynx import load_syntax
+    _cal, _sett, *_ = load_syntax(mod_dir, calib_overrides, setting_overrides)
+    denorm = 1.0 / float(_sett.get('normalisation', 1.0))
+
+    _LEVEL_PREFIXES = (
+        'mean_', 'sd_', 'av_', 'cond_discrete_0_mean_',
+        'cond_discrete_1_mean_', 'cond_discrete_0_sd_',
+        'cond_discrete_1_sd_',
+    )
+
+    def moment_fn(panels):
+        """Compute moments and denormalise levels to AUD."""
+        raw = raw_moment_fn(panels)
+        out = {}
+        for k, v in raw.items():
+            base = k.rsplit('__age', 1)[0] if '__age' in k else k
+            if any(base.startswith(p) for p in _LEVEL_PREFIXES):
+                out[k] = v * denorm
+            else:
+                out[k] = v
+        return out
+
+    if is_root(comm):
+        print(f"  Denorm factor: {denorm:.0f} (model units -> AUD)")
 
     # --- Build data moments ---
     data_source = moment_spec.get('data_source', 'precomputed')
     if data_source == 'selfgen':
+        # Selfgen: generate data at default calibration, denormalise via moment_fn
         if is_root(comm):
             print("  Data source: selfgen...")
             nest_data, grids_data = solve(
@@ -136,12 +167,13 @@ def _run_single_estimation(
             )
             data_panels = simulate_lifecycle(
                 nest_data, grids_data, N=N_sim, seed=simulation_seed)
-            data_moments = moment_fn(data_panels)
+            data_moments = moment_fn(data_panels)  # already denormalised
             del nest_data, grids_data, data_panels
         else:
             data_moments = None
         data_moments = bcast_item(data_moments, comm, root=0)
     else:
+        # Precomputed: CSV is already in AUD — no normalisation needed.
         data_moments = spec['data_moments']
 
     # --- Build trial function ---
@@ -165,15 +197,11 @@ def _run_single_estimation(
     # Unmatched keys would get NAN_PENALTY, making the loss ~1e9.
     # Selfgen data is already in model keys by construction — no filtering needed.
     if data_source == 'precomputed':
-        # Build target key prefixes from the YAML targets section.
-        # Each target has a 'key' field (e.g. 'av_consumption2_14_0') that maps
-        # to CSV columns. Data keys are '{key}__age{g}'. Keep only those.
         targets = moment_spec.get('targets') or []
         ident = moment_spec.get('identification') or {}
         target_prefixes = set()
         for t in targets:
             target_prefixes.add(t['key'])
-        # Also keep identification-style keys (mean_c, sd_h, corr_c_h, autocorr_a, etc.)
         for var in ident.get('mean', []) or []:
             target_prefixes.add(f'mean_{var}')
         for var in ident.get('sd', []) or ident.get('sds', []) or []:
@@ -186,29 +214,6 @@ def _run_single_estimation(
             k: v for k, v in data_moments.items()
             if any(k.startswith(p + '__') or k == p for p in target_prefixes)
         }
-
-    # Normalise precomputed data moments to model units.
-    # CSV is in AUD; model works in normalised units (normalisation = 1e-5).
-    # Means and SDs: data_aud * normalisation = model units.
-    # Correlations and autocorrelations are dimensionless — no change.
-    if data_source == 'precomputed':
-        from kikku.dynx import load_syntax
-        _cal, _sett, *_ = load_syntax(mod_dir, calib_overrides, setting_overrides)
-        norm_factor = float(_sett.get('normalisation', 1.0))
-        n_normed = 0
-        for k in list(data_moments):
-            base = k.rsplit('__age', 1)[0] if '__age' in k else k
-            # Means and SDs need normalisation; corr/autocorr don't
-            if any(base.startswith(p) for p in (
-                'av_', 'sd_', 'mean_', 'cond_discrete_0_mean_',
-                'cond_discrete_1_mean_', 'cond_discrete_0_sd_',
-                'cond_discrete_1_sd_',
-            )):
-                data_moments[k] = data_moments[k] * norm_factor
-                n_normed += 1
-        if is_root(comm):
-            print(f"  Normalised {n_normed} data moments to model units "
-                  f"(factor={norm_factor})")
 
     if is_root(comm):
         print(f"  Data moments: {len(data_moments)} keys")
