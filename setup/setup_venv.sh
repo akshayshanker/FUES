@@ -1,42 +1,35 @@
 #!/bin/bash
 # ==========================================================================
-#  Setup script for dcsmm.
+#  Setup script for dcsmm + kikku.
 #
-#  For anyone who clones the FUES repo and wants an editable install
-#  of dcsmm — run this once to create a virtual environment with all
-#  dependencies. Code changes in src/dcsmm/ take effect immediately.
+#  Creates a virtual environment with all dependencies for solving,
+#  simulating, and estimating DDSL models.
 #
 #  Works on both NCI Gadi and a local laptop/desktop.
 #
-#  REPO_ROOT  Root of the cloned FUES repository (auto-detected).
+#  Usage on Gadi (login node or interactive PBS):
 #
-#  VENV_DIR   Virtual environment directory. Contains Python, pip, and
-#             all installed packages. Activate it before running code.
-#             - On Gadi: /scratch/tp66/$USER/venvs/dcsmm
-#             - Locally: .venv inside the repo
-#
-#  Usage on Gadi (inside an interactive PBS session):
-#
-#    qsub -I -q expresssr -P tp66 -l ncpus=1,mem=8GB,walltime=01:00:00,storage=scratch/tp66,wd
 #    cd /home/141/as3442/dev/fues.dev/FUES
-#    bash scripts/setup_venv.sh
+#    bash setup/setup_venv.sh
 #
 #  Usage on laptop:
 #
 #    cd /path/to/FUES
-#    bash scripts/setup_venv.sh
+#    bash setup/setup_venv.sh
 #
 # ==========================================================================
 set -euo pipefail
 
-# Detect repo root (parent of scripts/)
+# Detect repo root (parent of setup/)
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 # Detect environment: Gadi (has /scratch/tp66) vs local
 if [[ -d "/scratch/tp66" ]]; then
     echo "Detected NCI Gadi environment"
-    VENV_DIR="/scratch/tp66/${USER}/venvs/dcsmm"
-    module load python3/3.12.1
+    VENV_DIR="/scratch/tp66/${USER}/venvs/fues"
+    module purge
+    module load python3/3.11.0
+    module load openmpi/4.1.5
 else
     echo "Detected local environment"
     VENV_DIR="${REPO_ROOT}/.venv"
@@ -50,32 +43,63 @@ if [[ -d "${VENV_DIR}" ]]; then
     echo "Removing existing venv..."
     rm -rf "${VENV_DIR}"
 fi
+# Do NOT use --system-site-packages (avoids numpy/numba conflicts from system packages)
 python3 -m venv "${VENV_DIR}"
 source "${VENV_DIR}/bin/activate"
-pip install --upgrade pip
+pip install --upgrade pip --quiet
 
 echo ""
-echo "=== Step 2: Install dcsmm (editable) + all dependencies ==="
+echo "=== Step 2: Core numerical stack (pinned for numba compatibility) ==="
+pip install "numpy>=1.26,<2.0" --quiet
+pip install "numba>=0.59" --quiet
+pip install "scipy>=1.12" --quiet
+
+echo ""
+echo "=== Step 3: Install dcsmm (editable) + all dependencies ==="
 cd "${REPO_ROOT}"
-pip install -e ".[examples]"
+pip install -e ".[examples]" --quiet
 
 echo ""
-echo "=== Step 3: Install dolang + dolo (bright-forest phase1.1_0.1, no-deps) ==="
-pip install lark multipledispatch  # dolang/dolo deps not pulled by dcsmm
-pip install --no-deps "dolang @ git+https://github.com/bright-forest/dolang.py.git@phase1.1_0.1"
-pip install --no-deps "dolo @ git+https://github.com/bright-forest/dolo.git@phase1.1_0.1"
+echo "=== Step 4: Install kikku from GitHub (with estimation extras) ==="
+# NOT editable (-e) — editable puts source on /scratch/ (Lustre) which causes
+# BrokenPipeError at scale (520+ MPI ranks all reading .py files simultaneously).
+# Non-editable installs compiled .pyc into site-packages/ which handles concurrent reads.
+pip install "kikku[estimation] @ git+https://github.com/bright-forest/kikku.git" --quiet
 
 echo ""
-echo "=== Step 4: Verify ==="
+echo "=== Step 5: Install dolang + dolo (bright-forest phase1.1_0.1) ==="
+pip install lark multipledispatch --quiet
+pip install --no-deps "dolang @ git+https://github.com/bright-forest/dolang.py.git@phase1.1_0.1" --quiet
+pip install --no-deps "dolo @ git+https://github.com/bright-forest/dolo.git@phase1.1_0.1" --quiet
+
+echo ""
+echo "=== Step 6: MPI (Gadi only — build from source against system OpenMPI) ==="
+if [[ -d "/scratch/tp66" ]]; then
+    pip install --no-binary :all: mpi4py --quiet
+    echo "mpi4py built from source"
+else
+    echo "Skipping mpi4py (local dev — install manually if needed)"
+fi
+
+echo ""
+echo "=== Step 7: Verify ==="
+python3 -c "import numpy; print(f'numpy {numpy.__version__}')"
+python3 -c "import numba; print(f'numba {numba.__version__}')"
+python3 -c "import scipy; print(f'scipy {scipy.__version__}')"
 python3 -c "from dcsmm.fues import FUES; print('OK: dcsmm.fues.FUES')"
 python3 -c "from dcsmm.uenvelope import EGM_UE; print('OK: dcsmm.uenvelope.EGM_UE')"
-python3 -c "import HARK; print('OK: HARK (econ-ark)')"
-python3 -c "from dcsmm.uenvelope.upperenvelope import _consav_ue; assert _consav_ue is not None; print('OK: consav.upperenvelope (via dcsmm)')"
-python3 -c "import yaml; print('OK: pyyaml')"
-python3 -c "import matplotlib; print('OK: matplotlib')"
-python3 -c "from kikku.dynx import period_to_graph; print('OK: kikku')"
+python3 -c "from kikku.run.estimate import estimate; print('OK: kikku.run.estimate')"
+python3 -c "from kikku.run.moments import make_moment_fn; print('OK: kikku.run.moments')"
+python3 -c "from kikku.dynx import load_syntax; print('OK: kikku.dynx')"
 python3 -c "import dolo; print('OK: dolo')"
-pip list | grep -i -E "dcsmm|numba|numpy|scipy|HARK|consav|interpolation|dill|matplotlib|seaborn|pyyaml|dolo"
+python3 -c "import yaml; print('OK: pyyaml')"
+
+if [[ -d "/scratch/tp66" ]]; then
+    python3 -c "from mpi4py import MPI; print(f'OK: mpi4py (ranks={MPI.COMM_WORLD.Get_size()})')"
+fi
+
+echo ""
+pip list 2>/dev/null | grep -i -E "dcsmm|kikku|numba|numpy|scipy|mpi4py|dolo|pandas|pyyaml"
 
 echo ""
 echo "=== Done ==="
