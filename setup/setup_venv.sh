@@ -26,7 +26,7 @@ if [[ -d "/scratch/tp66" ]]; then
     echo "Detected NCI Gadi — installing to ~/.local/ (NFS, not Lustre)"
 
     module purge
-    module load python3/3.11.0
+    module load python3/3.12.1
     module load openmpi/4.1.5
     python3 --version
 
@@ -68,8 +68,8 @@ if [[ -d "/scratch/tp66" ]]; then
 
     echo ""
     echo "=== Done (Gadi) ==="
-    echo "Packages installed to: ~/.local/lib/python3.11/site-packages/"
-    echo "No venv activation needed — just: module load python3/3.11.0"
+    echo "Packages installed to: ~/.local/lib/python3.12/site-packages/"
+    echo "No venv activation needed — just: module load python3/3.12.1"
 
 else
     # ===================== LOCAL =====================
