@@ -58,9 +58,12 @@ export MKL_NUM_THREADS=1
 export NUMBA_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
 
-# Numba cache on local SSD
+# Numba: fresh JIT cache per job on local SSD.
+# Also purge stale .nbc/.nbi from site-packages (prevents LLVM symbol errors
+# when numba version changes between venv rebuilds).
 export NUMBA_CACHE_DIR=$PBS_JOBFS/numba_cache
 mkdir -p $NUMBA_CACHE_DIR
+find "$HOME/venvs/fues/lib/" -name "*.nbc" -o -name "*.nbi" 2>/dev/null | xargs rm -f 2>/dev/null
 
 # Suppress OpenMPI warnings
 export OMPI_MCA_coll_hcoll_enable=0
