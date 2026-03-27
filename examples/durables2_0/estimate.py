@@ -165,6 +165,30 @@ def _run_single_estimation(
     # Unmatched keys would get NAN_PENALTY, making the loss ~1e9.
     sim_keys = set(get_moment_names(moment_spec))
     data_moments = {k: v for k, v in data_moments.items() if k in sim_keys}
+
+    # Normalise precomputed data moments to model units.
+    # CSV is in AUD; model works in normalised units (normalisation = 1e-5).
+    # Means and SDs: data_aud * normalisation = model units.
+    # Correlations and autocorrelations are dimensionless — no change.
+    if data_source == 'precomputed':
+        from kikku.dynx import load_syntax
+        _cal, _sett, *_ = load_syntax(mod_dir, calib_overrides, setting_overrides)
+        norm_factor = float(_sett.get('normalisation', 1.0))
+        n_normed = 0
+        for k in list(data_moments):
+            base = k.rsplit('__age', 1)[0] if '__age' in k else k
+            # Means and SDs need normalisation; corr/autocorr don't
+            if any(base.startswith(p) for p in (
+                'av_', 'sd_', 'mean_', 'cond_discrete_0_mean_',
+                'cond_discrete_1_mean_', 'cond_discrete_0_sd_',
+                'cond_discrete_1_sd_',
+            )):
+                data_moments[k] = data_moments[k] * norm_factor
+                n_normed += 1
+        if is_root(comm):
+            print(f"  Normalised {n_normed} data moments to model units "
+                  f"(factor={norm_factor})")
+
     if is_root(comm):
         print(f"  Matched data moments: {len(data_moments)} (filtered to model keys)")
 
