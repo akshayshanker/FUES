@@ -190,7 +190,9 @@ def main():
             setting_overrides=setting_overrides,
             verbose=False,
         )
-        return simulate_lifecycle(nest, grids, N=N_sim, seed=simulation_seed)
+        panels = simulate_lifecycle(nest, grids, N=N_sim, seed=simulation_seed)
+        del nest, grids  # free solution arrays eagerly
+        return panels
 
     # --- Compose criterion ---
     criterion = make_criterion(trial, moment_fn, data_moments)
