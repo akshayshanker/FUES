@@ -160,6 +160,14 @@ def _run_single_estimation(
         gc.collect()
         return panels
 
+    # Filter data moments to only keys the model can produce.
+    # The CSV has 130+ columns but the model only targets ~10.
+    # Unmatched keys would get NAN_PENALTY, making the loss ~1e9.
+    sim_keys = set(get_moment_names(moment_spec))
+    data_moments = {k: v for k, v in data_moments.items() if k in sim_keys}
+    if is_root(comm):
+        print(f"  Matched data moments: {len(data_moments)} (filtered to model keys)")
+
     criterion = make_criterion(trial, moment_fn, data_moments)
 
     # --- Create output directories ---

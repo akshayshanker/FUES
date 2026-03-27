@@ -19,7 +19,7 @@ estimation:
   method_options:
     n_samples: 1040        # total ranks; split across sweep points
     n_elite: 10
-    max_iter: 50
+    max_iter: 200
     tol: 1e-6
     sampling_seed: 42
     simulation_seed: 99

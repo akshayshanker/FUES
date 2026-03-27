@@ -33,7 +33,7 @@ estimation:
   method_options:
     n_samples: 48
     n_elite: 10
-    max_iter: 50
+    max_iter: 200
     tol: 1e-3
     seed: 42
 
