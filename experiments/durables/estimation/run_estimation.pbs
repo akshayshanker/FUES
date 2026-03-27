@@ -49,7 +49,7 @@ cd "$REPO_ROOT"
 echo "  Repo root: $(pwd)"
 
 # --- Activate venv on /home/ (NFS, not Lustre) ---
-# Created by setup/setup_venv.sh. Fully isolated — no system package conflicts.
+# Created by setup/setup_durables_est.sh. Lean: no HARK/sympy/matplotlib.
 source "$HOME/venvs/fues/bin/activate"
 
 # --- Thread pinning (critical for MPI Python) ---
