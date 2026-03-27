@@ -21,6 +21,7 @@ dependencies = [
 # Durables estimation on Gadi: minimal deps, fast import, no sympy/HARK
 durables-est = [
   "pyyaml",
+  "quantecon",
   "kikku[estimation] @ git+https://github.com/bright-forest/kikku.git",
 ]
 # Full examples (notebooks, benchmarks, all models)
