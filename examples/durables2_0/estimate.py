@@ -160,11 +160,13 @@ def _run_single_estimation(
         gc.collect()
         return panels
 
-    # Filter data moments to only keys the model can produce.
+    # Filter precomputed data moments to only keys the model can produce.
     # The CSV has 130+ columns but the model only targets ~10.
     # Unmatched keys would get NAN_PENALTY, making the loss ~1e9.
-    sim_keys = set(get_moment_names(moment_spec))
-    data_moments = {k: v for k, v in data_moments.items() if k in sim_keys}
+    # Selfgen data is already in model keys by construction — no filtering needed.
+    if data_source == 'precomputed':
+        sim_keys = set(get_moment_names(moment_spec))
+        data_moments = {k: v for k, v in data_moments.items() if k in sim_keys}
 
     # Normalise precomputed data moments to model units.
     # CSV is in AUD; model works in normalised units (normalisation = 1e-5).
@@ -190,7 +192,9 @@ def _run_single_estimation(
                   f"(factor={norm_factor})")
 
     if is_root(comm):
-        print(f"  Matched data moments: {len(data_moments)} (filtered to model keys)")
+        print(f"  Data moments: {len(data_moments)} keys")
+    if not data_moments:
+        raise RuntimeError("No data moments to match — check data_source and moment spec.")
 
     criterion = make_criterion(trial, moment_fn, data_moments)
 
