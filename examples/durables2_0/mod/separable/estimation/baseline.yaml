@@ -35,7 +35,7 @@ estimation:
   # These MUST be distinct on HPC. Can be the same for local development.
   # {user} is expanded from $USER at runtime.
   scratch_dir: /scratch/tp66/{user}/durables_est
-  results_dir: results/durables2_0/estimation
+  results_dir: /g/data/tp66/results/durables2_0/estimation
 
   # --- Save verbosity ---
   save_nests: none              # none | elite | all — which .nst files to save per iteration

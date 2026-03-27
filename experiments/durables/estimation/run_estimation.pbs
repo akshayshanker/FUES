@@ -82,7 +82,7 @@ mpiexec -n $PBS_NCPUS \
         --mod "$MOD" \
         --spec "$SPEC" \
         --scratch /scratch/tp66/$USER/durables_est \
-        --results results/durables2_0/estimation \
+        --results /g/data/tp66/results/durables2_0/estimation \
         --setting-override n_a=$GRID n_h=$GRID n_w=$GRID \
         --calib-override t0=20 \
         --N-sim $N_SIM
