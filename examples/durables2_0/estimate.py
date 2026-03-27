@@ -83,6 +83,10 @@ def main():
     parser.add_argument(
         '--method', type=str, default=None,
         help='Solver method override for adjuster (e.g. NEGM). Default: YAML methods.')
+    parser.add_argument(
+        '--local-results', type=str, default=None,
+        help='Local results dir (default: mod/<syntax>/estimation/results/). '
+             'Set to "none" to disable local copy.')
 
     args = parser.parse_args()
     comm = get_comm()
@@ -347,20 +351,28 @@ def main():
         for row in diag['worst_moments']:
             print(f"  {row['moment']:40s} data={row['data']:10.4f} "
                   f"sim={row['simulated']:10.4f} contrib={row['contribution']:.4f}")
-        # Also save a copy under the mod's estimation/ dir for easy local access:
-        #   mod/separable/estimation/results/baseline/est_<timestamp>/
-        local_results = mod_dir / 'estimation' / 'results' / spec_name / f'est_{run_id}'
-        try:
-            os.makedirs(local_results, exist_ok=True)
-            import shutil
-            for fname in ('theta_best.json', 'theta_mean.json', 'theta_se.json',
-                          'summary.json', 'fit_table.csv', 'convergence.csv'):
-                src = os.path.join(results_run, fname)
-                if os.path.exists(src):
-                    shutil.copy2(src, str(local_results / fname))
-            print(f"\nLocal copy:  {local_results}")
-        except OSError as e:
-            print(f"\nWARNING: could not save local copy: {e}")
+        # Local copy: --local-results (CLI) > default (mod/estimation/results/)
+        # Set --local-results none to disable.
+        if args.local_results and args.local_results.lower() == 'none':
+            local_root = None
+        elif args.local_results:
+            local_root = Path(args.local_results)
+        else:
+            local_root = mod_dir / 'estimation' / 'results'
+
+        if local_root is not None:
+            local_results = local_root / spec_name / f'est_{run_id}'
+            try:
+                os.makedirs(local_results, exist_ok=True)
+                import shutil
+                for fname in ('theta_best.json', 'theta_mean.json', 'theta_se.json',
+                              'summary.json', 'fit_table.csv', 'convergence.csv'):
+                    src = os.path.join(results_run, fname)
+                    if os.path.exists(src):
+                        shutil.copy2(src, str(local_results / fname))
+                print(f"\nLocal copy:  {local_results}")
+            except OSError as e:
+                print(f"\nWARNING: could not save local copy: {e}")
 
         print(f"Results saved to: {results_run}")
         print(f"Checkpoint: {scratch_run}/state.pkl")

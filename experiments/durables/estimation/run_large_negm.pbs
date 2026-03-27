@@ -19,7 +19,7 @@
 
 MOD="mod/separable"
 SPEC="baseline_large_negm.yaml"
-GRID=1000
+GRID=600
 N_SIM=10000
 
 module purge
