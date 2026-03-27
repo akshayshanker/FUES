@@ -1,4 +1,4 @@
-# Estimation spec: SELFGEN + SWEEP over sigma_w
+# Estimation spec: SELFGEN + SWEEP over sigma_w (NEGM adjuster)
 # Recovery test at each wage variance value.
 # MPI comm splitting: total ranks / 7 sweep points.
 

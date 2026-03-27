@@ -1,7 +1,7 @@
 #!/bin/bash
 #PBS -P tp66
 #PBS -q normalsr
-#PBS -N est_swSigW
+#PBS -N sw_sigW_EGM
 #PBS -l ncpus=1040
 #PBS -l mem=4800GB
 #PBS -l walltime=5:00:00
@@ -18,7 +18,7 @@
 # ---------------------------------------------------------------
 
 MOD="mod/separable"
-SPEC="selfgen_sweep_sigma_w.yaml"
+SPEC="selfgen_sweep_sigma_w_egm.yaml"
 GRID=300
 N_SIM=10000
 
@@ -49,7 +49,7 @@ export OMPI_MCA_coll_hcoll_enable=0
 export OMPI_MCA_coll=^hcoll
 export PMIX_MCA_gds=hash
 
-echo "Starting SELFGEN SWEEP sigma_w at $(date)"
+echo "Starting SELFGEN SWEEP sigma_w (EGM) at $(date)"
 echo "  Mod: $MOD | Spec: $SPEC | Grid: $GRID | Nodes: $((PBS_NCPUS/104)) | Cores: $PBS_NCPUS"
 
 mpiexec -n $PBS_NCPUS \
