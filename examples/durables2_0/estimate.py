@@ -239,13 +239,37 @@ def main():
         diag = diagnostics(result, data_moments,
                            moment_names=get_moment_names(moment_spec))
 
+        # Extract elite mean and SE from the last iteration's history
+        theta_mean = result.theta  # fallback
+        theta_se = {n: float('nan') for n in param_spec}
+        if result.history:
+            last = result.history[-1]
+            if 'means' in last:
+                theta_mean = last['means']
+            if 'cov' in last:
+                import numpy as _np
+                cov = _np.asarray(last['cov'])
+                names_sorted = sorted(param_spec.keys())
+                se_vec = _np.sqrt(_np.diag(cov))
+                theta_se = {names_sorted[i]: float(se_vec[i]) for i in range(len(names_sorted))}
+
         # theta_best.json
         with open(os.path.join(results_run, 'theta_best.json'), 'w') as f:
             json.dump(result.theta, f, indent=2)
 
+        # theta_mean.json (elite mean at convergence)
+        with open(os.path.join(results_run, 'theta_mean.json'), 'w') as f:
+            json.dump(theta_mean, f, indent=2)
+
+        # theta_se.json (SE from elite covariance)
+        with open(os.path.join(results_run, 'theta_se.json'), 'w') as f:
+            json.dump(theta_se, f, indent=2)
+
         # summary.json
         summary = {
-            'theta': result.theta,
+            'theta_best': result.theta,
+            'theta_mean': theta_mean,
+            'theta_se': theta_se,
             'objective': result.objective,
             'converged': result.converged,
             'n_iter': result.n_iter,
@@ -274,10 +298,13 @@ def main():
 
         # Print summary
         print(f"\n{'='*60}")
-        print(f"theta*: {result.theta}")
-        print(f"Loss:   {result.objective:.6f}")
-        print(f"Converged: {result.converged} ({result.n_iter} iters)")
-        print(f"\nTop 10 moment contributions:")
+        print(f"Loss:       {result.objective:.6f}")
+        print(f"Converged:  {result.converged} ({result.n_iter} iters)")
+        print(f"\n{'param':12s} {'best':>10s} {'mean':>10s} {'SE':>10s}")
+        print('-' * 44)
+        for n in sorted(param_spec.keys()):
+            print(f"{n:12s} {result.theta[n]:10.4f} {theta_mean[n]:10.4f} {theta_se[n]:10.6f}")
+        print(f"\nFit table (at theta_best):")
         for row in diag['worst_moments']:
             print(f"  {row['moment']:40s} data={row['data']:10.4f} "
                   f"sim={row['simulated']:10.4f} contrib={row['contribution']:.4f}")
