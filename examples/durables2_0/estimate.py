@@ -21,17 +21,23 @@ Usage:
 """
 
 import argparse
+import csv
 import gc
+import json
 import os
+import shutil
+from datetime import datetime
+from itertools import product as cart_product
 from pathlib import Path
 
+import numpy as np
 import yaml
 
 from kikku.run.estimate import (
     load_estimation_spec, make_criterion, estimate, diagnostics,
 )
 from kikku.run.moments import make_moment_fn, moment_names as get_moment_names
-from kikku.run.mpi import get_comm, is_root
+from kikku.run.mpi import get_comm, is_root, bcast_item
 
 from .solve import solve
 from .horses.simulate import simulate_lifecycle
@@ -53,6 +59,242 @@ def _parse_key_value_list(items):
                 pass
         out[k.strip()] = v
     return out
+
+
+def _build_sweep_grid(sweep_spec):
+    """Build list of dicts from sweep spec (cartesian product).
+
+    Example: {'sigma_w': [0.1, 0.2], 'phi_w': [0.8, 0.9]}
+    -> [{'sigma_w': 0.1, 'phi_w': 0.8}, {'sigma_w': 0.1, 'phi_w': 0.9},
+        {'sigma_w': 0.2, 'phi_w': 0.8}, {'sigma_w': 0.2, 'phi_w': 0.9}]
+    """
+    keys = sorted(sweep_spec.keys())
+    vals = [sweep_spec[k] for k in keys]
+    return [dict(zip(keys, combo)) for combo in cart_product(*vals)]
+
+
+def _sweep_point_label(point):
+    """e.g. {'sigma_w': 0.10} -> 'sigma_w=0.10'"""
+    return '_'.join(f'{k}={v}' for k, v in sorted(point.items()))
+
+
+def _run_single_estimation(
+    mod_dir, spec_path, spec, est_yaml, args,
+    calib_overrides, setting_overrides, comm,
+    results_dir, scratch_dir, run_id, sub_label=None,
+):
+    """Run one CE-SMM estimation. Used by both single and sweep modes."""
+
+    moment_spec = spec['moment_spec']
+    param_spec = spec['free']
+    method_options = dict(spec['method_options'])
+
+    # In sweep mode, n_samples = sub_comm size (not the YAML total)
+    if comm is not None:
+        sub_size = comm.Get_size()
+        method_options['n_samples'] = sub_size
+
+    simulation_seed = int(method_options.get('simulation_seed', 99))
+    N_sim = args.N_sim
+    solver_method = args.method
+    spec_name = Path(args.spec).stem
+
+    # Build path: results_dir/<spec_name>/<sub_label>/est_<run_id>/
+    path_parts = [results_dir, spec_name]
+    scratch_parts = [scratch_dir, spec_name]
+    if sub_label:
+        path_parts.append(sub_label)
+        scratch_parts.append(sub_label)
+    path_parts.append(f'est_{run_id}')
+    scratch_parts.append(f'est_{run_id}')
+    results_run = os.path.join(*path_parts)
+    scratch_run = os.path.join(*scratch_parts)
+
+    if is_root(comm):
+        print(f"\n{'='*60}")
+        if sub_label:
+            print(f"Sweep point: {sub_label}")
+        print(f"  Free params: {list(param_spec.keys())}")
+        print(f"  n_samples={method_options.get('n_samples')}, "
+              f"n_elite={method_options.get('n_elite')}")
+        print(f"  Calib overrides: {calib_overrides}")
+
+    # --- Build moment function ---
+    moment_fn = make_moment_fn(moment_spec)
+
+    # --- Build data moments ---
+    data_source = moment_spec.get('data_source', 'precomputed')
+    if data_source == 'selfgen':
+        if is_root(comm):
+            print("  Data source: selfgen...")
+            nest_data, grids_data = solve(
+                str(mod_dir),
+                calib_overrides=calib_overrides,
+                setting_overrides=setting_overrides,
+                verbose=False,
+                strip_solved=True,
+            )
+            data_panels = simulate_lifecycle(
+                nest_data, grids_data, N=N_sim, seed=simulation_seed)
+            data_moments = moment_fn(data_panels)
+            del nest_data, grids_data, data_panels
+        else:
+            data_moments = None
+        data_moments = bcast_item(data_moments, comm, root=0)
+    else:
+        data_moments = spec['data_moments']
+
+    # --- Build trial function ---
+    def trial(theta):
+        merged_calib = {**calib_overrides, **theta}
+        nest, grids = solve(
+            str(mod_dir),
+            method=solver_method,
+            calib_overrides=merged_calib,
+            setting_overrides=setting_overrides,
+            verbose=False,
+            strip_solved=True,
+        )
+        panels = simulate_lifecycle(nest, grids, N=N_sim, seed=simulation_seed)
+        del nest, grids
+        gc.collect()
+        return panels
+
+    criterion = make_criterion(trial, moment_fn, data_moments)
+
+    # --- Create output directories ---
+    if is_root(comm):
+        os.makedirs(scratch_run, exist_ok=True)
+        os.makedirs(results_run, exist_ok=True)
+        manifest = {
+            'mod': str(mod_dir),
+            'spec': str(spec_path),
+            'run_id': run_id,
+            'sweep_point': sub_label,
+            'calib_overrides': calib_overrides,
+            'n_samples': method_options.get('n_samples'),
+            'n_elite': method_options.get('n_elite'),
+            'max_iter': method_options.get('max_iter'),
+            'grid': setting_overrides,
+            'N_sim': N_sim,
+            'simulation_seed': simulation_seed,
+            'sampling_seed': method_options.get('sampling_seed'),
+            'free_params': list(param_spec.keys()),
+            'timestamp': run_id,
+        }
+        with open(os.path.join(scratch_run, 'manifest.json'), 'w') as f:
+            json.dump(manifest, f, indent=2)
+        print(f"  Scratch: {scratch_run}")
+        print(f"  Results: {results_run}")
+
+    method_options['checkpoint_dir'] = scratch_run
+
+    # --- Estimate ---
+    result = estimate(
+        criterion, param_spec,
+        method=spec['method'],
+        method_options=method_options,
+        comm=comm,
+        verbose=is_root(comm),
+    )
+
+    # --- Save results ---
+    summary_row = None
+    if is_root(comm):
+        diag = diagnostics(result, data_moments,
+                           moment_names=get_moment_names(moment_spec))
+
+        theta_mean = result.theta
+        theta_se = {n: float('nan') for n in param_spec}
+        if result.history:
+            last = result.history[-1]
+            if 'means' in last:
+                theta_mean = last['means']
+            if 'cov' in last:
+                cov = np.asarray(last['cov'])
+                names_sorted = sorted(param_spec.keys())
+                se_vec = np.sqrt(np.diag(cov))
+                theta_se = {names_sorted[i]: float(se_vec[i])
+                            for i in range(len(names_sorted))}
+
+        for fname, obj in [
+            ('theta_best.json', result.theta),
+            ('theta_mean.json', theta_mean),
+            ('theta_se.json', theta_se),
+            ('summary.json', {
+                'theta_best': result.theta,
+                'theta_mean': theta_mean,
+                'theta_se': theta_se,
+                'objective': result.objective,
+                'converged': result.converged,
+                'n_iter': result.n_iter,
+                'sweep_point': sub_label,
+                'calib_overrides': calib_overrides,
+            }),
+        ]:
+            with open(os.path.join(results_run, fname), 'w') as f:
+                json.dump(obj, f, indent=2)
+
+        with open(os.path.join(results_run, 'fit_table.csv'), 'w', newline='') as f:
+            writer = csv.DictWriter(f, fieldnames=[
+                'moment', 'data', 'simulated', 'residual',
+                'contribution', 'contribution_pct'])
+            writer.writeheader()
+            for row in diag['fit_table']:
+                writer.writerow(row)
+
+        with open(os.path.join(results_run, 'convergence.csv'), 'w', newline='') as f:
+            writer = csv.DictWriter(f, fieldnames=['iter', 'best_loss', 'elite_mean_loss'])
+            writer.writeheader()
+            for i, h in enumerate(result.history):
+                writer.writerow({
+                    'iter': i,
+                    'best_loss': h.get('best_loss'),
+                    'elite_mean_loss': h.get('elite_mean_loss'),
+                })
+
+        # Print summary
+        print(f"\nLoss:       {result.objective:.6f}")
+        print(f"Converged:  {result.converged} ({result.n_iter} iters)")
+        print(f"\n{'param':12s} {'best':>10s} {'mean':>10s} {'SE':>10s}")
+        print('-' * 44)
+        for n in sorted(param_spec.keys()):
+            print(f"{n:12s} {result.theta[n]:10.4f} {theta_mean[n]:10.4f} {theta_se[n]:10.6f}")
+
+        # Local copy
+        if args.local_results and args.local_results.lower() == 'none':
+            local_root = None
+        elif args.local_results:
+            local_root = Path(args.local_results)
+        else:
+            local_root = mod_dir / 'estimation' / 'results'
+
+        if local_root is not None:
+            lp = [str(local_root), spec_name]
+            if sub_label:
+                lp.append(sub_label)
+            lp.append(f'est_{run_id}')
+            local_results = Path(os.path.join(*lp))
+            try:
+                os.makedirs(local_results, exist_ok=True)
+                for fname in ('theta_best.json', 'theta_mean.json', 'theta_se.json',
+                              'summary.json', 'fit_table.csv', 'convergence.csv'):
+                    src = os.path.join(results_run, fname)
+                    if os.path.exists(src):
+                        shutil.copy2(src, str(local_results / fname))
+                print(f"Local copy:  {local_results}")
+            except OSError as e:
+                print(f"WARNING: could not save local copy: {e}")
+
+        print(f"Results: {results_run}")
+
+        # Build summary row for sweep aggregation
+        summary_row = {**calib_overrides, **result.theta,
+                       'objective': result.objective,
+                       'converged': result.converged,
+                       'n_iter': result.n_iter}
+
+    return summary_row
 
 
 def main():
@@ -89,10 +331,9 @@ def main():
              'Set to "none" to disable local copy.')
 
     args = parser.parse_args()
-    comm = get_comm()
+    world_comm = get_comm()
 
     # --- Resolve paths ---
-    # mod_dir is relative to the example root
     example_root = Path(__file__).parent
     mod_dir = (example_root / args.mod).resolve()
     spec_path = mod_dir / 'estimation' / args.spec
@@ -104,251 +345,104 @@ def main():
 
     # --- Load estimation spec ---
     spec = load_estimation_spec(str(spec_path))
-    moment_spec = spec['moment_spec']
-    param_spec = spec['free']
-    method_options = spec['method_options']
 
-    # Load scratch/results dirs from the raw YAML (not in spec dict)
     with spec_path.open() as f:
         raw_yaml = yaml.safe_load(f)
     est_yaml = raw_yaml.get('estimation', {})
 
-    # CLI overrides for paths (CLI > YAML > defaults)
     scratch_dir = args.scratch or est_yaml.get('scratch_dir', 'scratch/est')
     results_dir = args.results or est_yaml.get('results_dir', 'results/est')
-
-    # Expand {user}
     scratch_dir = scratch_dir.replace('{user}', os.environ.get('USER', 'unknown'))
     results_dir = results_dir.replace('{user}', os.environ.get('USER', 'unknown'))
 
     setting_overrides = _parse_key_value_list(args.setting_override)
     calib_overrides = _parse_key_value_list(args.calib_override)
 
-    simulation_seed = int(method_options.get('simulation_seed', 99))
-    N_sim = args.N_sim
-
-    if is_root(comm):
-        print(f"Estimation: {spec_path.name}")
-        print(f"  Mod: {mod_dir}")
-        print(f"  Free params: {list(param_spec.keys())}")
-        print(f"  Method: {spec['method']}")
-        print(f"  n_samples={method_options.get('n_samples')}, "
-              f"n_elite={method_options.get('n_elite')}, "
-              f"max_iter={method_options.get('max_iter')}")
-        print(f"  N_sim={N_sim}, simulation_seed={simulation_seed}")
-        print(f"  Scratch: {scratch_dir}")
-        print(f"  Results: {results_dir}")
-        if setting_overrides:
-            print(f"  Setting overrides: {setting_overrides}")
-        if calib_overrides:
-            print(f"  Calib overrides: {calib_overrides}")
-
-    # --- Build moment function ---
-    moment_fn = make_moment_fn(moment_spec)
-
-    # --- Build data moments ---
-    data_source = moment_spec.get('data_source', 'precomputed')
-    if data_source == 'selfgen':
-        # Generate data on rank 0 only, then broadcast.
-        # Use calib_overrides (e.g. t0=20) so data covers the same age range
-        # as the trial function. Without this, selfgen uses YAML defaults
-        # (t0=40) and produces NaN for age groups outside that range.
-        if is_root(comm):
-            print("  Data source: selfgen (solving at default calibration + overrides)...")
-            nest_data, grids_data = solve(
-                str(mod_dir),
-                calib_overrides=calib_overrides,
-                setting_overrides=setting_overrides,
-                verbose=False,
-                strip_solved=True,
-            )
-            data_panels = simulate_lifecycle(
-                nest_data, grids_data, N=N_sim, seed=simulation_seed)
-            data_moments = moment_fn(data_panels)
-            del nest_data, grids_data, data_panels
-        else:
-            data_moments = None
-        from kikku.run.mpi import bcast_item as _bcast
-        data_moments = _bcast(data_moments, comm, root=0)
-    else:
-        data_moments = spec['data_moments']
-
-    if is_root(comm):
-        print(f"  Data moments: {len(data_moments)} keys")
-
-    # --- Check for conflicts: calib overrides vs free params ---
-    conflicts = set(calib_overrides.keys()) & set(param_spec.keys())
-    if conflicts and is_root(comm):
-        print(f"  WARNING: --calib-override sets {conflicts} which are free params. "
-              f"CE draws will override these values at each evaluation.")
-
-    # --- Build trial function ---
-    # Precedence: theta (CE draw) > calib_overrides > YAML calibration defaults.
-    # Free params always come from the CE, never from overrides.
-    solver_method = args.method  # None = YAML default, 'NEGM' = override adjuster
-
-    def trial(theta):
-        merged_calib = {**calib_overrides, **theta}  # theta wins on overlap
-        nest, grids = solve(
-            str(mod_dir),
-            method=solver_method,
-            calib_overrides=merged_calib,
-            setting_overrides=setting_overrides,
-            verbose=False,
-            strip_solved=True,  # free V/marginals during backward loop
-        )
-        panels = simulate_lifecycle(nest, grids, N=N_sim, seed=simulation_seed)
-        del nest, grids
-        gc.collect()
-        return panels
-
-    # --- Compose criterion ---
-    criterion = make_criterion(trial, moment_fn, data_moments)
-
-    # --- Create output directories ---
-    import json
-    from datetime import datetime
-
     run_id = datetime.now().strftime('%Y%m%d_%H%M%S')
-    # Organise by spec name: estimation/baseline/est_20260327_143000/
-    spec_name = Path(args.spec).stem  # e.g. 'baseline', 'baseline_large_egm'
-    scratch_run = os.path.join(scratch_dir, spec_name, f'est_{run_id}')
-    results_run = os.path.join(results_dir, spec_name, f'est_{run_id}')
+    spec_name = Path(args.spec).stem
 
-    if is_root(comm):
-        os.makedirs(scratch_run, exist_ok=True)
-        os.makedirs(results_run, exist_ok=True)
-        # Save manifest
-        manifest = {
-            'mod': str(mod_dir),
-            'spec': str(spec_path),
-            'run_id': run_id,
-            'n_samples': method_options.get('n_samples'),
-            'n_elite': method_options.get('n_elite'),
-            'max_iter': method_options.get('max_iter'),
-            'grid': setting_overrides,
-            'N_sim': N_sim,
-            'simulation_seed': simulation_seed,
-            'sampling_seed': method_options.get('sampling_seed'),
-            'free_params': list(param_spec.keys()),
-            'timestamp': run_id,
-        }
-        with open(os.path.join(scratch_run, 'manifest.json'), 'w') as f:
-            json.dump(manifest, f, indent=2)
-        print(f"  Scratch: {scratch_run}")
-        print(f"  Results: {results_run}")
+    # --- Check for sweep ---
+    sweep_spec = est_yaml.get('sweep')
 
-    # --- Pass checkpoint_dir so CE saves state per iteration ---
-    method_options['checkpoint_dir'] = scratch_run
+    if sweep_spec is None:
+        # ── Single estimation (no sweep) ──
+        if is_root(world_comm):
+            print(f"Estimation: {spec_path.name}")
+            print(f"  Mod: {mod_dir}")
+            print(f"  Method: {spec['method']}")
+        _run_single_estimation(
+            mod_dir, spec_path, spec, est_yaml, args,
+            calib_overrides, setting_overrides, world_comm,
+            results_dir, scratch_dir, run_id,
+        )
+    else:
+        # ── Sweep mode: split communicator ──
+        sweep_grid = _build_sweep_grid(sweep_spec)
+        n_points = len(sweep_grid)
 
-    # --- Estimate ---
-    result = estimate(
-        criterion, param_spec,
-        method=spec['method'],
-        method_options=method_options,
-        comm=comm,
-        verbose=is_root(comm),
-    )
+        world_rank = world_comm.Get_rank() if world_comm else 0
+        world_size = world_comm.Get_size() if world_comm else 1
 
-    # --- Save results ---
-    if is_root(comm):
-        diag = diagnostics(result, data_moments,
-                           moment_names=get_moment_names(moment_spec))
+        if is_root(world_comm):
+            print(f"Estimation SWEEP: {spec_path.name}")
+            print(f"  Mod: {mod_dir}")
+            print(f"  Sweep: {n_points} points across {world_size} ranks")
+            for i, pt in enumerate(sweep_grid):
+                print(f"    [{i}] {pt}")
 
-        # Extract elite mean and SE from the last iteration's history
-        theta_mean = result.theta  # fallback
-        theta_se = {n: float('nan') for n in param_spec}
-        if result.history:
-            last = result.history[-1]
-            if 'means' in last:
-                theta_mean = last['means']
-            if 'cov' in last:
-                import numpy as _np
-                cov = _np.asarray(last['cov'])
-                names_sorted = sorted(param_spec.keys())
-                se_vec = _np.sqrt(_np.diag(cov))
-                theta_se = {names_sorted[i]: float(se_vec[i]) for i in range(len(names_sorted))}
+        # Split communicator: color = which sweep point this rank belongs to
+        color = world_rank * n_points // world_size
+        sub_comm = world_comm.Split(color, world_rank) if world_comm else None
+        my_point = sweep_grid[color]
+        sub_label = _sweep_point_label(my_point)
 
-        # theta_best.json
-        with open(os.path.join(results_run, 'theta_best.json'), 'w') as f:
-            json.dump(result.theta, f, indent=2)
+        # Merge sweep point into calib overrides
+        sweep_calib = {**calib_overrides, **my_point}
 
-        # theta_mean.json (elite mean at convergence)
-        with open(os.path.join(results_run, 'theta_mean.json'), 'w') as f:
-            json.dump(theta_mean, f, indent=2)
+        if is_root(sub_comm):
+            sub_size = sub_comm.Get_size() if sub_comm else 1
+            print(f"\n  Sweep [{color}] {sub_label}: {sub_size} ranks")
 
-        # theta_se.json (SE from elite covariance)
-        with open(os.path.join(results_run, 'theta_se.json'), 'w') as f:
-            json.dump(theta_se, f, indent=2)
+        summary_row = _run_single_estimation(
+            mod_dir, spec_path, spec, est_yaml, args,
+            sweep_calib, setting_overrides, sub_comm,
+            results_dir, scratch_dir, run_id, sub_label=sub_label,
+        )
 
-        # summary.json
-        summary = {
-            'theta_best': result.theta,
-            'theta_mean': theta_mean,
-            'theta_se': theta_se,
-            'objective': result.objective,
-            'converged': result.converged,
-            'n_iter': result.n_iter,
-        }
-        with open(os.path.join(results_run, 'summary.json'), 'w') as f:
-            json.dump(summary, f, indent=2)
+        # --- Gather sweep summary on world root ---
+        # Each sub_comm root has a summary_row; other ranks have None
+        all_rows = world_comm.gather(summary_row, root=0) if world_comm else [summary_row]
 
-        # fit_table.csv
-        import csv
-        with open(os.path.join(results_run, 'fit_table.csv'), 'w', newline='') as f:
-            writer = csv.DictWriter(f, fieldnames=['moment', 'data', 'simulated', 'residual', 'contribution', 'contribution_pct'])
-            writer.writeheader()
-            for row in diag['fit_table']:
-                writer.writerow(row)
+        if is_root(world_comm):
+            rows = [r for r in all_rows if r is not None]
+            if rows:
+                sweep_results_dir = os.path.join(results_dir, spec_name)
+                os.makedirs(sweep_results_dir, exist_ok=True)
+                summary_path = os.path.join(sweep_results_dir, f'sweep_summary_{run_id}.csv')
+                fieldnames = list(rows[0].keys())
+                with open(summary_path, 'w', newline='') as f:
+                    writer = csv.DictWriter(f, fieldnames=fieldnames)
+                    writer.writeheader()
+                    for row in rows:
+                        writer.writerow(row)
+                print(f"\n{'='*60}")
+                print(f"Sweep summary ({len(rows)} points): {summary_path}")
 
-        # convergence.csv
-        with open(os.path.join(results_run, 'convergence.csv'), 'w', newline='') as f:
-            writer = csv.DictWriter(f, fieldnames=['iter', 'best_loss', 'elite_mean_loss'])
-            writer.writeheader()
-            for i, h in enumerate(result.history):
-                writer.writerow({
-                    'iter': i,
-                    'best_loss': h.get('best_loss'),
-                    'elite_mean_loss': h.get('elite_mean_loss'),
-                })
-
-        # Print summary
-        print(f"\n{'='*60}")
-        print(f"Loss:       {result.objective:.6f}")
-        print(f"Converged:  {result.converged} ({result.n_iter} iters)")
-        print(f"\n{'param':12s} {'best':>10s} {'mean':>10s} {'SE':>10s}")
-        print('-' * 44)
-        for n in sorted(param_spec.keys()):
-            print(f"{n:12s} {result.theta[n]:10.4f} {theta_mean[n]:10.4f} {theta_se[n]:10.6f}")
-        print(f"\nFit table (at theta_best):")
-        for row in diag['worst_moments']:
-            print(f"  {row['moment']:40s} data={row['data']:10.4f} "
-                  f"sim={row['simulated']:10.4f} contrib={row['contribution']:.4f}")
-        # Local copy: --local-results (CLI) > default (mod/estimation/results/)
-        # Set --local-results none to disable.
-        if args.local_results and args.local_results.lower() == 'none':
-            local_root = None
-        elif args.local_results:
-            local_root = Path(args.local_results)
-        else:
-            local_root = mod_dir / 'estimation' / 'results'
-
-        if local_root is not None:
-            local_results = local_root / spec_name / f'est_{run_id}'
-            try:
-                os.makedirs(local_results, exist_ok=True)
-                import shutil
-                for fname in ('theta_best.json', 'theta_mean.json', 'theta_se.json',
-                              'summary.json', 'fit_table.csv', 'convergence.csv'):
-                    src = os.path.join(results_run, fname)
-                    if os.path.exists(src):
-                        shutil.copy2(src, str(local_results / fname))
-                print(f"\nLocal copy:  {local_results}")
-            except OSError as e:
-                print(f"\nWARNING: could not save local copy: {e}")
-
-        print(f"Results saved to: {results_run}")
-        print(f"Checkpoint: {scratch_run}/state.pkl")
+                # Also save to local results
+                if args.local_results and args.local_results.lower() == 'none':
+                    local_root = None
+                elif args.local_results:
+                    local_root = Path(args.local_results)
+                else:
+                    local_root = mod_dir / 'estimation' / 'results'
+                if local_root is not None:
+                    local_sweep = local_root / spec_name
+                    try:
+                        os.makedirs(local_sweep, exist_ok=True)
+                        shutil.copy2(summary_path,
+                                     str(local_sweep / f'sweep_summary_{run_id}.csv'))
+                    except OSError:
+                        pass
 
 
 if __name__ == '__main__':
