@@ -2,106 +2,109 @@
 # ==========================================================================
 #  Setup script for dcsmm + kikku.
 #
-#  Creates a virtual environment with all dependencies for solving,
-#  simulating, and estimating DDSL models.
+#  On Gadi: installs into ~/.local/ (user site-packages on /home/ NFS).
+#    This avoids Lustre BrokenPipeError at scale (520+ MPI ranks).
+#    /home/ NFS handles concurrent reads; /scratch/ Lustre does not.
 #
-#  Works on both NCI Gadi and a local laptop/desktop.
+#  Locally: creates a .venv in the repo root.
 #
-#  Usage on Gadi (login node or interactive PBS):
-#
+#  Usage on Gadi (login node):
 #    cd /home/141/as3442/dev/fues.dev/FUES
 #    bash setup/setup_venv.sh
 #
-#  Usage on laptop:
-#
+#  Usage locally:
 #    cd /path/to/FUES
 #    bash setup/setup_venv.sh
 #
 # ==========================================================================
 set -euo pipefail
 
-# Detect repo root (parent of setup/)
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-# Detect environment: Gadi (has /scratch/tp66) vs local
 if [[ -d "/scratch/tp66" ]]; then
-    echo "Detected NCI Gadi environment"
-    VENV_DIR="/scratch/tp66/${USER}/venvs/fues"
+    # ===================== GADI =====================
+    echo "Detected NCI Gadi — installing to ~/.local/ (NFS, not Lustre)"
+
     module purge
     module load python3/3.11.0
     module load openmpi/4.1.5
+    python3 --version
+
+    echo ""
+    echo "=== Step 1: Core numerical stack ==="
+    pip install --user "numpy>=1.26,<2.0" --quiet
+    pip install --user "numba>=0.59" --quiet
+    pip install --user "scipy>=1.12,<2.0" --quiet
+
+    echo ""
+    echo "=== Step 2: Install dcsmm (editable) ==="
+    cd "$REPO_ROOT"
+    pip install --user -e ".[examples]" --quiet
+
+    echo ""
+    echo "=== Step 3: Install kikku from GitHub ==="
+    pip install --user "kikku[estimation] @ git+https://github.com/bright-forest/kikku.git" --quiet
+
+    echo ""
+    echo "=== Step 4: Install dolang + dolo ==="
+    pip install --user lark multipledispatch --quiet
+    pip install --user --no-deps "dolang @ git+https://github.com/bright-forest/dolang.py.git@phase1.1_0.1" --quiet
+    pip install --user --no-deps "dolo @ git+https://github.com/bright-forest/dolo.git@phase1.1_0.1" --quiet
+
+    echo ""
+    echo "=== Step 5: Build mpi4py from source ==="
+    pip install --user --no-binary :all: mpi4py --quiet
+
+    echo ""
+    echo "=== Step 6: Verify ==="
+    python3 -c "import numpy; print(f'numpy {numpy.__version__}')"
+    python3 -c "import numba; print(f'numba {numba.__version__}')"
+    python3 -c "import scipy; print(f'scipy {scipy.__version__}')"
+    python3 -c "from dcsmm.fues import FUES; print('OK: dcsmm.fues')"
+    python3 -c "from kikku.run.estimate import estimate; print('OK: kikku.run.estimate')"
+    python3 -c "from kikku.dynx import load_syntax; print('OK: kikku.dynx')"
+    python3 -c "import dolo; print('OK: dolo')"
+    python3 -c "from mpi4py import MPI; print(f'OK: mpi4py')"
+
+    echo ""
+    echo "=== Done (Gadi) ==="
+    echo "Packages installed to: ~/.local/lib/python3.11/site-packages/"
+    echo "No venv activation needed — just: module load python3/3.11.0"
+
 else
+    # ===================== LOCAL =====================
     echo "Detected local environment"
     VENV_DIR="${REPO_ROOT}/.venv"
+    python3 --version
+
+    echo ""
+    echo "=== Step 1: Create venv at ${VENV_DIR} ==="
+    if [[ -d "${VENV_DIR}" ]]; then
+        echo "Removing existing venv..."
+        rm -rf "${VENV_DIR}"
+    fi
+    python3 -m venv "${VENV_DIR}"
+    source "${VENV_DIR}/bin/activate"
+    pip install --upgrade pip --quiet
+
+    echo ""
+    echo "=== Step 2: Install everything ==="
+    cd "$REPO_ROOT"
+    pip install -e ".[examples]" --quiet
+    pip install "kikku[estimation] @ git+https://github.com/bright-forest/kikku.git" --quiet
+    pip install lark multipledispatch --quiet
+    pip install --no-deps "dolang @ git+https://github.com/bright-forest/dolang.py.git@phase1.1_0.1" --quiet
+    pip install --no-deps "dolo @ git+https://github.com/bright-forest/dolo.git@phase1.1_0.1" --quiet
+
+    echo ""
+    echo "=== Step 3: Verify ==="
+    python3 -c "import numpy; print(f'numpy {numpy.__version__}')"
+    python3 -c "import numba; print(f'numba {numba.__version__}')"
+    python3 -c "from dcsmm.fues import FUES; print('OK: dcsmm.fues')"
+    python3 -c "from kikku.run.estimate import estimate; print('OK: kikku.run.estimate')"
+    python3 -c "import dolo; print('OK: dolo')"
+
+    echo ""
+    echo "=== Done (local) ==="
+    echo "Activate: source ${VENV_DIR}/bin/activate"
 fi
-
-python3 --version
-
-echo ""
-echo "=== Step 1: Create venv at ${VENV_DIR} ==="
-if [[ -d "${VENV_DIR}" ]]; then
-    echo "Removing existing venv..."
-    rm -rf "${VENV_DIR}"
-fi
-# Do NOT use --system-site-packages (avoids numpy/numba conflicts from system packages)
-python3 -m venv "${VENV_DIR}"
-source "${VENV_DIR}/bin/activate"
-pip install --upgrade pip --quiet
-
-echo ""
-echo "=== Step 2: Core numerical stack (pinned for numba compatibility) ==="
-pip install "numpy>=1.26,<2.0" --quiet
-pip install "numba>=0.59" --quiet
-pip install "scipy>=1.12" --quiet
-
-echo ""
-echo "=== Step 3: Install dcsmm (editable) + all dependencies ==="
-cd "${REPO_ROOT}"
-pip install -e ".[examples]" --quiet
-
-echo ""
-echo "=== Step 4: Install kikku from GitHub (with estimation extras) ==="
-# NOT editable (-e) — editable puts source on /scratch/ (Lustre) which causes
-# BrokenPipeError at scale (520+ MPI ranks all reading .py files simultaneously).
-# Non-editable installs compiled .pyc into site-packages/ which handles concurrent reads.
-pip install "kikku[estimation] @ git+https://github.com/bright-forest/kikku.git" --quiet
-
-echo ""
-echo "=== Step 5: Install dolang + dolo (bright-forest phase1.1_0.1) ==="
-pip install lark multipledispatch --quiet
-pip install --no-deps "dolang @ git+https://github.com/bright-forest/dolang.py.git@phase1.1_0.1" --quiet
-pip install --no-deps "dolo @ git+https://github.com/bright-forest/dolo.git@phase1.1_0.1" --quiet
-
-echo ""
-echo "=== Step 6: MPI (Gadi only — build from source against system OpenMPI) ==="
-if [[ -d "/scratch/tp66" ]]; then
-    pip install --no-binary :all: mpi4py --quiet
-    echo "mpi4py built from source"
-else
-    echo "Skipping mpi4py (local dev — install manually if needed)"
-fi
-
-echo ""
-echo "=== Step 7: Verify ==="
-python3 -c "import numpy; print(f'numpy {numpy.__version__}')"
-python3 -c "import numba; print(f'numba {numba.__version__}')"
-python3 -c "import scipy; print(f'scipy {scipy.__version__}')"
-python3 -c "from dcsmm.fues import FUES; print('OK: dcsmm.fues.FUES')"
-python3 -c "from dcsmm.uenvelope import EGM_UE; print('OK: dcsmm.uenvelope.EGM_UE')"
-python3 -c "from kikku.run.estimate import estimate; print('OK: kikku.run.estimate')"
-python3 -c "from kikku.run.moments import make_moment_fn; print('OK: kikku.run.moments')"
-python3 -c "from kikku.dynx import load_syntax; print('OK: kikku.dynx')"
-python3 -c "import dolo; print('OK: dolo')"
-python3 -c "import yaml; print('OK: pyyaml')"
-
-if [[ -d "/scratch/tp66" ]]; then
-    python3 -c "from mpi4py import MPI; print(f'OK: mpi4py (ranks={MPI.COMM_WORLD.Get_size()})')"
-fi
-
-echo ""
-pip list 2>/dev/null | grep -i -E "dcsmm|kikku|numba|numpy|scipy|mpi4py|dolo|pandas|pyyaml"
-
-echo ""
-echo "=== Done ==="
-echo "Venv:     ${VENV_DIR}"
-echo "Activate: source ${VENV_DIR}/bin/activate"
