@@ -144,11 +144,15 @@ def main():
     # --- Build data moments ---
     data_source = moment_spec.get('data_source', 'precomputed')
     if data_source == 'selfgen':
-        # Generate data on rank 0 only, then broadcast
+        # Generate data on rank 0 only, then broadcast.
+        # Use calib_overrides (e.g. t0=20) so data covers the same age range
+        # as the trial function. Without this, selfgen uses YAML defaults
+        # (t0=40) and produces NaN for age groups outside that range.
         if is_root(comm):
-            print("  Data source: selfgen (solving at default calibration)...")
+            print("  Data source: selfgen (solving at default calibration + overrides)...")
             nest_data, grids_data = solve(
                 str(mod_dir),
+                calib_overrides=calib_overrides,
                 setting_overrides=setting_overrides,
                 verbose=False,
             )
