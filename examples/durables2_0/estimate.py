@@ -165,8 +165,27 @@ def _run_single_estimation(
     # Unmatched keys would get NAN_PENALTY, making the loss ~1e9.
     # Selfgen data is already in model keys by construction — no filtering needed.
     if data_source == 'precomputed':
-        sim_keys = set(get_moment_names(moment_spec))
-        data_moments = {k: v for k, v in data_moments.items() if k in sim_keys}
+        # Build target key prefixes from the YAML targets section.
+        # Each target has a 'key' field (e.g. 'av_consumption2_14_0') that maps
+        # to CSV columns. Data keys are '{key}__age{g}'. Keep only those.
+        targets = moment_spec.get('targets') or []
+        ident = moment_spec.get('identification') or {}
+        target_prefixes = set()
+        for t in targets:
+            target_prefixes.add(t['key'])
+        # Also keep identification-style keys (mean_c, sd_h, corr_c_h, autocorr_a, etc.)
+        for var in ident.get('mean', []) or []:
+            target_prefixes.add(f'mean_{var}')
+        for var in ident.get('sd', []) or ident.get('sds', []) or []:
+            target_prefixes.add(f'sd_{var}')
+        for pair in ident.get('corrs', []) or []:
+            target_prefixes.add(f'corr_{pair[0]}_{pair[1]}')
+        for var in ident.get('autocorrs', []) or []:
+            target_prefixes.add(f'autocorr_{var}')
+        data_moments = {
+            k: v for k, v in data_moments.items()
+            if any(k.startswith(p + '__') or k == p for p in target_prefixes)
+        }
 
     # Normalise precomputed data moments to model units.
     # CSV is in AUD; model works in normalised units (normalisation = 1e-5).
