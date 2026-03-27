@@ -327,6 +327,8 @@ def _make_egm_adjuster(callables, grids, stage):
                 break
         if not has_b:
             dv_h_b = interp_as_scalar(a_grid, dv_h_cntn, b)
+            dv_a_b = interp_as_scalar(a_grid, dv_a_cntn, b)
+            c_at_b = -1.0  # sentinel
             if _cd_utility:
                 # CD: solve (1+τ)*du_c(c,h) - du_h(c,h) - dv_h(b) = 0
                 c_lo = 1e-6
@@ -339,15 +341,16 @@ def _make_egm_adjuster(callables, grids, stage):
                         args=(h_choice, dv_h_b), xtol=1e-10)
                     if result is not None and result[0] > 0.0:
                         c_at_b = result[0]
-                        a_nxt_cntn[-1] = b
-                        m_cntn_raw[-1] = c_at_b + b + housing_cost(h_choice)
             else:
                 # Separable: closed form (du_h ignores c).
-                # c = du_c_inv((dv_h(b) + du_h(h')) / (1+τ))
-                # Matches old/durables/durables.py root_H_UPRIME_func_fast.
                 du_h_val = du_h_fn(0.0, h_choice)
                 c_at_b = du_c_inv_fn(
                     (dv_h_b + du_h_val) / fac_housing, h_choice)
+
+            # Validity: only add if constraint is binding
+            # (agent wants to borrow more: du_c(c,h) >= dv_a(b)).
+            # Matches durable-cons benchmark validity check.
+            if c_at_b > 0.0 and du_c_fn(c_at_b, h_choice) >= dv_a_b:
                 a_nxt_cntn[-1] = b
                 m_cntn_raw[-1] = c_at_b + b + housing_cost(h_choice)
 
@@ -529,10 +532,12 @@ def _make_egm_adjuster(callables, grids, stage):
             m_arr = np.asarray(m_cntn_raw)
             a_arr = np.asarray(a_nxt_cntn)
             h_arr = np.asarray(h_choice_cntn)
+            v_arr = np.asarray(v_cntn_raw)
             c_raw = m_arr - h_arr * fac_housing - a_arr
             cntn_data = {
                 'c': c_raw,
                 'm_endog': m_arr,
+                'v_endog': v_arr,
                 'a_nxt_eval': a_arr,
                 'h_nxt_eval': h_arr,
                 '_refined': refined,

@@ -185,6 +185,40 @@ def main():
     # --- Compose criterion ---
     criterion = make_criterion(trial, moment_fn, data_moments)
 
+    # --- Create output directories ---
+    import json
+    from datetime import datetime
+
+    run_id = datetime.now().strftime('%Y%m%d_%H%M%S')
+    scratch_run = os.path.join(scratch_dir, f'est_{run_id}')
+    results_run = os.path.join(results_dir, f'est_{run_id}')
+
+    if is_root(comm):
+        os.makedirs(scratch_run, exist_ok=True)
+        os.makedirs(results_run, exist_ok=True)
+        # Save manifest
+        manifest = {
+            'mod': str(mod_dir),
+            'spec': str(spec_path),
+            'run_id': run_id,
+            'n_samples': method_options.get('n_samples'),
+            'n_elite': method_options.get('n_elite'),
+            'max_iter': method_options.get('max_iter'),
+            'grid': setting_overrides,
+            'N_sim': N_sim,
+            'simulation_seed': simulation_seed,
+            'sampling_seed': method_options.get('sampling_seed'),
+            'free_params': list(param_spec.keys()),
+            'timestamp': run_id,
+        }
+        with open(os.path.join(scratch_run, 'manifest.json'), 'w') as f:
+            json.dump(manifest, f, indent=2)
+        print(f"  Scratch: {scratch_run}")
+        print(f"  Results: {results_run}")
+
+    # --- Pass checkpoint_dir so CE saves state per iteration ---
+    method_options['checkpoint_dir'] = scratch_run
+
     # --- Estimate ---
     result = estimate(
         criterion, param_spec,
@@ -194,11 +228,45 @@ def main():
         verbose=is_root(comm),
     )
 
-    # --- Report ---
+    # --- Save results ---
     if is_root(comm):
         diag = diagnostics(result, data_moments,
                            moment_names=get_moment_names(moment_spec))
 
+        # theta_best.json
+        with open(os.path.join(results_run, 'theta_best.json'), 'w') as f:
+            json.dump(result.theta, f, indent=2)
+
+        # summary.json
+        summary = {
+            'theta': result.theta,
+            'objective': result.objective,
+            'converged': result.converged,
+            'n_iter': result.n_iter,
+        }
+        with open(os.path.join(results_run, 'summary.json'), 'w') as f:
+            json.dump(summary, f, indent=2)
+
+        # fit_table.csv
+        import csv
+        with open(os.path.join(results_run, 'fit_table.csv'), 'w', newline='') as f:
+            writer = csv.DictWriter(f, fieldnames=['moment', 'data', 'simulated', 'residual', 'contribution', 'contribution_pct'])
+            writer.writeheader()
+            for row in diag['fit_table']:
+                writer.writerow(row)
+
+        # convergence.csv
+        with open(os.path.join(results_run, 'convergence.csv'), 'w', newline='') as f:
+            writer = csv.DictWriter(f, fieldnames=['iter', 'best_loss', 'elite_mean_loss'])
+            writer.writeheader()
+            for i, h in enumerate(result.history):
+                writer.writerow({
+                    'iter': i,
+                    'best_loss': h.get('best_loss'),
+                    'elite_mean_loss': h.get('elite_mean_loss'),
+                })
+
+        # Print summary
         print(f"\n{'='*60}")
         print(f"theta*: {result.theta}")
         print(f"Loss:   {result.objective:.6f}")
@@ -207,6 +275,8 @@ def main():
         for row in diag['worst_moments']:
             print(f"  {row['moment']:40s} data={row['data']:10.4f} "
                   f"sim={row['simulated']:10.4f} contrib={row['contribution']:.4f}")
+        print(f"\nResults saved to: {results_run}")
+        print(f"Checkpoint: {scratch_run}/state.pkl")
 
 
 if __name__ == '__main__':

@@ -592,9 +592,32 @@ def nb_plot_adjuster_egm(nest, grids, plot_t=None, i_z=0, xlim=25):
             a_ymax = np.max(rf['a_nxt_eval'][env_mask]) * 1.15
             h_ymax = np.max(rf['h_nxt_eval'][env_mask]) * 1.15
 
-    fig, axes = plt.subplots(1, 2, figsize=(10, 4))
+    # Raw value (unrefined)
+    v_raw_arr = adj_cntn.get('v_endog')
+    if v_raw_arr is not None:
+        v_pts = v_raw_arr[i_z].ravel()[mask]
+    else:
+        v_pts = None
 
-    # Panel 1 (left): financial assets a'
+    # y-axis cap for value from refined envelope
+    v_ymin = v_ymax = None
+    if has_refined and refined[i_z].get('vf') is not None:
+        rf = refined[i_z]
+        env_mask = rf['m_endog'] <= xlim
+        if np.any(env_mask):
+            vf_vis = rf['vf'][env_mask]
+            vf_finite = vf_vis[np.isfinite(vf_vis)]
+            if len(vf_finite) > 0:
+                span = vf_finite.max() - vf_finite.min()
+                v_ymin = vf_finite.min() - 0.1 * span
+                v_ymax = vf_finite.max() + 0.05 * span
+
+    if v_pts is None:
+        print('Note: v_endog not stored — re-run solve to get the value EGM grid.')
+    n_panels = 3 if v_pts is not None else 2
+    fig, axes = plt.subplots(1, n_panels, figsize=(5 * n_panels, 4))
+
+    # Panel 1: financial assets a'
     ax = axes[0]
     ax.scatter(m_pts, a_pts, s=3, alpha=0.25, color=t['raw'],
                label='Raw EGM', rasterized=True, edgecolors='none')
@@ -615,7 +638,7 @@ def nb_plot_adjuster_egm(nest, grids, plot_t=None, i_z=0, xlim=25):
     ax.legend(frameon=False, fontsize=8)
     _style_nb_ax(ax)
 
-    # Panel 2 (right): housing
+    # Panel 2: housing
     ax = axes[1]
     ax.scatter(m_pts, h_pts, s=3, alpha=0.25, color=t['raw'],
                label='Raw EGM', rasterized=True, edgecolors='none')
@@ -635,6 +658,29 @@ def nb_plot_adjuster_egm(nest, grids, plot_t=None, i_z=0, xlim=25):
     ax.set_ylim(0, h_ymax)
     ax.legend(frameon=False, fontsize=8)
     _style_nb_ax(ax)
+
+    # Panel 3: value (raw + refined)
+    if v_pts is not None:
+        ax = axes[2]
+        ax.scatter(m_pts, v_pts, s=3, alpha=0.25, color=t['raw'],
+                   label='Raw EGM', rasterized=True, edgecolors='none')
+        if has_refined and refined[i_z].get('vf') is not None:
+            rf = refined[i_z]
+            sidx = np.argsort(rf['m_endog'])
+            ax.plot(rf['m_endog'][sidx], rf['vf'][sidx],
+                    color=t['accent'], linewidth=1.3, label='FUES envelope',
+                    zorder=5)
+            ax.scatter(rf['m_endog'], rf['vf'],
+                       s=10, color=t['accent'], marker='x', linewidth=0.7,
+                       zorder=6)
+        ax.set_xlabel('Endogenous wealth $\\hat{m}$')
+        ax.set_ylabel('$V(\\hat{m})$')
+        ax.set_title(f'Value (age {plot_t}, $z_{{{i_z}}}$)', fontweight='600')
+        ax.set_xlim(0, xlim)
+        if v_ymin is not None:
+            ax.set_ylim(v_ymin, v_ymax)
+        ax.legend(frameon=False, fontsize=8)
+        _style_nb_ax(ax)
 
     fig.tight_layout()
     return fig
@@ -769,12 +815,27 @@ def nb_plot_keeper_policy(results, grids, plot_t, i_z=0, i_h=None, xlim=15,
     return fig
 
 
+def _ce_transform(V, rho):
+    """Certainty-equivalent composite good: C_eq = ((1-rho)*V)^(1/(1-rho)).
+
+    Maps hugely negative CRRA values to positive, interpretable units.
+    For rho > 1 (the common case), V < 0 and (1-rho)*V > 0.
+    """
+    if abs(rho - 1.0) < 1e-8:
+        return np.exp(V)
+    inner = (1.0 - rho) * V
+    # Guard: inner must be positive for real-valued power
+    safe = np.where(inner > 0, inner, np.nan)
+    return np.power(safe, 1.0 / (1.0 - rho))
+
+
 def nb_plot_value_functions(results, grids, plot_t, i_z=0, i_h=None,
                             xlim_keep=15, xlim_adj=15):
-    """Value functions: keeper (left) and adjuster (right), FUES vs NEGM overlaid.
+    """Certainty-equivalent value: keeper (left) and adjuster (right).
 
-    Clips the y-axis to the 1st–99th percentile of the plotted values so
-    extreme negative penalties at the borrowing constraint don't dominate.
+    Plots the CE composite good ``((1-rho)*V)^(1/(1-rho))`` so the
+    y-axis is positive and in interpretable consumption-equivalent units.
+    Both methods overlaid for direct comparison.
 
     Parameters
     ----------
@@ -794,10 +855,11 @@ def nb_plot_value_functions(results, grids, plot_t, i_z=0, i_h=None,
     colors = {'FUES': t['accent'], 'NEGM': t['accent2']}
     labels = _METHOD_LABELS
 
-    fig, axes = plt.subplots(1, 2, figsize=(10, 4))
+    # Read rho from calibration
+    _st = results[methods[0]]['nest']['periods'][0]['stages']['keeper_cons']
+    rho = float(_st.calibration.get('rho', 2.0))
 
-    # Collect all plotted values for y-axis clipping
-    keep_vals, adj_vals = [], []
+    fig, axes = plt.subplots(1, 2, figsize=(10, 4))
 
     for method in methods:
         sol_by_t = {s['t']: s for s in results[method]['nest']['solutions']}
@@ -809,47 +871,191 @@ def nb_plot_value_functions(results, grids, plot_t, i_z=0, i_h=None,
 
         # Keeper VF: slice (i_z, :, i_h)
         v_keep = sol['keeper_cons']['dcsn']['V'][i_z, :, i_h]
+        ce_keep = _ce_transform(v_keep, rho)
         mask_k = (a_grid <= xlim_keep)
-        axes[0].plot(a_grid[mask_k], v_keep[mask_k], color=col,
+        axes[0].plot(a_grid[mask_k], ce_keep[mask_k], color=col,
                      linewidth=1.3, label=lbl)
-        keep_vals.append(v_keep[mask_k])
 
         # Adjuster VF: slice (i_z, :)
         v_adj = sol['adjuster_cons']['dcsn']['V'][i_z]
+        ce_adj = _ce_transform(v_adj, rho)
         mask_a = (we_grid <= xlim_adj)
-        axes[1].plot(we_grid[mask_a], v_adj[mask_a], color=col,
+        axes[1].plot(we_grid[mask_a], ce_adj[mask_a], color=col,
                      linewidth=1.3, label=lbl)
-        adj_vals.append(v_adj[mask_a])
-
-    # Clip y-axis to 1st–99th percentile to cut off extreme penalties
-    for ax, vals_list in [(axes[0], keep_vals), (axes[1], adj_vals)]:
-        if vals_list:
-            all_v = np.concatenate(vals_list)
-            finite = all_v[np.isfinite(all_v)]
-            if len(finite) > 0:
-                lo = np.percentile(finite, 1)
-                hi = np.percentile(finite, 99)
-                margin = (hi - lo) * 0.05
-                ax.set_ylim(lo - margin, hi + margin)
 
     hk = h_grid[i_h]
     axes[0].set_xlabel('Cash-on-hand $w_{\\mathrm{keep}}$')
-    axes[0].set_ylabel('$V(w, h)$')
-    axes[0].set_title(f'Keeper value (age {plot_t}, $h={hk:.2f}$)',
+    axes[0].set_ylabel('CE composite good')
+    axes[0].set_title(f'Keeper CE value (age {plot_t}, $h={hk:.2f}$)',
                       fontweight='600')
     axes[0].set_xlim(0, xlim_keep)
+    axes[0].set_ylim(bottom=0)
     axes[0].legend(frameon=False, fontsize=8)
     _style_nb_ax(axes[0])
 
     axes[1].set_xlabel('Adjuster wealth $m$')
-    axes[1].set_ylabel('$V(m)$')
-    axes[1].set_title(f'Adjuster value (age {plot_t})', fontweight='600')
+    axes[1].set_ylabel('CE composite good')
+    axes[1].set_title(f'Adjuster CE value (age {plot_t})', fontweight='600')
     axes[1].set_xlim(0, xlim_adj)
+    axes[1].set_ylim(bottom=0)
     axes[1].legend(frameon=False, fontsize=8)
     _style_nb_ax(axes[1])
 
     fig.tight_layout()
     return fig
+
+
+def _plotly_layout_defaults():
+    """Plotly layout dict matching the notebook theme."""
+    t = _nb_theme()
+    axis = dict(
+        gridcolor=t['grid'], gridwidth=0.6,
+        linecolor=t['spine'], linewidth=0.8,
+        zerolinecolor=t['grid'],
+        tickfont=dict(color=t['fg']),
+        title=dict(font=dict(color=t['fg'])),
+    )
+    return dict(
+        font=dict(family='Inter, Helvetica Neue, Arial, sans-serif',
+                  size=11, color=t['fg']),
+        plot_bgcolor=t['panel'],
+        paper_bgcolor=t['panel'],
+        xaxis=axis, yaxis=axis,
+    )
+
+
+def nb_plot_adjuster_egm_interactive(nest, grids, plot_t=None, i_z=0, xlim=25):
+    """Interactive plotly adjuster EGM: a', h', and value — raw + FUES refined.
+
+    Three separate figures you can zoom/pan independently:
+    (1) financial assets a', (2) housing h', (3) value.
+    Each shows the raw EGM candidates (unrefined) and the FUES-selected
+    envelope (refined).
+
+    Requires ``store_cntn=True``.
+
+    Returns
+    -------
+    tuple of (fig_a, fig_h, fig_v) — plotly Figures, or None
+    """
+    import plotly.graph_objects as go
+
+    t = _nb_theme()
+    sol_by_t = {s['t']: s for s in nest['solutions']}
+    all_t = sorted(sol_by_t.keys())
+    if plot_t is None:
+        plot_t = all_t[-3] if len(all_t) >= 3 else all_t[-1]
+
+    sol = sol_by_t.get(plot_t)
+    if sol is None:
+        print(f'Age {plot_t} not in solution')
+        return None
+
+    adj_cntn = sol.get('adjuster_cons', {}).get('cntn')
+    if adj_cntn is None or 'm_endog' not in adj_cntn:
+        print('No cntn data — run with store_cntn=True')
+        return None
+
+    m_raw = adj_cntn['m_endog'][i_z]
+    a_eval = adj_cntn['a_nxt_eval'][i_z]
+    h_eval = adj_cntn['h_nxt_eval'][i_z]
+
+    mask = a_eval.ravel() > 0.0
+    m_pts = m_raw.ravel()[mask]
+    a_pts = a_eval.ravel()[mask]
+    h_pts = h_eval.ravel()[mask]
+
+    # Raw value (unrefined) — stored per (n_he, egm_n), ravel + mask
+    v_raw_arr = adj_cntn.get('v_endog')
+    if v_raw_arr is not None:
+        v_pts = v_raw_arr[i_z].ravel()[mask]
+    else:
+        v_pts = None
+
+    refined = adj_cntn.get('_refined', {})
+    has_refined = i_z in refined
+
+    layout_kw = _plotly_layout_defaults()
+
+    def _make_fig(title, xlabel, ylabel, x_raw, y_raw, x_ref, y_ref,
+                  y_range_mode='tozero'):
+        fig = go.Figure()
+        fig.add_trace(go.Scattergl(
+            x=x_raw, y=y_raw, mode='markers',
+            marker=dict(size=3, color=t['raw'], opacity=0.3),
+            name='Raw EGM (unrefined)',
+        ))
+        if x_ref is not None:
+            sidx = np.argsort(x_ref)
+            fig.add_trace(go.Scattergl(
+                x=x_ref[sidx], y=y_ref[sidx],
+                mode='lines+markers',
+                line=dict(color=t['accent'], width=1.5),
+                marker=dict(size=5, color=t['accent'], symbol='x'),
+                name='FUES refined',
+            ))
+        fig.update_xaxes(title_text=xlabel, range=[0, xlim])
+        fig.update_yaxes(title_text=ylabel, rangemode=y_range_mode)
+        fig.update_layout(
+            title=title, height=420, width=700,
+            dragmode='zoom',
+            margin=dict(t=50, b=40, l=60, r=30),
+            legend=dict(x=0.01, y=0.99, bgcolor='rgba(0,0,0,0)',
+                        borderwidth=0, font=dict(size=9)),
+            **layout_kw,
+        )
+        fig.update_layout(template={})
+        return fig
+
+    rf_m = refined[i_z]['m_endog'] if has_refined else None
+    rf_a = refined[i_z]['a_nxt_eval'] if has_refined else None
+    rf_h = refined[i_z]['h_nxt_eval'] if has_refined else None
+    rf_v = refined[i_z].get('vf') if has_refined else None
+
+    fig_a = _make_fig(
+        f"Adjuster financial assets a' (age {plot_t}, z={i_z})",
+        'Endogenous wealth m̂', "a'",
+        m_pts, a_pts, rf_m, rf_a,
+    )
+
+    fig_h = _make_fig(
+        f"Adjuster housing h' (age {plot_t}, z={i_z})",
+        'Endogenous wealth m̂', "h'",
+        m_pts, h_pts, rf_m, rf_h,
+    )
+
+    # Value: raw + refined
+    if v_pts is not None:
+        fig_v = _make_fig(
+            f"Adjuster value (age {plot_t}, z={i_z})",
+            'Endogenous wealth m̂', 'V(m̂)',
+            m_pts, v_pts, rf_m, rf_v,
+            y_range_mode='normal',
+        )
+    else:
+        # Fallback: just the refined value on the wealth grid
+        we_grid = grids['we']
+        v_adj = sol['adjuster_cons']['dcsn']['V'][i_z]
+        _st = nest['periods'][0]['stages']['keeper_cons']
+        rho = float(_st.calibration.get('rho', 2.0))
+        ce_adj = _ce_transform(v_adj, rho)
+        mask_w = we_grid <= xlim
+        fig_v = go.Figure()
+        fig_v.add_trace(go.Scattergl(
+            x=we_grid[mask_w], y=ce_adj[mask_w],
+            mode='lines', line=dict(color=t['accent'], width=1.5),
+            name='CE value (refined)',
+        ))
+        fig_v.update_xaxes(title_text='Adjuster wealth m', range=[0, xlim])
+        fig_v.update_yaxes(title_text='CE composite good', rangemode='tozero')
+        fig_v.update_layout(
+            title=f"Adjuster CE value (age {plot_t}, z={i_z})",
+            height=420, width=700, dragmode='zoom',
+            margin=dict(t=50, b=40, l=60, r=30), **layout_kw,
+        )
+        fig_v.update_layout(template={})
+
+    return fig_a, fig_h, fig_v
 
 
 def _insert_nan_at_jumps(y, x, threshold):

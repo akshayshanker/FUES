@@ -15,7 +15,7 @@ calibration:
   beta: 0.945
   alpha: 0.7            # consumption share in Cobb-Douglas aggregate
   rho: 2.0              # risk aversion over the composite good
-  d_ubar: 0.001         # durable floor / subsistence housing stock
+  d_ubar: 0.1         # durable floor / subsistence housing stock
 
   # Housing frictions (unchanged)
   delta: 0

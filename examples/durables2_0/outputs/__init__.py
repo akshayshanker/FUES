@@ -18,6 +18,7 @@ from .plots import (
     nb_plot_keeper_egm,
     nb_plot_keeper_policy,
     nb_plot_value_functions,
+    nb_plot_adjuster_egm_interactive,
     plot_policies,
     plot_grids,
     plot_lifecycle,

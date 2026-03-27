@@ -212,6 +212,7 @@ def solve_period(stage_ops, vlu_cntn, grids, age,
             adjuster_sol["cntn"] = {
                 "c": adj_egm["c"],
                 "m_endog": adj_egm["m_endog"],
+                "v_endog": adj_egm["v_endog"],
                 "a_nxt_eval": adj_egm["a_nxt_eval"],
                 "h_nxt_eval": adj_egm["h_nxt_eval"],
                 "_refined": adj_egm["_refined"],
