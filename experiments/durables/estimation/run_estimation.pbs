@@ -48,8 +48,9 @@ fi
 cd "$REPO_ROOT"
 echo "  Repo root: $(pwd)"
 
-# --- No venv needed: packages installed to ~/.local/ via setup_venv.sh ---
-# This avoids Lustre BrokenPipeError at scale (all imports from /home/ NFS).
+# --- Activate venv on /home/ (NFS, not Lustre) ---
+# Created by setup/setup_venv.sh. Fully isolated — no system package conflicts.
+source "$HOME/venvs/fues/bin/activate"
 
 # --- Thread pinning (critical for MPI Python) ---
 export OMP_NUM_THREADS=1

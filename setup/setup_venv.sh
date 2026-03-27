@@ -2,9 +2,10 @@
 # ==========================================================================
 #  Setup script for dcsmm + kikku.
 #
-#  On Gadi: installs into ~/.local/ (user site-packages on /home/ NFS).
-#    This avoids Lustre BrokenPipeError at scale (520+ MPI ranks).
-#    /home/ NFS handles concurrent reads; /scratch/ Lustre does not.
+#  On Gadi: creates a venv on /home/ (NFS) — NOT /scratch/ (Lustre).
+#    /home/ NFS handles concurrent MPI reads at scale (520+ ranks).
+#    /scratch/ Lustre causes BrokenPipeError under concurrent import load.
+#    NO --system-site-packages — full isolation from /apps/ packages.
 #
 #  Locally: creates a .venv in the repo root.
 #
@@ -23,43 +24,59 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 if [[ -d "/scratch/tp66" ]]; then
     # ===================== GADI =====================
-    echo "Detected NCI Gadi — installing to ~/.local/ (NFS, not Lustre)"
+    echo "Detected NCI Gadi — creating venv on /home/ (NFS)"
 
     module purge
     module load python3/3.12.1
     module load openmpi/4.1.5
     python3 --version
 
-    echo ""
-    echo "=== Step 1: Core numerical stack ==="
-    pip install --user "numpy>=1.26,<2.0" --quiet
-    pip install --user "numba>=0.59" --quiet
-    pip install --user "scipy>=1.12,<2.0" --quiet
+    # Venv on /home/ — NFS handles concurrent reads, fully isolated
+    VENV_DIR="$HOME/venvs/fues"
 
     echo ""
-    echo "=== Step 2: Install dcsmm (editable) ==="
+    echo "=== Step 1: Create clean venv at ${VENV_DIR} ==="
+    if [[ -d "${VENV_DIR}" ]]; then
+        echo "Removing existing venv..."
+        rm -rf "${VENV_DIR}"
+    fi
+    # NO --system-site-packages — avoids numpy/matplotlib version conflicts
+    python3 -m venv "${VENV_DIR}"
+    source "${VENV_DIR}/bin/activate"
+    pip install --upgrade pip --quiet
+
+    echo ""
+    echo "=== Step 2: Core numerical stack ==="
+    pip install "numpy>=1.26,<2.0" --quiet
+    pip install "numba>=0.59" --quiet
+    pip install "scipy>=1.12,<2.0" --quiet
+    pip install matplotlib --quiet
+
+    echo ""
+    echo "=== Step 3: Install dcsmm (editable) ==="
     cd "$REPO_ROOT"
-    pip install --user -e ".[examples]" --quiet
+    pip install -e ".[examples]" --quiet
 
     echo ""
-    echo "=== Step 3: Install kikku from GitHub ==="
-    pip install --user "kikku[estimation] @ git+https://github.com/bright-forest/kikku.git" --quiet
+    echo "=== Step 4: Install kikku from GitHub ==="
+    pip install "kikku[estimation] @ git+https://github.com/bright-forest/kikku.git" --quiet
 
     echo ""
-    echo "=== Step 4: Install dolang + dolo ==="
-    pip install --user lark multipledispatch --quiet
-    pip install --user --no-deps "dolang @ git+https://github.com/bright-forest/dolang.py.git@phase1.1_0.1" --quiet
-    pip install --user --no-deps "dolo @ git+https://github.com/bright-forest/dolo.git@phase1.1_0.1" --quiet
+    echo "=== Step 5: Install dolang + dolo ==="
+    pip install lark multipledispatch --quiet
+    pip install --no-deps "dolang @ git+https://github.com/bright-forest/dolang.py.git@phase1.1_0.1" --quiet
+    pip install --no-deps "dolo @ git+https://github.com/bright-forest/dolo.git@phase1.1_0.1" --quiet
 
     echo ""
-    echo "=== Step 5: Build mpi4py from source ==="
-    pip install --user --no-binary :all: mpi4py --quiet
+    echo "=== Step 6: Build mpi4py from source ==="
+    pip install --no-binary :all: mpi4py --quiet
 
     echo ""
-    echo "=== Step 6: Verify ==="
+    echo "=== Step 7: Verify ==="
     python3 -c "import numpy; print(f'numpy {numpy.__version__}')"
     python3 -c "import numba; print(f'numba {numba.__version__}')"
     python3 -c "import scipy; print(f'scipy {scipy.__version__}')"
+    python3 -c "import matplotlib; print(f'matplotlib {matplotlib.__version__}')"
     python3 -c "from dcsmm.fues import FUES; print('OK: dcsmm.fues')"
     python3 -c "from kikku.run.estimate import estimate; print('OK: kikku.run.estimate')"
     python3 -c "from kikku.dynx import load_syntax; print('OK: kikku.dynx')"
@@ -68,8 +85,8 @@ if [[ -d "/scratch/tp66" ]]; then
 
     echo ""
     echo "=== Done (Gadi) ==="
-    echo "Packages installed to: ~/.local/lib/python3.12/site-packages/"
-    echo "No venv activation needed — just: module load python3/3.12.1"
+    echo "Venv:     ${VENV_DIR}"
+    echo "Activate: source ${VENV_DIR}/bin/activate"
 
 else
     # ===================== LOCAL =====================
