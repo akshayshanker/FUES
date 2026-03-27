@@ -21,6 +21,7 @@ Usage:
 """
 
 import argparse
+import gc
 import os
 from pathlib import Path
 
@@ -181,6 +182,33 @@ def main():
     # Free params always come from the CE, never from overrides.
     solver_method = args.method  # None = YAML default, 'NEGM' = override adjuster
 
+    def _strip_nest_for_sim(nest):
+        """Drop arrays the forward simulator doesn't need (V, marginals, arvl).
+
+        build_period_pushforwards only reads:
+          tenure/dcsn/adj, keeper_cons/dcsn/c,
+          adjuster_cons/dcsn/{c, h_choice}, callables.
+        Everything else is dead weight during estimation.
+        """
+        for sol in nest["solutions"]:
+            # keeper: keep only c
+            kd = sol["keeper_cons"]["dcsn"]
+            for k in list(kd):
+                if k != "c":
+                    del kd[k]
+            # adjuster: keep only c, h_choice
+            ad = sol["adjuster_cons"]["dcsn"]
+            for k in list(ad):
+                if k not in ("c", "h_choice"):
+                    del ad[k]
+            # tenure dcsn: keep only adj
+            td = sol["tenure"]["dcsn"]
+            for k in list(td):
+                if k != "adj":
+                    del td[k]
+            # tenure arvl: not needed for simulation
+            sol["tenure"].pop("arvl", None)
+
     def trial(theta):
         merged_calib = {**calib_overrides, **theta}  # theta wins on overlap
         nest, grids = solve(
@@ -190,8 +218,11 @@ def main():
             setting_overrides=setting_overrides,
             verbose=False,
         )
+        _strip_nest_for_sim(nest)
+        gc.collect()  # reclaim stripped arrays before simulation allocates
         panels = simulate_lifecycle(nest, grids, N=N_sim, seed=simulation_seed)
-        del nest, grids  # free solution arrays eagerly
+        del nest, grids
+        gc.collect()
         return panels
 
     # --- Compose criterion ---
