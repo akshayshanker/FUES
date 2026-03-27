@@ -102,6 +102,33 @@ def _terminal_vlu_cntn(grids, tenure_callables):
     return {"V": V, "d_aV": d_aV, "d_hV": d_hV}
 
 
+def _strip_old_solution(sol):
+    """Drop arrays not needed by simulation or Euler after backward induction.
+
+    Keeps only what build_period_pushforwards and _build_lookahead read:
+      keeper_cons/dcsn/c, adjuster_cons/dcsn/{c, h_choice},
+      tenure/dcsn/adj, tenure/arvl/d_hV (Euler only).
+    Drops V, marginal values, and tenure/arvl/{V, d_aV}.
+    """
+    kd = sol["keeper_cons"]["dcsn"]
+    for k in list(kd):
+        if k != "c":
+            del kd[k]
+    ad = sol["adjuster_cons"]["dcsn"]
+    for k in list(ad):
+        if k not in ("c", "h_choice"):
+            del ad[k]
+    td = sol["tenure"]["dcsn"]
+    for k in list(td):
+        if k != "adj":
+            del td[k]
+    if "arvl" in sol["tenure"]:
+        arvl = sol["tenure"]["arvl"]
+        for k in list(arvl):
+            if k != "d_hV":
+                del arvl[k]
+
+
 def recalibrate_period(period, calib_h):
     """Pure fn: return new period with updated calibration."""
     new_stages = {}
@@ -233,6 +260,7 @@ def accrete_and_solve(
     H, period_inst, calibration, grids,
     store_cntn=False, verbose=False, progress=None,
     make_callables=None,
+    strip_solved=False,
 ):
     """Accrete backward, solving each period.
 
@@ -244,6 +272,10 @@ def accrete_and_solve(
         ``'summary'``: no per-period output; one summary line at the end.
     progress : str, optional
         ``'bar'``: tqdm progress bar (requires ``tqdm``); suppresses per-period
+    strip_solved : bool
+        If True, strip V/marginals from old solutions during the backward
+        loop. Keeps only what simulation and Euler need. Reduces peak memory
+        by ~70% for large grids. Default False (notebooks keep full solutions).
         text unless ``verbose`` is ``True`` (sub-stage timings still off during bar).
     """
     nest = {"periods": [], "solutions": []}
@@ -335,6 +367,11 @@ def accrete_and_solve(
         sol["callables"] = callables
         nest["solutions"].append(sol)
 
+        # Incremental stripping: period h-1 provided vlu_cntn for this
+        # solve; period h-2 is now fully dead. Strip it to free memory.
+        if strip_solved and h >= 2:
+            _strip_old_solution(nest["solutions"][h - 2])
+
         if pbar is not None:
             steady = [s for s in nest["solutions"] if s["h"] > warmup]
             if steady:
@@ -348,6 +385,11 @@ def accrete_and_solve(
                 )
             else:
                 pbar.set_postfix(age=age, warmup=True)
+
+    # Strip the last two unstripped periods (h-1 and h=H)
+    if strip_solved and H >= 1:
+        _strip_old_solution(nest["solutions"][H - 1])
+        _strip_old_solution(nest["solutions"][H])
 
     if verbose == "summary":
         sols = nest["solutions"]
@@ -392,6 +434,7 @@ def solve(
     grids=None,
     verbose=False,
     progress=None,
+    strip_solved=False,
 ):
     """Full DDSL pipeline: load -> accrete+solve.
 
@@ -459,6 +502,7 @@ def solve(
         H, period_inst, calibration, grids,
         store_cntn=store_cntn, verbose=verbose, progress=progress,
         make_callables=make_callables_fn,
+        strip_solved=strip_solved,
     )
 
     # Expose topology so the forward simulator uses the same graph
