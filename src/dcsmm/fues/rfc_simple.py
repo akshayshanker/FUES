@@ -7,7 +7,10 @@ See Dobrescru and Shanker, 2024, "Discrete-Continuous High Dimensional Dynamic P
 """
 
 import numpy as np
-from pykdtree.kdtree import KDTree as KDTree
+try:
+    from pykdtree.kdtree import KDTree as KDTree
+except ImportError:
+    KDTree = None  # RFC method unavailable without pykdtree
 
 
 

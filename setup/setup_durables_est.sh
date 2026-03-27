@@ -37,6 +37,8 @@ pip install "numpy>=1.26,<2.0" --quiet
 pip install "numba>=0.59" --quiet
 pip install "scipy>=1.12,<2.0" --quiet
 pip install packaging --quiet
+pip install EconModel consav --quiet
+pip install dill --quiet
 
 echo ""
 echo "=== Step 3: Install dcsmm + kikku (durables-est profile) ==="
