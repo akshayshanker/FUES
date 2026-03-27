@@ -29,6 +29,7 @@ from dcsmm.fues.helpers.math_funcs import (
 from kikku.asva.numerics import clamp_value, clamp_policy
 from interpolation.splines import eval_linear
 from interpolation.splines import extrap_options as xto
+from quantecon.optimize.root_finding import brentq
 from consav import golden_section_search
 
 
@@ -235,8 +236,23 @@ def _make_egm_adjuster(callables, grids, stage):
     bellman_discount = adj["bellman_discount"]
     housing_cost = adj["housing_cost"]
     invEuler_foc_h_residual = adj["invEuler_foc_h_residual"]
-    invEuler_foc_h_rhs = adj["invEuler_foc_h_rhs"]
-    fac_housing = float(housing_cost(1.0))
+    fac_housing = float(housing_cost(1.0))  # (1+tau)
+    _cd_utility = "rho" in cal  # CD: du_h depends on c → brentq at constraint
+
+    # --- Constraint residual for CD brentq (only compiled if needed) ---
+    if _cd_utility:
+        @njit
+        def _constraint_resid(c, h_choice, dv_h_b):
+            """Housing FOC residual at borrowing constraint.
+            (1+τ)*du_c(c,h) - du_h(c,h) - dv_h(b) = 0
+            """
+            return fac_housing * du_c_fn(c, h_choice) \
+                   - du_h_fn(c, h_choice) - dv_h_b
+
+        @njit
+        def _constraint_resid_brentq(c, h_choice, dv_h_b):
+            """Wrapper with brentq-compatible signature."""
+            return _constraint_resid(c, h_choice, dv_h_b)
 
     # ================================================================
     # InvEuler: housing Euler residual root-finder
@@ -287,30 +303,53 @@ def _make_egm_adjuster(callables, grids, stage):
             )
 
         # Recover c and endogenous wealth at each root.
-        # c from the housing FOC: c = du_c_inv((dv_h(a') + du_h(h')) / (1+tau)).
-        # At interior roots both FOCs hold so this equals the asset Euler;
-        # at the borrowing constraint only the housing FOC holds.
-        # Matches old/durables/durables.py root_H_UPRIME_func_fast.
-        du_h_val = du_h_fn(h_choice)
+        # At interior roots both FOCs hold, so the asset Euler gives
+        # the correct c:  c = du_c_inv(dv_a(a'), h_choice).
+        # Works for both CD (needs h) and separable (ignores h).
         m_cntn_raw = np.zeros(egm_n)
         for j in range(n_roots):
             a_p = a_nxt_cntn[j]
             if a_p > 0.0:
-                dv_h_val = interp_as_scalar(a_grid, dv_h_cntn, a_p)
-                c = du_c_inv_fn(invEuler_foc_h_rhs(du_h_val, dv_h_val))
+                dv_a_val = interp_as_scalar(a_grid, dv_a_cntn, a_p)
+                c = du_c_inv_fn(dv_a_val, h_choice)
                 m_cntn_raw[j] = c + a_p + housing_cost(h_choice)
 
-        # Add borrowing constraint point
+        # Add borrowing constraint point.
+        # At a'=b the asset Euler does NOT hold (shadow price > 0).
+        # The housing FOC still holds:
+        #   (1+τ)*du_c(c,h') = du_h(c,h') + dv_h(b)
+        # Separable: closed form (du_h independent of c).
+        # CD: brentq over c (matches durable-cons benchmark).
         has_b = False
         for j in range(n_roots):
             if a_nxt_cntn[j] == b:
                 has_b = True
                 break
         if not has_b:
-            dv_h_val_b = interp_as_scalar(a_grid, dv_h_cntn, b)
-            c_at_b = du_c_inv_fn(invEuler_foc_h_rhs(du_h_val, dv_h_val_b))
-            a_nxt_cntn[-1] = b
-            m_cntn_raw[-1] = c_at_b + b + housing_cost(h_choice)
+            dv_h_b = interp_as_scalar(a_grid, dv_h_cntn, b)
+            if _cd_utility:
+                # CD: solve (1+τ)*du_c(c,h) - du_h(c,h) - dv_h(b) = 0
+                c_lo = 1e-6
+                c_hi = 100.0
+                res_lo = _constraint_resid(c_lo, h_choice, dv_h_b)
+                res_hi = _constraint_resid(c_hi, h_choice, dv_h_b)
+                if res_lo * res_hi < 0.0:
+                    result = brentq(
+                        _constraint_resid_brentq, c_lo, c_hi,
+                        args=(h_choice, dv_h_b), xtol=1e-10)
+                    if result is not None and result[0] > 0.0:
+                        c_at_b = result[0]
+                        a_nxt_cntn[-1] = b
+                        m_cntn_raw[-1] = c_at_b + b + housing_cost(h_choice)
+            else:
+                # Separable: closed form (du_h ignores c).
+                # c = du_c_inv((dv_h(b) + du_h(h')) / (1+τ))
+                # Matches old/durables/durables.py root_H_UPRIME_func_fast.
+                du_h_val = du_h_fn(0.0, h_choice)
+                c_at_b = du_c_inv_fn(
+                    (dv_h_b + du_h_val) / fac_housing, h_choice)
+                a_nxt_cntn[-1] = b
+                m_cntn_raw[-1] = c_at_b + b + housing_cost(h_choice)
 
         return a_nxt_cntn, m_cntn_raw
 
@@ -483,7 +522,7 @@ def _make_egm_adjuster(callables, grids, stage):
         d_wV = np.empty((n_z, n_w))
         for iz in range(n_z):
             for iw in range(n_w):
-                d_wV[iz, iw] = du_c_fn(c[iz, iw])
+                d_wV[iz, iw] = du_c_fn(c[iz, iw], h_choice[iz, iw])
 
         cntn_data = None
         if return_grids:
