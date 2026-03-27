@@ -44,6 +44,7 @@ export NUMBA_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
 export NUMBA_CACHE_DIR=$PBS_JOBFS/numba_cache
 mkdir -p $NUMBA_CACHE_DIR
+find "$HOME/venvs/fues/lib/" -name "*.nbc" -o -name "*.nbi" 2>/dev/null | xargs rm -f 2>/dev/null
 export OMPI_MCA_coll_hcoll_enable=0
 export OMPI_MCA_coll=^hcoll
 export PMIX_MCA_gds=hash
