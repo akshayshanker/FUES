@@ -79,6 +79,9 @@ def main():
     parser.add_argument(
         '--N-sim', type=int, default=10000,
         help='Number of simulation agents (default: 10000)')
+    parser.add_argument(
+        '--method', type=str, default=None,
+        help='Solver method override for adjuster (e.g. NEGM). Default: YAML methods.')
 
     args = parser.parse_args()
     comm = get_comm()
@@ -172,10 +175,13 @@ def main():
     # --- Build trial function ---
     # Precedence: theta (CE draw) > calib_overrides > YAML calibration defaults.
     # Free params always come from the CE, never from overrides.
+    solver_method = args.method  # None = YAML default, 'NEGM' = override adjuster
+
     def trial(theta):
         merged_calib = {**calib_overrides, **theta}  # theta wins on overlap
         nest, grids = solve(
             str(mod_dir),
+            method=solver_method,
             calib_overrides=merged_calib,
             setting_overrides=setting_overrides,
             verbose=False,
