@@ -640,6 +640,218 @@ def nb_plot_adjuster_egm(nest, grids, plot_t=None, i_z=0, xlim=25):
     return fig
 
 
+def nb_plot_keeper_egm(nest, grids, plot_t=None, i_z=0, i_h=None, xlim=None):
+    """Keeper EGM scatter: raw endogenous grid + refined policy.
+
+    Requires ``store_cntn=True`` and the generic EGM path.
+    """
+    t = _nb_theme()
+    a_grid = grids['a']
+    h_grid = grids['h']
+    n_h = len(h_grid)
+    if i_h is None:
+        i_h = n_h // 2
+    sol_by_t = {s['t']: s for s in nest['solutions']}
+    all_t = sorted(sol_by_t.keys())
+    if plot_t is None:
+        plot_t = all_t[-3] if len(all_t) >= 3 else all_t[-1]
+    sol = sol_by_t.get(plot_t)
+    if sol is None:
+        print(f'Age {plot_t} not in solution')
+        return None
+    keep_cntn = sol.get('keeper_cons', {}).get('cntn')
+    if keep_cntn is None or 'm_endog' not in keep_cntn:
+        print('No keeper cntn data — run with store_cntn=True and generic EGM path')
+        return None
+    m_endog = keep_cntn['m_endog']
+    c_data = keep_cntn['c']
+    key = (i_z, i_h)
+    if key not in m_endog:
+        print(f'No keeper EGM data for (z={i_z}, h={i_h})')
+        return None
+    m_raw = m_endog[key]
+    c_raw = c_data[key]
+    c_ref = sol['keeper_cons']['dcsn']['c'][i_z, :, i_h]
+    if xlim is None:
+        xlim = float(a_grid[-1]) * 0.6
+    hk = h_grid[i_h]
+    fig, axes = plt.subplots(1, 2, figsize=(10, 4))
+    # Consumption
+    ax = axes[0]
+    ax.scatter(m_raw, c_raw, s=4, alpha=0.35, color=t['raw'],
+               label='Raw EGM', rasterized=True, edgecolors='none')
+    sidx = np.argsort(a_grid)
+    y, x = _insert_nan_at_jumps(c_ref[sidx], a_grid[sidx], 0.3)
+    ax.plot(x, y, color=t['accent'], linewidth=1.3, label='FUES envelope', zorder=5)
+    ax.set_xlabel('Cash-on-hand $w_{\\mathrm{keep}}$')
+    ax.set_ylabel('Consumption $c$')
+    ax.set_title(f'Keeper consumption (age {plot_t}, $z_{{{i_z}}}$, '
+                 f'$h={hk:.2f}$)', fontweight='600')
+    ax.set_xlim(0, xlim)
+    ax.set_ylim(bottom=0)
+    ax.legend(frameon=False, fontsize=8)
+    _style_nb_ax(ax)
+    # Savings
+    a_raw = m_raw - c_raw
+    ax = axes[1]
+    ax.scatter(m_raw, a_raw, s=4, alpha=0.35, color=t['raw'],
+               label='Raw EGM', rasterized=True, edgecolors='none')
+    a_sav_ref = a_grid[sidx] - c_ref[sidx]
+    y, x = _insert_nan_at_jumps(a_sav_ref, a_grid[sidx], 0.3)
+    ax.plot(x, y, color=t['accent'], linewidth=1.3, label='FUES envelope', zorder=5)
+    ax.set_xlabel('Cash-on-hand $w_{\\mathrm{keep}}$')
+    ax.set_ylabel("Financial assets $a'$")
+    ax.set_title(f'Keeper savings (age {plot_t}, $z_{{{i_z}}}$, '
+                 f'$h={hk:.2f}$)', fontweight='600')
+    ax.set_xlim(0, xlim)
+    ax.set_ylim(bottom=0)
+    ax.legend(frameon=False, fontsize=8)
+    _style_nb_ax(ax)
+    fig.tight_layout()
+    return fig
+
+
+def nb_plot_keeper_policy(results, grids, plot_t, i_z=0, i_h=None, xlim=15,
+                          methods_filter=None):
+    """Keeper consumption and savings: FUES vs NEGM, multi-age."""
+    t = _nb_theme()
+    a_grid = grids['a']
+    h_grid = grids['h']
+    n_h = len(h_grid)
+    if i_h is None:
+        i_h = n_h // 2
+    if isinstance(plot_t, int):
+        plot_t = [plot_t]
+    all_methods = [m for m in ['FUES', 'NEGM'] if m in results]
+    methods = methods_filter if methods_filter else all_methods
+    methods = [m for m in methods if m in results]
+    labels = _METHOD_LABELS
+    if len(methods) == 1:
+        styles = {methods[0]: '-'}
+    else:
+        styles = {'FUES': '-', 'NEGM': '--'}
+    age_colors = plt.cm.viridis(np.linspace(0.2, 0.85, max(len(plot_t), 1)))
+    fig, axes = plt.subplots(1, 2, figsize=(10, 4))
+    for method in methods:
+        sol_by_t = {s['t']: s for s in results[method]['nest']['solutions']}
+        ls = styles[method]
+        for ai, age in enumerate(plot_t):
+            if age not in sol_by_t:
+                continue
+            c = sol_by_t[age]['keeper_cons']['dcsn']['c'][i_z, :, i_h]
+            col = age_colors[ai]
+            lbl = f'age {age}' if method == methods[0] else None
+            y, x = _insert_nan_at_jumps(c, a_grid, 0.3)
+            axes[0].plot(x, y, color=col, ls=ls, linewidth=1.3, label=lbl)
+            a_sav = a_grid - c
+            y2, x2 = _insert_nan_at_jumps(a_sav, a_grid, 0.3)
+            axes[1].plot(x2, y2, color=col, ls=ls, linewidth=1.3, label=lbl)
+    hk = h_grid[i_h]
+    method_title = labels.get(methods[0], methods[0]) if len(methods) == 1 else 'FUES vs NEGM'
+    for ax, ylabel, title in [
+        (axes[0], 'Consumption $c$', f'{method_title}: keeper consumption ($h={hk:.2f}$)'),
+        (axes[1], "Financial assets $a'$", f'{method_title}: keeper savings ($h={hk:.2f}$)'),
+    ]:
+        ax.set_xlabel('Cash-on-hand $w_{\\mathrm{keep}}$')
+        ax.set_ylabel(ylabel)
+        ax.set_title(title, fontweight='600')
+        ax.set_xlim(0, xlim)
+        ax.set_ylim(bottom=0)
+        _style_nb_ax(ax)
+    axes[0].legend(frameon=False, fontsize=8)
+    if len(methods) > 1:
+        from matplotlib.lines import Line2D as _L2D
+        axes[1].legend(handles=[
+            _L2D([0], [0], ls='-', color='grey', lw=1, label='EGM(FUES)'),
+            _L2D([0], [0], ls='--', color='grey', lw=1, label='NEGM(FUES)')],
+            frameon=False, fontsize=8)
+    fig.tight_layout()
+    return fig
+
+
+def nb_plot_value_functions(results, grids, plot_t, i_z=0, i_h=None,
+                            xlim_keep=15, xlim_adj=15):
+    """Value functions: keeper (left) and adjuster (right), FUES vs NEGM overlaid.
+
+    Clips the y-axis to the 1st–99th percentile of the plotted values so
+    extreme negative penalties at the borrowing constraint don't dominate.
+
+    Parameters
+    ----------
+    results : dict
+    grids : dict
+    plot_t : int  Age to plot.
+    """
+    t = _nb_theme()
+    a_grid = grids['a']
+    h_grid = grids['h']
+    we_grid = grids['we']
+    n_h = len(h_grid)
+    if i_h is None:
+        i_h = n_h // 2
+
+    methods = [m for m in ['FUES', 'NEGM'] if m in results]
+    colors = {'FUES': t['accent'], 'NEGM': t['accent2']}
+    labels = _METHOD_LABELS
+
+    fig, axes = plt.subplots(1, 2, figsize=(10, 4))
+
+    # Collect all plotted values for y-axis clipping
+    keep_vals, adj_vals = [], []
+
+    for method in methods:
+        sol_by_t = {s['t']: s for s in results[method]['nest']['solutions']}
+        if plot_t not in sol_by_t:
+            continue
+        sol = sol_by_t[plot_t]
+        col = colors[method]
+        lbl = labels.get(method, method)
+
+        # Keeper VF: slice (i_z, :, i_h)
+        v_keep = sol['keeper_cons']['dcsn']['V'][i_z, :, i_h]
+        mask_k = (a_grid <= xlim_keep)
+        axes[0].plot(a_grid[mask_k], v_keep[mask_k], color=col,
+                     linewidth=1.3, label=lbl)
+        keep_vals.append(v_keep[mask_k])
+
+        # Adjuster VF: slice (i_z, :)
+        v_adj = sol['adjuster_cons']['dcsn']['V'][i_z]
+        mask_a = (we_grid <= xlim_adj)
+        axes[1].plot(we_grid[mask_a], v_adj[mask_a], color=col,
+                     linewidth=1.3, label=lbl)
+        adj_vals.append(v_adj[mask_a])
+
+    # Clip y-axis to 1st–99th percentile to cut off extreme penalties
+    for ax, vals_list in [(axes[0], keep_vals), (axes[1], adj_vals)]:
+        if vals_list:
+            all_v = np.concatenate(vals_list)
+            finite = all_v[np.isfinite(all_v)]
+            if len(finite) > 0:
+                lo = np.percentile(finite, 1)
+                hi = np.percentile(finite, 99)
+                margin = (hi - lo) * 0.05
+                ax.set_ylim(lo - margin, hi + margin)
+
+    hk = h_grid[i_h]
+    axes[0].set_xlabel('Cash-on-hand $w_{\\mathrm{keep}}$')
+    axes[0].set_ylabel('$V(w, h)$')
+    axes[0].set_title(f'Keeper value (age {plot_t}, $h={hk:.2f}$)',
+                      fontweight='600')
+    axes[0].set_xlim(0, xlim_keep)
+    axes[0].legend(frameon=False, fontsize=8)
+    _style_nb_ax(axes[0])
+
+    axes[1].set_xlabel('Adjuster wealth $m$')
+    axes[1].set_ylabel('$V(m)$')
+    axes[1].set_title(f'Adjuster value (age {plot_t})', fontweight='600')
+    axes[1].set_xlim(0, xlim_adj)
+    axes[1].legend(frameon=False, fontsize=8)
+    _style_nb_ax(axes[1])
+
+    fig.tight_layout()
+    return fig
+
+
 def _insert_nan_at_jumps(y, x, threshold):
     """Insert NaN where |dy| > *threshold* so discrete jumps render as gaps, not diagonals.
 
