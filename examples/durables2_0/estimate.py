@@ -233,8 +233,10 @@ def main():
     from datetime import datetime
 
     run_id = datetime.now().strftime('%Y%m%d_%H%M%S')
-    scratch_run = os.path.join(scratch_dir, f'est_{run_id}')
-    results_run = os.path.join(results_dir, f'est_{run_id}')
+    # Organise by spec name: estimation/baseline/est_20260327_143000/
+    spec_name = Path(args.spec).stem  # e.g. 'baseline', 'baseline_large_egm'
+    scratch_run = os.path.join(scratch_dir, spec_name, f'est_{run_id}')
+    results_run = os.path.join(results_dir, spec_name, f'est_{run_id}')
 
     if is_root(comm):
         os.makedirs(scratch_run, exist_ok=True)
