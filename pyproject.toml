@@ -9,20 +9,32 @@ description = "Fast Upper Envelope Scan (Dobrescu & Shanker, 2022)."
 readme = "README.md"
 requires-python = ">=3.11"
 
+# Core: just the FUES algorithm. No HARK, no consav, no heavy deps.
 dependencies = [
   "numpy>=1.23",
   "numba",
   "scipy",
-  "dill>=0.3.6",
-  "econ-ark",
   "interpolation>=0.5.2",
-  "ConSav",
-  "pykdtree>=1.3.12",
 ]
 
 [project.optional-dependencies]
-examples = ["pyyaml", "matplotlib", "seaborn", "tqdm", "kikku @ git+https://github.com/bright-forest/kikku.git"]
-dev = ["pyyaml", "matplotlib", "seaborn", "tqdm", "kikku @ git+https://github.com/bright-forest/kikku.git", "pytest", "autopep8"]
+# Durables estimation on Gadi: minimal deps, fast import, no sympy/HARK
+durables-est = [
+  "pyyaml",
+  "kikku[estimation] @ git+https://github.com/bright-forest/kikku.git",
+]
+# Full examples (notebooks, benchmarks, all models)
+examples = [
+  "pyyaml", "matplotlib", "seaborn", "tqdm", "dill>=0.3.6",
+  "econ-ark", "ConSav", "pykdtree>=1.3.12",
+  "kikku @ git+https://github.com/bright-forest/kikku.git",
+]
+dev = [
+  "pyyaml", "matplotlib", "seaborn", "tqdm", "dill>=0.3.6",
+  "econ-ark", "ConSav", "pykdtree>=1.3.12",
+  "kikku @ git+https://github.com/bright-forest/kikku.git",
+  "pytest", "autopep8",
+]
 mpi = ["mpi4py>=3.1"]
 
 [project.urls]

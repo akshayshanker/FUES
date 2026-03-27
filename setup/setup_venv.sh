@@ -54,13 +54,11 @@ if [[ -d "/scratch/tp66" ]]; then
     pip install EconModel consav --quiet
 
     echo ""
-    echo "=== Step 3: Install dcsmm (editable) ==="
+    echo "=== Step 3: Install dcsmm (editable, durables-est profile) ==="
     cd "$REPO_ROOT"
-    pip install -e ".[examples]" --quiet
-
-    echo ""
-    echo "=== Step 4: Install kikku from GitHub ==="
-    pip install "kikku[estimation] @ git+https://github.com/bright-forest/kikku.git" --quiet
+    # Lean install: no HARK, no consav, no sympy, no matplotlib
+    # Just FUES + kikku + pyyaml + pandas (for moments)
+    pip install -e ".[durables-est]" --quiet
 
     echo ""
     echo "=== Step 5: Install dolang + dolo ==="
