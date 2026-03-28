@@ -29,6 +29,11 @@ Results are organised by mod (gender/utility) and spec (estimation config):
         est_<timestamp>/
           ...
       sweep_summary_<timestamp>.csv    all points in one table
+
+Note: sweep point folders (gamma_c=1.5/, etc.) are NOT timestamped.
+Multiple runs of the same sweep accumulate est_<timestamp>/ dirs
+within each point folder. Use the sweep_summary timestamp or the
+est_ timestamp to identify which run is which.
 ```
 
 Scratch mirrors this structure with checkpoints:
