@@ -273,7 +273,7 @@ def _run_single_estimation(
                 resume_state = pickle.load(f)
             print(f"  Resuming from checkpoint: iter {resume_state['it'] + 1}")
         else:
-            print(f"  WARNING: --resume but no state.pkl at {state_path}. Starting fresh.")
+            print(f"  No checkpoint found — starting fresh.")
     if args.resume:
         resume_state = bcast_item(resume_state if is_root(comm) else None, comm, root=0)
 
