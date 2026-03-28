@@ -1,5 +1,6 @@
 """Backward induction for the durables model (DDSL)."""
 
+import os
 import time
 import numpy as np
 from pathlib import Path
@@ -460,12 +461,26 @@ def solve(
     """
     syntax_dir = Path(syntax_dir)
 
-    # All stages share the same calibration and settings in this model.
-    # CLI overrides (--calib-override, --setting-override) apply to ALL stages
-    # because load_syntax merges calibration into every stage source.
+    # --- Memory diagnostics (activated by FUES_MEM_DIAG=1 env var) ---
+    _mem_diag = os.environ.get('FUES_MEM_DIAG', '') == '1'
+
+    def _rss():
+        try:
+            import resource
+            return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss // 1024
+        except Exception:
+            return 0
+
+    if _mem_diag:
+        _r0 = _rss()
+
     calibration, yaml_settings, stage_sources, period_template, inter_conn = load_syntax(
         syntax_dir, calib_overrides, setting_overrides
     )
+
+    if _mem_diag:
+        print(f"      [solve] load_syntax: +{_rss()-_r0}MB")
+
     all_method_overrides = {}
     if method is not None:
         for target in METHOD_SHORTCUT:
@@ -478,8 +493,14 @@ def solve(
         calibration, yaml_settings, stage_sources, period_template
     )
 
+    if _mem_diag:
+        print(f"      [solve] instantiate: +{_rss()-_r0}MB")
+
     if grids is None:
         grids = make_grids(calibration, yaml_settings)
+
+    if _mem_diag:
+        print(f"      [solve] make_grids: +{_rss()-_r0}MB")
 
     # T, t0 are period-level calibration; any stage carries them after merge.
     stage_ref = period_inst["stages"]["keeper_cons"]
@@ -504,6 +525,9 @@ def solve(
         make_callables=make_callables_fn,
         strip_solved=strip_solved,
     )
+
+    if _mem_diag:
+        print(f"      [solve] accrete_and_solve: +{_rss()-_r0}MB")
 
     # Expose topology so the forward simulator uses the same graph
     # that was solved, not a fresh parse of the syntax directory.

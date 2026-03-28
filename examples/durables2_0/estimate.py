@@ -177,8 +177,26 @@ def _run_single_estimation(
         data_moments = spec['data_moments']
 
     # --- Build trial function ---
+    _trial_call_count = [0]
+    _mem_diag = os.environ.get('FUES_MEM_DIAG', '') == '1'
+
+    def _rss_mb():
+        try:
+            import resource
+            return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss // 1024
+        except Exception:
+            return 0
+
     def trial(theta):
+        _trial_call_count[0] += 1
+        _log = _mem_diag and is_root(comm)
+
+        if _log:
+            r0 = _rss_mb()
+            print(f"    [trial #{_trial_call_count[0]}] start RSS={r0}MB")
+
         merged_calib = {**calib_overrides, **theta}
+
         nest, grids = solve(
             str(mod_dir),
             method=solver_method,
@@ -187,13 +205,44 @@ def _run_single_estimation(
             verbose=False,
             strip_solved=True,
         )
+
+        if _log:
+            r2 = _rss_mb()
+            n_periods = len(nest.get("periods", []))
+            n_sols = len(nest.get("solutions", []))
+            print(f"    [trial #{_trial_call_count[0]}] post-solve RSS={r2}MB "
+                  f"(+{r2-r0}MB) periods={n_periods} sols={n_sols}")
+
         panels = simulate_lifecycle(nest, grids, N=N_sim, seed=simulation_seed)
-        # Explicitly clear period stage objects (hold YAML node trees)
+
+        if _log:
+            r3 = _rss_mb()
+            n_panel_keys = len(panels) if panels else 0
+            panel_bytes = sum(v.nbytes for v in panels.values() if hasattr(v, 'nbytes')) if panels else 0
+            print(f"    [trial #{_trial_call_count[0]}] post-sim RSS={r3}MB "
+                  f"(+{r3-r2}MB) panels={n_panel_keys} keys, "
+                  f"{panel_bytes/1e6:.1f}MB data")
+
         nest["periods"].clear()
         nest["solutions"].clear()
         del nest, grids
         gc.collect()
-        return panels
+        try:
+            import ctypes
+            ctypes.CDLL(None).malloc_trim(0)
+        except (OSError, AttributeError):
+            pass
+
+        if _log:
+            r4 = _rss_mb()
+            # Count gc stats
+            gc_stats = gc.get_stats()
+            gen2_collected = gc_stats[2]['collected'] if len(gc_stats) > 2 else 0
+            gen2_uncollectable = gc_stats[2]['uncollectable'] if len(gc_stats) > 2 else 0
+            print(f"    [trial #{_trial_call_count[0]}] post-gc RSS={r4}MB "
+                  f"(+{r4-r3}MB) total_delta={r4-r0}MB "
+                  f"gc_gen2_collected={gen2_collected} "
+                  f"gc_uncollectable={gen2_uncollectable}")
 
     # Filter precomputed data moments to only keys the model can produce.
     # The CSV has 130+ columns but the model only targets ~10.
