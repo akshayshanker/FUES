@@ -62,6 +62,7 @@ echo "  Mod: $MOD | Spec: $SPEC | Grid: $GRID | Nodes: $((PBS_NCPUS/104)) | Core
 
 ITERS_PER_RESTART=10
 MAX_RESTARTS=20
+RUN_ID=$(date +%Y%m%d_%H%M%S)
 
 RESTART_NUM=0
 RESUME_FLAG=""
@@ -83,6 +84,7 @@ while [ $RESTART_NUM -lt $MAX_RESTARTS ]; do
             --calib-override t0=20 \
             --N-sim $N_SIM \
             --max-iter-this-run $ITERS_PER_RESTART \
+            --run-id $RUN_ID \
             $RESUME_FLAG
 
     EXIT_CODE=$?

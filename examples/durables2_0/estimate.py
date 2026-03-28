@@ -442,6 +442,10 @@ def main():
         dest='max_iter_this_run',
         help='Max CE iterations for this restart segment. '
              'Exits with code 42 when exhausted (not converged).')
+    parser.add_argument(
+        '--run-id', type=str, default=None,
+        help='Explicit run ID (timestamp). Used by PBS restart loop to '
+             'ensure all segments use the same results directory.')
 
     args = parser.parse_args()
     world_comm = get_comm()
@@ -471,30 +475,15 @@ def main():
     setting_overrides = _parse_key_value_list(args.setting_override)
     calib_overrides = _parse_key_value_list(args.calib_override)
 
-    run_id = datetime.now().strftime('%Y%m%d_%H%M%S')
+    # run_id: use --run-id if provided (restart loop), otherwise generate fresh
+    run_id = args.run_id or datetime.now().strftime('%Y%m%d_%H%M%S')
     spec_name = Path(args.spec).stem
 
     # --- Check for sweep ---
     sweep_spec = est_yaml.get('sweep')
 
-    # --- Resume mode: reuse existing run_id from latest checkpoint ---
-    if args.resume:
-        if sweep_spec is not None:
-            raise RuntimeError("--resume is not supported with sweep mode")
-        if is_root(world_comm):
-            spec_scratch = os.path.join(scratch_dir, spec_name)
-            if os.path.isdir(spec_scratch):
-                run_dirs = sorted([
-                    d for d in os.listdir(spec_scratch)
-                    if d.startswith('est_')
-                    and os.path.isfile(os.path.join(spec_scratch, d, 'state.pkl'))
-                ])
-                if run_dirs:
-                    run_id = run_dirs[-1].replace('est_', '', 1)
-                    print(f"  Resuming run_id: {run_id}")
-                else:
-                    print("  WARNING: --resume but no checkpoint found. Starting fresh.")
-        run_id = bcast_item(run_id if is_root(world_comm) else None, world_comm, root=0)
+    # Broadcast run_id so all ranks agree
+    run_id = bcast_item(run_id if is_root(world_comm) else None, world_comm, root=0)
 
     if sweep_spec is None:
         # ── Single estimation (no sweep) ──
