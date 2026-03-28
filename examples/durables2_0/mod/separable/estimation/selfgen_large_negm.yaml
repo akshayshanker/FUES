@@ -23,6 +23,7 @@ estimation:
     tol: 1e-6
     sampling_seed: 42
     simulation_seed: 99
+    noise_fraction: 0.10        # 10% uniform draws for exploration
 
   scratch_dir: /scratch/tp66/{user}/durables_est
   results_dir: /g/data/tp66/results/durables2_0/estimation

@@ -36,6 +36,7 @@ estimation:
     max_iter: 200
     tol: 1e-3
     seed: 42
+    noise_fraction: 0.10        # 10% uniform draws for exploration
 
   # --- Output paths ---
   # scratch_dir: fast intermediate storage (purged after 100 days on Gadi)
