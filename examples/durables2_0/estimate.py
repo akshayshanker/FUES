@@ -166,11 +166,25 @@ def _run_single_estimation(
                 calib_overrides=calib_overrides,
                 setting_overrides=setting_overrides,
                 verbose=False,
-                strip_solved=True,
+                strip_solved=False,  # keep full nest for .nst save
             )
             data_panels = simulate_lifecycle(
                 nest_data, grids_data, N=N_sim, seed=simulation_seed)
             data_moments = moment_fn(data_panels)  # already denormalised
+            # Save the selfgen (true) nest
+            try:
+                from kikku.run.nest_io import save_nest
+                save_nest(nest_data, os.path.join(scratch_run, 'true.nst'),
+                          solutions=True,
+                          metadata={'calib_overrides': calib_overrides,
+                                    'data_source': 'selfgen'})
+                save_nest(nest_data, os.path.join(results_run, 'true.nst'),
+                          solutions=True,
+                          metadata={'calib_overrides': calib_overrides,
+                                    'data_source': 'selfgen'})
+                print(f"  Saved true.nst ({len(nest_data['solutions'])} periods)")
+            except Exception as e:
+                print(f"  WARNING: could not save true.nst: {e}")
             del nest_data, grids_data, data_panels
         else:
             data_moments = None
@@ -180,6 +194,10 @@ def _run_single_estimation(
         data_moments = spec['data_moments']
 
     # --- Build trial function ---
+    # _last_nest stores the nest+grids from the most recent trial call.
+    # After estimation, if is_final, we save it as best.nst.
+    _last_nest = [None, None]  # [nest, grids] — mutable container for closure
+
     def trial(theta):
         merged_calib = {**calib_overrides, **theta}
         nest, grids = solve(
@@ -191,15 +209,14 @@ def _run_single_estimation(
             strip_solved=True,
         )
         panels = simulate_lifecycle(nest, grids, N=N_sim, seed=simulation_seed)
-        # Free all solve/simulate artifacts before returning.
-        # nest holds: periods (dolo stages), solutions (stripped arrays),
-        #   graph (networkx), inter_conn, callables refs.
-        # grids holds: a, h, we, z, Pi, X_all (60MB), UGgrid_all.
-        nest["periods"].clear()
-        nest["solutions"].clear()
-        nest.clear()
-        grids.clear()
-        del nest, grids
+        # Keep the nest/grids from this call (overwrite previous).
+        # Only the last evaluation's nest survives — all prior ones are freed.
+        if _last_nest[0] is not None:
+            _last_nest[0].clear()
+        if _last_nest[1] is not None:
+            _last_nest[1].clear()
+        _last_nest[0] = nest
+        _last_nest[1] = grids
         gc.collect()
         try:
             import ctypes
@@ -353,6 +370,22 @@ def _run_single_estimation(
                     'best_loss': h.get('best_loss'),
                     'elite_mean_loss': h.get('elite_mean_loss'),
                 })
+
+        # Save best.nst (the nest from the last trial evaluation)
+        if _last_nest[0] is not None:
+            try:
+                from kikku.run.nest_io import save_nest
+                nst_meta = {'theta_best': result.theta,
+                            'objective': result.objective,
+                            'n_iter': result.n_iter}
+                for d in [scratch_run, results_run]:
+                    save_nest(_last_nest[0], os.path.join(d, 'best.nst'),
+                              solutions=True, metadata=nst_meta)
+                print(f"  Saved best.nst")
+            except Exception as e:
+                print(f"  WARNING: could not save best.nst: {e}")
+            _last_nest[0] = None
+            _last_nest[1] = None
 
         # Print summary
         print(f"\nLoss:       {result.objective:.6f}")
