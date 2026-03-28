@@ -20,13 +20,16 @@
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
+# Venv path — override with: VENV=~/venvs/other source setup/update_and_activate.sh
+VENV="${VENV:-$HOME/venvs/fues}"
+
 module purge
 module load python3/3.12.1
 module load openmpi/4.1.5
 
 echo ""
 echo "=== Activating venv ==="
-source "$HOME/venvs/fues/bin/activate"
+source "$VENV/bin/activate"
 echo "  Python: $(python3 --version)"
 echo "  Venv:   $VIRTUAL_ENV"
 
