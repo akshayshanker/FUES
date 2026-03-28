@@ -497,8 +497,11 @@ def main():
             results_dir, scratch_dir, run_id,
         )
 
-        # Exit codes for restart loop (uses broadcast values, not filesystem state)
+        # Exit codes for restart loop — ALL ranks must agree and exit together
+        is_final = bcast_item(is_final if is_root(world_comm) else None, world_comm, root=0)
         if args.max_iter_this_run is not None and not is_final:
+            if world_comm is not None:
+                world_comm.Barrier()  # sync all ranks before exit
             sys.exit(42)
     else:
         # ── Sweep mode: split communicator ──
