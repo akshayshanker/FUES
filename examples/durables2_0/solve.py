@@ -80,25 +80,25 @@ def _terminal_vlu_cntn(grids, tenure_callables):
     z_vals = grids["z"]
     a_grid = grids["a"]
     h_grid = grids["h"]
-    x_all = grids["X_all"]
     term_u = tenure_callables["term_u"]
     d_a_term = tenure_callables["marginalBellman_d_a_terminal"]
     d_h_term = tenure_callables["marginalBellman_d_h_terminal"]
     g_w = tenure_callables["transitions"]["terminal_wealth"]
 
-    shape = (len(z_vals), len(a_grid), len(h_grid))
-    V = np.empty(shape)
-    d_aV = np.empty(shape)
-    d_hV = np.empty(shape)
+    n_z, n_a, n_h = len(z_vals), len(a_grid), len(h_grid)
+    V = np.empty((n_z, n_a, n_h))
+    d_aV = np.empty((n_z, n_a, n_h))
+    d_hV = np.empty((n_z, n_a, n_h))
 
-    for state in range(len(x_all)):
-        i_z, i_a, i_h = x_all[state]
-        a = a_grid[i_a]
-        h = h_grid[i_h]
-        w = g_w(a, h)
-        V[i_z, i_a, i_h] = term_u(w)
-        d_aV[i_z, i_a, i_h] = d_a_term(w)
-        d_hV[i_z, i_a, i_h] = d_h_term(w)
+    for i_z in range(n_z):
+        for i_a in range(n_a):
+            a = a_grid[i_a]
+            for i_h in range(n_h):
+                h = h_grid[i_h]
+                w = g_w(a, h)
+                V[i_z, i_a, i_h] = term_u(w)
+                d_aV[i_z, i_a, i_h] = d_a_term(w)
+                d_hV[i_z, i_a, i_h] = d_h_term(w)
 
     return {"V": V, "d_aV": d_aV, "d_hV": d_hV}
 
@@ -534,10 +534,6 @@ def solve(
 
     if _mem_diag:
         print(f"      [solve] accrete_and_solve: +{_rss()-_r0}MB")
-
-    # Drop X_all — only needed during backward loop (_terminal_vlu_cntn).
-    # At 600-grid: 7 × 600 × 600 × 3 ints = ~60 MB.
-    grids.pop("X_all", None)
 
     # Expose topology so the forward simulator uses the same graph
     # that was solved, not a fresh parse of the syntax directory.

@@ -58,14 +58,6 @@ def make_grids(calibration, settings):
     asset_grid_HE = np.linspace(b, np.float64(grid_max_H), n_h)
     asset_grid_WE = np.linspace(b, np.float64(grid_max_WE), n_w)
 
-    X_all = qe.cartesian(
-        [
-            np.arange(len(z_vals)),
-            np.arange(len(asset_grid_A)),
-            np.arange(len(asset_grid_H)),
-        ]
-    )
-
     UGgrid_all = UCGrid((b, grid_max_A, n_a), (b, grid_max_H, n_h))
 
     return {
@@ -75,6 +67,5 @@ def make_grids(calibration, settings):
         "we": asset_grid_WE,
         "z": z_vals,
         "Pi": Pi,
-        "X_all": X_all,
         "UGgrid_all": UGgrid_all,
     }
