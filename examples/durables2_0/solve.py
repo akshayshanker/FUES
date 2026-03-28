@@ -535,6 +535,10 @@ def solve(
     if _mem_diag:
         print(f"      [solve] accrete_and_solve: +{_rss()-_r0}MB")
 
+    # Drop X_all — only needed during backward loop (_terminal_vlu_cntn).
+    # At 600-grid: 7 × 600 × 600 × 3 ints = ~60 MB.
+    grids.pop("X_all", None)
+
     # Expose topology so the forward simulator uses the same graph
     # that was solved, not a fresh parse of the syntax directory.
     nest["graph"] = graph
