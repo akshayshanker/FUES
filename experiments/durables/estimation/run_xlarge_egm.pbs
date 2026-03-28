@@ -59,16 +59,45 @@ export PMIX_MCA_gds=hash
 echo "Starting XLARGE EGM estimation at $(date)"
 echo "  Mod: $MOD | Spec: $SPEC | Grid: $GRID | Nodes: $((PBS_NCPUS/104)) | Cores: $PBS_NCPUS"
 
-mpiexec -n $PBS_NCPUS \
-    --map-by ppr:13:numa \
-    python3 -u -m mpi4py -m examples.durables2_0.estimate \
-        --mod "$MOD" \
-        --spec "$SPEC" \
-        --scratch /scratch/tp66/$USER/durables_est \
-        --results /g/data/tp66/results/durables2_0/estimation \
-        --setting-override n_a=$GRID n_h=$GRID n_w=$GRID \
-        --calib-override t0=20 \
-        --N-sim $N_SIM
+ITERS_PER_RESTART=10
+MAX_RESTARTS=20
+
+RESTART_NUM=0
+RESUME_FLAG=""
+EXIT_CODE=0
+
+while [ $RESTART_NUM -lt $MAX_RESTARTS ]; do
+    RESTART_NUM=$((RESTART_NUM + 1))
+    echo ""
+    echo "=== Restart segment $RESTART_NUM at $(date) ==="
+
+    mpiexec -n $PBS_NCPUS \
+        --map-by ppr:13:numa \
+        python3 -u -m mpi4py -m examples.durables2_0.estimate \
+            --mod "$MOD" \
+            --spec "$SPEC" \
+            --scratch /scratch/tp66/$USER/durables_est \
+            --results /g/data/tp66/results/durables2_0/estimation \
+            --setting-override n_a=$GRID n_h=$GRID n_w=$GRID \
+            --calib-override t0=20 \
+            --N-sim $N_SIM \
+            --max-iter-this-run $ITERS_PER_RESTART \
+            $RESUME_FLAG
+
+    EXIT_CODE=$?
+    echo "=== Segment $RESTART_NUM exit code: $EXIT_CODE ==="
+
+    if [ $EXIT_CODE -ne 42 ]; then
+        if [ $EXIT_CODE -ne 0 ]; then
+            echo "ERROR: mpiexec exited with code $EXIT_CODE"
+        else
+            echo "Estimation complete (converged or max_iter reached)."
+        fi
+        break
+    fi
+
+    RESUME_FLAG="--resume"
+done
 
 echo "Finished at $(date)"
 
