@@ -188,8 +188,14 @@ def _run_single_estimation(
             strip_solved=True,
         )
         panels = simulate_lifecycle(nest, grids, N=N_sim, seed=simulation_seed)
+        # Free all solve/simulate artifacts before returning.
+        # nest holds: periods (dolo stages), solutions (stripped arrays),
+        #   graph (networkx), inter_conn, callables refs.
+        # grids holds: a, h, we, z, Pi, X_all (60MB), UGgrid_all.
         nest["periods"].clear()
         nest["solutions"].clear()
+        nest.clear()
+        grids.clear()
         del nest, grids
         gc.collect()
         try:
