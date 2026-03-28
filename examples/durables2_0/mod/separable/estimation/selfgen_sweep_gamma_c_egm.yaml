@@ -18,7 +18,7 @@ estimation:
 
   method: cross-entropy
   method_options:
-    n_samples: 1040
+    n_samples: 5200
     n_elite: 10
     max_iter: 200
     tol: 1e-6

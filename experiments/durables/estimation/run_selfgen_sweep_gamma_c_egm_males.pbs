@@ -2,10 +2,10 @@
 #PBS -P tp66
 #PBS -q normalsr
 #PBS -N sw_gamCm_EGM
-#PBS -l ncpus=1040
-#PBS -l mem=4800GB
+#PBS -l ncpus=5200
+#PBS -l mem=24000GB
 #PBS -l walltime=5:00:00
-#PBS -l jobfs=400GB
+#PBS -l jobfs=2000GB
 #PBS -l storage=scratch/tp66+gdata/tp66
 #PBS -l wd
 #PBS -o /g/data/tp66/logs/durables/
