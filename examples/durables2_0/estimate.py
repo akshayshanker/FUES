@@ -203,17 +203,7 @@ def _run_single_estimation(
             ctypes.CDLL(None).malloc_trim(0)
         except (OSError, AttributeError):
             pass
-
-        if _log:
-            r4 = _rss_mb()
-            # Count gc stats
-            gc_stats = gc.get_stats()
-            gen2_collected = gc_stats[2]['collected'] if len(gc_stats) > 2 else 0
-            gen2_uncollectable = gc_stats[2]['uncollectable'] if len(gc_stats) > 2 else 0
-            print(f"    [trial #{_trial_call_count[0]}] post-gc RSS={r4}MB "
-                  f"(+{r4-r3}MB) total_delta={r4-r0}MB "
-                  f"gc_gen2_collected={gen2_collected} "
-                  f"gc_uncollectable={gen2_uncollectable}")
+        return panels
 
     # Filter precomputed data moments to only keys the model can produce.
     # The CSV has 130+ columns but the model only targets ~10.
