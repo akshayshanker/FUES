@@ -461,8 +461,14 @@ def solve(
     """
     syntax_dir = Path(syntax_dir)
 
-    # --- Memory diagnostics (activated by FUES_MEM_DIAG=1 env var) ---
-    _mem_diag = os.environ.get('FUES_MEM_DIAG', '') == '1'
+    # --- Memory diagnostics (activated by FUES_MEM_DIAG=1 env var, rank 0 only) ---
+    _is_rank0 = True
+    try:
+        from mpi4py import MPI
+        _is_rank0 = MPI.COMM_WORLD.Get_rank() == 0
+    except Exception:
+        pass
+    _mem_diag = os.environ.get('FUES_MEM_DIAG', '') == '1' and _is_rank0
 
     def _rss():
         try:
