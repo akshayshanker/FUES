@@ -3,7 +3,7 @@
 #PBS -q expresssr 
 #PBS -N est_dur
 #PBS -l ncpus=520
-#PBS -l mem=2400GB
+#PBS -l mem=3200GB
 #PBS -l walltime=5:00:00
 #PBS -l jobfs=200GB
 #PBS -l storage=scratch/tp66+gdata/tp66
