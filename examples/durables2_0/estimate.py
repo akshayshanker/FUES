@@ -176,14 +176,6 @@ def _run_single_estimation(
         # Precomputed: CSV is already in AUD — no normalisation needed.
         data_moments = spec['data_moments']
 
-    # --- Pre-build grids (same across all CE iterations — only calibration changes) ---
-    from .model import make_grids as _make_grids
-    from kikku.dynx import load_syntax as _load_syntax
-    _pre_cal, _pre_sett, *_ = _load_syntax(mod_dir, calib_overrides, setting_overrides)
-    _cached_grids = _make_grids(_pre_cal, _pre_sett)
-    if is_root(comm):
-        print(f"  Cached grids: {len(_cached_grids)} keys")
-
     # --- Build trial function ---
     def trial(theta):
         merged_calib = {**calib_overrides, **theta}
@@ -192,7 +184,6 @@ def _run_single_estimation(
             method=solver_method,
             calib_overrides=merged_calib,
             setting_overrides=setting_overrides,
-            grids=_cached_grids,
             verbose=False,
             strip_solved=True,
         )
