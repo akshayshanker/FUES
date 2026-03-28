@@ -40,6 +40,7 @@ source "$HOME/venvs/fues/bin/activate"
 export OMP_NUM_THREADS=1
 export MKL_NUM_THREADS=1
 export NUMBA_NUM_THREADS=1
+export NUMBA_THREADING_LAYER=workqueue
 
 # Force large allocations through mmap (returned to OS on free).
 # Prevents glibc malloc fragmentation that causes RSS growth across iterations.
