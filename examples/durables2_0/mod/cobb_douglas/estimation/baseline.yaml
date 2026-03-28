@@ -37,6 +37,7 @@ estimation:
     tol: 1e-3
     seed: 42
     noise_fraction: 0.10        # 10% uniform draws for exploration
+    alpha_smooth: 0.6           # blend elite with previous (prevents spurious convergence)
 
   # --- Output paths ---
   # scratch_dir: fast intermediate storage (purged after 100 days on Gadi)
