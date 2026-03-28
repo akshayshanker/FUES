@@ -390,8 +390,11 @@ def _run_single_estimation(
 
         print(f"Results: {results_run}")
 
-        # Build summary row for sweep aggregation
-        summary_row = {**calib_overrides, **result.theta,
+        # Build summary row for sweep aggregation.
+        # Prefix sweep-point calib overrides with 'true_' so they aren't
+        # overwritten by the estimated theta (e.g. true_gamma_c vs gamma_c).
+        sweep_true = {f'true_{k}': v for k, v in calib_overrides.items()}
+        summary_row = {**sweep_true, **result.theta,
                        'objective': result.objective,
                        'converged': result.converged,
                        'n_iter': result.n_iter}
