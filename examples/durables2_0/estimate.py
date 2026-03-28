@@ -531,11 +531,27 @@ def main():
             sub_size = sub_comm.Get_size() if sub_comm else 1
             print(f"\n  Sweep [{color}] {sub_label}: {sub_size} ranks")
 
-        summary_row, _ = _run_single_estimation(
+        summary_row, is_final = _run_single_estimation(
             mod_dir, spec_path, spec, est_yaml, args,
             sweep_calib, setting_overrides, sub_comm,
             results_dir, scratch_dir, run_id, sub_label=sub_label,
         )
+
+        # All ranks agree on is_final for their sub_comm
+        is_final = bcast_item(is_final if is_root(sub_comm) else None, sub_comm, root=0)
+        # World-level: final only if ALL ranks are final (min across all)
+        my_final = 1 if is_final else 0
+        from mpi4py import MPI as _MPI
+        all_final_sum = world_comm.allreduce(my_final, op=_MPI.MIN) if world_comm else my_final
+        all_final = bool(all_final_sum)
+
+        if not all_final and args.max_iter_this_run is not None:
+            # Restart needed — skip gather, all ranks exit together
+            if is_root(world_comm):
+                print(f"\n  Sweep restart: not all points converged. Checkpoint saved.")
+            if world_comm is not None:
+                world_comm.Barrier()
+            sys.exit(42)
 
         # --- Gather sweep summary on world root ---
         # Each sub_comm root has a summary_row; other ranks have None
