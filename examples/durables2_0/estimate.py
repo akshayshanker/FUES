@@ -25,7 +25,9 @@ import csv
 import gc
 import json
 import os
+import pickle
 import shutil
+import sys
 from datetime import datetime
 from itertools import product as cart_product
 from pathlib import Path
@@ -262,6 +264,22 @@ def _run_single_estimation(
 
     method_options['checkpoint_dir'] = scratch_run
 
+    # --- Resume from checkpoint (root loads, then broadcasts) ---
+    resume_state = None
+    if args.resume and is_root(comm):
+        state_path = os.path.join(scratch_run, 'state.pkl')
+        if os.path.exists(state_path):
+            with open(state_path, 'rb') as f:
+                resume_state = pickle.load(f)
+            print(f"  Resuming from checkpoint: iter {resume_state['it'] + 1}")
+        else:
+            print(f"  WARNING: --resume but no state.pkl at {state_path}. Starting fresh.")
+    if args.resume:
+        resume_state = bcast_item(resume_state if is_root(comm) else None, comm, root=0)
+
+    if args.max_iter_this_run is not None:
+        method_options['max_iter_this_run'] = args.max_iter_this_run
+
     # --- Estimate ---
     result = estimate(
         criterion, param_spec,
@@ -269,11 +287,20 @@ def _run_single_estimation(
         method_options=method_options,
         comm=comm,
         verbose=is_root(comm),
+        resume_state=resume_state,
+    )
+
+    # Determine if this is a final segment (write results) or intermediate (checkpoint only)
+    global_max = int(method_options.get('max_iter', 200))
+    is_final = (
+        result.converged
+        or (args.max_iter_this_run is None)
+        or (result.n_iter >= global_max)
     )
 
     # --- Save results ---
     summary_row = None
-    if is_root(comm):
+    if is_root(comm) and is_final:
         diag = diagnostics(result, data_moments,
                            moment_names=get_moment_names(moment_spec))
 
@@ -368,7 +395,11 @@ def _run_single_estimation(
                        'converged': result.converged,
                        'n_iter': result.n_iter}
 
-    return summary_row
+    elif is_root(comm):
+        print(f"\n  Checkpoint saved at iter {result.n_iter}. Will resume on next restart.")
+        print(f"  best_loss={result.objective:.6f}")
+
+    return summary_row, is_final
 
 
 def main():
@@ -403,6 +434,14 @@ def main():
         '--local-results', type=str, default=None,
         help='Local results dir (default: experiments/durables/estimation/results/). '
              'Set to "none" to disable local copy.')
+    parser.add_argument(
+        '--resume', action='store_true',
+        help='Resume from latest checkpoint in scratch dir')
+    parser.add_argument(
+        '--max-iter-this-run', type=int, default=None,
+        dest='max_iter_this_run',
+        help='Max CE iterations for this restart segment. '
+             'Exits with code 42 when exhausted (not converged).')
 
     args = parser.parse_args()
     world_comm = get_comm()
@@ -438,17 +477,40 @@ def main():
     # --- Check for sweep ---
     sweep_spec = est_yaml.get('sweep')
 
+    # --- Resume mode: reuse existing run_id from latest checkpoint ---
+    if args.resume:
+        if sweep_spec is not None:
+            raise RuntimeError("--resume is not supported with sweep mode")
+        if is_root(world_comm):
+            spec_scratch = os.path.join(scratch_dir, spec_name)
+            if os.path.isdir(spec_scratch):
+                run_dirs = sorted([
+                    d for d in os.listdir(spec_scratch)
+                    if d.startswith('est_')
+                    and os.path.isfile(os.path.join(spec_scratch, d, 'state.pkl'))
+                ])
+                if run_dirs:
+                    run_id = run_dirs[-1].replace('est_', '', 1)
+                    print(f"  Resuming run_id: {run_id}")
+                else:
+                    print("  WARNING: --resume but no checkpoint found. Starting fresh.")
+        run_id = bcast_item(run_id if is_root(world_comm) else None, world_comm, root=0)
+
     if sweep_spec is None:
         # ── Single estimation (no sweep) ──
         if is_root(world_comm):
             print(f"Estimation: {spec_path.name}")
             print(f"  Mod: {mod_dir}")
             print(f"  Method: {spec['method']}")
-        _run_single_estimation(
+        _, is_final = _run_single_estimation(
             mod_dir, spec_path, spec, est_yaml, args,
             calib_overrides, setting_overrides, world_comm,
             results_dir, scratch_dir, run_id,
         )
+
+        # Exit codes for restart loop (uses broadcast values, not filesystem state)
+        if args.max_iter_this_run is not None and not is_final:
+            sys.exit(42)
     else:
         # ── Sweep mode: split communicator ──
         sweep_grid = _build_sweep_grid(sweep_spec)
@@ -477,7 +539,7 @@ def main():
             sub_size = sub_comm.Get_size() if sub_comm else 1
             print(f"\n  Sweep [{color}] {sub_label}: {sub_size} ranks")
 
-        summary_row = _run_single_estimation(
+        summary_row, _ = _run_single_estimation(
             mod_dir, spec_path, spec, est_yaml, args,
             sweep_calib, setting_overrides, sub_comm,
             results_dir, scratch_dir, run_id, sub_label=sub_label,
