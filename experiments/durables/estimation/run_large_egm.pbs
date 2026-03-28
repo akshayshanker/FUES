@@ -48,8 +48,8 @@ export MALLOC_MMAP_THRESHOLD_=65536
 export MALLOC_TRIM_THRESHOLD_=0
 export PYTHONMALLOC=malloc
 export OPENBLAS_NUM_THREADS=1
-# Memory leak diagnostics (remove after debugging)
-export FUES_MEM_DIAG=1
+# Memory diagnostics (set to 1 to enable per-step RSS logging)
+# export FUES_MEM_DIAG=1
 export NUMBA_CACHE_DIR=$PBS_JOBFS/numba_cache
 mkdir -p $NUMBA_CACHE_DIR
 find "$HOME/venvs/fues/lib/" -name "*.nbc" -o -name "*.nbi" 2>/dev/null | xargs rm -f 2>/dev/null

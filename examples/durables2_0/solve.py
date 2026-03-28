@@ -461,7 +461,7 @@ def solve(
     """
     syntax_dir = Path(syntax_dir)
 
-    # --- Memory diagnostics (activated by FUES_MEM_DIAG=1 env var, rank 0 only) ---
+    # --- Memory diagnostics (activate with FUES_MEM_DIAG=1 env var) ---
     _is_rank0 = True
     try:
         from mpi4py import MPI

@@ -185,53 +185,18 @@ def _run_single_estimation(
         print(f"  Cached grids: {len(_cached_grids)} keys")
 
     # --- Build trial function ---
-    _trial_call_count = [0]
-    _mem_diag = os.environ.get('FUES_MEM_DIAG', '') == '1'
-
-    def _rss_mb():
-        try:
-            import resource
-            return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss // 1024
-        except Exception:
-            return 0
-
     def trial(theta):
-        _trial_call_count[0] += 1
-        _log = _mem_diag and is_root(comm)
-
-        if _log:
-            r0 = _rss_mb()
-            print(f"    [trial #{_trial_call_count[0]}] start RSS={r0}MB")
-
         merged_calib = {**calib_overrides, **theta}
-
         nest, grids = solve(
             str(mod_dir),
             method=solver_method,
             calib_overrides=merged_calib,
             setting_overrides=setting_overrides,
-            grids=_cached_grids,  # reuse pre-built grids
+            grids=_cached_grids,
             verbose=False,
             strip_solved=True,
         )
-
-        if _log:
-            r2 = _rss_mb()
-            n_periods = len(nest.get("periods", []))
-            n_sols = len(nest.get("solutions", []))
-            print(f"    [trial #{_trial_call_count[0]}] post-solve RSS={r2}MB "
-                  f"(+{r2-r0}MB) periods={n_periods} sols={n_sols}")
-
         panels = simulate_lifecycle(nest, grids, N=N_sim, seed=simulation_seed)
-
-        if _log:
-            r3 = _rss_mb()
-            n_panel_keys = len(panels) if panels else 0
-            panel_bytes = sum(v.nbytes for v in panels.values() if hasattr(v, 'nbytes')) if panels else 0
-            print(f"    [trial #{_trial_call_count[0]}] post-sim RSS={r3}MB "
-                  f"(+{r3-r2}MB) panels={n_panel_keys} keys, "
-                  f"{panel_bytes/1e6:.1f}MB data")
-
         nest["periods"].clear()
         nest["solutions"].clear()
         del nest, grids
