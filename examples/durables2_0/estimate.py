@@ -100,10 +100,11 @@ def _run_single_estimation(
     N_sim = args.N_sim
     solver_method = args.method
     spec_name = Path(args.spec).stem
+    mod_name = Path(args.mod).name  # e.g. 'separable', 'separable_males'
 
-    # Build path: results_dir/<spec_name>/<sub_label>/est_<run_id>/
-    path_parts = [results_dir, spec_name]
-    scratch_parts = [scratch_dir, spec_name]
+    # Build path: results_dir/<mod_name>/<spec_name>/<sub_label>/est_<run_id>/
+    path_parts = [results_dir, mod_name, spec_name]
+    scratch_parts = [scratch_dir, mod_name, spec_name]
     if sub_label:
         path_parts.append(sub_label)
         scratch_parts.append(sub_label)
@@ -371,7 +372,7 @@ def _run_single_estimation(
             local_root = repo_root / 'experiments' / 'durables' / 'estimation' / 'results'
 
         if local_root is not None:
-            lp = [str(local_root), spec_name]
+            lp = [str(local_root), mod_name, spec_name]
             if sub_label:
                 lp.append(sub_label)
             lp.append(f'est_{run_id}')
@@ -478,6 +479,7 @@ def main():
     # run_id: use --run-id if provided (restart loop), otherwise generate fresh
     run_id = args.run_id or datetime.now().strftime('%Y%m%d_%H%M%S')
     spec_name = Path(args.spec).stem
+    mod_name = Path(args.mod).name  # e.g. 'separable', 'separable_males'
 
     # --- Check for sweep ---
     sweep_spec = est_yaml.get('sweep')
@@ -560,7 +562,7 @@ def main():
         if is_root(world_comm):
             rows = [r for r in all_rows if r is not None]
             if rows:
-                sweep_results_dir = os.path.join(results_dir, spec_name)
+                sweep_results_dir = os.path.join(results_dir, mod_name, spec_name)
                 os.makedirs(sweep_results_dir, exist_ok=True)
                 summary_path = os.path.join(sweep_results_dir, f'sweep_summary_{run_id}.csv')
                 fieldnames = list(rows[0].keys())
@@ -581,7 +583,7 @@ def main():
                     repo_root = Path(__file__).parent.parent.parent
                     local_root = repo_root / 'experiments' / 'durables' / 'estimation' / 'results'
                 if local_root is not None:
-                    local_sweep = local_root / spec_name
+                    local_sweep = local_root / mod_name / spec_name
                     try:
                         os.makedirs(local_sweep, exist_ok=True)
                         shutil.copy2(summary_path,
