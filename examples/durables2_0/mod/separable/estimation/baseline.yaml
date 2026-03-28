@@ -18,7 +18,7 @@ estimation:
     gamma_h:
       bounds: [1.2, 6.0]
     tau:
-      bounds: [0.01, 0.25]
+      bounds: [0.04, 0.25]
 
   method: cross-entropy
   method_options:

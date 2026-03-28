@@ -19,7 +19,7 @@ estimation:
       bounds: [1.2, 6.0]
       init: 3.5
     tau:
-      bounds: [0.01, 0.25]
+      bounds: [0.04, 0.25]
       init: 0.12
 
   # True values (for recovery test — simulate data at these, then estimate)
