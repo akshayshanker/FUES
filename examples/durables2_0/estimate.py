@@ -188,6 +188,9 @@ def _run_single_estimation(
             strip_solved=True,
         )
         panels = simulate_lifecycle(nest, grids, N=N_sim, seed=simulation_seed)
+        # Explicitly clear period stage objects (hold YAML node trees)
+        nest["periods"].clear()
+        nest["solutions"].clear()
         del nest, grids
         gc.collect()
         return panels
