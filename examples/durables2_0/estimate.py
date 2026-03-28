@@ -371,21 +371,22 @@ def _run_single_estimation(
                     'elite_mean_loss': h.get('elite_mean_loss'),
                 })
 
-        # Save best.nst (the nest from the last trial evaluation)
+        # Save best.nst (stripped nest from last trial evaluation)
         if _last_nest[0] is not None:
             try:
                 from kikku.run.nest_io import save_nest
-                nst_meta = {'theta_best': result.theta,
-                            'objective': result.objective,
-                            'n_iter': result.n_iter}
-                for d in [scratch_run, results_run]:
-                    save_nest(_last_nest[0], os.path.join(d, 'best.nst'),
-                              solutions=True, metadata=nst_meta)
-                print(f"  Saved best.nst")
+                meta = {'theta_best': result.theta,
+                        'objective': result.objective,
+                        'n_iter': result.n_iter}
+                save_nest(_last_nest[0], os.path.join(results_run, 'best.nst'),
+                          solutions=True, metadata=meta)
+                save_nest(_last_nest[0], os.path.join(scratch_run, 'best.nst'),
+                          solutions=True, metadata=meta)
+                print(f"  Saved best.nst (stripped)")
             except Exception as e:
                 print(f"  WARNING: could not save best.nst: {e}")
-            _last_nest[0] = None
-            _last_nest[1] = None
+        _last_nest[0] = None
+        _last_nest[1] = None
 
         # Print summary
         print(f"\nLoss:       {result.objective:.6f}")
