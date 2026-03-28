@@ -46,6 +46,7 @@ export NUMBA_NUM_THREADS=1
 # Prevents glibc malloc fragmentation that causes RSS growth across iterations.
 export MALLOC_MMAP_THRESHOLD_=65536
 export MALLOC_TRIM_THRESHOLD_=0
+export PYTHONMALLOC=malloc
 export OPENBLAS_NUM_THREADS=1
 export NUMBA_CACHE_DIR=$PBS_JOBFS/numba_cache
 mkdir -p $NUMBA_CACHE_DIR
