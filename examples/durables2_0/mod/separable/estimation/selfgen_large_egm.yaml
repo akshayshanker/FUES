@@ -95,7 +95,7 @@ moments:
     - key: sd_wealth_real_14_0
       stat: sd
       var: h
-    - key: sd_fin_assets_14_0
+    - key: sd_a_tot_14_0
       stat: sd
       var: a
     - key: corr_cons_realw_14_0
