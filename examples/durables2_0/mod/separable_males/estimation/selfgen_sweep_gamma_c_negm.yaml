@@ -72,33 +72,33 @@ moments:
           mean: [c, h]
 
   targets:
-    - key: av_consumption2_14_0
+    - key: av_consumption2_14_1
       stat: mean
       var: c
-    - key: av_wealth_real_14_0
+    - key: av_wealth_real_14_1
       stat: mean
       var: h
-    - key: av_fin_assets_14_0
+    - key: av_a_tot_14_1
       stat: mean
       var: a
-    - key: sd_consumption2_14_0
+    - key: sd_consumption2_14_1
       stat: sd
       var: c
-    - key: sd_wealth_real_14_0
+    - key: sd_wealth_real_14_1
       stat: sd
       var: h
-    - key: sd_fin_assets_14_0
+    - key: sd_a_tot_14_1
       stat: sd
       var: a
-    - key: corr_cons_realw_14_0
+    - key: corr_cons_realw_14_1
       stat: corr
       vars: [c, h]
-    - key: autocorr_wealth_real_0
+    - key: autocorr_wealth_real_1
       stat: autocorr
       var: h
-    - key: autocorr_wealth_fin_0
+    - key: autocorr_wealth_fin_1
       stat: autocorr
       var: a
-    - key: autocorr_consumption_0
+    - key: autocorr_consumption_1
       stat: autocorr
       var: c
