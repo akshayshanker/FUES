@@ -11,8 +11,6 @@ qsub "$SCRIPT_DIR/run_large_egm.pbs"
 qsub "$SCRIPT_DIR/run_large_negm.pbs"
 qsub "$SCRIPT_DIR/run_xlarge_egm.pbs"
 qsub "$SCRIPT_DIR/run_xlarge_negm.pbs"
-qsub "$SCRIPT_DIR/run_large_egm_males.pbs"
-qsub "$SCRIPT_DIR/run_large_negm_males.pbs"
 
 echo ""
 echo "Submitted 6 jobs. Check with: qstat -u \$USER"
