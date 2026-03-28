@@ -42,6 +42,11 @@ source "$HOME/venvs/fues/bin/activate"
 export OMP_NUM_THREADS=1
 export MKL_NUM_THREADS=1
 export NUMBA_NUM_THREADS=1
+
+# Force large allocations through mmap (returned to OS on free).
+# Prevents glibc malloc fragmentation that causes RSS growth across iterations.
+export MALLOC_MMAP_THRESHOLD_=65536
+export MALLOC_TRIM_THRESHOLD_=0
 export OPENBLAS_NUM_THREADS=1
 export NUMBA_CACHE_DIR=$PBS_JOBFS/numba_cache
 mkdir -p $NUMBA_CACHE_DIR
