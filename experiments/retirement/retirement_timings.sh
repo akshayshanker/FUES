@@ -7,7 +7,7 @@
 #PBS -l mem=960GB
 #PBS -q normal
 #PBS -P tp66
-#PBS -l walltime=4:00:00
+#PBS -l walltime=1:00:00
 #PBS -l storage=scratch/tp66+gdata/tp66
 #PBS -l wd
 #PBS -j oe
