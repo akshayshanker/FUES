@@ -1,0 +1,62 @@
+#!/bin/bash
+#PBS -N durables-sweep
+#PBS -P tp66
+#PBS -q normalsr
+#PBS -l ncpus=4,mem=200GB,walltime=10:00:00
+#PBS -l storage=scratch/tp66
+#PBS -l wd
+#PBS -j oe
+#PBS -r y
+#PBS -o logs/
+
+# ======================================================================
+#  Durables Model - Grid convergence sweep
+#  Runs sweep over grid sizes with optional Euler accuracy
+# ======================================================================
+
+VERSION="${VERSION:-v1}"
+
+set -euo pipefail
+
+# --- Path Setup ---
+if [[ -n "${PBS_O_WORKDIR:-}" ]]; then
+    REPO_ROOT="$(cd "$PBS_O_WORKDIR/../.." && pwd)"
+else
+    REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+fi
+
+# --- Environment ---
+module purge
+module load python3/3.12.1
+
+VENV_PUBLIC="${VENV_PUBLIC:-/scratch/tp66/$USER/venvs/fues_public}"
+source "$VENV_PUBLIC/bin/activate"
+
+export PYTHONPATH="$REPO_ROOT/src:$REPO_ROOT${PYTHONPATH:+:$PYTHONPATH}"
+export OMP_NUM_THREADS=1
+export NUMBA_NUM_THREADS=1
+export NUMBA_CACHE_DIR=/scratch/tp66/$USER/numba_cache
+mkdir -p "$NUMBA_CACHE_DIR"
+
+echo "========================================================"
+echo "Durables: Grid convergence sweep ($VERSION)"
+echo "Job ID: ${PBS_JOBID:-local} | Node: $(hostname)"
+echo "========================================================"
+
+cd "$REPO_ROOT"
+
+OUTPUT_DIR="/scratch/tp66/$USER/FUES/durables/sweep_$VERSION"
+
+# Grid convergence sweep with simulation + Euler
+python3 -m examples.durables.run \
+    --sweep \
+    --sweep-grids 100,200,300,500 \
+    --sweep-runs 3 \
+    --simulate --n-sim 10000 --seed 42 \
+    --calib-override t0=20 \
+    --output-dir "$OUTPUT_DIR" \
+    --run-tag "grid_sweep"
+
+echo ""
+echo "Results saved to: $OUTPUT_DIR/"
+echo "Job completed at $(date)"

@@ -1,5 +1,5 @@
 #!/bin/bash
-#PBS -N durables-mpi
+#PBS -N durables-compare
 #PBS -P tp66
 #PBS -q expresssr
 #PBS -l ncpus=2,mem=80GB,walltime=02:00:00
@@ -10,82 +10,43 @@
 #PBS -o logs/
 
 # ======================================================================
-#  Durables Model - 2 methods in parallel (NEGM, FUES)
+#  Durables Model - EGM(FUES) vs NEGM comparison
 # ======================================================================
-
-# ===== USER CONFIGURATION =====
-# Set plot start period here (leave empty for default T-2)
-PLOT_START=55
-
-# EGM Grid Storage: Set to 1 to store intermediate grids (for debugging/plotting)
-# Set to 0 to skip storing grids (faster, less memory)
-export FUES_RETURN_GRIDS="${FUES_RETURN_GRIDS:-0}"
-# ==============================
 
 set -euo pipefail
 
-# --- Path Setup (handle PBS vs local) ---
+# --- Path Setup ---
 if [[ -n "${PBS_O_WORKDIR:-}" ]]; then
-    SCRIPT_DIR="$PBS_O_WORKDIR"
     REPO_ROOT="$(cd "$PBS_O_WORKDIR/../.." && pwd)"
 else
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+    REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 fi
 
-# --- Environment Setup ---
+# --- Environment ---
 module purge
 module load python3/3.12.1
-module load openmpi/4.1.5
 
-# Use public venv
 VENV_PUBLIC="${VENV_PUBLIC:-/scratch/tp66/$USER/venvs/fues_public}"
 source "$VENV_PUBLIC/bin/activate"
 
-export FUES_HOME="$REPO_ROOT"
-export PYTHONPATH="$FUES_HOME/src:$FUES_HOME${PYTHONPATH:+:$PYTHONPATH}"
-
-# --- MPI Configuration ---
+export PYTHONPATH="$REPO_ROOT/src:$REPO_ROOT${PYTHONPATH:+:$PYTHONPATH}"
 export OMP_NUM_THREADS=1
 export NUMBA_NUM_THREADS=1
 export NUMBA_CACHE_DIR=/scratch/tp66/$USER/numba_cache
 mkdir -p "$NUMBA_CACHE_DIR"
 
-# Suppress OpenMPI warnings
-export OMPI_MCA_coll_hcoll_enable=0
-export OMPI_MCA_coll=^hcoll
-export PMIX_MCA_gds=hash
-
-# --- Print job info ---
 echo "========================================================"
-echo "PBS Job: Durables Model"
-echo "========================================================"
-echo "Job ID:      ${PBS_JOBID:-local}"
-echo "Node:        $(hostname)"
-echo "CPUs:        ${PBS_NCPUS:-2}"
-echo "Python:      $(which python3)"
+echo "Durables: EGM(FUES) vs NEGM comparison"
+echo "Job ID: ${PBS_JOBID:-local} | Node: $(hostname)"
 echo "========================================================"
 
-cd "$REPO_ROOT/examples/durables"
+cd "$REPO_ROOT"
 
-# Create scratch directory for outputs (NOT home drive!)
-export FUES_OUTPUT_DIR="/scratch/tp66/$USER/FUES/durables"
-mkdir -p "$FUES_OUTPUT_DIR/plots"
+python3 -m examples.durables.run \
+    --compare FUES NEGM \
+    --simulate --n-sim 10000 --seed 42 \
+    --calib-override t0=20 \
+    --output-dir /scratch/tp66/$USER/FUES/durables \
+    --run-tag compare_$(date +%Y%m%d)
 
-# Build plot-start argument if specified
-PLOT_START_ARG=""
-if [[ -n "$PLOT_START" ]]; then
-    PLOT_START_ARG="--plot-start $PLOT_START"
-fi
-
-# Run with MPI (2 cores for 2 methods: NEGM, FUES)
-# Note: --run-tests is NOT passed, so grid/tau comparison tests are disabled
-echo "Running with PLOT_START=${PLOT_START:-default}"
-mpirun -np 2 python3 durables_plot.py $PLOT_START_ARG
-
-echo ""
-echo "Plots saved to: $FUES_OUTPUT_DIR/plots/"
-
-echo ""
 echo "Job completed at $(date)"
-

@@ -38,7 +38,7 @@ Each stage declares its solution methods in `syntax/stages/<stage>/<stage>_metho
 **`--method-override stage.scheme=TAG`** overrides any specific scheme on any stage. When disambiguation is needed, use the full address `stage.mover.scheme=TAG`.
 
 ```bash
-# Shortcut: patches the model's default target (adjuster UE in durables2_0)
+# Shortcut: patches the model's default target (adjuster UE in durables)
 --method NEGM
 
 # Explicit: override one stage's upper envelope
@@ -75,7 +75,7 @@ Each stage declares its solution methods in `syntax/stages/<stage>/<stage>_metho
 Every run creates a self-contained directory under `results/<model>/`:
 
 ```
-results/durables2_0/
+results/durables/
 └── 2026-03-25_001/                        # auto-dated, or --run-tag name
     │
     │  ── Single-method run ──
@@ -115,7 +115,7 @@ results/durables2_0/
 
 ---
 
-## Durables2_0 (`examples.durables2_0.run`)
+## Durables2_0 (`examples.durables.run`)
 
 Two-asset lifecycle model: liquid assets **a**, housing **h**, discrete tenure choice (keep/adjust with transaction cost **τ**), CRRA preferences over **(c, h)**. Three DDSL stages per period: `keeper_cons`, `adjuster_cons`, `tenure`.
 
@@ -125,47 +125,47 @@ The `--method` shortcut targets the **adjuster** stage's upper envelope (FUES vs
 
 ```bash
 # Default solve (FUES everywhere)
-python -m examples.durables2_0.run
+python -m examples.durables.run
 
 # NEGM adjuster (keeper stays FUES)
-python -m examples.durables2_0.run --method NEGM
+python -m examples.durables.run --method NEGM
 
 # MSS at the keeper (adjuster stays FUES)
-python -m examples.durables2_0.run --method-override keeper_cons.upper_envelope=MSS
+python -m examples.durables.run --method-override keeper_cons.upper_envelope=MSS
 
 # Compare adjuster methods
-python -m examples.durables2_0.run --compare FUES NEGM --simulate --n-sim 10000
+python -m examples.durables.run --compare FUES NEGM --simulate --n-sim 10000
 
 # Compare keeper methods
-python -m examples.durables2_0.run \
+python -m examples.durables.run \
     --compare keeper_cons.upper_envelope=FUES keeper_cons.upper_envelope=MSS \
     --simulate --n-sim 10000
 
 # Three-way: FUES everywhere vs NEGM adjuster vs MSS keeper
-python -m examples.durables2_0.run \
+python -m examples.durables.run \
     --compare FUES NEGM keeper_cons.upper_envelope=MSS \
     --simulate --n-sim 10000
 
 # Finer grids
-python -m examples.durables2_0.run \
+python -m examples.durables.run \
     --setting-override n_a=300 --setting-override n_h=300 --setting-override n_w=300
 
 # Shorter horizon (faster for testing)
-python -m examples.durables2_0.run --calib-override t0=55
+python -m examples.durables.run --calib-override t0=55
 
 # EGM grid diagnostics
-python -m examples.durables2_0.run \
+python -m examples.durables.run \
     --setting-override store_cntn=1 --setting-override plot_ages=69,65,60
 
 # Grid-convergence sweep
-python -m examples.durables2_0.run --sweep --sweep-grids 100,200,300 --sweep-runs 3
+python -m examples.durables.run --sweep --sweep-grids 100,200,300 --sweep-runs 3
 
 # Sweep + simulation (Euler accuracy vs grid size)
-python -m examples.durables2_0.run \
+python -m examples.durables.run \
     --sweep --sweep-grids 100,200,300 --simulate --n-sim 5000
 
 # Named output directory
-python -m examples.durables2_0.run --compare FUES NEGM --run-tag paper_baseline
+python -m examples.durables.run --compare FUES NEGM --run-tag paper_baseline
 ```
 
 ---
@@ -223,7 +223,7 @@ Grid sweeps can be distributed across MPI ranks. The sweep function in `kikku.ru
 A typical PBS job script:
 
 ```bash
-mpirun -np 48 python -m examples.durables2_0.run \
+mpirun -np 48 python -m examples.durables.run \
     --sweep --sweep-grids 100,200,300,500,1000 \
     --simulate --n-sim 10000 \
     --run-tag sweep_paper
@@ -232,7 +232,7 @@ mpirun -np 48 python -m examples.durables2_0.run \
 For large experiment matrices (many grid sizes × methods × calibrations), define the sweep in an **experiment-set YAML** under `experiments/<model>/experiment_sets/`:
 
 ```yaml
-# experiments/durables2_0/experiment_sets/paper_sweep.yml
+# experiments/durables/experiment_sets/paper_sweep.yml
 sweep:
   methods: [FUES, NEGM]
   grid_sizes: [100, 200, 300, 500, 1000]
@@ -245,6 +245,6 @@ metrics:
   - euler_error
 ```
 
-Pass to the runner: `--experiment-set experiments/durables2_0/experiment_sets/paper_sweep.yml`.
+Pass to the runner: `--experiment-set experiments/durables/experiment_sets/paper_sweep.yml`.
 
 Each MPI rank solves one `(method, grid_size)` combination. Results are gathered on rank 0 and written to a single table. The experiment-set YAML is the reproducible record of what was run.

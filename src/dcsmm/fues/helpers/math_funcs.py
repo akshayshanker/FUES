@@ -1335,3 +1335,243 @@ def postclean_double_jump_mask(e_grid, a_prime, m_bar, skip_mask, eps_d=EPS_D):
             keep[i] = False
 
     return keep
+
+
+@njit(cache=True)
+def calculate_gradient_1d(data, x):
+    """Finite-difference gradient of data with respect to x.
+
+    Returns an array of length len(data)+1 representing the slope
+    between consecutive points (element i is the slope from i-1 to i).
+    Element 0 is set to 0.
+    """
+    n = len(data)
+    grad = np.empty(n + 1)
+    grad[0] = 0.0
+    for i in range(1, n):
+        dx = x[i] - x[i - 1]
+        if dx == 0.0:
+            grad[i] = 0.0
+        else:
+            grad[i] = (data[i] - data[i - 1]) / dx
+    grad[n] = 0.0
+    return grad
+
+
+@njit(cache=True)
+def correct_jumps1d_arr(data, x, gradient_jump_threshold,
+                        v_arr, d_arr, a_arr):
+    """Remove isolated jumps in 1D interpolated policy arrays (two-pass).
+
+    A point is flagged when both the left and right gradients exceed
+    *gradient_jump_threshold*.  Pass 1 corrects using the original
+    neighbours; pass 2 recomputes gradients on the corrected arrays
+    and catches clusters that pass 1 could not fix.
+
+    Parameters
+    ----------
+    data : np.ndarray
+        1D array of interpolated values to correct.
+    x : np.ndarray
+        x-coordinates corresponding to *data*.
+    gradient_jump_threshold : float
+        Threshold for detecting jumps.
+    v_arr, d_arr, a_arr : np.ndarray
+        Companion arrays (value, durable choice, asset choice) corrected
+        in lockstep with *data*.
+
+    Returns
+    -------
+    corrected_data, corrected_v, corrected_d, corrected_a : np.ndarray
+    """
+    n = len(data)
+    corrected_data = np.copy(data)
+    corrected_v = np.copy(v_arr)
+    corrected_d = np.copy(d_arr)
+    corrected_a = np.copy(a_arr)
+
+    # --- Pass 1: correct using original neighbours ---
+    gradients = calculate_gradient_1d(data, x)
+    for i in range(1, n - 1):
+        if (np.abs(gradients[i]) > gradient_jump_threshold
+                and np.abs(gradients[i + 1]) > gradient_jump_threshold):
+            corrected_data[i] = 0.5 * (data[i - 1] + data[i + 1])
+            corrected_v[i] = 0.5 * (v_arr[i - 1] + v_arr[i + 1])
+            corrected_d[i] = 0.5 * (d_arr[i - 1] + d_arr[i + 1])
+            corrected_a[i] = 0.5 * (a_arr[i - 1] + a_arr[i + 1])
+
+    # --- Pass 2: recompute gradients on corrected arrays ---
+    gradients2 = calculate_gradient_1d(corrected_data, x)
+    for i in range(1, n - 1):
+        if (np.abs(gradients2[i]) > gradient_jump_threshold
+                and np.abs(gradients2[i + 1]) > gradient_jump_threshold):
+            corrected_data[i] = 0.5 * (corrected_data[i - 1]
+                                       + corrected_data[i + 1])
+            corrected_v[i] = 0.5 * (corrected_v[i - 1]
+                                     + corrected_v[i + 1])
+            corrected_d[i] = 0.5 * (corrected_d[i - 1]
+                                     + corrected_d[i + 1])
+            corrected_a[i] = 0.5 * (corrected_a[i - 1]
+                                     + corrected_a[i + 1])
+
+    return corrected_data, corrected_v, corrected_d, corrected_a
+
+
+@njit(cache=True)
+def interp_as_4(xp, yp1, yp2, yp3, yp4, x, extrap=False):
+    """Fused interpolation of 4 y-arrays on the same xp/x grids.
+
+    Single index walk (O(n+m)) shared across all 4 y-arrays,
+    eliminating 3 redundant walks compared to 4 separate interp_as calls.
+
+    Parameters
+    ----------
+    xp : 1D array  – sorted data x-coordinates
+    yp1, yp2, yp3, yp4 : 1D arrays – y data to interpolate
+    x  : 1D array  – query points (sorted ascending for linear walk)
+    extrap : bool   – linearly extrapolate beyond xp bounds
+
+    Returns
+    -------
+    out1, out2, out3, out4 : 1D arrays
+    """
+    n_x = len(x)
+    n_xp = len(xp)
+    out1 = np.empty(n_x)
+    out2 = np.empty(n_x)
+    out3 = np.empty(n_x)
+    out4 = np.empty(n_x)
+
+    if n_xp == 0:
+        for i in range(n_x):
+            out1[i] = 0.0
+            out2[i] = 0.0
+            out3[i] = 0.0
+            out4[i] = 0.0
+        return out1, out2, out3, out4
+
+    if n_xp == 1:
+        for i in range(n_x):
+            out1[i] = yp1[0]
+            out2[i] = yp2[0]
+            out3[i] = yp3[0]
+            out4[i] = yp4[0]
+        return out1, out2, out3, out4
+
+    x_lo, x_hi = xp[0], xp[-1]
+
+    dx_left = xp[1] - xp[0]
+    dx_right = xp[-1] - xp[-2]
+    inv_left = 1.0 / dx_left if dx_left != 0.0 else 0.0
+    inv_right = 1.0 / dx_right if dx_right != 0.0 else 0.0
+    sl1 = (yp1[1] - yp1[0]) * inv_left
+    sl2 = (yp2[1] - yp2[0]) * inv_left
+    sl3 = (yp3[1] - yp3[0]) * inv_left
+    sl4 = (yp4[1] - yp4[0]) * inv_left
+    sr1 = (yp1[-1] - yp1[-2]) * inv_right
+    sr2 = (yp2[-1] - yp2[-2]) * inv_right
+    sr3 = (yp3[-1] - yp3[-2]) * inv_right
+    sr4 = (yp4[-1] - yp4[-2]) * inv_right
+
+    # Detect sorted (same heuristic as interp_as)
+    x_sorted = True
+    check_n = min(n_x, 8)
+    for i in range(1, check_n):
+        if x[i] < x[i - 1]:
+            x_sorted = False
+            break
+    if x_sorted and n_x > check_n and x[-1] < x[-2]:
+        x_sorted = False
+
+    if x_sorted:
+        j = 0
+        for i in range(n_x):
+            xi = x[i]
+            if xi <= x_lo:
+                if extrap:
+                    d = xi - x_lo
+                    out1[i] = yp1[0] + d * sl1
+                    out2[i] = yp2[0] + d * sl2
+                    out3[i] = yp3[0] + d * sl3
+                    out4[i] = yp4[0] + d * sl4
+                else:
+                    out1[i] = yp1[0]
+                    out2[i] = yp2[0]
+                    out3[i] = yp3[0]
+                    out4[i] = yp4[0]
+            elif xi >= x_hi:
+                if extrap:
+                    d = xi - x_hi
+                    out1[i] = yp1[-1] + d * sr1
+                    out2[i] = yp2[-1] + d * sr2
+                    out3[i] = yp3[-1] + d * sr3
+                    out4[i] = yp4[-1] + d * sr4
+                else:
+                    out1[i] = yp1[-1]
+                    out2[i] = yp2[-1]
+                    out3[i] = yp3[-1]
+                    out4[i] = yp4[-1]
+            else:
+                while j < n_xp - 2 and xp[j + 1] <= xi:
+                    j += 1
+                dx = xp[j + 1] - xp[j]
+                if dx != 0.0:
+                    t = (xi - xp[j]) / dx
+                    out1[i] = yp1[j] + t * (yp1[j + 1] - yp1[j])
+                    out2[i] = yp2[j] + t * (yp2[j + 1] - yp2[j])
+                    out3[i] = yp3[j] + t * (yp3[j + 1] - yp3[j])
+                    out4[i] = yp4[j] + t * (yp4[j + 1] - yp4[j])
+                else:
+                    out1[i] = yp1[j]
+                    out2[i] = yp2[j]
+                    out3[i] = yp3[j]
+                    out4[i] = yp4[j]
+    else:
+        for i in range(n_x):
+            xi = x[i]
+            if xi <= x_lo:
+                if extrap:
+                    d = xi - x_lo
+                    out1[i] = yp1[0] + d * sl1
+                    out2[i] = yp2[0] + d * sl2
+                    out3[i] = yp3[0] + d * sl3
+                    out4[i] = yp4[0] + d * sl4
+                else:
+                    out1[i] = yp1[0]
+                    out2[i] = yp2[0]
+                    out3[i] = yp3[0]
+                    out4[i] = yp4[0]
+            elif xi >= x_hi:
+                if extrap:
+                    d = xi - x_hi
+                    out1[i] = yp1[-1] + d * sr1
+                    out2[i] = yp2[-1] + d * sr2
+                    out3[i] = yp3[-1] + d * sr3
+                    out4[i] = yp4[-1] + d * sr4
+                else:
+                    out1[i] = yp1[-1]
+                    out2[i] = yp2[-1]
+                    out3[i] = yp3[-1]
+                    out4[i] = yp4[-1]
+            else:
+                lo, hi = 0, n_xp - 1
+                while hi - lo > 1:
+                    mid = (lo + hi) >> 1
+                    if xp[mid] <= xi:
+                        lo = mid
+                    else:
+                        hi = mid
+                dx = xp[hi] - xp[lo]
+                if dx != 0.0:
+                    t = (xi - xp[lo]) / dx
+                    out1[i] = yp1[lo] + t * (yp1[hi] - yp1[lo])
+                    out2[i] = yp2[lo] + t * (yp2[hi] - yp2[lo])
+                    out3[i] = yp3[lo] + t * (yp3[hi] - yp3[lo])
+                    out4[i] = yp4[lo] + t * (yp4[hi] - yp4[lo])
+                else:
+                    out1[i] = yp1[lo]
+                    out2[i] = yp2[lo]
+                    out3[i] = yp3[lo]
+                    out4[i] = yp4[lo]
+
+    return out1, out2, out3, out4

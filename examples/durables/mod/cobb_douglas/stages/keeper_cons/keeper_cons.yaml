@@ -1,0 +1,99 @@
+name: KeeperConsumption
+
+symbols:
+  spaces:
+    Xw: '@def R+'          # cash-on-hand domain
+    Xh: '@def R+'          # housing stock domain
+    Xa: '@def R+'          # financial savings domain
+
+  prestate:
+    w_kp: '@in Xw'       # cash-on-hand from branching stage
+    h_kp: '@in Xh'       # housing stock from branching stage
+
+  states:
+    w_kp: '@in Xw'       # cash-on-hand (pass-through)
+    h_kp: '@in Xh'       # housing stock (conditioning variable, no choice)
+
+  poststates:
+    a_nxt: '@in Xa'        # end-of-period financial savings
+    h_nxt: '@in Xh'        # end-of-period housing = h_kp (already depreciated by tenure)
+
+  controls:
+    c: '@in R+'
+
+  values:
+    V[<]: '@in R'
+    V: '@in R'
+    V[>]: '@in R'          # V[>]: R^2 -> R (depends on a_nxt, h_nxt)
+
+  values_marginal:
+    d_{w}V[<]: '@in R'
+    d_{h}V[<]: '@in R'
+    d_{w}V: '@in R'
+    d_{h}V: '@in R'
+    d_{a_nxt}V[>]: '@in R+'     # partial_{a_nxt} v[>]
+    d_{h_nxt}V[>]: '@in R+'     # partial_{h_nxt} v[>]
+
+  functions:
+    # Cobb-Douglas CRRA: u(c, h) = (c^alpha * (h + d_ubar)^(1-alpha))^(1-rho) / (1-rho)
+    # From durable-cons/utility.py: func_nopar
+    u: 'c, h -> (c^alpha * (h + d_ubar)^(1 - alpha))^(1 - rho) / (1 - rho)'
+
+    # du_c(c, h) = alpha * c^(alpha*(1-rho)-1) * (h + d_ubar)^((1-alpha)*(1-rho))
+    # From durable-cons/utility.py: marg_func_nopar
+    d_{c}u: 'c, h -> alpha * c^(alpha * (1 - rho) - 1) * (h + d_ubar)^((1 - alpha) * (1 - rho))'
+
+    # du_h(c, h) = (1-alpha) * c^(alpha*(1-rho)) * (h + d_ubar)^((1-alpha)*(1-rho)-1)
+    # From durable-cons/utility.py: marg_func_d_nopar
+    d_{h}u: 'c, h -> (1 - alpha) * c^(alpha * (1 - rho)) * (h + d_ubar)^((1 - alpha) * (1 - rho) - 1)'
+
+  settings:
+    m_bar: '@in R+'
+    n_a: '@in N+'
+    n_h: '@in N+'
+    a_min: '@in R+'
+    a_max: '@in R+'
+    h_min: '@in R+'
+    h_max: '@in R+'
+
+  parameters:
+    R: '@in R+'
+    beta: '@in (0,1)'
+    alpha: '@in (0,1)'
+    delta: '@in [0,1]'
+    rho: '@in R+'            # risk aversion (replaces gamma_c, gamma_h)
+    d_ubar: '@in R+'         # durable floor (replaces kappa)
+
+equations:
+  arvl_to_dcsn_transition: identity    # w_kp, h_kp in prestate & states -> Rule 3
+
+  dcsn_to_cntn_transition: |
+    a_nxt = w_kp - c
+    h_nxt = h_kp
+
+  cntn_to_dcsn_mover:
+    Bellman: |
+      V = max_{c}(u(c, h_kp) + beta * V[>])
+
+    # InvEuler: c[>] = inv_marg_func(beta * d_{a_nxt}V[>], h_kp)
+    # From durable-cons/utility.py: inv_marg_func_nopar(q, d, d_ubar, alpha, rho)
+    #   c_power = alpha*(1-rho) - 1
+    #   d_power = (1-alpha)*(1-rho)
+    #   c = (q / (alpha * (d + d_ubar)^d_power))^(1/c_power)
+    # NOTE: this depends on h_kp — passed as fixed_state in the EGM horse
+    InvEuler: |
+      c[>] = ((beta * d_{a_nxt}V[>]) / (alpha * (h_kp + d_ubar)^((1 - alpha) * (1 - rho))))^(1 / (alpha * (1 - rho) - 1))
+
+    cntn_to_dcsn_transition: |
+      w_kp[>] = a_nxt + c[>]
+
+    MarginalBellman: |
+      d_{w}V = d_{c}u(c, h_kp)
+      d_{h}V = d_{h}u(c, h_kp) + beta * d_{h_nxt}V[>]
+
+  dcsn_to_arvl_mover:
+    Bellman: |
+      V[<] = V
+    ShadowBellman: |
+      d_{w}V[<] = d_{w}V
+      d_{h}V[<] = d_{h}V

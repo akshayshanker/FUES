@@ -12,7 +12,11 @@ import seaborn as sns
 from matplotlib.ticker import FormatStrFormatter
 import matplotlib.pylab as pl
 import matplotlib.lines as mlines
-from IPython.display import HTML, display
+try:
+    from IPython.display import HTML, display
+except ImportError:
+    HTML = None
+    display = None
 
 from dcsmm.fues.fues import FUES as fues_alg
 

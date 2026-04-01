@@ -1,0 +1,60 @@
+# Methodization: discretization and solver choices
+#
+# The SYM layer (stage YAMLs) declares the mathematical problem:
+#   eps[>] ~ Normal(0,1)                              (IID innovation)
+#   z[>] = z^rho_z * exp(sigma_z * eps[>])            (AR(1) transition)
+#   E_{eps[>]}(V)                                     (unconditional expectation)
+#
+# This file specifies HOW that math is computed. It does not change
+# the mathematical model — only the numerical representation.
+#
+# Design choice: Tauchen discretization
+# ──────────────────────────────────────
+# We discretize the continuous AR(1) to a finite Markov chain using
+# Tauchen (1986). This converts:
+#   - the continuous z into a discrete grid z_vals (N_wage points)
+#   - the AR(1) transition into a transition matrix Pi (N_wage x N_wage)
+#   - the expectation E_{eps[>]}(V) into Pi @ V (matrix multiplication)
+#
+# Alternatives (same SYM, different Rho):
+#
+#   | Method         | z representation   | Expectation          | When to prefer             |
+#   |----------------|--------------------|----------------------|----------------------------|
+#   | Tauchen        | discrete grid      | Pi @ V               | Low–moderate persistence   |
+#   | Rouwenhorst    | discrete grid      | Pi @ V               | High persistence (rho > 0.95) |
+#   | Gauss-Hermite  | continuous state   | weighted quadrature  | Smooth value functions     |
+#   | Monte Carlo    | continuous state   | sample average       | High-dimensional shocks    |
+#
+# With Tauchen/Rouwenhorst, z becomes a discrete state variable that
+# indexes into value function arrays. The tenure stage loops over z
+# nodes and applies the transition matrix for the expectation.
+#
+# With Gauss-Hermite, z would remain continuous and the expectation
+# would integrate over quadrature nodes — no transition matrix needed.
+# The keeper and adjuster stages would then interpolate V(a, H, z)
+# rather than index into V[a, H, z_i].
+#
+# Dynare:      perturbation — AR(1) handled analytically, no discretization
+# HARK:        pre-computes IncShkDstn via Tauchen or equiprobable method
+# QuantEcon:   tauchen(n, rho, sigma) produces a MarkovChain object
+# SSJ:         continuous blocks, internal discretization
+
+methodization:
+  exogenous:
+    eps:
+      method: Tauchen
+      n_points: N_wage              # from settings.yaml
+
+  stages:
+    tenure:
+      backward_mover: discrete_max
+      arrival_mover: markov_expectation
+
+    keeper_cons:
+      backward_mover: EGM
+      upper_envelope: FUES
+
+    adjuster_cons:
+      backward_mover: partial_EGM   # fix H_succ on grid, EGM over c
+      upper_envelope: FUES
+      # Alternative: NEGM (golden-section over H_succ, nest keeper EGM)

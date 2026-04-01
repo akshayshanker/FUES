@@ -1,0 +1,106 @@
+# Estimation spec: SELFGEN + SWEEP over sigma_w (EGM/FUES adjuster)
+# Recovery test at each wage variance value.
+# MPI comm splitting: total ranks / 7 sweep points.
+
+estimation:
+  free:
+    beta:
+      bounds: [0.85, 0.99]
+    alpha:
+      bounds: [0.3, 0.95]
+    gamma_c:
+      bounds: [1.5, 8.0]
+    gamma_h:
+      bounds: [1.2, 6.0]
+    tau:
+      bounds: [0.04, 0.30]
+
+  method: cross-entropy
+  method_options:
+    n_samples: 1040        # total ranks; split across sweep points
+    n_elite: 10
+    max_iter: 200
+    tol: 1e-6
+    sampling_seed: 42
+    simulation_seed: 99
+    noise_fraction: 0.10        # 10% uniform draws for exploration
+    alpha_smooth: 0.6           # blend elite with previous (prevents spurious convergence)
+
+  scratch_dir: /scratch/tp66/{user}/durables_est
+  results_dir: /g/data/tp66/results/durables/estimation
+
+  save_nests: none
+  save_panels: best
+  save_mean: false
+
+  # Sweep: one full estimation per sigma_w value.
+  # Ranks are split evenly across points via MPI comm splitting.
+  sweep:
+    sigma_w: [0.05, 0.08, 0.11, 0.14, 0.17, 0.20, 0.25]
+
+moments:
+  data_source: selfgen
+  data_file: moments_data.csv
+
+  setup:
+    time_var: t
+    id_var: _idx
+    t0: 0
+    T: 70
+    age_groups:
+      1: [20, 24]
+      2: [25, 29]
+      3: [30, 34]
+      4: [35, 39]
+      5: [40, 44]
+      6: [45, 49]
+      7: [50, 54]
+      8: [55, 59]
+      9: [60, 64]
+
+  identification:
+    mean: [c, a, h]
+    sd: [c, a, h]
+    corrs:
+      - [c, h]
+      - [c, a]
+      - [a, h]
+    autocorrs: [c, a, h]
+    conditional:
+      discrete:
+        0:
+          mean: [c, a]
+        1:
+          mean: [c, h]
+
+  targets:
+    - key: av_consumption2_14_0
+      stat: mean
+      var: c
+    - key: av_wealth_real_14_0
+      stat: mean
+      var: h
+    - key: av_a_tot_14_0
+      stat: mean
+      var: a
+    - key: sd_consumption2_14_0
+      stat: sd
+      var: c
+    - key: sd_wealth_real_14_0
+      stat: sd
+      var: h
+    - key: sd_a_tot_14_0
+      stat: sd
+      var: a
+    - key: corr_cons_realw_14_0
+      stat: corr
+      vars: [c, h]
+    - key: autocorr_wealth_real_0
+      stat: autocorr
+      var: h
+    - key: autocorr_wealth_fin_0
+      stat: autocorr
+      var: a
+    - key: autocorr_consumption_0
+      stat: autocorr
+      var: c
