@@ -5,8 +5,8 @@
 #PBS -l ncpus=1,mem=5GB,walltime=01:00:00
 #PBS -l storage=scratch/tp66
 #PBS -j oe
-#PBS -o /dev/null
-#PBS -e /dev/null
+#PBS -o /g/data/tp66/logs/retirement/
+#PBS -e /g/data/tp66/logs/retirement/
 #
 # Single-core retirement model runner (NO sweep) that saves ALL outputs to scratch.
 #
@@ -42,9 +42,8 @@ PARAMS_FILE="${PARAMS_FILE:-params/baseline.yml}"
 GRID_SIZE="${GRID_SIZE:-3000}"
 PLOT_AGE="${PLOT_AGE:-17}"
 
-OUTPUT_BASE="${OUTPUT_BASE:-/scratch/tp66/${USER}/FUES/solutions/retirement}"
-RUN_ID="${RUN_ID:-baseline_$(date +%Y%m%d_%H%M%S)}"
-OUTPUT_DIR="${OUTPUT_BASE}/${RUN_ID}"
+OUTPUT_DIR="${OUTPUT_DIR:-/scratch/tp66/${USER}/FUES/retirement}"
+# make_run_dir creates YYYY-MM-DD/NNN/ inside OUTPUT_DIR automatically
 
 LOG_DIR="/scratch/tp66/${USER}/FUES/logs/retirement"
 mkdir -p "${LOG_DIR}" "${OUTPUT_DIR}"
@@ -112,10 +111,10 @@ if [[ ! -f "${PARAMS_FILE}" ]]; then
     PARAMS_FILE="${REPO_ROOT}/experiments/retirement/${PARAMS_FILE}"
 fi
 
-python3 "${EXAMPLE_DIR}/run.py" \
+python3 -m examples.retirement.run \
   --override-file "${PARAMS_FILE}" \
-  --grid-size "${GRID_SIZE}" \
-  --plot-age "${PLOT_AGE}" \
+  --setting-override grid_size="${GRID_SIZE}" \
+  --setting-override plot_age="${PLOT_AGE}" \
   --output-dir "${OUTPUT_DIR}" \
   1> >(tee -a "${LOG_FILE}") \
   2> >(tee -a "${ERR_FILE}" >&2)

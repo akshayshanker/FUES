@@ -11,8 +11,8 @@
 #PBS -l storage=scratch/tp66
 #PBS -l wd
 #PBS -j oe
-#PBS -o /dev/null
-#PBS -e /dev/null
+#PBS -o /g/data/tp66/logs/retirement/
+#PBS -e /g/data/tp66/logs/retirement/
 
 set -euo pipefail
 
@@ -106,14 +106,12 @@ EXAMPLE_DIR="${REPO_ROOT}/examples/retirement"
 
 if [[ -z "$OUTPUT_DIR" ]]; then
     if [[ -d "${SCRATCH_ROOT}" ]]; then
-        OUTPUT_DIR="${SCRATCH_ROOT}/FUES/solutions/retirement/${RUN_ID}"
+        OUTPUT_DIR="${SCRATCH_ROOT}/FUES/retirement"
     else
-        OUTPUT_DIR="${REPO_ROOT}/results/retirement/${RUN_ID}"
+        OUTPUT_DIR="${REPO_ROOT}/results/retirement"
     fi
 fi
-
-# Ensure outputs directory exists
-mkdir -p "${OUTPUT_DIR}"
+# make_run_dir creates YYYY-MM-DD/NNN/ inside OUTPUT_DIR automatically
 
 # Make repo + src importable (fixes `import dcsmm` without pip install)
 export PYTHONPATH="${REPO_ROOT}:${REPO_ROOT}/src${PYTHONPATH:+:${PYTHONPATH}}"
@@ -146,19 +144,19 @@ if [[ ! -f "${PARAMS_FILE}" ]]; then
     PARAMS_FILE="${TIMINGS_SCRIPT_DIR}/${PARAMS_FILE}"
 fi
 
-# Build command
-CMD="python3 $EXAMPLE_DIR/run.py"
+# Build command using new CLI interface (parse_run)
+CMD="python3 -m examples.retirement.run"
 CMD="$CMD --override-file $PARAMS_FILE"
-CMD="$CMD --grid-size $GRID_SIZE"
-CMD="$CMD --plot-age $PLOT_AGE"
+CMD="$CMD --setting-override grid_size=$GRID_SIZE"
+CMD="$CMD --setting-override plot_age=$PLOT_AGE"
 CMD="$CMD --output-dir $OUTPUT_DIR"
 
 if [[ "$RUN_TIMINGS" == "true" ]]; then
-    CMD="$CMD --run-timings"
+    CMD="$CMD --setting-override run_timings=1"
+    CMD="$CMD --setting-override sweep_deltas=$SWEEP_DELTAS"
+    CMD="$CMD --config-override latex_grids=$LATEX_GRIDS"
     CMD="$CMD --sweep-grids $SWEEP_GRIDS"
-    CMD="$CMD --sweep-deltas $SWEEP_DELTAS"
     CMD="$CMD --sweep-runs $SWEEP_RUNS"
-    CMD="$CMD --latex-grids $LATEX_GRIDS"
 fi
 
 # Run

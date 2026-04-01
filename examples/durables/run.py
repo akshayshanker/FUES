@@ -461,6 +461,19 @@ def _run_sweep_params_path(run, base_calib, base_config):
         results.append(row)
 
         tau_eff = _effective_calib('tau', point, base_calib)
+        # Include calibration params for table notes (paper format)
+        cal_params = {}
+        for k in ('beta', 'gamma_c', 'gamma_h', 'alpha', 'delta',
+                  'R', 'R_H', 'phi_w', 'sigma_w'):
+            if k in calib_use:
+                cal_params[k] = calib_use[k]
+        # Map R→r, R_H→r_H for paper notation
+        if 'R' in cal_params:
+            cal_params['r'] = cal_params.pop('R')
+        if 'R_H' in cal_params:
+            cal_params['r_H'] = cal_params.pop('R_H')
+        cal_params['N_sim'] = run.n_sim
+
         summaries.append({
             'Grid_Size': int(n_a_eff) if n_a_eff is not None else 0,
             'Tau': float(tau_eff) if tau_eff is not None else 0.0,
@@ -470,6 +483,8 @@ def _run_sweep_params_path(run, base_calib, base_config):
             'Euler_Combined': best_metrics.get('euler_c_mean', np.nan),
             'Euler_Keeper': best_metrics.get('euler_c_keeper', np.nan),
             'Euler_Adjuster': best_metrics.get('euler_c_adjuster', np.nan),
+            'Euler_H_Adjuster': best_metrics.get('euler_h_mean', np.nan),
+            **cal_params,
         })
 
     return results, summaries

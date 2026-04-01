@@ -7,7 +7,8 @@
 #PBS -l wd
 #PBS -j oe
 #PBS -r y
-#PBS -o logs/
+#PBS -o /g/data/tp66/logs/durables/
+#PBS -e /g/data/tp66/logs/durables/
 
 # ======================================================================
 #  Durables Model - EGM(FUES) vs NEGM comparison
@@ -46,7 +47,6 @@ python3 -m examples.durables.run \
     --compare FUES NEGM \
     --simulate --n-sim 10000 --seed 42 \
     --calib-override t0=20 \
-    --output-dir /scratch/tp66/$USER/FUES/durables \
-    --run-tag compare_$(date +%Y%m%d)
+    --output-dir /scratch/tp66/$USER/FUES/durables
 
 echo "Job completed at $(date)"

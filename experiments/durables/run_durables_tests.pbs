@@ -7,7 +7,8 @@
 #PBS -l wd
 #PBS -j oe
 #PBS -r y
-#PBS -o logs/
+#PBS -o /g/data/tp66/logs/durables/
+#PBS -e /g/data/tp66/logs/durables/
 
 # ======================================================================
 #  Durables Model - Grid convergence sweep
@@ -45,8 +46,6 @@ echo "========================================================"
 
 cd "$REPO_ROOT"
 
-OUTPUT_DIR="/scratch/tp66/$USER/FUES/durables/sweep_$VERSION"
-
 # Grid convergence sweep with simulation + Euler
 python3 -m examples.durables.run \
     --sweep \
@@ -54,9 +53,5 @@ python3 -m examples.durables.run \
     --sweep-runs 3 \
     --simulate --n-sim 10000 --seed 42 \
     --calib-override t0=20 \
-    --output-dir "$OUTPUT_DIR" \
-    --run-tag "grid_sweep"
-
-echo ""
-echo "Results saved to: $OUTPUT_DIR/"
+    --output-dir /scratch/tp66/$USER/FUES/durables
 echo "Job completed at $(date)"

@@ -6,6 +6,7 @@ Produces markdown and LaTeX tables for method comparison
 
 import math
 import os
+import numpy as np
 
 
 _PARAM_ORDER = [
@@ -184,18 +185,27 @@ def generate_sweep_table(results_summary, fmt='tex', caption=None):
 
 
 def _sweep_table_tex(results_summary, caption=None):
-    """LaTeX sweep table with booktabs, method column groups."""
+    """LaTeX sweep table — exact paper format (Table 2 in Dobrescu & Shanker).
+
+    5 columns per method: NA(time) | Adj(time) | Comb | NA | Adj
+    where Euler columns use the adjuster HOUSING Euler (Euler_H_Adjuster)
+    for the Adj column, matching the paper's definition.
+
+    Discovers method names from the data.
+    """
     results_summary = sorted(results_summary,
                              key=lambda x: (x['Grid_Size'], x['Tau']))
 
+    methods = sorted(set(r['Method'] for r in results_summary))
     grid_sizes = sorted(set(r['Grid_Size'] for r in results_summary))
     tau_values = sorted(set(r['Tau'] for r in results_summary))
 
-    def get_result(grid_size, tau, method):
-        return next((r for r in results_summary
-                     if r['Grid_Size'] == grid_size
-                     and r['Tau'] == tau
-                     and r['Method'] == method), None)
+    by_key = {}
+    for r in results_summary:
+        by_key[(r['Grid_Size'], r['Tau'], r['Method'])] = r
+
+    n_methods = len(methods)
+    col_spec = 'rr' + ' rrrrr' * n_methods
 
     table = "% Requires: \\usepackage{booktabs}\n"
     table += "\\begin{table}[htbp]\n\\centering\n"
@@ -206,48 +216,50 @@ def _sweep_table_tex(results_summary, caption=None):
         table += f"\\caption{{{caption}}}\n"
     else:
         table += "\\caption{Durables Model: Per-Period Timing and Accuracy}\n"
-    table += "\\label{tab:durables_timing}\n"
-    table += "\\begin{tabular}{@{}rr rrrrr rrrrr@{}}\n"
+    table += "\\label{table:housing1}\n"
+    table += "\\begin{tabular}{@{}" + col_spec + "@{}}\n"
     table += "\\toprule\n"
 
     # Header row 1: method groups
-    table += (
-        "& & "
-        "\\multicolumn{5}{c}{FUES} & "
-        "\\multicolumn{5}{c}{NEGM} \\\\\n"
-    )
-    table += "\\cmidrule(lr){3-7} \\cmidrule(lr){8-12}\n"
+    method_headers = []
+    cmidrules = []
+    col_offset = 3
+    for m in methods:
+        method_headers.append(f"\\multicolumn{{5}}{{c}}{{{m}}}")
+        cmidrules.append(
+            f"\\cmidrule(lr){{{col_offset}-{col_offset + 4}}}")
+        col_offset += 5
+    table += "& & " + " & ".join(method_headers) + " \\\\\n"
+    table += " ".join(cmidrules) + "\n"
 
     # Header row 2: Time and Euler subgroups
-    table += (
-        "& & "
-        "\\multicolumn{2}{c}{Time} & \\multicolumn{3}{c}{Euler} & "
-        "\\multicolumn{2}{c}{Time} & \\multicolumn{3}{c}{Euler} \\\\\n"
-    )
-    table += (
-        "\\cmidrule(lr){3-4} \\cmidrule(lr){5-7} "
-        "\\cmidrule(lr){8-9} \\cmidrule(lr){10-12}\n"
-    )
+    time_euler = []
+    te_rules = []
+    col_offset = 3
+    for m in methods:
+        time_euler.append(
+            f"\\multicolumn{{2}}{{c}}{{Time}} & \\multicolumn{{3}}{{c}}{{Euler}}")
+        te_rules.append(
+            f"\\cmidrule(lr){{{col_offset}-{col_offset + 1}}} "
+            f"\\cmidrule(lr){{{col_offset + 2}-{col_offset + 4}}}")
+        col_offset += 5
+    table += "& & " + " & ".join(time_euler) + " \\\\\n"
+    table += " ".join(te_rules) + "\n"
 
     # Header row 3: individual column labels
-    table += (
-        "$N_A$ & $\\tau$ & "
-        "Keep & Adj & Comb & Keep & Adj & "
-        "Keep & Adj & Comb & Keep & Adj \\\\\n"
-    )
+    col_labels = ["$N_A$ & $\\tau$"]
+    for m in methods:
+        col_labels.append("NA & Adj & Comb & NA & Adj")
+    table += " & ".join(col_labels) + " \\\\\n"
     table += "\\midrule\n"
 
+    # Data rows
     current_grid = None
     for grid_size in grid_sizes:
         taus_for_grid = [t for t in tau_values
-                         if get_result(grid_size, t, 'FUES') is not None]
+                         if all((grid_size, t, m) in by_key for m in methods)]
 
         for i, tau in enumerate(taus_for_grid):
-            fues = get_result(grid_size, tau, 'FUES')
-            negm = get_result(grid_size, tau, 'NEGM')
-            if fues is None or negm is None:
-                continue
-
             if i == 0:
                 if current_grid is not None:
                     table += "\\midrule\n"
@@ -256,98 +268,100 @@ def _sweep_table_tex(results_summary, caption=None):
             else:
                 grid_str = ""
 
-            def _e(r, key):
-                return r.get(key + '_HD', r.get(key, 0.0))
-
-            table += (
-                f"{grid_str} & {tau} & "
-                f"{fues.get('Avg_Keeper_ms', 0):.0f} & "
-                f"{fues.get('Avg_Adj_ms', 0):.0f} & "
-                f"{_e(fues, 'Euler_Combined'):.2f} & "
-                f"{_e(fues, 'Euler_Keeper'):.2f} & "
-                f"{_e(fues, 'Euler_Adjuster'):.2f} & "
-                f"{negm.get('Avg_Keeper_ms', 0):.0f} & "
-                f"{negm.get('Avg_Adj_ms', 0):.0f} & "
-                f"{_e(negm, 'Euler_Combined'):.2f} & "
-                f"{_e(negm, 'Euler_Keeper'):.2f} & "
-                f"{_e(negm, 'Euler_Adjuster'):.2f} "
-                "\\\\\n"
-            )
+            cells = [f"{grid_str} & {tau}"]
+            for m in methods:
+                r = by_key[(grid_size, tau, m)]
+                keeper_ms = r.get('Avg_Keeper_ms', 0.0)
+                adj_ms = r.get('Avg_Adj_ms', 0.0)
+                euler_comb = r.get('Euler_Combined', 0.0)
+                euler_keep = r.get('Euler_Keeper', 0.0)
+                # Paper's "Adj" Euler = housing FOC for adjusters
+                euler_adj = r.get('Euler_H_Adjuster', np.nan)
+                def _fmt(v):
+                    return f"{v:.2f}" if not np.isnan(v) else "---"
+                cells.append(
+                    f"{keeper_ms:.0f} & {adj_ms:.0f} & "
+                    f"{_fmt(euler_comb)} & {_fmt(euler_keep)} & {_fmt(euler_adj)}")
+            table += " & ".join(cells) + " \\\\\n"
 
     table += "\\bottomrule\n\\end{tabular}\n"
     table += "\\vspace{0.3em}\n"
 
-    # Parameter footnote
+    # Parameter notes (exact paper format)
     if results_summary:
         p = results_summary[0]
-        parts = []
-        for k, tex in [('beta', r'\beta'), ('gamma_c', r'\gamma_c'),
-                        ('gamma_h', r'\gamma_h'), ('alpha', r'\alpha'),
-                        ('delta', r'\delta'), ('r', 'r'),
-                        ('r_H', 'r_H'), ('phi_w', r'\rho_w'),
-                        ('sigma_w', r'\sigma_w')]:
-            if k in p:
-                parts.append(f"${tex}={p[k]:.2g}$")
-        if parts:
-            table += (
-                "\\par\\small \\textit{Notes:} "
-                "Time in ms; Euler errors in $\\log_{10}$ scale. "
-                f"Parameters: {', '.join(parts)}.\n"
-            )
+        param_str = (
+            f"$\\beta={p.get('beta', 0.93):.2f}$, "
+            f"$\\gamma_c={p.get('gamma_c', 3):.1f}$, "
+            f"$\\gamma_h={p.get('gamma_h', 3):.1f}$, "
+            f"$\\alpha={p.get('alpha', 0.7):.2f}$, "
+            f"$\\delta={p.get('delta', 0.0):.2f}$, "
+            f"$r={p.get('r', 0.01):.2f}$, "
+            f"$r_H={p.get('r_H', 0.0):.2f}$, "
+            f"$\\rho_w={p.get('phi_w', 0.9):.2f}$, "
+            f"$\\sigma_w={p.get('sigma_w', 0.08):.2f}$, "
+            f"$N_{{sim}}={p.get('N_sim', 10000):,}$"
+        )
+        table += (
+            "\\par\\small \\textit{Notes:} "
+            "Time in ms; Euler errors in $\\log_{10}$ scale. "
+            "\\textbf{Comb}: combined mean. "
+            "\\textbf{NA}: non-adjusters. "
+            "\\textbf{Adj}: adjusters. "
+            f"Parameters: {param_str}.\n"
+        )
 
     table += "\\endgroup\n\\end{table}\n"
     return table
 
 
 def _sweep_table_md(results_summary, caption=None):
-    """Markdown sweep table with method column groups."""
+    """Markdown sweep table with method column groups.
+
+    Discovers method names from the data rather than hard-coding.
+    """
     results_summary = sorted(results_summary,
                              key=lambda x: (x['Grid_Size'], x['Tau']))
 
+    methods = sorted(set(r['Method'] for r in results_summary))
     grid_sizes = sorted(set(r['Grid_Size'] for r in results_summary))
     tau_values = sorted(set(r['Tau'] for r in results_summary))
 
-    def get_result(grid_size, tau, method):
-        return next((r for r in results_summary
-                     if r['Grid_Size'] == grid_size
-                     and r['Tau'] == tau
-                     and r['Method'] == method), None)
+    by_key = {}
+    for r in results_summary:
+        by_key[(r['Grid_Size'], r['Tau'], r['Method'])] = r
+
+    def _e(r, key):
+        return r.get(key + '_HD', r.get(key, 0.0))
 
     lines = []
     if caption:
         lines.append(f"# {caption}\n")
 
-    # Header
-    lines.append(
-        "| N_A | τ | "
-        "FUES Keep | FUES Adj | FUES Euler | "
-        "NEGM Keep | NEGM Adj | NEGM Euler |")
-    lines.append(
-        "|----:|---:|"
-        "----------:|----------:|----------:|"
-        "----------:|----------:|----------:|")
+    hdr_parts = ["| N_A | τ |"]
+    sep_parts = ["|----:|---:|"]
+    for m in methods:
+        hdr_parts.append(f" {m} Keep | {m} Adj | {m} Euler(c) | {m} Euler(h) |")
+        sep_parts.append("----------:|----------:|----------:|----------:|")
+    lines.append(" ".join(hdr_parts))
+    lines.append("".join(sep_parts))
 
     for grid_size in grid_sizes:
         taus_for_grid = [t for t in tau_values
-                         if get_result(grid_size, t, 'FUES') is not None]
+                         if all((grid_size, t, m) in by_key for m in methods)]
         for i, tau in enumerate(taus_for_grid):
-            fues = get_result(grid_size, tau, 'FUES')
-            negm = get_result(grid_size, tau, 'NEGM')
-            if fues is None or negm is None:
-                continue
             grid_str = f"{grid_size:,}" if i == 0 else ""
-
-            def _e(r, key):
-                return r.get(key + '_HD', r.get(key, 0.0))
-
-            lines.append(
-                f"| {grid_str} | {tau} | "
-                f"{fues.get('Avg_Keeper_ms', 0):.0f} | "
-                f"{fues.get('Avg_Adj_ms', 0):.0f} | "
-                f"{_e(fues, 'Euler_Combined'):.2f} | "
-                f"{negm.get('Avg_Keeper_ms', 0):.0f} | "
-                f"{negm.get('Avg_Adj_ms', 0):.0f} | "
-                f"{_e(negm, 'Euler_Combined'):.2f} |")
+            cells = [f"| {grid_str} | {tau} |"]
+            for m in methods:
+                r = by_key[(grid_size, tau, m)]
+                eh_adj = r.get('Euler_H_Adjuster', float('nan'))
+                eh_str = f"{eh_adj:.2f}" if not math.isnan(eh_adj) else "---"
+                cells.append(
+                    f" {r.get('Avg_Keeper_ms', 0):.0f} | "
+                    f"{r.get('Avg_Adj_ms', 0):.0f} | "
+                    f"{_e(r, 'Euler_Combined'):.2f} | "
+                    f"{eh_str} |")
+            lines.append(" ".join(cells))
 
     return '\n'.join(lines)
 
