@@ -8,7 +8,7 @@
 #PBS -q expresssr
 #PBS -P tp66
 #PBS -l walltime=1:00:00
-#PBS -l storage=scratch/tp66
+#PBS -l storage=scratch/tp66+gdata/tp66
 #PBS -l wd
 #PBS -j oe
 #PBS -o /g/data/tp66/logs/retirement/

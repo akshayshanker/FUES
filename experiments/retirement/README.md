@@ -43,4 +43,46 @@ python examples/retirement/run.py --calib-override beta=0.96 --config-override g
 
 ## Output
 
-Results go to `--output-dir` (default `results/retirement/`): plots (PNG), timing tables (LaTeX/Markdown), accuracy tables.
+Each run creates a **timestamped folder** named `retirement_YYYYMMDD_HHMMSS`:
+
+- **On Gadi**: `/scratch/tp66/$USER/FUES/solutions/retirement/retirement_YYYYMMDD_HHMMSS/`
+- **Locally**: `results/retirement/retirement_YYYYMMDD_HHMMSS/`
+
+Override with `--output-dir` or the `OUTPUT_DIR` variable in `retirement_timings.sh`.
+
+Contents of each run folder:
+
+```
+retirement_YYYYMMDD_HHMMSS/
+├── plots/              # PNG plots (EGM grids, policy functions, value functions)
+├── timings.md          # Markdown timing table (all grid × delta combos)
+├── timings.tex         # LaTeX timing table (subset for paper)
+└── ...                 # Additional solver outputs
+```
+
+## Logs
+
+Logs are written to `$BASE_OUT/logs/retirement/` (scratch on Gadi, `/tmp` locally):
+
+```
+logs/retirement/
+├── retirement_YYYYMMDD_HHMMSS.log   # stdout
+└── retirement_YYYYMMDD_HHMMSS.err   # stderr
+```
+
+The `RUN_ID` can be overridden via environment variable: `RUN_ID=myrun qsub retirement_timings.sh`.
+
+## Configuration (retirement_timings.sh)
+
+Key variables at the top of the script:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PARAMS_FILE` | `params/baseline.yml` | Override file for calibration/settings |
+| `GRID_SIZE` | 2000 | Baseline grid size for plots |
+| `PLOT_AGE` | 16 | Age to plot EGM grids |
+| `RUN_TIMINGS` | true | Run full timing comparison |
+| `SWEEP_GRIDS` | 1000–15000 | Grid sizes for sweep |
+| `SWEEP_DELTAS` | 0.25, 0.5, 1, 2 | Delta values for sweep |
+| `SWEEP_RUNS` | 3 | Number of runs per config (best of n) |
+| `LATEX_GRIDS` | 1000–10000 | Subset for paper LaTeX tables |

@@ -3,7 +3,7 @@
 #PBS -P tp66
 #PBS -q normalsr
 #PBS -l ncpus=4,mem=200GB,walltime=10:00:00
-#PBS -l storage=scratch/tp66
+#PBS -l storage=scratch/tp66+gdata/tp66
 #PBS -l wd
 #PBS -j oe
 #PBS -r y
