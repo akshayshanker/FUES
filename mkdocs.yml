@@ -76,7 +76,7 @@ extra_javascript:
   - javascripts/mathjax.js
   - javascripts/fues-interactive.js
   - https://cdn.plot.ly/plotly-2.35.2.min.js
-  - javascripts/thebe-config.js?v=7
+  # - javascripts/thebe-config.js?v=7  # disabled: no live execution
   - https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js
 
 copyright: >-
@@ -100,6 +100,8 @@ nav:
     - Housing-Renting: examples/housing-renting.md
   - Notebooks:
     - Retirement Speed Benchmarks: notebooks/retirement_fues.ipynb
+    - Durables (Cobb-Douglas): notebooks/durables_fues.ipynb
+    - Durables (Separable): notebooks/durables_fues_separable.ipynb
   - API Reference:
     - FUES & EGM_UE: api/fues.md
     - Retirement Example: api/retirement.md

@@ -87,18 +87,25 @@ def _build_notebook_style_block():
   }}
   .jp-RenderedHTMLCommon table, .jp-RenderedMarkdown table, .rendered_html table, .text_cell_render table {{
     border-collapse: collapse;
-    font-size: 0.92rem;
+    font-size: 0.82rem;
+    margin: 1em auto;
+    max-width: 90%;
   }}
   .jp-RenderedHTMLCommon th, .jp-RenderedMarkdown th, .rendered_html th, .text_cell_render th {{
     background: #f0f0f5;
     text-transform: uppercase;
     letter-spacing: 0.04em;
-    font-size: 0.76rem;
+    font-size: 0.7rem;
+    font-weight: 600;
   }}
   .jp-RenderedHTMLCommon th, .jp-RenderedMarkdown th, .rendered_html th, .text_cell_render th,
   .jp-RenderedHTMLCommon td, .jp-RenderedMarkdown td, .rendered_html td, .text_cell_render td {{
-    border: 1px solid {light['grid']};
-    padding: 0.5em 0.75em;
+    border: none;
+    border-bottom: 1px solid {light['grid']};
+    padding: 0.35em 0.65em;
+  }}
+  .jp-RenderedHTMLCommon thead, .jp-RenderedMarkdown thead, .rendered_html thead, .text_cell_render thead {{
+    border-bottom: 2px solid {light['spine']};
   }}
   @media (prefers-color-scheme: dark) {{
     .jp-RenderedHTMLCommon, .rendered_html, .jp-RenderedMarkdown, .text_cell_render {{
@@ -118,6 +125,10 @@ def _build_notebook_style_block():
     .jp-RenderedHTMLCommon th, .jp-RenderedMarkdown th, .rendered_html th, .text_cell_render th,
     .jp-RenderedHTMLCommon td, .jp-RenderedMarkdown td, .rendered_html td, .text_cell_render td {{
       border-color: {dark['spine']};
+      border-bottom-color: {dark['spine']};
+    }}
+    .jp-RenderedHTMLCommon thead, .jp-RenderedMarkdown thead, .rendered_html thead, .text_cell_render thead {{
+      border-bottom-color: {dark['fg']};
     }}
   }}
 </style>
@@ -427,7 +438,7 @@ _METHOD_LABELS = {'FUES': 'EGM(FUES)', 'NEGM': 'NEGM(FUES)'}
 
 
 def nb_plot_adjuster_comparison(results, grids, plot_t, i_z=0,
-                                 methods_filter=None, xlim=15,
+                                 methods_filter=None, xlim=14,
                                  ylim_a=None, ylim_h=None):
     """Two-panel adjuster comparison: financial assets $a'$ + housing.
 
@@ -548,7 +559,7 @@ def nb_plot_adjuster_comparison(results, grids, plot_t, i_z=0,
     return fig
 
 
-def nb_plot_adjuster_egm(nest, grids, plot_t=None, i_z=0, xlim=15,
+def nb_plot_adjuster_egm(nest, grids, plot_t=None, i_z=0, xlim=14,
                           ylim_a=None, ylim_h=None, ylim_v=None):
     """Adjuster EGM scatter: raw points + FUES refined (notebook style).
 
@@ -669,25 +680,32 @@ def nb_plot_adjuster_egm(nest, grids, plot_t=None, i_z=0, xlim=15,
     ax.legend(frameon=False, fontsize=8)
     _style_nb_ax(ax)
 
-    # Panel 3: value (raw + refined), filter extreme negatives
+    # Panel 3: CE value (raw + refined)
     if v_pts is not None:
-        v_mask = v_pts > -10
+        _rho = float(nest['periods'][0]['stages'][
+            'keeper_cons'].calibration.get('rho', 2.0))
+        ce_raw = _ce_transform(v_pts, _rho)
+        ce_mask = np.isfinite(ce_raw) & (ce_raw > 0)
         ax = axes[2]
-        ax.scatter(m_pts[v_mask], v_pts[v_mask], s=3, alpha=0.25,
-                   color=t['raw'], label='Raw EGM',
-                   rasterized=True, edgecolors='none')
+        ax.scatter(m_pts[ce_mask], ce_raw[ce_mask], s=3,
+                   alpha=0.25, color=t['raw'],
+                   label='Raw EGM', rasterized=True,
+                   edgecolors='none')
         if has_refined and refined[i_z].get('vf') is not None:
             rf = refined[i_z]
+            ce_ref = _ce_transform(rf['vf'], _rho)
             sidx = np.argsort(rf['m_endog'])
-            ax.plot(rf['m_endog'][sidx], rf['vf'][sidx],
-                    color=t['accent'], linewidth=1.3, label='FUES envelope',
-                    zorder=5)
-            ax.scatter(rf['m_endog'], rf['vf'],
-                       s=10, color=t['accent'], marker='x', linewidth=0.7,
-                       zorder=6)
+            ax.plot(rf['m_endog'][sidx], ce_ref[sidx],
+                    color=t['accent'], linewidth=1.3,
+                    label='FUES envelope', zorder=5)
+            ax.scatter(rf['m_endog'], ce_ref,
+                       s=10, color=t['accent'], marker='x',
+                       linewidth=0.7, zorder=6)
         ax.set_xlabel('Endogenous wealth $\\hat{m}$')
-        ax.set_ylabel('$V(\\hat{m})$')
-        ax.set_title(f'Value (age {plot_t}, $z_{{{i_z}}}$)', fontweight='600')
+        ax.set_ylabel('CE composite good')
+        ax.set_title(
+            f'CE value (age {plot_t}, $z_{{{i_z}}}$)',
+            fontweight='600')
         ax.set_xlim(0, xlim)
         if ylim_v:
             ax.set_ylim(*ylim_v)
@@ -844,7 +862,7 @@ def _ce_transform(V, rho):
 
 
 def nb_plot_value_functions(results, grids, plot_t, i_z=0, i_h=None,
-                            xlim_keep=7.5, xlim_adj=15,
+                            xlim_keep=7.5, xlim_adj=14,
                             ylim_keep=None, ylim_adj=None):
     """Certainty-equivalent value: keeper (left) and adjuster (right).
 
@@ -939,7 +957,7 @@ def _plotly_layout_defaults():
     )
 
 
-def nb_plot_adjuster_egm_interactive(nest, grids, plot_t=None, i_z=0, xlim=15):
+def nb_plot_adjuster_egm_interactive(nest, grids, plot_t=None, i_z=0, xlim=14):
     """Interactive plotly adjuster EGM: a', h', and value — raw + FUES refined.
 
     Three separate figures you can zoom/pan independently:
@@ -1039,14 +1057,18 @@ def nb_plot_adjuster_egm_interactive(nest, grids, plot_t=None, i_z=0, xlim=15):
         m_pts, h_pts, rf_m, rf_h,
     )
 
-    # Value: raw + refined, filter extreme negatives
+    # CE value: raw + refined
     if v_pts is not None:
-        v_mask = v_pts > -10
+        _rho = float(nest['periods'][0]['stages'][
+            'keeper_cons'].calibration.get('rho', 2.0))
+        ce_raw = _ce_transform(v_pts, _rho)
+        ce_mask = np.isfinite(ce_raw) & (ce_raw > 0)
+        ce_rf = _ce_transform(rf_v, _rho) if rf_v is not None else None
         fig_v = _make_fig(
-            f"Adjuster value (age {plot_t}, z={i_z})",
-            'Endogenous wealth m̂', 'V(m̂)',
-            m_pts[v_mask], v_pts[v_mask], rf_m, rf_v,
-            y_range_mode='normal',
+            f"Adjuster CE value (age {plot_t}, z={i_z})",
+            'Endogenous wealth m̂', 'CE',
+            m_pts[ce_mask], ce_raw[ce_mask],
+            rf_m, ce_rf,
         )
     else:
         # Fallback: just the refined value on the wealth grid

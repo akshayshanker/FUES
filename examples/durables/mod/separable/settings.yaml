@@ -29,7 +29,7 @@ settings:
   keeper_disable_jump_checks: 0
 
   # FUES intersection options (adjuster)
-  adj_include_intersections: 1
+  adj_include_intersections: 0
   adj_no_double_jumps: 1
   adj_single_intersection: 1
   adj_disable_jump_checks: 1
