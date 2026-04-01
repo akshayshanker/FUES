@@ -1,0 +1,42 @@
+\documentclass{article}
+\usepackage{booktabs}
+\usepackage{amsmath}
+\begin{document}
+\begin{table}[htbp]
+\centering
+\begingroup
+\small
+\setlength{\tabcolsep}{3pt}
+\renewcommand{\arraystretch}{1s.05}
+\caption{Durables Model: Per-Period Timing and Accuracy}
+\label{table:housing1}
+\begin{tabular}{@{}rr rrrrr rrrrr@{}}
+\toprule
+& & \multicolumn{5}{c}{FUES} & \multicolumn{5}{c}{NEGM} \\
+\cmidrule(lr){3-7} \cmidrule(lr){8-12}
+& & \multicolumn{2}{c}{Time} & \multicolumn{3}{c}{Euler} & \multicolumn{2}{c}{Time} & \multicolumn{3}{c}{Euler} \\
+\cmidrule(lr){3-4} \cmidrule(lr){5-7} \cmidrule(lr){8-9} \cmidrule(lr){10-12}
+$N_A$ & $\tau$ & NA & Adj & Comb & NA & Adj & NA & Adj & Comb & NA & Adj \\
+\midrule
+250 & 0.05 & 157 & 16 & -4.02 & -4.05 & -3.59 & 151 & 86 & -3.88 & -3.90 & -1.19 \\
+ & 0.07 & 155 & 16 & -4.07 & -4.10 & -3.53 & 150 & 85 & -3.97 & -3.99 & -2.51 \\
+ & 0.12 & 154 & 15 & -4.06 & -4.08 & -3.52 & 153 & 88 & -4.00 & -4.02 & -2.47 \\
+\midrule
+500 & 0.05 & 417 & 38 & -3.87 & -4.05 & -1.00 & 418 & 90 & -4.38 & -4.40 & -2.63 \\
+ & 0.07 & 410 & 26 & -4.55 & -4.56 & -3.98 & 423 & 90 & -4.44 & -4.45 & 0.95 \\
+ & 0.12 & 411 & 27 & -4.51 & -4.53 & -3.92 & 421 & 91 & -4.46 & -4.48 & -2.66 \\
+\midrule
+750 & 0.05 & 798 & 41 & -4.66 & -4.68 & -4.19 & 856 & 96 & -4.08 & -4.24 & 4.68 \\
+ & 0.07 & 801 & 41 & -4.76 & -4.78 & -4.16 & 860 & 96 & -4.62 & -4.64 & -0.35 \\
+ & 0.12 & 804 & 40 & -4.77 & -4.79 & -4.00 & 862 & 98 & -4.74 & -4.75 & -2.70 \\
+\midrule
+1,000 & 0.05 & 1348 & 60 & -4.81 & -4.82 & -4.38 & 1387 & 96 & -4.73 & -4.74 & -2.48 \\
+ & 0.07 & 1357 & 48 & -4.88 & -4.90 & -4.32 & 1397 & 97 & -4.79 & -4.81 & -2.57 \\
+ & 0.12 & 1281 & 54 & -4.89 & -4.91 & -4.18 & 1395 & 97 & -4.85 & -4.86 & -2.63 \\
+\bottomrule
+\end{tabular}
+\vspace{0.3em}
+\par\small \textit{Notes:} Time in ms; Euler errors in $\log_{10}$ scale. \textbf{Comb}: combined mean. \textbf{NA}: non-adjusters. \textbf{Adj}: adjusters. Parameters: $\beta=0.94$, $\gamma_c=3.5$, $\gamma_h=1.5$, $\alpha=0.70$, $\delta=0.00$, $r=1.04$, $r_H=1.00$, $\rho_w=0.82$, $\sigma_w=0.11$, $N_{sim}=10,000$.
+\endgroup
+\end{table}
+\end{document}

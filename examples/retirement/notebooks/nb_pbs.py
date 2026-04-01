@@ -111,35 +111,31 @@ def plot_pbs_scaling(path, ax=None):
               alpha=0.4, label='$O(n)$ at FUES')
 
     # ── Speedup factor ticks on the right margin ──
+    # Show actual speedup of each method vs FUES at the largest grid
     fues_last = means['FUES'][-1]
     ylim = ax.get_ylim()
-    tick_ys = []
-    for factor in [5, 10, 20, 50, 100]:
-        y = fues_last * factor
-        if y < ylim[0] or y > ylim[1]:
+    for m in ['DCEGM', 'RFC', 'CONSAV']:
+        m_last = means[m][-1]
+        if m_last <= 0 or fues_last <= 0:
             continue
-        tick_ys.append(y)
-        ax.plot([ns[-1], ns[-1] * 1.06], [y, y],
-                color='#6b7280', linewidth=0.7, clip_on=False,
+        factor = m_last / fues_last
+        if m_last < ylim[0] or m_last > ylim[1]:
+            continue
+        ax.plot([ns[-1], ns[-1] * 1.06], [m_last, m_last],
+                color=mc.get(m, '#6b7280'), linewidth=0.7, clip_on=False,
                 solid_capstyle='round')
-        ax.text(ns[-1] * 1.09, y, f'{factor}\u00d7',
-                fontsize=7.5, fontweight='600', color='#4b5563',
+        ax.text(ns[-1] * 1.09, m_last, f'{factor:.0f}\u00d7',
+                fontsize=7.5, fontweight='600',
+                color=mc.get(m, '#4b5563'),
                 va='center', ha='left', clip_on=False)
+    # FUES baseline
     if ylim[0] <= fues_last <= ylim[1]:
-        tick_ys.append(fues_last)
         ax.plot([ns[-1], ns[-1] * 1.06], [fues_last, fues_last],
                 color=mc['FUES'], linewidth=0.9, clip_on=False,
                 solid_capstyle='round')
         ax.text(ns[-1] * 1.09, fues_last, '1\u00d7',
                 fontsize=7.5, fontweight='700', color=mc['FUES'],
                 va='center', ha='left', clip_on=False)
-    if tick_ys:
-        top_tick = max(tick_ys)
-        ax.text(ns[-1] * 1.09, top_tick * 1.6,
-                f'slowdown\nvs FUES',
-                fontsize=6.5, fontweight='600', color='#4b5563',
-                ha='left', va='bottom',
-                clip_on=False, linespacing=1.2)
 
     import matplotlib.ticker as ticker
 
