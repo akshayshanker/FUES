@@ -90,7 +90,19 @@ def test_Timings(grid_sizes, delta_values, n=3, results_dir="results",
                         'true_grid_size': true_grid_size,
                         'true_method': true_method}
 
-    # ── Pre-compute "true" solutions per delta (before sweep) ──
+    # MPI: detect communicator for distributing sweep points
+    comm = None
+    try:
+        from mpi4py import MPI
+        _comm = MPI.COMM_WORLD
+        if _comm.Get_size() > 1:
+            comm = _comm
+    except ImportError:
+        pass
+
+    is_root = comm is None or comm.Get_rank() == 0
+
+    # ── Pre-compute "true" solutions per delta (all ranks need these) ──
     true_solutions = {}
     for delta in delta_values:
         print(f"\nComputing true solution for delta={delta} "
@@ -154,7 +166,11 @@ def test_Timings(grid_sizes, delta_values, n=3, results_dir="results",
             lambda r, m=method: r[m]['cdev'])
 
     results = sweep(solve_fn, grid, metric_fns,
-                    n_reps=n, warmup=True, best='min')
+                    n_reps=n, warmup=True, best='min', comm=comm)
+
+    # Non-root ranks get [] from gather — nothing to do
+    if not results:
+        return
 
     # ── Reshape into row format for table generators ──
     # Each row: [grid_size, delta, RFC_val, FUES_val, DCEGM_val, CONSAV_val]

@@ -3,8 +3,8 @@
 #  Retirement Model Timing Experiments
 #  Runs FUES vs DC-EGM comparison for Ishkakov et al (2017) model
 # ======================================================================
-#PBS -l ncpus=1
-#PBS -l mem=5GB
+#PBS -l ncpus=12
+#PBS -l mem=60GB
 #PBS -q normalsr
 #PBS -P tp66
 #PBS -l walltime=4:00:00
@@ -144,8 +144,14 @@ if [[ ! -f "${PARAMS_FILE}" ]]; then
     PARAMS_FILE="${TIMINGS_SCRIPT_DIR}/${PARAMS_FILE}"
 fi
 
+# MPI setup (sweep distributes grid points across ranks)
+module load openmpi/4.1.5
+export OMPI_MCA_coll_hcoll_enable=0
+export OMPI_MCA_coll=^hcoll
+export PMIX_MCA_gds=hash
+
 # Build command using new CLI interface (parse_run)
-CMD="python3 -m examples.retirement.run"
+CMD="mpiexec -n $PBS_NCPUS python3 -u -m mpi4py -m examples.retirement.run"
 CMD="$CMD --override-file $PARAMS_FILE"
 CMD="$CMD --setting-override grid_size=$GRID_SIZE"
 CMD="$CMD --setting-override plot_age=$PLOT_AGE"
