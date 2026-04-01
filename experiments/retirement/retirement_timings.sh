@@ -5,9 +5,9 @@
 # ======================================================================
 #PBS -l ncpus=1
 #PBS -l mem=5GB
-#PBS -q expresssr
+#PBS -q normalsr
 #PBS -P tp66
-#PBS -l walltime=1:00:00
+#PBS -l walltime=4:00:00
 #PBS -l storage=scratch/tp66+gdata/tp66
 #PBS -l wd
 #PBS -j oe
