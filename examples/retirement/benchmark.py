@@ -124,46 +124,45 @@ def test_Timings(grid_sizes, delta_values, n=3, results_dir="results",
         }
         print(f"  True solution computed.")
 
-    # ── Build sweep grid ──
-    grid = param_grid(grid_size=grid_sizes, delta=delta_values)
+    # ── Build sweep grid: method × grid_size × delta ──
+    grid = param_grid(
+        method=list(METHODS),
+        grid_size=grid_sizes,
+        delta=delta_values,
+    )
+    # e.g. 4 methods × 15 grids × 4 deltas = 240 points
 
-    # ── solve_fn: all 4 methods per point ──
+    # ── solve_fn: ONE method per point ──
     def solve_fn(ov):
         gs = ov['grid_size']
         d = ov['delta']
+        method = ov['method']
         c_true = true_solutions[d]['c_true']
         a_grid_true = true_solutions[d]['a_grid']
 
-        bundle = {}
-        for method in METHODS:
-            nest, model, _, _ = solve_nest(
-                SYNTAX_DIR, method=method,
-                calib_overrides={**extra_calib, 'delta': d},
-                config_overrides={**extra_config, 'grid_size': gs,
-                                  'padding_mbar': -0.011},
-            )
-            c_refined = get_policy(nest, 'c')
-            timing = get_timing(nest)
-            bundle[method] = {
-                'ue_time': timing[0],
-                'total_time': timing[1],
-                'error': euler(model, c_refined),
-                'cdev': consumption_deviation(
-                    model, c_refined, c_true, a_grid_true),
-            }
-        return bundle
+        nest, model, _, _ = solve_nest(
+            SYNTAX_DIR, method=method,
+            calib_overrides={**extra_calib, 'delta': d},
+            config_overrides={**extra_config, 'grid_size': gs,
+                              'padding_mbar': -0.011},
+        )
+        c_refined = get_policy(nest, 'c')
+        timing = get_timing(nest)
+        return {
+            'ue_time': timing[0],
+            'total_time': timing[1],
+            'error': euler(model, c_refined),
+            'cdev': consumption_deviation(
+                model, c_refined, c_true, a_grid_true),
+        }
 
-    # ── Metric extractors (sweep selects best rep by primary key) ──
-    metric_fns = {}
-    for method in METHODS:
-        metric_fns[f'{method}_ue_time'] = (
-            lambda r, m=method: r[m]['ue_time'])
-        metric_fns[f'{method}_total_time'] = (
-            lambda r, m=method: r[m]['total_time'])
-        metric_fns[f'{method}_error'] = (
-            lambda r, m=method: r[m]['error'])
-        metric_fns[f'{method}_cdev'] = (
-            lambda r, m=method: r[m]['cdev'])
+    # ── Metric extractors ──
+    metric_fns = {
+        'ue_time': lambda r: r['ue_time'],
+        'total_time': lambda r: r['total_time'],
+        'error': lambda r: r['error'],
+        'cdev': lambda r: r['cdev'],
+    }
 
     results = sweep(solve_fn, grid, metric_fns,
                     n_reps=n, warmup=True, best='min', comm=comm)
@@ -172,41 +171,47 @@ def test_Timings(grid_sizes, delta_values, n=3, results_dir="results",
     if not results:
         return
 
-    # ── Reshape into row format for table generators ──
-    # Each row: [grid_size, delta, RFC_val, FUES_val, DCEGM_val, CONSAV_val]
+    # ── Reshape: flat rows → per-(grid, delta) rows with method columns ──
+    # Table generators expect: [grid_size, delta, RFC_val, FUES_val, DCEGM_val, CONSAV_val]
+    by_key = {}
+    for r in results:
+        by_key[(r['grid_size'], r['delta'], r['method'])] = r
+
     latex_errors_data = []
     latex_timings_data = []
     latex_total_timing_data = []
     latex_cdev_data = []
 
-    for r in results:
-        gs, d = r['grid_size'], r['delta']
-        latex_errors_data.append([
-            gs, d,
-            *[r[f'{m}_error'] for m in METHODS],
-        ])
-        latex_timings_data.append([
-            gs, d,
-            *[r[f'{m}_ue_time'] * 1000 for m in METHODS],
-        ])
-        latex_total_timing_data.append([
-            gs, d,
-            *[r[f'{m}_total_time'] * 1000 for m in METHODS],
-        ])
-        latex_cdev_data.append([
-            gs, d,
-            *[r[f'{m}_cdev'] for m in METHODS],
-        ])
+    for gs in sorted(set(r['grid_size'] for r in results)):
+        for d in sorted(set(r['delta'] for r in results)):
+            if not all((gs, d, m) in by_key for m in METHODS):
+                continue
+            latex_errors_data.append([
+                gs, d,
+                *[by_key[(gs, d, m)]['error'] for m in METHODS],
+            ])
+            latex_timings_data.append([
+                gs, d,
+                *[by_key[(gs, d, m)]['ue_time'] * 1000 for m in METHODS],
+            ])
+            latex_total_timing_data.append([
+                gs, d,
+                *[by_key[(gs, d, m)]['total_time'] * 1000 for m in METHODS],
+            ])
+            latex_cdev_data.append([
+                gs, d,
+                *[by_key[(gs, d, m)]['cdev'] for m in METHODS],
+            ])
 
-        print(
-            f'\nGrid={gs}, delta={d}:\n'
-            f'  Euler errors: '
-            + ', '.join(f'{m}: {r[f"{m}_error"]:.6f}' for m in METHODS)
-            + f'\n  Cons. dev (log10): '
-            + ', '.join(f'{m}: {r[f"{m}_cdev"]:.6f}' for m in METHODS)
-            + f'\n  Timings (s): '
-            + ', '.join(f'{m}: {r[f"{m}_ue_time"]:.6f}' for m in METHODS)
-        )
+            print(
+                f'\nGrid={gs}, delta={d}:\n'
+                f'  Euler errors: '
+                + ', '.join(f'{m}: {by_key[(gs, d, m)]["error"]:.6f}' for m in METHODS)
+                + f'\n  Cons. dev (log10): '
+                + ', '.join(f'{m}: {by_key[(gs, d, m)]["cdev"]:.6f}' for m in METHODS)
+                + f'\n  Timings (s): '
+                + ', '.join(f'{m}: {by_key[(gs, d, m)]["ue_time"]:.6f}' for m in METHODS)
+            )
 
     # ── Generate tables ──
     generate_timing_table_combined(
