@@ -51,7 +51,7 @@ else
 fi
 
 # Logs go to BASE_OUT (avoid home on Gadi)
-LOG_DIR="${LOG_DIR:-${BASE_OUT}/logs/retirement}"
+LOG_DIR="${LOG_DIR:-/g/data/tp66/logs/retirement}"
 mkdir -p "${LOG_DIR}"
 LOG_FILE="${LOG_DIR}/${RUN_ID}.log"
 ERR_FILE="${LOG_DIR}/${RUN_ID}.err"
