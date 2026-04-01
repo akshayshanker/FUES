@@ -504,6 +504,11 @@ def run_sweep(run):
     if run.sweep_params:
         results, summaries = _run_sweep_params_path(
             run, base_calib, base_config)
+
+        # Only rank 0 has gathered results; non-root ranks get []
+        if not results:
+            return results
+
         omit_md = {'euler_c_keeper', 'euler_c_adjuster'}
         if run.simulate:
             metric_tail = [
@@ -518,17 +523,16 @@ def run_sweep(run):
         param_cols = sorted(
             k for k in row0 if k not in set(metric_tail) | omit_md)
         cols = [c for c in param_cols + metric_tail if c in row0]
-        if results:
-            print('\n' + format_table(results, cols))
-            output_dir = str(run.output_dir)
-            tdir = os.path.join(output_dir, 'tables')
-            os.makedirs(tdir, exist_ok=True)
-            write_table(os.path.join(tdir, 'sweep.md'), results, cols)
-            tex = generate_sweep_table(
-                summaries, fmt='tex',
-                caption='Durables Model: Per-Period Timing and Accuracy')
-            with open(os.path.join(tdir, 'sweep.tex'), 'w') as f:
-                f.write(tex)
+        print('\n' + format_table(results, cols))
+        output_dir = str(run.output_dir)
+        tdir = os.path.join(output_dir, 'tables')
+        os.makedirs(tdir, exist_ok=True)
+        write_table(os.path.join(tdir, 'sweep.md'), results, cols)
+        tex = generate_sweep_table(
+            summaries, fmt='tex',
+            caption='Durables Model: Per-Period Timing and Accuracy')
+        with open(os.path.join(tdir, 'sweep.tex'), 'w') as f:
+            f.write(tex)
         return results
 
     grid_sizes = run.sweep_grids or [100, 200, 300]
