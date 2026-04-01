@@ -27,8 +27,8 @@ calibration:
 
 
   # Income AR(1) in logs: log z[>] = phi_w * log z + sigma_w * eps[>],  eps[>] ~ N(0,1)
-  phi_w: 0.8170411          # rho_z: AR(1) persistence
-  sigma_w: 0.1117012        # sigma_z: innovation std dev
+  phi_w: 0.82          # rho_z: AR(1) persistence
+  sigma_w: 0.11      # sigma_z: innovation std dev
 
   # Wage function polynomial
   lambdas:
