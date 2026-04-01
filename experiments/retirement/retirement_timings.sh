@@ -3,8 +3,8 @@
 #  Retirement Model Timing Experiments
 #  Runs FUES vs DC-EGM comparison for Ishkakov et al (2017) model
 # ======================================================================
-#PBS -l ncpus=12
-#PBS -l mem=60GB
+#PBS -l ncpus=60
+#PBS -l mem=300GB
 #PBS -q normalsr
 #PBS -P tp66
 #PBS -l walltime=4:00:00
