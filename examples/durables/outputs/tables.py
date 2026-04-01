@@ -204,6 +204,10 @@ def _sweep_table_tex(results_summary, caption=None):
     for r in results_summary:
         by_key[(r['Grid_Size'], r['Tau'], r['Method'])] = r
 
+    def _ef(v):
+        """Format Euler value; NaN → ---."""
+        return f"{v:.2f}" if not np.isnan(v) else "---"
+
     n_methods = len(methods)
     col_spec = 'rr' + ' rrrrr' * n_methods
 
@@ -273,15 +277,13 @@ def _sweep_table_tex(results_summary, caption=None):
                 r = by_key[(grid_size, tau, m)]
                 keeper_ms = r.get('Avg_Keeper_ms', 0.0)
                 adj_ms = r.get('Avg_Adj_ms', 0.0)
-                euler_comb = r.get('Euler_Combined', 0.0)
-                euler_keep = r.get('Euler_Keeper', 0.0)
+                euler_comb = r.get('Euler_Combined', np.nan)
+                euler_keep = r.get('Euler_Keeper', np.nan)
                 # Paper's "Adj" Euler = housing FOC for adjusters
                 euler_adj = r.get('Euler_H_Adjuster', np.nan)
-                def _fmt(v):
-                    return f"{v:.2f}" if not np.isnan(v) else "---"
                 cells.append(
                     f"{keeper_ms:.0f} & {adj_ms:.0f} & "
-                    f"{_fmt(euler_comb)} & {_fmt(euler_keep)} & {_fmt(euler_adj)}")
+                    f"{_ef(euler_comb)} & {_ef(euler_keep)} & {_ef(euler_adj)}")
             table += " & ".join(cells) + " \\\\\n"
 
     table += "\\bottomrule\n\\end{tabular}\n"

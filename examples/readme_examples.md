@@ -1,7 +1,31 @@
 # Running the examples
 
 From the repo root (`FUES/`), run `python -m examples.<model>.run`.
-Each run writes to a timestamped folder under `--output-dir` (default `results/<model>/YYYY-MM-DD_NNN`). Use `--run-tag NAME` for a memorable label instead of the auto-increment.
+
+### Output directories
+
+Every run creates `<output-dir>/YYYY-MM-DD/NNN/` with auto-incremented NNN. Never overwrites.
+
+| | Local (default) | Gadi |
+|---|---|---|
+| **Results** | `results/<model>/YYYY-MM-DD/NNN/` | `/scratch/tp66/$USER/FUES/<model>/YYYY-MM-DD/NNN/` |
+| **PBS logs** | *(n/a)* | `/g/data/tp66/logs/<model>/` |
+
+Set `--output-dir /scratch/tp66/$USER/FUES/<model>` on Gadi. The `YYYY-MM-DD/NNN/` is created automatically.
+
+All plots, tables, simulation outputs go inside the run folder:
+
+```
+NNN/
+├── plots/
+│   ├── age_68/            # policy plots
+│   └── simulation/        # lifecycle plots
+└── tables/
+    ├── sweep.md           # sweep (markdown)
+    ├── sweep.tex          # sweep (paper LaTeX)
+    ├── comparison.md      # compare mode
+    └── summary.md         # single-run
+```
 
 ---
 
