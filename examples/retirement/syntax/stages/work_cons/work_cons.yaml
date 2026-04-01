@@ -20,7 +20,7 @@ symbols:
     dV[<]: "@in R+"
     dV: "@in R+"
   parameters: [beta, r, y]
-  settings: [n_w, w_min, w_max, m_bar]
+  settings: [n_w, w_min, w_max, m_bar, n_a, a_min, a_max]
 equations:
   arvl_to_dcsn_transition: |
     w = (1 + r) * a + y
