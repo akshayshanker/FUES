@@ -349,14 +349,142 @@ def run_comparison(run):
     return all_results
 
 
+def _get_mpi_comm():
+    """Return MPI communicator if available and size > 1, else None."""
+    try:
+        from mpi4py import MPI
+        comm = MPI.COMM_WORLD
+        if comm.Get_size() > 1:
+            return comm
+    except ImportError:
+        pass
+    return None
+
+
 def _run_sweep_params_path(run, base_calib, base_config):
-    """Multi-axis sweep: each point may change method, calib, and settings."""
+    """Multi-axis sweep using kikku's sweep() with MPI support.
+
+    Builds the Cartesian product of sweep axes, wraps each point
+    into a solve_fn compatible with kikku.run.sweep.sweep(), and
+    lets sweep() handle MPI distribution + best-of-n timing.
+    """
+    comm = _get_mpi_comm()
     points = build_sweep_grid(run)
+
+    syntax = str(run.syntax_dir)
+
+    # Pre-compute key classification for solve_fn
+    calib_keys = set(base_calib.keys())
+    settings_keys = set(base_config.keys())
+
+    def solve_fn(params):
+        """Solve one sweep point. params is flat: {method: .., n_a: .., tau: ..}."""
+        method = params.get('method', run.method)
+        mo = dict(run.method_overrides or {})
+        calib_use = dict(base_calib)
+        cfg_use = dict(base_config)
+        for k, v in params.items():
+            if k == 'method':
+                continue
+            elif k in calib_keys:
+                calib_use[k] = v
+            elif k in settings_keys:
+                cfg_use[k] = v
+
+        nest, grids = solve(
+            syntax, method=method,
+            method_overrides=mo,
+            calib_overrides=calib_use,
+            setting_overrides=cfg_use,
+            verbose=False)
+
+        adj0 = nest["periods"][0]["stages"]["adjuster_cons"]
+        method_label = method or read_scheme_method(adj0, 'upper_envelope')
+        timing = get_timing(nest)
+
+        result = {
+            'nest': nest, 'grids': grids,
+            'method_label': method_label,
+            'timing': timing,
+            'calib_use': calib_use,
+        }
+
+        if run.simulate:
+            st0 = nest["periods"][0]["stages"]["keeper_cons"]
+            use_emp = st0.calibration.get("init_method", "standard") == "empirical"
+            sim_data = simulate_lifecycle(
+                nest, grids,
+                N=run.n_sim, seed=run.seed,
+                use_empirical_init=use_emp)
+            euler_c = evaluate_euler_c(sim_data, nest, grids)
+            euler_h = evaluate_euler_h(sim_data, nest, grids)
+            d = sim_data['discrete']
+            result['ec_stats'] = compute_euler_stats(euler_c, d)
+            result['eh_stats'] = compute_euler_stats(euler_h, d)
+            result['adj_rate'] = np.mean(d[d >= 0]) * 100
+
+        return result
+
+    # Build metric extraction functions
+    metric_fns = {
+        'solve_ms': lambda r: r['timing']['solve_time'] * 1000,
+        'keeper_ms': lambda r: r['timing']['keeper_ms'],
+        'adj_ms': lambda r: r['timing']['adj_ms'],
+        'method': lambda r: r['method_label'],
+    }
+    if run.simulate:
+        metric_fns.update({
+            'euler_c_mean': lambda r: r['ec_stats'].get('combined', {}).get('mean', np.nan),
+            'euler_c_keeper': lambda r: r['ec_stats'].get('keeper', {}).get('mean', np.nan),
+            'euler_c_adjuster': lambda r: r['ec_stats'].get('adjuster', {}).get('mean', np.nan),
+            'euler_h_mean': lambda r: r['eh_stats'].get('combined', {}).get('mean', np.nan),
+            'adj_rate': lambda r: r['adj_rate'],
+        })
+
+    # Pass flat param dicts to kikku's sweep (MPI-aware)
+    flat_grid = [p['params'] for p in points]
+
+    raw_results = sweep(
+        solve_fn, flat_grid, metric_fns,
+        n_reps=run.sweep_runs,
+        warmup=run.warmup,
+        best='min',
+        on_error='skip',
+        comm=comm,
+    )
+
+    # Build summaries for LaTeX table (only on rank 0 after gather)
     results = []
     summaries = []
-    n_pts = len(points)
+    for row in raw_results:
+        n_a_eff = row.get('n_a', base_config.get('n_a', 0))
+        tau_eff = row.get('tau', base_calib.get('tau', 0.0))
 
-    for idx, point in enumerate(points):
+        results.append(row)
+
+        cal_params = {}
+        for k in ('beta', 'gamma_c', 'gamma_h', 'alpha', 'delta',
+                  'R', 'R_H', 'phi_w', 'sigma_w'):
+            if k in base_calib:
+                cal_params[k] = base_calib[k]
+        if 'R' in cal_params:
+            cal_params['r'] = cal_params.pop('R')
+        if 'R_H' in cal_params:
+            cal_params['r_H'] = cal_params.pop('R_H')
+        cal_params['N_sim'] = run.n_sim
+
+        summaries.append({
+            'Grid_Size': int(n_a_eff) if n_a_eff is not None else 0,
+            'Tau': float(tau_eff) if tau_eff is not None else 0.0,
+            'Method': row.get('method', ''),
+            'Avg_Keeper_ms': row.get('keeper_ms', 0.0),
+            'Avg_Adj_ms': row.get('adj_ms', 0.0),
+            'Euler_Combined': row.get('euler_c_mean', np.nan),
+            'Euler_Keeper': row.get('euler_c_keeper', np.nan),
+            'Euler_Adjuster': row.get('euler_c_adjuster', np.nan),
+            'Euler_H_Adjuster': row.get('euler_h_mean', np.nan),
+            **cal_params,
+        })
         print(f"Point {idx + 1}/{n_pts}: {point['label']}")
 
         method = point['method'] if point['method'] is not None else run.method
