@@ -76,7 +76,7 @@ def main():
             latex_grids = [int(x) for x in str(latex_grids_str).split(',')]
         test_Timings(
             grid_sizes, delta_values, n=run.sweep_runs,
-            results_dir=run_dir,
+            results_dir=os.path.join(run_dir, 'tables'),
             calib_overrides=calib_overrides,
             config_overrides=config_overrides,
             latex_grids=latex_grids,
