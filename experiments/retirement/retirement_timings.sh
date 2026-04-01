@@ -64,9 +64,9 @@ if [[ -n "${PBS_JOBFS:-}" ]]; then
     module purge
     module load python3/3.12.1
 
-    # Activate dcsmm venv on scratch
-    DCSMM_VENV="${DCSMM_VENV:-/scratch/tp66/${USER}/venvs/dcsmm}"
-    source "${DCSMM_VENV}/bin/activate"
+    # Activate fues venv
+    FUES_VENV="${FUES_VENV:-$HOME/venvs/fues}"
+    source "${FUES_VENV}/bin/activate"
 
     # Use PBS_JOBFS (fast local SSD on compute node)
     export NUMBA_CACHE_DIR="${NUMBA_CACHE_DIR:-${PBS_JOBFS}}"

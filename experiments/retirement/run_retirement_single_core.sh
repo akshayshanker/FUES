@@ -11,7 +11,7 @@
 # Single-core retirement model runner (NO sweep) that saves ALL outputs to scratch.
 #
 # - Runs `examples/retirement/run.py` (baseline solve + plots)
-# - Uses the dcsmm venv (defaults to /scratch/tp66/$USER/venvs/dcsmm)
+# - Uses the fues venv (defaults to /scratch/tp66/$USER/venvs/dcsmm)
 # - Ensures repo + src are on PYTHONPATH for `dcsmm` imports
 #
 # Usage:
@@ -22,7 +22,7 @@
 #   GRID_SIZE=3000
 #   PLOT_AGE=17
 #   OUTPUT_BASE="/scratch/tp66/$USER/FUES/solutions/retirement"
-#   DCSMM_VENV="/scratch/tp66/$USER/venvs/dcsmm"
+#   FUES_VENV="/scratch/tp66/$USER/venvs/dcsmm"
 #
 
 set -euo pipefail
@@ -67,15 +67,15 @@ echo "========================================================" | tee -a "${LOG_
 # -----------------------------------------------------------------------------
 module load python3/3.12.1
 
-DCSMM_VENV="${DCSMM_VENV:-/scratch/tp66/${USER}/venvs/dcsmm}"
-if [[ ! -f "${DCSMM_VENV}/bin/activate" ]]; then
+FUES_VENV="${FUES_VENV:-$HOME/venvs/fues}"
+if [[ ! -f "${FUES_VENV}/bin/activate" ]]; then
   {
-    echo "ERROR: dcsmm venv not found at: ${DCSMM_VENV}"
+    echo "ERROR: fues venv not found at: ${FUES_VENV}"
     echo "Run: bash scripts/setup_venv.sh"
   } | tee -a "${LOG_FILE}" >&2
   exit 1
 fi
-source "${DCSMM_VENV}/bin/activate"
+source "${FUES_VENV}/bin/activate"
 
 # Numba cache on PBS_JOBFS (fast local SSD, fresh each job)
 export NUMBA_CACHE_DIR=$PBS_JOBFS

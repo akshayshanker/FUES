@@ -30,8 +30,8 @@ fi
 module purge
 module load python3/3.12.1
 
-VENV_PUBLIC="${VENV_PUBLIC:-/scratch/tp66/$USER/venvs/fues_public}"
-source "$VENV_PUBLIC/bin/activate"
+FUES_VENV="${FUES_VENV:-$HOME/venvs/fues}"
+source "$FUES_VENV/bin/activate"
 
 export PYTHONPATH="$REPO_ROOT/src:$REPO_ROOT${PYTHONPATH:+:$PYTHONPATH}"
 export OMP_NUM_THREADS=1
