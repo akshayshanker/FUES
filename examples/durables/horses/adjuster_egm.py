@@ -30,7 +30,7 @@ from kikku.asva.numerics import clamp_value, clamp_policy
 from interpolation.splines import eval_linear
 from interpolation.splines import extrap_options as xto
 from quantecon.optimize.root_finding import brentq
-from consav import golden_section_search
+from quantecon.optimize import brent_max
 
 
 def _make_negm_adjuster(callables, grids, stage):
@@ -82,10 +82,6 @@ def _make_negm_adjuster(callables, grids, stage):
         return bellman_obj(u_fn(c_keeper, h_prime), Ev)
 
     @njit
-    def _obj_interior_neg(h_prime, wealth, i_z, V_cntn, keeper_c_iz):
-        return -_obj_interior(h_prime, wealth, i_z, V_cntn, keeper_c_iz)
-
-    @njit
     def _obj_boundary(h_prime, wealth, i_z, V_cntn, keeper_c_iz):
         w_residual = wealth - housing_cost(h_prime)
 
@@ -102,11 +98,14 @@ def _make_negm_adjuster(callables, grids, stage):
         return bellman_obj(u_fn(c_val, h_prime), Ev)
 
     @njit
-    def _obj_boundary_neg(h_prime, wealth, i_z, V_cntn, keeper_c_iz):
-        return -_obj_boundary(h_prime, wealth, i_z, V_cntn, keeper_c_iz)
+    def _section_max(obj, lo, hi, args, n_sections=2, xtol=1e-6):
+        """Multi-section Brent maximisation.
 
-    @njit
-    def _gs_max(obj, obj_neg, lo, hi, args, n_sections=2, xtol=1e-6):
+        Splits [lo, hi] into n_sections intervals and runs
+        quantecon.optimize.brent_max on each. Returns the
+        global best. More robust than golden section for
+        non-smooth objectives with -inf regions.
+        """
         if hi - lo < xtol:
             return lo, obj(lo, *args)
 
@@ -119,10 +118,10 @@ def _make_negm_adjuster(callables, grids, stage):
             s_hi = lo + (i + 1) * section_w
             if s_hi - s_lo < xtol:
                 continue
-            x_opt = golden_section_search.optimizer(
-                obj_neg, s_lo, s_hi, args=args, tol=xtol)
+            x_opt, fval, _ = brent_max(
+                obj, s_lo, s_hi, args=args, xtol=xtol)
             x_opts[i] = x_opt
-            vals[i] = obj(x_opt, *args)
+            vals[i] = fval
 
         best_idx = 0
         best_val = vals[0]
@@ -163,12 +162,12 @@ def _make_negm_adjuster(callables, grids, stage):
 
                 args = (wealth, iz, V_cntn, keeper_c[iz])
 
-                h_star, v_star = _gs_max(
-                    _obj_interior, _obj_interior_neg,
+                h_star, v_star = _section_max(
+                    _obj_interior,
                     h_lo, h_hi, args, n_sections=n_sections, xtol=1e-6)
 
-                h_bound, v_bound = _gs_max(
-                    _obj_boundary, _obj_boundary_neg,
+                h_bound, v_bound = _section_max(
+                    _obj_boundary,
                     h_lo, h_hi, args, n_sections=n_sections, xtol=1e-6)
 
                 if v_bound > v_star:
