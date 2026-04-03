@@ -20,7 +20,7 @@ if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
 from pathlib import Path
-from .solve import solve_nest
+from .solve import solve_block
 from .outputs import (
     generate_timing_table_combined, generate_accuracy_table,
     get_policy, get_timing,
@@ -112,12 +112,14 @@ def test_Timings(grid_sizes, delta_values, n=3, results_dir="results",
         cfg_ov = {**extra_config, 'grid_size': true_grid_size,
                   'padding_mbar': -0.011}
         # Warmup
-        solve_nest(SYNTAX_DIR, method=true_method,
-                   calib_overrides=cal_ov, config_overrides=cfg_ov)
+        from .solve import METHOD_SHORTCUT as _MS
+        _mo_true = {t: true_method for t in _MS}
+        solve_block(SYNTAX_DIR, method_overrides=_mo_true,
+                    calib_overrides=cal_ov, setting_overrides=cfg_ov)
         # Actual run
-        nest_true, model_true, _, _ = solve_nest(
-            SYNTAX_DIR, method=true_method,
-            calib_overrides=cal_ov, config_overrides=cfg_ov)
+        nest_true, model_true, _, _ = solve_block(
+            SYNTAX_DIR, method_overrides=_mo_true,
+            calib_overrides=cal_ov, setting_overrides=cfg_ov)
         true_solutions[delta] = {
             'c_true': get_policy(nest_true, 'c'),
             'a_grid': model_true.asset_grid_A,
@@ -140,11 +142,12 @@ def test_Timings(grid_sizes, delta_values, n=3, results_dir="results",
         c_true = true_solutions[d]['c_true']
         a_grid_true = true_solutions[d]['a_grid']
 
-        nest, model, _, _ = solve_nest(
-            SYNTAX_DIR, method=method,
+        _mo = {t: method for t in _MS}
+        nest, model, _, _ = solve_block(
+            SYNTAX_DIR, method_overrides=_mo,
             calib_overrides={**extra_calib, 'delta': d},
-            config_overrides={**extra_config, 'grid_size': gs,
-                              'padding_mbar': -0.011},
+            setting_overrides={**extra_config, 'grid_size': gs,
+                               'padding_mbar': -0.011},
         )
         c_refined = get_policy(nest, 'c')
         timing = get_timing(nest)

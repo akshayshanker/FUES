@@ -14,7 +14,18 @@ from pathlib import Path
 
 from kikku.run import parse_run
 
-from examples.retirement.solve import solve_nest
+from examples.retirement.solve import solve_block, METHOD_SHORTCUT
+
+
+def _build_method_overrides(method=None, method_overrides=None):
+    """Expand --method shortcut + merge explicit overrides."""
+    result = {}
+    if method is not None:
+        for target in METHOD_SHORTCUT:
+            result[target] = method
+    if method_overrides:
+        result.update(method_overrides)
+    return result or None
 from examples.retirement.outputs import (
     plot_egrids, plot_cons_pol, plot_dcegm_cf,
     euler, get_policy, get_timing,
@@ -49,9 +60,9 @@ def main():
     latex_grids_str = eff.get('latex_grids', None)
 
     run_dir = str(run.output_dir)
-    syntax_dir = run.syntax_dir
+    syntax_dir = run.model_dir
 
-    print(f'Syntax dir: {syntax_dir}')
+    print(f'Model dir: {syntax_dir}')
     print(f'Output directory: {run_dir}')
     if calib_overrides:
         print(f'Calib overrides: {calib_overrides}')
@@ -85,18 +96,19 @@ def main():
     print('\nSolving via canonical pipeline...')
     solutions = {}
     for method in UE_METHODS:
-        _, m_, ops_, w_ = solve_nest(
-            syntax_dir, method=method,
+        mo = _build_method_overrides(method, run.method_overrides)
+        _, m_, ops_, w_ = solve_block(
+            syntax_dir,
+            method_overrides=mo,
             calib_overrides=calib_overrides,
-            config_overrides=config_overrides,
-            method_overrides=run.method_overrides,
+            setting_overrides=config_overrides,
         )
-        nest, model, _, _ = solve_nest(
-            syntax_dir, method=method,
+        nest, model, _, _ = solve_block(
+            syntax_dir,
+            method_overrides=mo,
             calib_overrides=calib_overrides,
-            config_overrides=config_overrides,
+            setting_overrides=config_overrides,
             model=m_, stage_ops=ops_, waves=w_,
-            method_overrides=run.method_overrides,
         )
         solutions[method] = {
             'nest': nest,

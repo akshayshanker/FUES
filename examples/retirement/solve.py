@@ -175,10 +175,11 @@ def solve_backward(T, model, stage_ops, waves):
 # Entry point
 # ============================================================
 
-def solve_nest(syntax_dir, method='FUES',
-               calib_overrides=None, config_overrides=None,
+def solve_nest(syntax_dir, method_overrides=None,
+               calib_overrides=None, setting_overrides=None,
                model=None, stage_ops=None, waves=None,
-               method_overrides=None):
+               # Deprecated — use method_overrides + setting_overrides
+               method=None, config_overrides=None):
     """Canonical pipeline: load → build → solve backward.
 
     Composition algebra::
@@ -225,11 +226,16 @@ def solve_nest(syntax_dir, method='FUES',
     """
     syntax_dir = Path(syntax_dir)
 
+    # Backward compat: config_overrides → setting_overrides
+    if config_overrides is not None and setting_overrides is None:
+        setting_overrides = config_overrides
+
     if model is None or stage_ops is None or waves is None:
         calibration, settings, stage_sources, \
             period_template, inter_conn = load_syntax(
-                syntax_dir, calib_overrides, config_overrides,
+                syntax_dir, calib_overrides, setting_overrides,
             )
+        # method= is deprecated — callers should use method_overrides
         all_method_overrides = {}
         if method is not None:
             for target in METHOD_SHORTCUT:

@@ -428,7 +428,6 @@ def precompile(syntax_dir='examples/durables/syntax', method=None):
 
 def solve(
     syntax_dir,
-    method=None,
     method_overrides=None,
     calib_overrides=None,
     setting_overrides=None,
@@ -436,18 +435,20 @@ def solve(
     verbose=False,
     progress=None,
     strip_solved=False,
+    # Deprecated — use method_overrides. Kept for backward compat.
+    method=None,
 ):
     """Full DDSL pipeline: load -> accrete+solve.
 
     Parameters
     ----------
-    method : str, optional
-        If given (e.g. ``\"NEGM\"``), applies to each target in
-        :data:`METHOD_SHORTCUT` before instantiation. If ``None``, YAML
-        defaults apply unless ``method_overrides`` is set.
     method_overrides : dict, optional
-        ``{(stage, target, scheme): tag, ...}`` merged after the ``method``
-        shortcut expansion; passed to :func:`kikku.dynx.methods.override_methods`.
+        ``{(stage, target, scheme): tag, ...}`` passed to
+        :func:`kikku.dynx.methods.override_methods`.
+    method : str, optional
+        **Deprecated.** Shortcut that expands via ``METHOD_SHORTCUT``
+        into ``method_overrides``. Prefer passing ``method_overrides``
+        directly.
     verbose : bool or str
         ``True``: print waves (unless ``progress='bar'``) and per-period solve output.
         ``False``: minimal.
@@ -487,8 +488,14 @@ def solve(
     if _mem_diag:
         print(f"      [solve] load_syntax: +{_rss()-_r0}MB")
 
+    # method= is deprecated — callers should use method_overrides directly.
+    # For backward compat, expand the shortcut here if provided.
     all_method_overrides = {}
     if method is not None:
+        import warnings
+        warnings.warn(
+            "solve(method=...) is deprecated; use method_overrides instead.",
+            DeprecationWarning, stacklevel=2)
         for target in METHOD_SHORTCUT:
             all_method_overrides[target] = method
     if method_overrides:

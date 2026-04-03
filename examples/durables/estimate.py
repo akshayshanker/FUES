@@ -41,7 +41,7 @@ from kikku.run.estimate import (
 from kikku.run.moments import make_moment_fn, moment_names as get_moment_names
 from kikku.run.mpi import get_comm, is_root, bcast_item
 
-from .solve import solve
+from .solve import solve_block as solve
 from .horses.simulate import simulate_lifecycle
 
 

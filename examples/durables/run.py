@@ -29,7 +29,18 @@ from kikku.run import parse_run
 from kikku.run.sweep import param_grid, sweep
 from kikku.run.metrics import format_table, write_table
 
-from .solve import solve, read_scheme_method
+from .solve import solve_block as solve, read_scheme_method, METHOD_SHORTCUT
+
+
+def _build_method_overrides(method=None, method_overrides=None):
+    """Expand --method shortcut + merge explicit overrides into one dict."""
+    result = {}
+    if method is not None:
+        for target in METHOD_SHORTCUT:
+            result[target] = method
+    if method_overrides:
+        result.update(method_overrides)
+    return result or None
 from .outputs import (
     plot_policies, plot_grids, plot_lifecycle, get_timing, derive_savings,
     consumption_deviation, compute_euler_stats, print_euler_stats,
@@ -68,9 +79,7 @@ def run_single(run):
     store_cntn = bool(run.settings.get('store_cntn', 0))
 
     cfg = _solver_config(run)
-    nest, grids = solve(
-        str(run.syntax_dir), method=run.method,
-        method_overrides=run.method_overrides,
+    nest, grids = solve(        str(run.model_dir),         method_overrides=_build_method_overrides(run.method, run.method_overrides),
         verbose=False,
         calib_overrides=run.calib or None,
         setting_overrides=cfg if cfg else None)
@@ -307,8 +316,7 @@ def run_comparison(run):
         method_dir = os.path.join(base_dir, label)
         spec_run = replace(
             run,
-            method=method,
-            method_overrides=method_overrides or run.method_overrides,
+                        method_overrides=_build_method_overrides(method, method_overrides or run.method_overrides),
             output_dir=Path(method_dir),
         )
         result = run_single(spec_run)
@@ -371,7 +379,7 @@ def _run_sweep_params_path(run, base_calib, base_config):
     comm = _get_mpi_comm()
     points = build_sweep_grid(run)
 
-    syntax = str(run.syntax_dir)
+    syntax = str(run.model_dir)
 
     # Pre-compute key classification for solve_fn
     calib_keys = set(base_calib.keys())
@@ -391,9 +399,7 @@ def _run_sweep_params_path(run, base_calib, base_config):
             elif k in settings_keys:
                 cfg_use[k] = v
 
-        nest, grids = solve(
-            syntax, method=method,
-            method_overrides=mo,
+        nest, grids = solve(            syntax,             method_overrides=_build_method_overrides(method, mo),
             calib_overrides=calib_use,
             setting_overrides=cfg_use,
             verbose=False)
@@ -541,9 +547,7 @@ def run_sweep(run):
     if run.simulate:
         def trial_fn(ov):
             cfg = {**base_config, 'n_a': ov['n_a']}
-            nest, grids = solve(
-                str(run.syntax_dir), method=run.method,
-                method_overrides=run.method_overrides,
+            nest, grids = solve(                str(run.model_dir),                 method_overrides=_build_method_overrides(run.method, run.method_overrides),
                 calib_overrides=base_calib,
                 setting_overrides=cfg,
                 verbose=False)
@@ -595,9 +599,7 @@ def run_sweep(run):
     else:
         def solve_fn(ov):
             cfg = {**base_config, 'n_a': ov['n_a']}
-            nest, grids = solve(
-                str(run.syntax_dir), method=run.method,
-                method_overrides=run.method_overrides,
+            nest, grids = solve(                str(run.model_dir),                 method_overrides=_build_method_overrides(run.method, run.method_overrides),
                 calib_overrides=base_calib,
                 setting_overrides=cfg,
                 verbose=False)
