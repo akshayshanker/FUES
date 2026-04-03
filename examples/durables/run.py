@@ -55,9 +55,15 @@ from .horses.simulate import (
 )
 
 
-def _solver_config(run):
-    """Merge settings tier + config tier for ``load_syntax`` (settings.yaml overlay)."""
-    return {**dict(run.settings), **dict(run.config)}
+def _solve_overrides(run):
+    """Extract the three DDSL override dicts from a RunSpec.
+
+    Returns (method_overrides, calib_overrides, setting_overrides).
+    """
+    mo = _build_method_overrides(run.method, run.method_overrides)
+    calib = run.calib or None
+    settings = {**dict(run.settings), **dict(run.config)} if run.config else dict(run.settings)
+    return mo, calib, settings or None
 
 
 def _parse_plot_ages(raw):
@@ -78,11 +84,13 @@ def run_single(run):
     """
     store_cntn = bool(run.settings.get('store_cntn', 0))
 
-    cfg = _solver_config(run)
-    nest, grids = solve(        str(run.model_dir),         method_overrides=_build_method_overrides(run.method, run.method_overrides),
-        verbose=False,
-        calib_overrides=run.calib or None,
-        setting_overrides=cfg if cfg else None)
+    mo, calib, settings = _solve_overrides(run)
+    nest, grids = solve(
+        str(run.model_dir),
+        method_overrides=mo,
+        calib_overrides=calib,
+        setting_overrides=settings,
+        verbose=False)
     adj0 = nest["periods"][0]["stages"]["adjuster_cons"]
     method_label = run.method or read_scheme_method(adj0, 'upper_envelope')
     print(f'{len(nest["solutions"])} periods solved')
@@ -399,7 +407,9 @@ def _run_sweep_params_path(run, base_calib, base_config):
             elif k in settings_keys:
                 cfg_use[k] = v
 
-        nest, grids = solve(            syntax,             method_overrides=_build_method_overrides(method, mo),
+        nest, grids = solve(
+            syntax,
+            method_overrides=_build_method_overrides(method, mo),
             calib_overrides=calib_use,
             setting_overrides=cfg_use,
             verbose=False)
@@ -544,10 +554,14 @@ def run_sweep(run):
     grid_sizes = run.sweep_grids or [100, 200, 300]
     grid = param_grid(n_a=grid_sizes)
 
+    mo, _, _ = _solve_overrides(run)
+
     if run.simulate:
         def trial_fn(ov):
             cfg = {**base_config, 'n_a': ov['n_a']}
-            nest, grids = solve(                str(run.model_dir),                 method_overrides=_build_method_overrides(run.method, run.method_overrides),
+            nest, grids = solve(
+                str(run.model_dir),
+                method_overrides=mo,
                 calib_overrides=base_calib,
                 setting_overrides=cfg,
                 verbose=False)
@@ -599,7 +613,9 @@ def run_sweep(run):
     else:
         def solve_fn(ov):
             cfg = {**base_config, 'n_a': ov['n_a']}
-            nest, grids = solve(                str(run.model_dir),                 method_overrides=_build_method_overrides(run.method, run.method_overrides),
+            nest, grids = solve(
+                str(run.model_dir),
+                method_overrides=mo,
                 calib_overrides=base_calib,
                 setting_overrides=cfg,
                 verbose=False)
