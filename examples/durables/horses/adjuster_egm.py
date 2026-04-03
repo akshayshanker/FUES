@@ -31,6 +31,7 @@ from interpolation.splines import eval_linear
 from interpolation.splines import extrap_options as xto
 from quantecon.optimize.root_finding import brentq
 from quantecon.optimize import brent_max
+from consav import golden_section_search
 
 
 def _make_negm_adjuster(callables, grids, stage):
@@ -42,6 +43,7 @@ def _make_negm_adjuster(callables, grids, stage):
     grid_max_A = float(sett["a_max"])
     grid_max_H = float(sett["h_max"])
     n_sections = int(sett.get("n_sections", 3))
+    negm_optimizer = str(sett.get("negm_optimizer", "brent_max"))
     UGgrid_all = grids["UGgrid_all"]
 
     u_fn = adj["u"]
@@ -98,14 +100,8 @@ def _make_negm_adjuster(callables, grids, stage):
         return bellman_obj(u_fn(c_val, h_prime), Ev)
 
     @njit
-    def _section_max(obj, lo, hi, args, n_sections=2, xtol=1e-6):
-        """Multi-section Brent maximisation.
-
-        Splits [lo, hi] into n_sections intervals and runs
-        quantecon.optimize.brent_max on each. Returns the
-        global best. More robust than golden section for
-        non-smooth objectives with -inf regions.
-        """
+    def _section_max_brent(obj, lo, hi, args, n_sections=2, xtol=1e-6):
+        """Multi-section Brent maximisation (quantecon.optimize.brent_max)."""
         if hi - lo < xtol:
             return lo, obj(lo, *args)
 
@@ -136,6 +132,50 @@ def _make_negm_adjuster(callables, grids, stage):
 
         return x_opts[best_idx], best_val
 
+    @njit
+    def _obj_interior_neg(h_prime, wealth, i_z, V_cntn, keeper_c_iz):
+        return -_obj_interior(h_prime, wealth, i_z, V_cntn, keeper_c_iz)
+
+    @njit
+    def _obj_boundary_neg(h_prime, wealth, i_z, V_cntn, keeper_c_iz):
+        return -_obj_boundary(h_prime, wealth, i_z, V_cntn, keeper_c_iz)
+
+    @njit
+    def _section_max_gs(obj, obj_neg, lo, hi, args, n_sections=2, xtol=1e-6):
+        """Multi-section golden section (consav.golden_section_search)."""
+        if hi - lo < xtol:
+            return lo, obj(lo, *args)
+
+        x_opts = np.zeros(n_sections)
+        vals = np.full(n_sections, -1e250)
+
+        section_w = (hi - lo) / n_sections
+        for i in range(n_sections):
+            s_lo = lo + i * section_w
+            s_hi = lo + (i + 1) * section_w
+            if s_hi - s_lo < xtol:
+                continue
+            x_opt = golden_section_search.optimizer(
+                obj_neg, s_lo, s_hi, args=args, tol=xtol)
+            x_opts[i] = x_opt
+            vals[i] = obj(x_opt, *args)
+
+        best_idx = 0
+        best_val = vals[0]
+        for i in range(1, n_sections):
+            if vals[i] > best_val:
+                best_val = vals[i]
+                best_idx = i
+
+        if best_val < -1e200:
+            mid = (lo + hi) / 2.0
+            return mid, obj(mid, *args)
+
+        return x_opts[best_idx], best_val
+
+    # Select optimizer based on settings
+    use_golden_section = (negm_optimizer == 'golden_section')
+
     def dcsn_mover(vlu_cntn, grids):
         V_cntn = vlu_cntn["V"]
         we_grid = grids["we"]
@@ -162,13 +202,20 @@ def _make_negm_adjuster(callables, grids, stage):
 
                 args = (wealth, iz, V_cntn, keeper_c[iz])
 
-                h_star, v_star = _section_max(
-                    _obj_interior,
-                    h_lo, h_hi, args, n_sections=n_sections, xtol=1e-6)
-
-                h_bound, v_bound = _section_max(
-                    _obj_boundary,
-                    h_lo, h_hi, args, n_sections=n_sections, xtol=1e-6)
+                if use_golden_section:
+                    h_star, v_star = _section_max_gs(
+                        _obj_interior, _obj_interior_neg,
+                        h_lo, h_hi, args, n_sections=n_sections, xtol=1e-6)
+                    h_bound, v_bound = _section_max_gs(
+                        _obj_boundary, _obj_boundary_neg,
+                        h_lo, h_hi, args, n_sections=n_sections, xtol=1e-6)
+                else:
+                    h_star, v_star = _section_max_brent(
+                        _obj_interior,
+                        h_lo, h_hi, args, n_sections=n_sections, xtol=1e-6)
+                    h_bound, v_bound = _section_max_brent(
+                        _obj_boundary,
+                        h_lo, h_hi, args, n_sections=n_sections, xtol=1e-6)
 
                 if v_bound > v_star:
                     h_opt = h_bound

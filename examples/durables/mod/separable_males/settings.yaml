@@ -63,4 +63,6 @@ settings:
   # NEGM: golden-section search intervals per h' optimisation.
   # Higher values improve accuracy. Alternatives include brentmax,
   # but may be slower.
-  n_sections: 5
+  # NEGM optimiser: brent_max (robust, default) or golden_section
+  # Eventually this moves to methods YAML as maximization scheme method
+  negm_optimizer: brent_max  n_sections: 5
