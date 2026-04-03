@@ -16,6 +16,11 @@ methods:
         settings:
           m_bar: m_bar
 
+      - scheme: maximization
+        method: !brent_max
+        settings:
+          n_sections: n_sections
+
   - on: dcsn_to_arvl_mover
     schemes:
       - scheme: interpolation

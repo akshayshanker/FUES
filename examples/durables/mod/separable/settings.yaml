@@ -60,7 +60,6 @@ settings:
   b: 1.0e-08
   normalisation: 1.0e-05
 
-  # NEGM optimiser: 'brent_max' (robust, default) or 'golden_section'
-  negm_optimizer: brent_max
-  # Number of search intervals per h' optimisation
+  # NEGM: number of search intervals per h' optimisation.
+  # Maximization method (brent_max vs golden_section) is in the methods YAML.
   n_sections: 5

@@ -43,7 +43,10 @@ def _make_negm_adjuster(callables, grids, stage):
     grid_max_A = float(sett["a_max"])
     grid_max_H = float(sett["h_max"])
     n_sections = int(sett.get("n_sections", 3))
-    negm_optimizer = str(sett.get("negm_optimizer", "brent_max"))
+
+    # Read maximization method from stage.methods (DDSL convention)
+    from ..solve import read_scheme_method
+    negm_optimizer = read_scheme_method(stage, 'maximization', default='brent_max')
     UGgrid_all = grids["UGgrid_all"]
 
     u_fn = adj["u"]
