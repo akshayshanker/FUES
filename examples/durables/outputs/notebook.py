@@ -111,7 +111,7 @@ def build_comparison_row(method, results, euler_results):
 
     # CE utility + mean aggregates (denormalised)
     _st = results[method]['nest']['periods'][0]['stages']['keeper_cons']
-    rho = float(_st.calibration.get('rho', 2.0))
+    rho = float(_st.calibration.get('gamma_c', _st.calibration.get('rho', 2.0)))
     norm = 1.0 / float(_st.settings['normalisation'])
     row['CE Utility'] = ce_utility(sd['npv_utility'], rho) * norm
     row['Mean Consumption'] = np.nanmean(sd['c']) * norm

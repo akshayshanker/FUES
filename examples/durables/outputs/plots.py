@@ -620,18 +620,22 @@ def nb_plot_adjuster_egm(nest, grids, plot_t=None, i_z=0, xlim=14,
     else:
         v_pts = None
 
-    # y-axis cap for value from refined envelope
+    # CE risk-aversion parameter: gamma_c (separable) or rho (Cobb-Douglas)
+    _cal0 = nest['periods'][0]['stages']['keeper_cons'].calibration
+    _ce_rho = float(_cal0.get('gamma_c', _cal0.get('rho', 2.0)))
+
+    # y-axis cap for CE panel from refined envelope (CE-transformed, not raw V)
     v_ymin = v_ymax = None
     if has_refined and refined[i_z].get('vf') is not None:
         rf = refined[i_z]
         env_mask = rf['m_endog'] <= xlim
         if np.any(env_mask):
-            vf_vis = rf['vf'][env_mask]
-            vf_finite = vf_vis[np.isfinite(vf_vis)]
-            if len(vf_finite) > 0:
-                span = vf_finite.max() - vf_finite.min()
-                v_ymin = vf_finite.min() - 0.1 * span
-                v_ymax = vf_finite.max() + 0.05 * span
+            ce_vis = _ce_transform(rf['vf'][env_mask], _ce_rho)
+            ce_finite = ce_vis[np.isfinite(ce_vis) & (ce_vis > 0)]
+            if len(ce_finite) > 0:
+                span = ce_finite.max() - ce_finite.min()
+                v_ymin = ce_finite.min() - 0.1 * span
+                v_ymax = ce_finite.max() + 0.05 * span
 
     if v_pts is None:
         print('Note: v_endog not stored — re-run solve to get the value EGM grid.')
@@ -682,9 +686,7 @@ def nb_plot_adjuster_egm(nest, grids, plot_t=None, i_z=0, xlim=14,
 
     # Panel 3: CE value (raw + refined)
     if v_pts is not None:
-        _rho = float(nest['periods'][0]['stages'][
-            'keeper_cons'].calibration.get('rho', 2.0))
-        ce_raw = _ce_transform(v_pts, _rho)
+        ce_raw = _ce_transform(v_pts, _ce_rho)
         ce_mask = np.isfinite(ce_raw) & (ce_raw > 0)
         ax = axes[2]
         ax.scatter(m_pts[ce_mask], ce_raw[ce_mask], s=3,
@@ -693,7 +695,7 @@ def nb_plot_adjuster_egm(nest, grids, plot_t=None, i_z=0, xlim=14,
                    edgecolors='none')
         if has_refined and refined[i_z].get('vf') is not None:
             rf = refined[i_z]
-            ce_ref = _ce_transform(rf['vf'], _rho)
+            ce_ref = _ce_transform(rf['vf'], _ce_rho)
             sidx = np.argsort(rf['m_endog'])
             ax.plot(rf['m_endog'][sidx], ce_ref[sidx],
                     color=t['accent'], linewidth=1.3,
@@ -888,9 +890,9 @@ def nb_plot_value_functions(results, grids, plot_t, i_z=0, i_h=None,
     colors = {'FUES': t['accent'], 'NEGM': t['accent2']}
     labels = _METHOD_LABELS
 
-    # Read rho from calibration
+    # CE risk-aversion: gamma_c (separable) or rho (Cobb-Douglas)
     _st = results[methods[0]]['nest']['periods'][0]['stages']['keeper_cons']
-    rho = float(_st.calibration.get('rho', 2.0))
+    rho = float(_st.calibration.get('gamma_c', _st.calibration.get('rho', 2.0)))
 
     fig, axes = plt.subplots(1, 2, figsize=(10, 4))
 
@@ -1059,8 +1061,8 @@ def nb_plot_adjuster_egm_interactive(nest, grids, plot_t=None, i_z=0, xlim=14):
 
     # CE value: raw + refined
     if v_pts is not None:
-        _rho = float(nest['periods'][0]['stages'][
-            'keeper_cons'].calibration.get('rho', 2.0))
+        _cal = nest['periods'][0]['stages']['keeper_cons'].calibration
+        _rho = float(_cal.get('gamma_c', _cal.get('rho', 2.0)))
         ce_raw = _ce_transform(v_pts, _rho)
         ce_mask = np.isfinite(ce_raw) & (ce_raw > 0)
         ce_rf = _ce_transform(rf_v, _rho) if rf_v is not None else None
@@ -1075,7 +1077,7 @@ def nb_plot_adjuster_egm_interactive(nest, grids, plot_t=None, i_z=0, xlim=14):
         we_grid = grids['we']
         v_adj = sol['adjuster_cons']['dcsn']['V'][i_z]
         _st = nest['periods'][0]['stages']['keeper_cons']
-        rho = float(_st.calibration.get('rho', 2.0))
+        rho = float(_st.calibration.get('gamma_c', _st.calibration.get('rho', 2.0)))
         ce_adj = _ce_transform(v_adj, rho)
         mask_w = we_grid <= xlim
         fig_v = go.Figure()
