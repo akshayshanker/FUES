@@ -274,6 +274,12 @@ def _make_egm_adjuster(callables, grids, stage):
     a_no_double = bool(int(sett.get("adj_no_double_jumps", 1)))
     a_single_inter = bool(int(sett.get("adj_single_intersection", 1)))
     a_disable_jumps = bool(int(sett.get("adj_disable_jump_checks", 1)))
+    fues_eps_d = float(sett.get("fues_eps_d", _FUES_EPS_D))
+    fues_eps_sep = float(sett.get("fues_eps_sep", _FUES_EPS_SEP))
+    fues_eps_fwd_back = float(sett.get("fues_eps_fwd_back", 0.05))
+    fues_parallel_guard = float(sett.get("fues_parallel_guard", _FUES_PAR_GUARD))
+    extrap = bool(int(sett.get("extrap_policy", 1)))
+    correct_jumps = bool(int(sett.get("correct_jumps", 1)))
     grid_max_A = float(sett["a_max"])
     grid_max_H = float(sett["h_max"])
     return_grids = cal.get("return_grids", False)
@@ -559,8 +565,8 @@ def _make_egm_adjuster(callables, grids, stage):
                 a_no_double,
                 a_single_inter,
                 a_disable_jumps,
-                _FUES_EPS_D, _FUES_EPS_SEP, 0.05,
-                _FUES_PAR_GUARD,
+                fues_eps_d, fues_eps_sep, fues_eps_fwd_back,
+                fues_parallel_guard,
             )
 
             refined[iz] = {
@@ -573,21 +579,22 @@ def _make_egm_adjuster(callables, grids, stage):
             c_clean = m_clean - h_clean * fac_housing - a_clean
 
             a_nxt[iz] = clamp_policy(
-                interp_as(m_clean, a_clean, m_grid, extrap=True),
+                interp_as(m_clean, a_clean, m_grid, extrap=extrap),
                 b, grid_max_A * 2)
             h_choice_out[iz] = clamp_policy(
-                interp_as(m_clean, h_clean, m_grid, extrap=True),
+                interp_as(m_clean, h_clean, m_grid, extrap=extrap),
                 b, grid_max_H * 2)
             V[iz] = clamp_value(
-                interp_as(m_clean, v_clean, m_grid, extrap=True))
+                interp_as(m_clean, v_clean, m_grid, extrap=extrap))
             c[iz] = clamp_policy(
-                interp_as(m_clean, c_clean, m_grid, extrap=True),
+                interp_as(m_clean, c_clean, m_grid, extrap=extrap),
                 1e-10, 1e10)
 
-            c[iz], V[iz], h_choice_out[iz], a_nxt[iz] = correct_jumps1d_arr(
-                c[iz], m_grid, m_bar,
-                V[iz], h_choice_out[iz], a_nxt[iz],
-            )
+            if correct_jumps:
+                c[iz], V[iz], h_choice_out[iz], a_nxt[iz] = correct_jumps1d_arr(
+                    c[iz], m_grid, m_bar,
+                    V[iz], h_choice_out[iz], a_nxt[iz],
+                )
 
         return a_nxt, c, h_choice_out, V, refined
 
@@ -842,6 +849,7 @@ def make_adjuster_forward(C_adj_t, H_adj_t, callables, grids, stage):
     b = float(sett["b"])
     gA = float(sett["a_max"])
     gH = float(sett["h_max"])
+    _extrap = bool(int(sett.get("extrap_policy", 1)))
 
     def arvl_to_dcsn(particles, shocks):
         return particles
@@ -853,8 +861,8 @@ def make_adjuster_forward(C_adj_t, H_adj_t, callables, grids, stage):
         c = np.empty(N)
         h_choice = np.empty(N)
         for i in range(N):
-            ci = interp_as_scalar(we_grid, C_adj_t[int(z_idx[i])], w[i])
-            hi = interp_as_scalar(we_grid, H_adj_t[int(z_idx[i])], w[i])
+            ci = interp_as_scalar(we_grid, C_adj_t[int(z_idx[i])], w[i], extrap=_extrap)
+            hi = interp_as_scalar(we_grid, H_adj_t[int(z_idx[i])], w[i], extrap=_extrap)
             c[i] = max(ci, 1e-10)
             h_choice[i] = max(hi, 1e-10)
         return {'c': c, 'h_choice': h_choice}

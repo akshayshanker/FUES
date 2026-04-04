@@ -42,6 +42,10 @@ def _tenure_dcsn_kernel(
     dVw_adj,
     UGgrid_all,
     b,
+    grid_max_A,
+    grid_max_H,
+    extrap_flag,
+    xto_mode,
     age,
     g_keep_w,
     g_adj_w,
@@ -70,7 +74,7 @@ def _tenure_dcsn_kernel(
                 h = h_grid[ih]
 
                 v_k = _tenure_clamp_scalar(
-                    interp_as_scalar(a_grid, Vkeeper[iz, :, ih], w_k, extrap=True),
+                    interp_as_scalar(a_grid, Vkeeper[iz, :, ih], w_k, extrap=extrap_flag),
                     -1e10,
                     1e10,
                     -1e10,
@@ -78,15 +82,15 @@ def _tenure_dcsn_kernel(
 
                 w_adj = g_adj_w(a, h, z, age)
                 a_a = _tenure_clamp_scalar(
-                    interp_as_scalar(we_grid, Aadj[iz], w_adj, extrap=True),
+                    interp_as_scalar(we_grid, Aadj[iz], w_adj, extrap=extrap_flag),
                     b,
-                    1e10,
+                    2.0 * grid_max_A,
                     b,
                 )
                 h_a = _tenure_clamp_scalar(
-                    interp_as_scalar(we_grid, Hadj[iz], w_adj, extrap=True),
+                    interp_as_scalar(we_grid, Hadj[iz], w_adj, extrap=extrap_flag),
                     b,
-                    1e10,
+                    2.0 * grid_max_H,
                     b,
                 )
                 c_a = _tenure_clamp_scalar(
@@ -96,20 +100,23 @@ def _tenure_dcsn_kernel(
                     1e-10,
                 )
                 pts = np.empty(2, dtype=np.float64)
-                pts[0] = a_a
-                pts[1] = h_a
+                pts[0] = min(max(a_a, b), 2.0 * grid_max_A)
+                pts[1] = min(max(h_a, b), 2.0 * grid_max_H)
+                Ev_raw = eval_linear(UGgrid_all, V_cntn[iz], pts, xto_mode)
+                if np.isnan(Ev_raw) or np.isinf(Ev_raw):
+                    Ev_raw = -1e10
                 v_a = bellman_obj_fn(
                     u_fn(c_a, h_a),
-                    eval_linear(UGgrid_all, V_cntn[iz], pts, xto.LINEAR),
+                    Ev_raw,
                 )
 
                 adj = 1.0 if v_a >= v_k else 0.0
                 V_out[iz, ia, ih] = adj * v_a + (1.0 - adj) * v_k
                 adj_out[iz, ia, ih] = adj
 
-                dvw_k = interp_as_scalar(a_grid, dVw_keeper[iz, :, ih], w_k, extrap=True)
-                dvw_a = interp_as_scalar(we_grid, dVw_adj[iz], w_adj, extrap=True)
-                pk = interp_as_scalar(a_grid, phi_keeper[iz, :, ih], w_k, extrap=True)
+                dvw_k = interp_as_scalar(a_grid, dVw_keeper[iz, :, ih], w_k, extrap=extrap_flag)
+                dvw_a = interp_as_scalar(we_grid, dVw_adj[iz], w_adj, extrap=extrap_flag)
+                pk = interp_as_scalar(a_grid, phi_keeper[iz, :, ih], w_k, extrap=extrap_flag)
 
                 dV_a_out[iz, ia, ih] = marginal_a_fn(
                     adj * dvw_a + (1.0 - adj) * dvw_k
@@ -175,7 +182,12 @@ def make_tenure_ops(callables, grids, stage,
     """
     tenure = callables["tenure"]
     income_transitions = tenure["transitions"]
-    b = float(stage.calibration["b"])
+    sett = stage.settings
+    b = float(sett["b"])
+    grid_max_A = float(sett["a_max"])
+    grid_max_H = float(sett["h_max"])
+    extrap = bool(int(sett.get("extrap_policy", 1)))
+    _xto_mode = xto.LINEAR if extrap else xto.CONSTANT
     u_fn = tenure["u"]
     bellman_obj_fn = tenure["bellman_obj"]
     housing_cost_fn = tenure["housing_cost"]
@@ -222,6 +234,10 @@ def make_tenure_ops(callables, grids, stage,
             dVw_adj,
             UGgrid_all,
             b,
+            grid_max_A,
+            grid_max_H,
+            extrap,
+            _xto_mode,
             float(age),
             g_keep_w,
             g_adj_w,

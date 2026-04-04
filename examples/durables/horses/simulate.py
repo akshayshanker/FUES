@@ -38,26 +38,28 @@ def _base_stage(nest):
 # in horses/ compose into vectorised stage callables.
 # ------------------------------------------------------------------
 
-def _eval_adj(a, h, iz, adj_t, UG):
+def _eval_adj(a, h, iz, adj_t, UG, xto_mode):
     """Interpolate tenure discrete choice at (a, h)."""
     pt = np.array([a, h])
-    adj_val = eval_linear(UG, adj_t[iz], pt, xto.LINEAR)
+    adj_val = eval_linear(UG, adj_t[iz], pt, xto_mode)
     return int(min(max(round(adj_val), 0), 1))
 
 
-def _eval_keeper_c(w, h, iz, C_t, UG):
+def _eval_keeper_c(w, h, iz, C_t, UG, xto_mode):
     """Interpolate keeper consumption at (w, h)."""
     pt = np.array([w, h])
-    c = eval_linear(UG, C_t[iz], pt, xto.LINEAR)
+    c = eval_linear(UG, C_t[iz], pt, xto_mode)
     return max(c, 1e-10)
 
 
 def keeper_euler(c, a_nxt, h_nxt, iz,
-                 edata_next, grids, callables):
+                 edata_next, grids, callables, xto_mode=None):
     """Keeper consumption Euler error (scalar, one agent).
 
     FOC: du_c(c) = E_z'[beta * R * du_c(c')]
     """
+    if xto_mode is None:
+        xto_mode = xto.LINEAR
     du_c = callables['keeper_cons']['d_c_u']
     euler_error_c = callables['keeper_cons']['euler_error_c']
     marginal_a = callables['tenure']['marginalBellman_d_a']
@@ -66,6 +68,7 @@ def keeper_euler(c, a_nxt, h_nxt, iz,
     UG = grids['UGgrid_all']
     we_grid = grids['we']
     n_z = len(z_vals)
+    _extrap = (xto_mode == xto.LINEAR)
 
     income_trans_next = edata_next['income_trans']
     age_next = edata_next['age']
@@ -77,30 +80,32 @@ def keeper_euler(c, a_nxt, h_nxt, iz,
     for iz2 in range(n_z):
         prob = Pi[iz, iz2]
         z2 = z_vals[iz2]
-        d2 = _eval_adj(a_nxt, h_nxt, iz2, adj_next, UG)
+        d2 = _eval_adj(a_nxt, h_nxt, iz2, adj_next, UG, xto_mode)
         if d2 == 1:
             w2 = income_trans_next['adj_w'](a_nxt, h_nxt, z2, age_next)
-            c2 = max(interp_as_scalar(we_grid, C_adj_next[iz2], w2), 1e-10)
+            c2 = max(interp_as_scalar(we_grid, C_adj_next[iz2], w2, extrap=_extrap), 1e-10)
         else:
             w2 = income_trans_next['keep_w'](a_nxt, z2, age_next)
-            c2 = _eval_keeper_c(w2, h_nxt, iz2, C_keep_next, UG)
+            c2 = _eval_keeper_c(w2, h_nxt, iz2, C_keep_next, UG, xto_mode)
         rhs += prob * marginal_a(du_c(max(c2, 1e-10), h_nxt))
 
     return euler_error_c(c, rhs, h_nxt)
 
 
 def adjuster_euler(c, h_nxt, a_nxt, iz,
-                   edata_next, grids, callables):
+                   edata_next, grids, callables, xto_mode=None):
     """Adjuster housing Euler error (scalar, one agent).
 
     InvEuler FOC2 (adjuster_cons): lhs matches invEuler_foc_h_rhs.
     """
+    if xto_mode is None:
+        xto_mode = xto.LINEAR
     euler_error_h = callables['adjuster_cons']['euler_error_h']
     UG = grids['UGgrid_all']
 
     d_hV_arvl = edata_next['d_hV_arvl']
     pt = np.array([a_nxt, h_nxt])
-    phi = eval_linear(UG, d_hV_arvl[iz], pt, xto.LINEAR)
+    phi = eval_linear(UG, d_hV_arvl[iz], pt, xto_mode)
     if np.isnan(phi) or np.isinf(phi):
         phi = 0.0
 
@@ -161,7 +166,11 @@ def evaluate_euler_c(sim_data, nest, grids):
     """Consumption Euler error for all agents (log10 relative), shape (T, N)."""
     T, N = sim_data['c'].shape
     cal = _base_stage(nest).calibration
+    sett = _base_stage(nest).settings
     t0 = int(cal["t0"])
+    sim_guard = float(sett.get("sim_guard", 1e-10))
+    _extrap = bool(int(sett.get("extrap_policy", 1)))
+    xto_mode = xto.LINEAR if _extrap else xto.CONSTANT
     euler_c = np.full((T, N), np.nan)
     sol_by_t = {sol['t']: sol for sol in nest['solutions']}
 
@@ -176,11 +185,12 @@ def evaluate_euler_c(sim_data, nest, grids):
             a_ti = sim_data['a_nxt'][t, i]
             h_ti = sim_data['h_nxt'][t, i]
             z_ti = int(sim_data['z_idx'][t, i])
-            if np.isnan(c_ti) or c_ti <= 0.1 or a_ti <= 0.1:
+            if (np.isnan(c_ti) or np.isnan(a_ti) or np.isnan(h_ti)
+                    or c_ti <= sim_guard or a_ti <= sim_guard):
                 continue
             euler_c[t, i] = keeper_euler(
                 c_ti, a_ti, h_ti, z_ti,
-                edata_next, grids, callables_t)
+                edata_next, grids, callables_t, xto_mode)
 
     return euler_c
 
@@ -189,7 +199,11 @@ def evaluate_euler_h(sim_data, nest, grids):
     """Housing FOC error for adjusters only (log10 relative), shape (T, N)."""
     T, N = sim_data['c'].shape
     cal = _base_stage(nest).calibration
+    sett = _base_stage(nest).settings
     t0 = int(cal["t0"])
+    sim_guard = float(sett.get("sim_guard", 1e-10))
+    _extrap = bool(int(sett.get("extrap_policy", 1)))
+    xto_mode = xto.LINEAR if _extrap else xto.CONSTANT
     euler_h = np.full((T, N), np.nan)
     sol_by_t = {sol['t']: sol for sol in nest['solutions']}
 
@@ -206,11 +220,12 @@ def evaluate_euler_h(sim_data, nest, grids):
             a_ti = sim_data['a_nxt'][t, i]
             h_ti = sim_data['h_nxt'][t, i]
             z_ti = int(sim_data['z_idx'][t, i])
-            if np.isnan(c_ti) or c_ti <= 0.1 or a_ti <= 0.1:
+            if (np.isnan(c_ti) or np.isnan(a_ti) or np.isnan(h_ti)
+                    or c_ti <= sim_guard or a_ti <= sim_guard):
                 continue
             euler_h[t, i] = adjuster_euler(
                 c_ti, h_ti, a_ti, z_ti,
-                edata_next, grids, callables_t)
+                edata_next, grids, callables_t, xto_mode)
 
     return euler_h
 
@@ -328,8 +343,13 @@ def _compute_utility_stats(sim_data, nest, callables):
     """NPV utility and per-branch period counts."""
     T, N = sim_data['a'].shape
     cal = _base_stage(nest).calibration
+    sett = _base_stage(nest).settings
     t0 = int(cal["t0"])
+    ce_burn_in = int(sett.get("ce_burn_in", 0))
+    t_ce_start = t0 + ce_burn_in
     beta = float(cal["beta"])
+    sim_guard = float(sett.get("sim_guard", 1e-10))
+    util_floor = float(sett.get("util_floor", -1e10))
     # chi is captured inside u_fn; if chi > 0, adjuster needs its own u_adj callable
     u_fn = callables['keeper_cons']['u']
 
@@ -339,16 +359,18 @@ def _compute_utility_stats(sim_data, nest, callables):
     n_adj = np.zeros(N, dtype=np.int64)
     n_keep = np.zeros(N, dtype=np.int64)
 
-    for t in range(t0, T):
-        discount = beta ** (t - t0)
+    for t in range(t_ce_start, T):
+        discount = beta ** (t - t_ce_start)
         for i in range(N):
             ci = sim_data['c'][t, i]
+            ai = sim_data['a_nxt'][t, i]
             hi = sim_data['h_nxt'][t, i]
             di = sim_data['discrete'][t, i]
-            if np.isnan(ci) or np.isnan(hi) or ci <= 0.1:
+            if (np.isnan(ci) or np.isnan(ai) or np.isnan(hi)
+                    or ci <= sim_guard or ai <= sim_guard):
                 continue
             util = u_fn(ci, hi)
-            if util > -1e10:
+            if util > util_floor:
                 npv[i] += discount * util
                 if di == 1:
                     npv_adj[i] += discount * util
@@ -405,8 +427,19 @@ def make_initial_particles(N, grids, nest, seed=42,
             a = np.full(N, 0.5)
             h = np.full(N, 0.5)
     else:
-        a = np.full(N, 0.5)
-        h = np.full(N, 0.5)
+        a_mean = 0.5
+        h_mean = 0.5
+        if dispersion > 0.0:
+            # Log-normal draws around the mean.
+            # E[X] = exp(mu + sigma^2/2) = mean  =>  mu = log(mean) - sigma^2/2
+            sig = dispersion
+            mu_a = np.log(a_mean) - 0.5 * sig ** 2
+            mu_h = np.log(h_mean) - 0.5 * sig ** 2
+            a = rng.lognormal(mu_a, sig, N)
+            h = rng.lognormal(mu_h, sig, N)
+        else:
+            a = np.full(N, a_mean)
+            h = np.full(N, h_mean)
 
     return {
         'a': np.clip(a, b, gA).astype(np.float64),

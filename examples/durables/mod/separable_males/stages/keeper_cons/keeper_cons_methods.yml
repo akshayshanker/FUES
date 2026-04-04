@@ -9,11 +9,14 @@ methods:
       - scheme: interpolation
         method: !Linear
         grid: endogenous
+        settings:
+          extrap_policy: extrap_policy
 
       - scheme: upper_envelope
         method: !FUES
         settings:
           m_bar: m_bar
+          extrap_policy: extrap_policy
 
   - on: dcsn_to_arvl_mover
     schemes:
@@ -23,3 +26,4 @@ methods:
         settings:
           orders: [n_a, n_h]
           bounds: [[a_min, a_max], [h_min, h_max]]
+          extrap_policy: extrap_policy

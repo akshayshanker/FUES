@@ -60,9 +60,8 @@ def _make_keeper_fast(callables, grids, stage):
     """
     keeper = callables["keeper_cons"]
     g_keep_h = callables["tenure"]["transitions"]["keep_h"]
-    cal = stage.calibration
     sett = stage.settings
-    b = float(cal["b"])
+    b = float(sett["b"])
     grid_max_A = float(sett["a_max"])
     m_bar = float(sett["m_bar"])
     d_c_u = keeper["d_c_u"]
@@ -83,6 +82,11 @@ def _make_keeper_fast(callables, grids, stage):
     k_no_double = bool(int(sett.get("keeper_no_double_jumps", 1)))
     k_single_inter = bool(int(sett.get("keeper_single_intersection", 0)))
     k_disable_jumps = bool(int(sett.get("keeper_disable_jump_checks", 0)))
+    fues_eps_d = float(sett.get("fues_eps_d", _FUES_EPS_D))
+    fues_eps_sep = float(sett.get("fues_eps_sep", _FUES_EPS_SEP))
+    fues_eps_fwd_back = float(sett.get("fues_eps_fwd_back", _FUES_EPS_FWD_BACK))
+    fues_parallel_guard = float(sett.get("fues_parallel_guard", _FUES_PAR_GUARD))
+    extrap = bool(int(sett.get("extrap_policy", 1)))
 
     @njit(parallel=True)
     def _keeper_fues_kernel(
@@ -103,6 +107,7 @@ def _make_keeper_fast(callables, grids, stage):
         eps_sep,
         eps_fwd_back,
         parallel_guard,
+        extrap_flag,
         Akeeper,
         Ckeeper,
         Vkeeper,
@@ -177,9 +182,9 @@ def _make_keeper_fast(callables, grids, stage):
                 parallel_guard,
             )
 
-            a_interp = interp_as(eg_ref, ac_ref, asset_grid_A, True)
-            c_interp = interp_as(eg_ref, c_ref, asset_grid_A, True)
-            v_interp = interp_as(eg_ref, vf_ref, asset_grid_A, True)
+            a_interp = interp_as(eg_ref, ac_ref, asset_grid_A, extrap_flag)
+            c_interp = interp_as(eg_ref, c_ref, asset_grid_A, extrap_flag)
+            v_interp = interp_as(eg_ref, vf_ref, asset_grid_A, extrap_flag)
 
             a_clamped = clamp_policy(a_interp, b_in, grid_max_A_in * 2)
             c_clamped = clamp_policy(c_interp, 1e-10, 1e10)
@@ -229,10 +234,11 @@ def _make_keeper_fast(callables, grids, stage):
             k_no_double,
             k_single_inter,
             k_disable_jumps,
-            _FUES_EPS_D,
-            _FUES_EPS_SEP,
-            _FUES_EPS_FWD_BACK,
-            _FUES_PAR_GUARD,
+            fues_eps_d,
+            fues_eps_sep,
+            fues_eps_fwd_back,
+            fues_parallel_guard,
+            extrap,
             Akeeper,
             Ckeeper,
             Vkeeper,
@@ -272,7 +278,7 @@ def _make_keeper_generic(callables, grids, stage):
     g_keep_h = callables["tenure"]["transitions"]["keep_h"]
     cal = stage.calibration
     sett = stage.settings
-    b = float(cal["b"])
+    b = float(sett["b"])
     grid_max_A = float(sett["a_max"])
     m_bar = float(sett["m_bar"])
     fues_lb = int(sett.get("fues_lb", 10))
@@ -283,6 +289,7 @@ def _make_keeper_generic(callables, grids, stage):
 
     from ..solve import read_scheme_method
     ue_method = read_scheme_method(stage, "upper_envelope")
+    extrap = bool(int(sett.get("extrap_policy", 1)))
 
     def _d_c_u_arr(c_arr, hk_val=0.0):
         """Vectorised marginal utility for EGM_UE (accepts arrays).
@@ -391,9 +398,9 @@ def _make_keeper_generic(callables, grids, stage):
                     cntn_m_endog[(iz, ih)] = eg_ref.copy()
 
                 # --- Interpolate to asset grid ---
-                a_interp = interp_as(eg_ref, a_ref, asset_grid_A, extrap=True)
-                c_interp = interp_as(eg_ref, c_ref, asset_grid_A, extrap=True)
-                v_interp = interp_as(eg_ref, vf_ref, asset_grid_A, extrap=True)
+                a_interp = interp_as(eg_ref, a_ref, asset_grid_A, extrap=extrap)
+                c_interp = interp_as(eg_ref, c_ref, asset_grid_A, extrap=extrap)
+                v_interp = interp_as(eg_ref, vf_ref, asset_grid_A, extrap=extrap)
 
                 a_clamped = clamp_policy(a_interp, b, grid_max_A * 2)
                 c_clamped = clamp_policy(c_interp, 1e-10, 1e10)
@@ -436,12 +443,14 @@ def make_keeper_forward(C_keep_t, callables, grids, stage):
     """
     from kikku.asva.simulate import StageForward
     from .simulate import _eval_keeper_c
+    from interpolation.splines import extrap_options as xto
 
     UG = grids["UGgrid_all"]
     sett = stage.settings
     b = float(sett["b"])
     gA = float(sett["a_max"])
     gH = float(sett["h_max"])
+    _xto_mode = xto.LINEAR if bool(int(sett.get("extrap_policy", 1))) else xto.CONSTANT
 
     def arvl_to_dcsn(particles, shocks):
         return particles
@@ -454,7 +463,7 @@ def make_keeper_forward(C_keep_t, callables, grids, stage):
         c = np.empty(N)
         for i in range(N):
             c[i] = _eval_keeper_c(w[i], h[i], int(z_idx[i]),
-                                  C_keep_t, UG)
+                                  C_keep_t, UG, _xto_mode)
         return {"c": c}
 
     def dcsn_to_cntn(particles, controls, shocks):

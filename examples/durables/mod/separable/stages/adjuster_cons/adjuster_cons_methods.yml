@@ -10,11 +10,14 @@ methods:
       - scheme: interpolation
         method: !Linear
         grid: endogenous
+        settings:
+          extrap_policy: extrap_policy
 
       - scheme: upper_envelope
         method: !FUES
         settings:
           m_bar: m_bar
+          extrap_policy: extrap_policy
 
       # Maximization scheme: only used when bellman_backward is overridden
       # to NEGM (VFI). EGM bypasses maximization entirely.
@@ -31,3 +34,4 @@ methods:
         settings:
           orders: [n_w]
           bounds: [[w_min, w_max]]
+          extrap_policy: extrap_policy

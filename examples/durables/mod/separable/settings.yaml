@@ -5,27 +5,31 @@ settings:
 
   # Financial asset grid
   n_a: 300
-  a_min: 1.0e-08
+  a_min: 1.0e-05
   a_max: 7.5
 
   # Housing asset grid
   n_h: 300
-  h_min: 1.0e-08
-  h_max: 15.0
+  h_min: 1.0e-05
+  h_max: 10.0
 
   # Total wealth grid (adjuster)
   n_w: 300
-  w_min: 1.0e-08
-  w_max: 22.5
+  w_min: 1.0e-05
+  w_max: 17.0
 
   # FUES upper envelope
   m_bar: 1.01
-  fues_lb: 10
+  fues_lb: 5
+  fues_eps_d: 1.0e-05
+  fues_eps_sep: 1.0e-05
+  fues_eps_fwd_back: 0.05
+  fues_parallel_guard: 1.0e-07
 
   # FUES intersection options (keeper)
-  keeper_include_intersections: 1
+  keeper_include_intersections: 0
   keeper_no_double_jumps: 1
-  keeper_single_intersection: 0
+  keeper_single_intersection: 1
   keeper_disable_jump_checks: 0
 
   # FUES intersection options (adjuster)
@@ -33,6 +37,10 @@ settings:
   adj_no_double_jumps: 1
   adj_single_intersection: 1
   adj_disable_jump_checks: 1
+
+  # Post-FUES jump correction: average policies at detected jumps.
+  # 0 = off (preserves envelope at discrete-choice boundaries)
+  correct_jumps: 0
 
   # Adjuster EGM root scan: 0 = full grid (exact), >0 = coarse step size
   root_eps: 0.0
@@ -57,8 +65,20 @@ settings:
   # JIT warmup periods to skip when reporting timing averages
   warmup_periods: 3
 
-  b: 1.0e-08
+  b: 1.0e-05
   normalisation: 1.0e-05
+
+  # Simulation guard: skip agent-periods with c or a below this threshold
+  # when computing Euler errors and NPV utility. Old default was 0.1;
+  # lowered to 1e-10 to avoid discarding legitimate low-consumption states.
+  extrap_policy: 0
+
+  sim_guard: 1.0e-03
+  util_floor: -1.0e10
+
+  # CE burn-in: skip this many periods from t0 before accumulating NPV utility.
+  # Lets agents spread out from identical initial conditions before measuring welfare.
+  ce_burn_in: 5
 
   # NEGM: number of search intervals per h' optimisation.
   # Maximization method (brent_max vs golden_section) is in the methods YAML.

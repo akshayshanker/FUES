@@ -34,10 +34,11 @@ UCGrid = _splines.UCGrid
 
 def make_grids(calibration, settings):
     """Construct all grids from calibration + YAML settings dicts."""
-    b = float(calibration.get("b", 1e-8))
+    b = float(settings.get("b", calibration.get("b", 1e-8)))
     grid_max_A = float(settings.get("a_max", 50.0))
     grid_max_H = float(settings.get("h_max", 50.0))
     grid_max_WE = float(settings.get("w_max", 100.0))
+    w_min = float(settings.get("w_min", b))
     n_a = int(settings.get("n_a", 50))
     n_h = int(settings.get("n_h", 50))
     n_w = int(settings.get("n_w", 50))
@@ -56,7 +57,7 @@ def make_grids(calibration, settings):
     asset_grid_A = np.linspace(b, np.float64(grid_max_A), n_a)
     asset_grid_H = np.linspace(b, np.float64(grid_max_H), n_h)
     asset_grid_HE = np.linspace(b, np.float64(grid_max_H), n_h)
-    asset_grid_WE = np.linspace(b, np.float64(grid_max_WE), n_w)
+    asset_grid_WE = np.linspace(w_min, np.float64(grid_max_WE), n_w)
 
     UGgrid_all = UCGrid((b, grid_max_A, n_a), (b, grid_max_H, n_h))
 
