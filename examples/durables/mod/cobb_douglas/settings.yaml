@@ -21,7 +21,7 @@ settings:
   # FUES upper envelope
   m_bar: 1.01
   fues_lb: 5
-  fues_eps_d: 1.0e-08
+  fues_eps_d: 1.0e-05
   fues_eps_sep: 1.0e-05
   fues_eps_fwd_back: 0.05
   fues_parallel_guard: 1.0e-07
@@ -75,7 +75,7 @@ settings:
 
   sim_guard: 1.0e-03
   util_floor: -1.0e10
-  ce_burn_in: 5
+  ce_burn_in: 10
 
   # NEGM: golden-section search intervals per h' optimisation.
   # Higher values improve accuracy. Alternatives include brentmax,

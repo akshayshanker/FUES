@@ -584,11 +584,11 @@ def _make_egm_adjuster(callables, grids, stage):
             h_choice_out[iz] = clamp_policy(
                 interp_as(m_clean, h_clean, m_grid, extrap=extrap),
                 b, grid_max_H * 2)
-            V[iz] = clamp_value(
-                interp_as(m_clean, v_clean, m_grid, extrap=extrap))
             c[iz] = clamp_policy(
                 interp_as(m_clean, c_clean, m_grid, extrap=extrap),
                 1e-10, 1e10)
+            V[iz] = clamp_value(
+                interp_as(m_clean, v_clean, m_grid, extrap=extrap))
 
             if correct_jumps:
                 c[iz], V[iz], h_choice_out[iz], a_nxt[iz] = correct_jumps1d_arr(
