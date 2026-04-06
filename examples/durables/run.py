@@ -29,7 +29,7 @@ from kikku.run import parse_run
 from kikku.run.sweep import param_grid, sweep
 from kikku.run.metrics import format_table, write_table
 
-from .solve import solve_block as solve, read_scheme_method, METHOD_SHORTCUT
+from .solve import solve, read_scheme_method, METHOD_SHORTCUT
 
 
 def _build_method_overrides(method=None, method_overrides=None):
