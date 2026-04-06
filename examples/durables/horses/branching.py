@@ -7,9 +7,8 @@ arvl_mover: E_z conditioning.
 
 import numpy as np
 from numba import njit
-from interpolation.splines import eval_linear
-from interpolation.splines import extrap_options as xto
 from dcsmm.fues.helpers.math_funcs import interp_as_scalar
+from consav.linear_interp import interp_2d
 
 
 @njit(cache=True)
@@ -41,12 +40,13 @@ def _tenure_dcsn_kernel(
     Hadj,
     Cadj,
     Ckeeper,
-    UGgrid_all,
+    a_grid_2d,
+    h_grid_2d,
     b,
     grid_max_A,
     grid_max_H,
+    clamp_fac,
     extrap_flag,
-    xto_mode,
     age,
     g_keep_w,
     g_adj_w,
@@ -86,13 +86,13 @@ def _tenure_dcsn_kernel(
                 a_a = _tenure_clamp_scalar(
                     interp_as_scalar(we_grid, Aadj[iz], w_adj, extrap=extrap_flag),
                     b,
-                    2.0 * grid_max_A,
+                    clamp_fac * grid_max_A,
                     b,
                 )
                 h_a = _tenure_clamp_scalar(
                     interp_as_scalar(we_grid, Hadj[iz], w_adj, extrap=extrap_flag),
                     b,
-                    2.0 * grid_max_H,
+                    clamp_fac * grid_max_H,
                     b,
                 )
                 c_a = _tenure_clamp_scalar(
@@ -101,10 +101,10 @@ def _tenure_dcsn_kernel(
                     1e10,
                     1e-10,
                 )
-                pts = np.empty(2, dtype=np.float64)
-                pts[0] = min(max(a_a, b), 2.0 * grid_max_A)
-                pts[1] = min(max(h_a, b), 2.0 * grid_max_H)
-                Ev_raw = eval_linear(UGgrid_all, V_cntn[iz], pts, xto_mode)
+                a_q = min(max(a_a, b), clamp_fac * grid_max_A)
+                h_q = min(max(h_a, b), clamp_fac * grid_max_H)
+                Ev_raw = interp_2d(
+                    a_grid_2d, h_grid_2d, V_cntn[iz], a_q, h_q)
                 if np.isnan(Ev_raw) or np.isinf(Ev_raw):
                     Ev_raw = -1e10
                 v_a = bellman_obj_fn(
@@ -141,15 +141,12 @@ def _tenure_dcsn_kernel(
 
 
 @njit(cache=True)
-def _branch_policy_adj_vals(UG, adj_t, a, h, z_idx):
+def _branch_policy_adj_vals(a_grid, h_grid, adj_t, a, h, z_idx, extrap):
     N = a.shape[0]
     out = np.empty(N, dtype=np.float64)
     for i in range(N):
-        pt = np.empty(2, dtype=np.float64)
-        pt[0] = a[i]
-        pt[1] = h[i]
         iz = int(z_idx[i])
-        out[i] = eval_linear(UG, adj_t[iz], pt, xto.LINEAR)
+        out[i] = interp_2d(a_grid, h_grid, adj_t[iz], a[i], h[i])
     return out
 
 
@@ -199,7 +196,7 @@ def make_tenure_ops(callables, grids, stage,
     grid_max_A = float(sett["a_max"])
     grid_max_H = float(sett["h_max"])
     extrap = bool(int(sett.get("extrap_policy", 1)))
-    _xto_mode = xto.LINEAR if extrap else xto.CONSTANT
+    clamp_fac = float(sett.get("clamp_max_factor", 2.0))
     u_fn = tenure["u"]
     du_c_fn = keeper["d_c_u"]
     bellman_obj_fn = tenure["bellman_obj"]
@@ -227,7 +224,6 @@ def make_tenure_ops(callables, grids, stage,
         z_vals = np.asarray(grids["z"], dtype=np.float64)
         a_grid = np.asarray(grids["a"], dtype=np.float64)
         we_grid = np.asarray(grids["we"], dtype=np.float64)
-        UGgrid_all = grids["UGgrid_all"]
         h_grid_loc = np.asarray(h_grid, dtype=np.float64)
 
         V = vlu_cntn["V"]
@@ -246,12 +242,13 @@ def make_tenure_ops(callables, grids, stage,
             Hadj,
             Cadj,
             Ckeeper,
-            UGgrid_all,
+            a_grid,
+            h_grid_loc,
             b,
             grid_max_A,
             grid_max_H,
+            clamp_fac,
             extrap,
-            _xto_mode,
             float(age),
             g_keep_w,
             g_adj_w,
@@ -287,7 +284,7 @@ def make_tenure_ops(callables, grids, stage,
 # Forward (simulation) operator
 # ------------------------------------------------------------------
 
-def make_tenure_forward(adj_t, callables, grids, age):
+def make_tenure_forward(adj_t, callables, grids, age, stage=None):
     """BranchingForward for the tenure stage.
 
     Composes: arvl_to_dcsn (identity) -> branch_policy (D interp)
@@ -297,8 +294,14 @@ def make_tenure_forward(adj_t, callables, grids, age):
     stages can map back to the full population.
     """
     from kikku.asva.simulate import BranchingForward
+    from interpolation.splines import extrap_options as xto
 
-    UG = grids["UGgrid_all"]
+    _a_grid = np.asarray(grids["a"], dtype=np.float64)
+    _h_grid = np.asarray(grids["h"], dtype=np.float64)
+    if stage is not None:
+        _extrap = bool(int(stage.settings.get("extrap_policy", 1)))
+    else:
+        _extrap = True
     income_trans_t = callables["tenure"]["transitions"]
     g_keep_h = income_trans_t["keep_h"]
     g_keep_w = income_trans_t["keep_w"]
@@ -314,7 +317,7 @@ def make_tenure_forward(adj_t, callables, grids, age):
         h = particles["h"]
         z_idx = particles["z_idx"]
         N = len(a)
-        adj_vals = _branch_policy_adj_vals(UG, adj_t, a, h, z_idx)
+        adj_vals = _branch_policy_adj_vals(_a_grid, _h_grid, adj_t, a, h, z_idx, _extrap)
         labels = np.empty(N, dtype="<U7")
         for i in range(N):
             av = adj_vals[i]

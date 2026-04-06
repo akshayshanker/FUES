@@ -223,11 +223,17 @@ def interp_as(xp, yp, x, extrap=False):
 
     x_lo, x_hi = xp[0], xp[-1]
 
-    # Extrapolation slopes
+    # Extrapolation slopes (capped to avoid wild extrapolation
+    # from steep edge intervals after FUES cleaning)
+    _MAX_EXTRAP_SLOPE = 1e8
     dx_left = xp[1] - xp[0]
     slope_left = (yp[1] - yp[0]) / dx_left if dx_left != 0.0 else 0.0
+    if abs(slope_left) > _MAX_EXTRAP_SLOPE:
+        slope_left = _MAX_EXTRAP_SLOPE if slope_left > 0 else -_MAX_EXTRAP_SLOPE
     dx_right = xp[-1] - xp[-2]
     slope_right = (yp[-1] - yp[-2]) / dx_right if dx_right != 0.0 else 0.0
+    if abs(slope_right) > _MAX_EXTRAP_SLOPE:
+        slope_right = _MAX_EXTRAP_SLOPE if slope_right > 0 else -_MAX_EXTRAP_SLOPE
 
     # Detect whether x is sorted (check first few + last)
     x_sorted = True
@@ -313,11 +319,15 @@ def interp_as_scalar(xp, yp, x, extrap=False):
     x_lo, x_hi = xp[0], xp[-1]
 
     # Left boundary/extrapolation
+    _MAX_EXTRAP_SLOPE = 1e8
     if x <= x_lo:
         if extrap:
             dx = xp[1] - xp[0]
             if dx != 0.0:
-                return float(yp[0] + (x - x_lo) * (yp[1] - yp[0]) / dx)
+                slope = (yp[1] - yp[0]) / dx
+                if abs(slope) > _MAX_EXTRAP_SLOPE:
+                    slope = _MAX_EXTRAP_SLOPE if slope > 0 else -_MAX_EXTRAP_SLOPE
+                return float(yp[0] + (x - x_lo) * slope)
         return float(yp[0])
 
     # Right boundary/extrapolation
@@ -325,7 +335,10 @@ def interp_as_scalar(xp, yp, x, extrap=False):
         if extrap:
             dx = xp[-1] - xp[-2]
             if dx != 0.0:
-                return float(yp[-1] + (x - x_hi) * (yp[-1] - yp[-2]) / dx)
+                slope = (yp[-1] - yp[-2]) / dx
+                if abs(slope) > _MAX_EXTRAP_SLOPE:
+                    slope = _MAX_EXTRAP_SLOPE if slope > 0 else -_MAX_EXTRAP_SLOPE
+                return float(yp[-1] + (x - x_hi) * slope)
         return float(yp[-1])
 
     # Binary search for interval: find j such that xp[j] <= x < xp[j+1]
@@ -343,6 +356,137 @@ def interp_as_scalar(xp, yp, x, extrap=False):
         t = (x - xp[lo]) / dx
         return float(yp[lo] + t * (yp[hi] - yp[lo]))
     return float(yp[lo])
+
+
+@njit(cache=True)
+def _interp_1d_binary(xp, yp, x, extrap):
+    """Core 1D interp (binary search, no slope cap). Internal helper."""
+    n = len(xp)
+    if n == 0:
+        return 0.0
+    if n == 1:
+        return float(yp[0])
+    if x <= xp[0]:
+        if extrap:
+            dx = xp[1] - xp[0]
+            if dx != 0.0:
+                return float(yp[0] + (x - xp[0]) * (yp[1] - yp[0]) / dx)
+        return float(yp[0])
+    if x >= xp[-1]:
+        if extrap:
+            dx = xp[-1] - xp[-2]
+            if dx != 0.0:
+                return float(yp[-1] + (x - xp[-1]) * (yp[-1] - yp[-2]) / dx)
+        return float(yp[-1])
+    lo, hi = 0, n - 1
+    while hi - lo > 1:
+        mid = (lo + hi) >> 1
+        if xp[mid] <= x:
+            lo = mid
+        else:
+            hi = mid
+    dx = xp[hi] - xp[lo]
+    if dx != 0.0:
+        t = (x - xp[lo]) / dx
+        return float(yp[lo] + t * (yp[hi] - yp[lo]))
+    return float(yp[lo])
+
+
+@njit(cache=True)
+def _bsearch(grid, x):
+    """Binary search: return (lo, t) where grid[lo] <= x < grid[lo+1], t in [0,1]."""
+    n = len(grid)
+    if x <= grid[0]:
+        return 0, 0.0
+    if x >= grid[-1]:
+        return n - 2, 1.0
+    lo, hi = 0, n - 1
+    while hi - lo > 1:
+        mid = (lo + hi) >> 1
+        if grid[mid] <= x:
+            lo = mid
+        else:
+            hi = mid
+    dx = grid[hi] - grid[lo]
+    t = (x - grid[lo]) / dx if dx != 0.0 else 0.0
+    return lo, t
+
+
+@njit(cache=True)
+def interp2d_nonuniform(a_grid, h_grid, Z, a_q, h_q, extrap=False):
+    """Bilinear interpolation on non-uniform rectilinear grid.
+
+    Two binary searches + four-corner bilinear.  O(log n_a + log n_h).
+
+    Parameters
+    ----------
+    a_grid : 1D array (n_a,)
+        First-axis grid (must be increasing).
+    h_grid : 1D array (n_h,)
+        Second-axis grid (must be increasing).
+    Z : 2D array (n_a, n_h)
+        Data on the grid.
+    a_q, h_q : float
+        Query point.
+    extrap : bool
+        If True, linearly extrapolate outside domain.
+        If False, clamp to boundary values.
+
+    Returns
+    -------
+    float
+        Interpolated value at (a_q, h_q).
+    """
+    n_a = len(a_grid)
+    n_h = len(h_grid)
+
+    if not extrap:
+        a_q = min(max(a_q, a_grid[0]), a_grid[-1])
+        h_q = min(max(h_q, h_grid[0]), h_grid[-1])
+
+    ia, ta = _bsearch(a_grid, a_q)
+    ih, th = _bsearch(h_grid, h_q)
+
+    # Clamp indices for safety
+    ia = min(ia, n_a - 2)
+    ih = min(ih, n_h - 2)
+
+    # Four-corner bilinear
+    z00 = Z[ia, ih]
+    z10 = Z[ia + 1, ih]
+    z01 = Z[ia, ih + 1]
+    z11 = Z[ia + 1, ih + 1]
+
+    val = (z00 * (1.0 - ta) * (1.0 - th)
+         + z10 * ta * (1.0 - th)
+         + z01 * (1.0 - ta) * th
+         + z11 * ta * th)
+
+    return val
+
+
+@njit(cache=True)
+def interp2d_nonuniform_vec(a_grid, h_grid, Z, pts, extrap=False):
+    """Vectorised bilinear interpolation on non-uniform rectilinear grid.
+
+    Parameters
+    ----------
+    a_grid : 1D array (n_a,)
+    h_grid : 1D array (n_h,)
+    Z : 2D array (n_a, n_h)
+    pts : 2D array (N, 2)
+        Query points, each row is (a, h).
+    extrap : bool
+
+    Returns
+    -------
+    1D array (N,)
+    """
+    N = pts.shape[0]
+    out = np.empty(N)
+    for i in range(N):
+        out[i] = interp2d_nonuniform(a_grid, h_grid, Z, pts[i, 0], pts[i, 1], extrap)
+    return out
 
 
 def upper_envelope(segments,  calc_crossings=False):

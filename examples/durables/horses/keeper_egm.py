@@ -87,6 +87,7 @@ def _make_keeper_fast(callables, grids, stage):
     fues_eps_fwd_back = float(sett.get("fues_eps_fwd_back", _FUES_EPS_FWD_BACK))
     fues_parallel_guard = float(sett.get("fues_parallel_guard", _FUES_PAR_GUARD))
     extrap = bool(int(sett.get("extrap_policy", 1)))
+    clamp_fac = float(sett.get("clamp_max_factor", 2.0))
 
     @njit(parallel=True)
     def _keeper_fues_kernel(
@@ -108,6 +109,7 @@ def _make_keeper_fast(callables, grids, stage):
         eps_fwd_back,
         parallel_guard,
         extrap_flag,
+        clamp_fac_in,
         Akeeper,
         Ckeeper,
         Vkeeper,
@@ -186,7 +188,7 @@ def _make_keeper_fast(callables, grids, stage):
             c_interp = interp_as(eg_ref, c_ref, asset_grid_A, extrap_flag)
             v_interp = interp_as(eg_ref, vf_ref, asset_grid_A, extrap_flag)
 
-            a_clamped = clamp_policy(a_interp, b_in, grid_max_A_in * 2)
+            a_clamped = clamp_policy(a_interp, b_in, grid_max_A_in * clamp_fac_in)
             c_clamped = clamp_policy(c_interp, 1e-10, 1e10)
             v_clamped = clamp_value(v_interp)
 
@@ -199,8 +201,8 @@ def _make_keeper_fast(callables, grids, stage):
             dv_h_slice = dV_h[iz, :, ih]
             for ia in range(n_a):
                 edvh = interp_as_scalar(
-                    asset_grid_A, dv_h_slice, Akeeper[iz, ia, ih]
-                )
+                    asset_grid_A, dv_h_slice, Akeeper[iz, ia, ih],
+                    extrap=extrap_flag)
                 phi_keep[iz, ia, ih] = d_h_u(c_clamped[ia], hk) + edvh
 
     def dcsn_mover(vlu_cntn, grids):
@@ -239,6 +241,7 @@ def _make_keeper_fast(callables, grids, stage):
             fues_eps_fwd_back,
             fues_parallel_guard,
             extrap,
+            clamp_fac,
             Akeeper,
             Ckeeper,
             Vkeeper,
@@ -290,6 +293,7 @@ def _make_keeper_generic(callables, grids, stage):
     from ..solve import read_scheme_method
     ue_method = read_scheme_method(stage, "upper_envelope")
     extrap = bool(int(sett.get("extrap_policy", 1)))
+    clamp_fac = float(sett.get("clamp_max_factor", 2.0))
 
     def _d_c_u_arr(c_arr, hk_val=0.0):
         """Vectorised marginal utility for EGM_UE (accepts arrays).
@@ -402,7 +406,7 @@ def _make_keeper_generic(callables, grids, stage):
                 c_interp = interp_as(eg_ref, c_ref, asset_grid_A, extrap=extrap)
                 v_interp = interp_as(eg_ref, vf_ref, asset_grid_A, extrap=extrap)
 
-                a_clamped = clamp_policy(a_interp, b, grid_max_A * 2)
+                a_clamped = clamp_policy(a_interp, b, grid_max_A * clamp_fac)
                 c_clamped = clamp_policy(c_interp, 1e-10, 1e10)
 
                 Akeeper[iz, :, ih] = a_clamped
@@ -415,7 +419,8 @@ def _make_keeper_generic(callables, grids, stage):
                 dv_h_slice = dV_h[iz, :, ih]
                 for ia in range(n_a):
                     edvh = interp_as_scalar(
-                        asset_grid_A, dv_h_slice, a_clamped[ia])
+                        asset_grid_A, dv_h_slice, a_clamped[ia],
+                        extrap=extrap)
                     phi_keep[iz, ia, ih] = d_h_u(c_clamped[ia], hk) + edvh
 
         cntn_data = None
@@ -443,14 +448,14 @@ def make_keeper_forward(C_keep_t, callables, grids, stage):
     """
     from kikku.asva.simulate import StageForward
     from .simulate import _eval_keeper_c
-    from interpolation.splines import extrap_options as xto
 
-    UG = grids["UGgrid_all"]
+    _a_grid = np.asarray(grids["a"], dtype=np.float64)
+    _h_grid = np.asarray(grids["h"], dtype=np.float64)
     sett = stage.settings
     b = float(sett["b"])
     gA = float(sett["a_max"])
     gH = float(sett["h_max"])
-    _xto_mode = xto.LINEAR if bool(int(sett.get("extrap_policy", 1))) else xto.CONSTANT
+    _extrap = bool(int(sett.get("extrap_policy", 1)))
 
     def arvl_to_dcsn(particles, shocks):
         return particles
@@ -463,7 +468,7 @@ def make_keeper_forward(C_keep_t, callables, grids, stage):
         c = np.empty(N)
         for i in range(N):
             c[i] = _eval_keeper_c(w[i], h[i], int(z_idx[i]),
-                                  C_keep_t, UG, _xto_mode)
+                                  C_keep_t, _a_grid, _h_grid)
         return {"c": c}
 
     def dcsn_to_cntn(particles, controls, shocks):

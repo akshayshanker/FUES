@@ -12,12 +12,14 @@ methods:
         grid: endogenous
         settings:
           extrap_policy: extrap_policy
+          clamp_max_factor: clamp_max_factor
 
       - scheme: upper_envelope
         method: !FUES
         settings:
           m_bar: m_bar
           extrap_policy: extrap_policy
+          clamp_max_factor: clamp_max_factor
 
       - scheme: maximization
         method: !brent_max
@@ -33,3 +35,4 @@ methods:
           orders: [n_w]
           bounds: [[w_min, w_max]]
           extrap_policy: extrap_policy
+          clamp_max_factor: clamp_max_factor

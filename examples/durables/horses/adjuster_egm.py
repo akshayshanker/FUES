@@ -27,7 +27,6 @@ from dcsmm.fues.helpers.math_funcs import (
     correct_jumps1d_arr,
 )
 from kikku.asva.numerics import clamp_value, clamp_policy
-from interpolation.splines import eval_linear
 from interpolation.splines import extrap_options as xto
 from quantecon.optimize.root_finding import brentq
 from quantecon.optimize import brent_max
@@ -43,11 +42,18 @@ def _make_negm_adjuster(callables, grids, stage):
     grid_max_A = float(sett["a_max"])
     grid_max_H = float(sett["h_max"])
     n_sections = int(sett.get("n_sections", 3))
+    clamp_fac = float(sett.get("clamp_max_factor", 2.0))
 
     # Read maximization method from stage.methods (DDSL convention)
     from ..solve import read_scheme_method
     negm_optimizer = read_scheme_method(stage, 'maximization', default='brent_max')
-    UGgrid_all = grids["UGgrid_all"]
+    from dcsmm.fues.helpers.math_funcs import interp2d_nonuniform
+    _a_grid_2d = np.array(grids["a"], dtype=np.float64).copy()
+    _h_grid_2d = np.array(grids["h"], dtype=np.float64).copy()
+
+    @njit
+    def interp_2d_nu(a_grid, h_grid, Z, a_q, h_q):
+        return interp2d_nonuniform(a_grid, h_grid, Z, a_q, h_q, True)
 
     u_fn = adj["u"]
     du_c_fn = adj["d_c_u"]
@@ -71,8 +77,8 @@ def _make_negm_adjuster(callables, grids, stage):
         if w_residual > grid_max_A:
             return -np.inf
 
-        pt = np.array([w_residual, h_prime])
-        c_keeper = eval_linear(UGgrid_all, keeper_c_iz, pt, xto.LINEAR)
+        c_keeper = interp_2d_nu(_a_grid_2d, _h_grid_2d, keeper_c_iz,
+                             w_residual, h_prime)
 
         if c_keeper <= 0 or c_keeper > w_residual:
             return -np.inf
@@ -81,8 +87,8 @@ def _make_negm_adjuster(callables, grids, stage):
         if a_prime > grid_max_A:
             return -np.inf
 
-        pt_v = np.array([a_prime, h_prime])
-        Ev = eval_linear(UGgrid_all, V_cntn[i_z], pt_v, xto.LINEAR)
+        Ev = interp_2d_nu(_a_grid_2d, _h_grid_2d, V_cntn[i_z],
+                       a_prime, h_prime)
 
         return bellman_obj(u_fn(c_keeper, h_prime), Ev)
 
@@ -97,8 +103,7 @@ def _make_negm_adjuster(callables, grids, stage):
         if c_val <= 0:
             return -np.inf
 
-        pt = np.array([b, h_prime])
-        Ev = eval_linear(UGgrid_all, V_cntn[i_z], pt, xto.LINEAR)
+        Ev = interp_2d_nu(_a_grid_2d, _h_grid_2d, V_cntn[i_z], b, h_prime)
 
         return bellman_obj(u_fn(c_val, h_prime), Ev)
 
@@ -197,13 +202,18 @@ def _make_negm_adjuster(callables, grids, stage):
         h_choice = np.empty((n_z, n_w))
         V = np.empty((n_z, n_w))
 
+        # Contiguous copies for consav.interp_2d numba compatibility
+        V_cntn_c = np.ascontiguousarray(V_cntn)
+        keeper_c_slices = [np.ascontiguousarray(keeper_c[iz]) for iz in range(n_z)]
+        keeper_a_slices = [np.ascontiguousarray(keeper_a[iz]) for iz in range(n_z)]
+
         for iw in range(n_w):
             wealth = we_grid[iw]
             for iz in range(n_z):
                 h_lo = b
                 h_hi = min((wealth - b) / fac_housing, grid_max_H)
 
-                args = (wealth, iz, V_cntn, keeper_c[iz])
+                args = (wealth, iz, V_cntn_c, keeper_c_slices[iz])
 
                 if use_golden_section:
                     h_star, v_star = _section_max_gs(
@@ -229,14 +239,13 @@ def _make_negm_adjuster(callables, grids, stage):
                 else:
                     h_opt = h_star
                     w_res = wealth - housing_cost(h_opt)
-                    pt = np.array([w_res, h_opt])
-                    a_val = eval_linear(
-                        UGgrid_all, keeper_a[iz], pt, xto.LINEAR)
-                    a_nxt[iz, iw] = min(max(a_val, b), grid_max_A * 2)
+                    a_val = interp_2d_nu(_a_grid_2d, _h_grid_2d, keeper_a_slices[iz],
+                                      w_res, h_opt)
+                    a_nxt[iz, iw] = min(max(a_val, b), grid_max_A * clamp_fac)
                     c[iz, iw] = max(1e-10, w_res - a_nxt[iz, iw])
                     V[iz, iw] = v_star
 
-                h_choice[iz, iw] = min(max(h_opt, b), grid_max_H * 2)
+                h_choice[iz, iw] = min(max(h_opt, b), grid_max_H * clamp_fac)
 
                 # Never leave -inf in the solution array
                 if np.isinf(V[iz, iw]) or np.isnan(V[iz, iw]):
@@ -284,6 +293,7 @@ def _make_egm_adjuster(callables, grids, stage):
     fues_parallel_guard = float(sett.get("fues_parallel_guard", _FUES_PAR_GUARD))
     extrap = bool(int(sett.get("extrap_policy", 1)))
     correct_jumps = bool(int(sett.get("correct_jumps", 1)))
+    clamp_fac = float(sett.get("clamp_max_factor", 2.0))
     grid_max_A = float(sett["a_max"])
     grid_max_H = float(sett["h_max"])
     return_grids = cal.get("return_grids", False)
@@ -584,15 +594,16 @@ def _make_egm_adjuster(callables, grids, stage):
 
             a_nxt[iz] = clamp_policy(
                 interp_as(m_clean, a_clean, m_grid, extrap=extrap),
-                b, grid_max_A * 2)
+                b, grid_max_A * clamp_fac)
             h_choice_out[iz] = clamp_policy(
                 interp_as(m_clean, h_clean, m_grid, extrap=extrap),
-                b, grid_max_H * 2)
+                b, grid_max_H * clamp_fac)
             c[iz] = clamp_policy(
                 interp_as(m_clean, c_clean, m_grid, extrap=extrap),
                 1e-10, 1e10)
             V[iz] = clamp_value(
                 interp_as(m_clean, v_clean, m_grid, extrap=extrap))
+
 
             if correct_jumps:
                 c[iz], V[iz], h_choice_out[iz], a_nxt[iz] = correct_jumps1d_arr(

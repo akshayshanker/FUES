@@ -39,6 +39,7 @@ settings:
   adj_disable_jump_checks: 1
 
   correct_jumps: 0
+  clamp_max_factor: 1.1
 
   # Adjuster EGM root scan: 0 = full grid (exact), >0 = coarse step size
   root_eps: 0.0

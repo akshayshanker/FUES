@@ -9,6 +9,19 @@ import quantecon as qe
 import interpolation.splines as _splines
 
 
+def nonlinspace(x_min, x_max, n, phi):
+    """Grid with denser points near x_min (Druedahl convention).
+
+    phi = 1.0: uniform (equivalent to linspace).
+    phi > 1.0: packs points near x_min.
+    """
+    y = np.empty(n)
+    y[0] = x_min
+    for i in range(1, n):
+        y[i] = y[i - 1] + (x_max - y[i - 1]) / (n - i) ** phi
+    return y
+
+
 # ============================================================
 # UCGrid patch (numba dtype assertion workaround)
 # ============================================================
@@ -35,16 +48,25 @@ UCGrid = _splines.UCGrid
 def make_grids(calibration, settings):
     """Construct all grids from calibration + YAML settings dicts."""
     b = float(settings.get("b", calibration.get("b", 1e-8)))
+    a_min = float(settings.get("a_min", b))
+    h_min = float(settings.get("h_min", b))
     grid_max_A = float(settings.get("a_max", 50.0))
     grid_max_H = float(settings.get("h_max", 50.0))
     grid_max_WE = float(settings.get("w_max", 100.0))
     _tau_adj = float(calibration.get("tau", 0.0))
-    _w_min_feasible = b * (2.0 + _tau_adj) + 1e-8
+    _R = float(calibration.get("R", 1.0))
+    _R_H = float(calibration.get("R_H", 1.0))
+    _delta = float(calibration.get("delta", 0.0))
+    # w_min must cover the minimum next-period adjuster wealth:
+    # R*a_min + R_H*(1-delta)*h_min + income_min
+    # Use b for a_min/h_min, income_min ≈ 0 (conservative).
+    _w_min_feasible = _R * a_min + _R_H * (1.0 - _delta) * h_min
     _w_min_setting = float(settings.get("w_min", b))
     w_min_WE = max(_w_min_setting, _w_min_feasible)
     n_a = int(settings.get("n_a", 50))
     n_h = int(settings.get("n_h", 50))
     n_w = int(settings.get("n_w", 50))
+    grid_phi = float(settings.get("grid_phi", 1.0))
 
     phi_w = float(calibration.get("phi_w", 0.917))
     sigma_w = float(calibration.get("sigma_w", 0.082))
@@ -57,12 +79,19 @@ def make_grids(calibration, settings):
     Pi = np.maximum(Pi, min_prob)
     Pi = Pi / Pi.sum(axis=1, keepdims=True)
 
-    asset_grid_A = np.linspace(b, np.float64(grid_max_A), n_a)
-    asset_grid_H = np.linspace(b, np.float64(grid_max_H), n_h)
-    asset_grid_HE = np.linspace(b, np.float64(grid_max_H), n_h)
-    asset_grid_WE = np.linspace(w_min_WE, np.float64(grid_max_WE), n_w)
+    if grid_phi == 1.0:
+        asset_grid_A = np.linspace(a_min, np.float64(grid_max_A), n_a)
+        asset_grid_H = np.linspace(h_min, np.float64(grid_max_H), n_h)
+        asset_grid_HE = np.linspace(h_min, np.float64(grid_max_H), n_h)
+        asset_grid_WE = np.linspace(w_min_WE, np.float64(grid_max_WE), n_w)
+    else:
+        asset_grid_A = nonlinspace(a_min, np.float64(grid_max_A), n_a, grid_phi)
+        asset_grid_H = nonlinspace(h_min, np.float64(grid_max_H), n_h, grid_phi)
+        asset_grid_HE = nonlinspace(h_min, np.float64(grid_max_H), n_h, grid_phi)
+        asset_grid_WE = nonlinspace(w_min_WE, np.float64(grid_max_WE), n_w, grid_phi)
 
-    UGgrid_all = UCGrid((b, grid_max_A, n_a), (b, grid_max_H, n_h))
+    # UCGrid kept for backward compat; interp2d_nonuniform uses raw grids
+    UGgrid_all = UCGrid((a_min, grid_max_A, n_a), (h_min, grid_max_H, n_h))
 
     return {
         "a": asset_grid_A,
