@@ -96,7 +96,7 @@ nav:
   - Examples:
     - Overview: examples/index.md
     - Retirement Choice: examples/retirement.md
-    - Durables: examples/housing.md
+    - Durables: examples/durables.md
     - Housing-Renting: examples/housing-renting.md
   - Notebooks:
     - Retirement Speed Benchmarks: notebooks/retirement_fues.ipynb
