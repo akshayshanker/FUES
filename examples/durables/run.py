@@ -515,7 +515,7 @@ def run_sweep(run):
     Returns list[dict] — flat results from sweep().
     """
     base_calib = dict(run.calib or {})
-    base_config = _solver_config(run)
+    _, _, base_config = _solve_overrides(run)
 
     if run.sweep_params:
         results, summaries = _run_sweep_params_path(
