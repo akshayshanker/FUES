@@ -528,8 +528,8 @@ def generate_cohort_table(sim_data, t0, T, norm, cohort_width=5):
             return '\u2014'
         return f'{v:,.2f}'
 
-    hdr = '| Age | $\\bar{c}$ | SD($c$) | $\\bar{a}$ | SD($a$) | $\\bar{H}$ | SD($H$) |'
-    sep = '|:---|---:|---:|---:|---:|---:|---:|'
+    hdr = '| Age | Mean c | SD c | Mean a | SD a | Mean H | SD H |'
+    sep = '| :--- | ---: | ---: | ---: | ---: | ---: | ---: |'
     lines = [hdr, sep]
     for r in rows:
         lines.append(
