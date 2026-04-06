@@ -39,7 +39,8 @@ def _tenure_dcsn_kernel(
     phi_keeper,
     Aadj,
     Hadj,
-    dVw_adj,
+    Cadj,
+    Ckeeper,
     UGgrid_all,
     b,
     grid_max_A,
@@ -50,6 +51,7 @@ def _tenure_dcsn_kernel(
     g_keep_w,
     g_adj_w,
     u_fn,
+    du_c_fn,
     bellman_obj_fn,
     housing_cost_fn,
     marginal_a_fn,
@@ -114,8 +116,17 @@ def _tenure_dcsn_kernel(
                 V_out[iz, ia, ih] = adj * v_a + (1.0 - adj) * v_k
                 adj_out[iz, ia, ih] = adj
 
-                dvw_k = interp_as_scalar(a_grid, dVw_keeper[iz, :, ih], w_k, extrap=extrap_flag)
-                dvw_a = interp_as_scalar(we_grid, dVw_adj[iz], w_adj, extrap=extrap_flag)
+                # Compute marginals from interpolated policies (more accurate
+                # than interpolating du_c directly, since c^(-gamma) is highly
+                # nonlinear).
+                c_k = interp_as_scalar(a_grid, Ckeeper[iz, :, ih], w_k, extrap=extrap_flag)
+                c_k = max(c_k, 1e-10)
+                dvw_k = du_c_fn(c_k, h_keep[ih])
+
+                c_adj = interp_as_scalar(we_grid, Cadj[iz], w_adj, extrap=extrap_flag)
+                c_adj = max(c_adj, 1e-10)
+                dvw_a = du_c_fn(c_adj, h_a)
+
                 pk = interp_as_scalar(a_grid, phi_keeper[iz, :, ih], w_k, extrap=extrap_flag)
 
                 dV_a_out[iz, ia, ih] = marginal_a_fn(
@@ -181,6 +192,7 @@ def make_tenure_ops(callables, grids, stage,
         E_z conditioning.
     """
     tenure = callables["tenure"]
+    keeper = callables["keeper_cons"]
     income_transitions = tenure["transitions"]
     sett = stage.settings
     b = float(sett["b"])
@@ -189,6 +201,7 @@ def make_tenure_ops(callables, grids, stage,
     extrap = bool(int(sett.get("extrap_policy", 1)))
     _xto_mode = xto.LINEAR if extrap else xto.CONSTANT
     u_fn = tenure["u"]
+    du_c_fn = keeper["d_c_u"]
     bellman_obj_fn = tenure["bellman_obj"]
     housing_cost_fn = tenure["housing_cost"]
     marginal_a_fn = tenure["marginalBellman_d_a"]
@@ -231,7 +244,8 @@ def make_tenure_ops(callables, grids, stage,
             phi_keeper,
             Aadj,
             Hadj,
-            dVw_adj,
+            Cadj,
+            Ckeeper,
             UGgrid_all,
             b,
             grid_max_A,
@@ -242,6 +256,7 @@ def make_tenure_ops(callables, grids, stage,
             g_keep_w,
             g_adj_w,
             u_fn,
+            du_c_fn,
             bellman_obj_fn,
             housing_cost_fn,
             marginal_a_fn,

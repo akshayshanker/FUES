@@ -201,25 +201,7 @@ def _make_negm_adjuster(callables, grids, stage):
             wealth = we_grid[iw]
             for iz in range(n_z):
                 h_lo = b
-                h_hi = min(wealth / fac_housing + b, grid_max_H)
-
-                # If search interval is empty or degenerate, the adjuster
-                # problem is infeasible at this wealth.  Assign the
-                # constrained fallback: h = b, a = b, c = residual.
-                if h_hi <= h_lo + 1e-12:
-                    h_opt = b
-                    c_fall = max(1e-10, wealth - housing_cost(b) - b)
-                    a_nxt[iz, iw] = b
-                    c[iz, iw] = c_fall
-                    h_choice[iz, iw] = b
-                    if c_fall > 1e-10:
-                        pt_f = np.array([b, b])
-                        Ev_f = eval_linear(
-                            UGgrid_all, V_cntn[iz], pt_f, xto.LINEAR)
-                        V[iz, iw] = bellman_obj(u_fn(c_fall, b), Ev_f)
-                    else:
-                        V[iz, iw] = -1e18
-                    continue
+                h_hi = min((wealth - b) / fac_housing, grid_max_H)
 
                 args = (wealth, iz, V_cntn, keeper_c[iz])
 
@@ -256,20 +238,9 @@ def _make_negm_adjuster(callables, grids, stage):
 
                 h_choice[iz, iw] = min(max(h_opt, b), grid_max_H * 2)
 
-                # Guard: if optimizer returned -inf, replace with
-                # constrained fallback value (never leave -inf in solution)
-                if V[iz, iw] < -1e17 or np.isinf(V[iz, iw]):
-                    c_fall = max(1e-10, wealth - housing_cost(b) - b)
-                    if c_fall > 1e-10:
-                        pt_f = np.array([b, b])
-                        Ev_f = eval_linear(
-                            UGgrid_all, V_cntn[iz], pt_f, xto.LINEAR)
-                        V[iz, iw] = bellman_obj(u_fn(c_fall, b), Ev_f)
-                    else:
-                        V[iz, iw] = -1e18
-                    a_nxt[iz, iw] = b
-                    c[iz, iw] = c_fall
-                    h_choice[iz, iw] = b
+                # Never leave -inf in the solution array
+                if np.isinf(V[iz, iw]) or np.isnan(V[iz, iw]):
+                    V[iz, iw] = -1e18
 
         d_wV = np.empty((n_z, n_w))
         for iz in range(n_z):
