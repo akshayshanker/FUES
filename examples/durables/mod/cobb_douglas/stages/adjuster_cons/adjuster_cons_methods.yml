@@ -22,7 +22,7 @@ methods:
           clamp_max_factor: clamp_max_factor
 
       - scheme: maximization
-        method: !brent_max
+        method: !golden_section
         settings:
           n_sections: n_sections
 

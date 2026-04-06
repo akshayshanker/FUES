@@ -15,7 +15,7 @@ settings:
 
   # Total wealth grid (adjuster)
   n_w: 300
-  w_min: 1.0e-05
+  w_min: 2.0e-02
   w_max: 12.0
   grid_phi: 1.01
 
@@ -75,8 +75,8 @@ settings:
   # Applies to all 1D interp_as/interp_as_scalar calls and eval_linear (2D).
   extrap_policy: 0
 
-  sim_guard: 1.0e-02
-  util_floor: -1.0e10
+  sim_guard: 0.02
+  util_floor: -1.0e18
   ce_burn_in: 10
 
   # NEGM: number of search intervals per h' optimisation.

@@ -132,7 +132,7 @@ def run_timing(syntax_dir, n_runs=3, calib_overrides=None,
 
 
 if __name__ == '__main__':
-    syntax_dir = 'examples/durables/syntax'
+    syntax_dir = 'examples/durables/mod/separable'
 
     if '--timing' in sys.argv:
         result = run_timing(syntax_dir, n_runs=3)

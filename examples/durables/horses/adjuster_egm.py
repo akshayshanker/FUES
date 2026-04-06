@@ -46,7 +46,7 @@ def _make_negm_adjuster(callables, grids, stage):
 
     # Read maximization method from stage.methods (DDSL convention)
     from ..solve import read_scheme_method
-    negm_optimizer = read_scheme_method(stage, 'maximization', default='brent_max')
+    negm_optimizer = read_scheme_method(stage, 'maximization', default='golden_section')
     from dcsmm.fues.helpers.math_funcs import interp2d_nonuniform
     _a_grid_2d = np.array(grids["a"], dtype=np.float64).copy()
     _h_grid_2d = np.array(grids["h"], dtype=np.float64).copy()

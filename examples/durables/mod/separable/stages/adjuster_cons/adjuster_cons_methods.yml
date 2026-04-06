@@ -24,7 +24,7 @@ methods:
       # Maximization scheme: only used when bellman_backward is overridden
       # to NEGM (VFI). EGM bypasses maximization entirely.
       - scheme: maximization
-        method: !brent_max
+        method: !golden_section
         settings:
           n_sections: n_sections
 

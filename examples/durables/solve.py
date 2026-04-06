@@ -414,7 +414,7 @@ def accrete_and_solve(
     return nest
 
 
-def precompile(syntax_dir='examples/durables/syntax', method=None):
+def precompile(syntax_dir='examples/durables/mod/separable', method=None):
     """Warm Numba JIT caches with a tiny solve (small grids, 2 periods).
 
     Call once before timed solves to avoid JIT compilation overhead

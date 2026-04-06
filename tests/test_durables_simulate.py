@@ -14,12 +14,12 @@ sys.path.insert(0, SRC_ROOT)
 
 from pathlib import Path
 from examples.durables.solve import solve
-from examples.durables.simulate import (
+from examples.durables.horses.simulate import (
     simulate_lifecycle,
     evaluate_euler_c,
 )
 
-SYNTAX_DIR = Path(REPO_ROOT) / "examples" / "durables" / "syntax"
+SYNTAX_DIR = Path(REPO_ROOT) / "examples" / "durables" / "mod" / "separable"
 
 # Small N for speed; enough to check statistics
 N_SIM = 500
