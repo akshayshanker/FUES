@@ -86,7 +86,7 @@ def run_single(run):
 
     mo, calib, settings = _solve_overrides(run)
     nest, grids = solve(
-        str(run.model_dir),
+        str(run.syntax_dir),
         method_overrides=mo,
         calib_overrides=calib,
         setting_overrides=settings,
@@ -387,7 +387,7 @@ def _run_sweep_params_path(run, base_calib, base_config):
     comm = _get_mpi_comm()
     points = build_sweep_grid(run)
 
-    syntax = str(run.model_dir)
+    syntax = str(run.syntax_dir)
 
     # Pre-compute key classification for solve_fn
     calib_keys = set(base_calib.keys())
@@ -567,7 +567,7 @@ def run_sweep(run):
         def trial_fn(ov):
             cfg = {**base_config, 'n_a': ov['n_a']}
             nest, grids = solve(
-                str(run.model_dir),
+                str(run.syntax_dir),
                 method_overrides=mo,
                 calib_overrides=base_calib,
                 setting_overrides=cfg,
@@ -621,7 +621,7 @@ def run_sweep(run):
         def solve_fn(ov):
             cfg = {**base_config, 'n_a': ov['n_a']}
             nest, grids = solve(
-                str(run.model_dir),
+                str(run.syntax_dir),
                 method_overrides=mo,
                 calib_overrides=base_calib,
                 setting_overrides=cfg,
