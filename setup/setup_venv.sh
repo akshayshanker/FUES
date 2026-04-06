@@ -56,22 +56,22 @@ if [[ -d "/scratch/tp66" ]]; then
     echo ""
     echo "=== Step 3: Install dcsmm (editable, durables-est profile) ==="
     cd "$REPO_ROOT"
-    # Lean install: no HARK, no consav, no sympy, no matplotlib
-    # Just FUES + kikku + pyyaml + pandas (for moments)
+    # Core deps include consav and quantecon (used in horses code).
+    # durables-est adds kikku[estimation] + pyyaml.
     pip install -e ".[durables-est]" --quiet
 
     echo ""
-    echo "=== Step 5: Install dolang + dolo ==="
+    echo "=== Step 4: Install dolang + dolo ==="
     pip install lark multipledispatch --quiet
     pip install --no-deps "dolang @ git+https://github.com/bright-forest/dolang.py.git@phase1.1_0.1" --quiet
     pip install --no-deps "dolo @ git+https://github.com/bright-forest/dolo.git@phase1.1_0.1" --quiet
 
     echo ""
-    echo "=== Step 6: Build mpi4py from source ==="
+    echo "=== Step 5: Build mpi4py from source ==="
     pip install --no-binary :all: mpi4py --quiet
 
     echo ""
-    echo "=== Step 7: Verify ==="
+    echo "=== Step 6: Verify ==="
     python3 -c "import numpy; print(f'numpy {numpy.__version__}')"
     python3 -c "import numba; print(f'numba {numba.__version__}')"
     python3 -c "import scipy; print(f'scipy {scipy.__version__}')"
