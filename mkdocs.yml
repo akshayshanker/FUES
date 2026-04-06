@@ -99,9 +99,9 @@ nav:
     - Durables: examples/durables.md
     - Housing-Renting: examples/housing-renting.md
   - Notebooks:
-    - Retirement Speed Benchmarks: notebooks/retirement_fues.ipynb
     - Durables (Cobb-Douglas): notebooks/durables_fues.ipynb
     - Durables (Separable): notebooks/durables_fues_separable.ipynb
+    - Retirement Speed Benchmarks: notebooks/retirement_fues.ipynb
   - API Reference:
     - FUES & EGM_UE: api/fues.md
     - Retirement Example: api/retirement.md
