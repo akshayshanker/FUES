@@ -1,0 +1,25 @@
+stage: KeeperConsumption
+
+methods:
+  - on: cntn_to_dcsn_mover
+    schemes:
+      - scheme: bellman_backward
+        method: !egm
+
+      - scheme: interpolation
+        method: !Linear
+        grid: endogenous
+
+      - scheme: upper_envelope
+        method: !FUES
+        settings:
+          m_bar: m_bar
+
+  - on: dcsn_to_arvl_mover
+    schemes:
+      - scheme: interpolation
+        method: !Linear
+        grid: !Cartesian
+        settings:
+          orders: [n_a, n_h]
+          bounds: [[a_min, a_max], [h_min, h_max]]

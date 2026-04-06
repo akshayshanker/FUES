@@ -1,0 +1,106 @@
+#!/bin/bash
+#PBS -P tp66
+#PBS -q expresssr 
+#PBS -N est_dur
+#PBS -l ncpus=520
+#PBS -l mem=3200GB
+#PBS -l walltime=5:00:00
+#PBS -l jobfs=200GB
+#PBS -l storage=scratch/tp66+gdata/tp66
+#PBS -l wd
+#PBS -o /g/data/tp66/logs/durables/
+#PBS -e /g/data/tp66/logs/durables/
+
+# ---------------------------------------------------------------
+# Durables2_0 — Cross-Entropy SMM Estimation
+#
+# All CE parameters come from the estimation YAML inside the mod dir.
+# This script only sets: which mod, which spec, grid size, paths.
+#
+# Default: mod/separable, baseline.yaml, 300-grid, 520 samples
+# Override via env vars before qsub:
+#   MOD=mod/cobb_douglas GRID=200 qsub run_estimation.pbs
+#
+# Estimated cost: 2.0 SU × 520 cores × 5h = 5200 SU max
+# ---------------------------------------------------------------
+
+# --- User configuration (overridable via env) ---
+MOD="${MOD:-mod/separable}"
+SPEC="${SPEC:-baseline.yaml}"
+GRID="${GRID:-300}"
+N_SIM="${N_SIM:-10000}"
+
+module purge
+module load python3/3.12.1
+module load openmpi/4.1.5
+
+# --- Navigate to repo root ---
+# PBS_O_WORKDIR is where qsub was run. If submitted from the repo root, use it directly.
+# If submitted from experiments/durables/estimation/, go up 3 levels.
+if [ -f "$PBS_O_WORKDIR/pyproject.toml" ]; then
+    REPO_ROOT="$PBS_O_WORKDIR"
+elif [ -f "$PBS_O_WORKDIR/../../../pyproject.toml" ]; then
+    REPO_ROOT="$(cd "$PBS_O_WORKDIR/../../.." && pwd)"
+else
+    echo "ERROR: Cannot find repo root from PBS_O_WORKDIR=$PBS_O_WORKDIR" >&2
+    exit 1
+fi
+cd "$REPO_ROOT"
+echo "  Repo root: $(pwd)"
+
+# --- Activate venv on /home/ (NFS, not Lustre) ---
+# Created by setup/setup_durables_est.sh. Lean: no HARK/sympy/matplotlib.
+source "$HOME/venvs/fues/bin/activate"
+
+# --- Thread pinning (critical for MPI Python) ---
+export OMP_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+export NUMBA_NUM_THREADS=1
+export NUMBA_THREADING_LAYER=workqueue
+
+# Force large allocations through mmap (returned to OS on free).
+# Prevents glibc malloc fragmentation that causes RSS growth across iterations.
+export MALLOC_MMAP_THRESHOLD_=65536
+export MALLOC_TRIM_THRESHOLD_=0
+export PYTHONMALLOC=malloc
+export OPENBLAS_NUM_THREADS=1
+
+# Numba: fresh JIT cache per job on local SSD.
+# Also purge stale .nbc/.nbi from site-packages (prevents LLVM symbol errors
+# when numba version changes between venv rebuilds).
+export NUMBA_CACHE_DIR=$PBS_JOBFS/numba_cache
+mkdir -p $NUMBA_CACHE_DIR
+find "$HOME/venvs/fues/lib/" -name "*.nbc" -o -name "*.nbi" 2>/dev/null | xargs rm -f 2>/dev/null
+
+# Suppress OpenMPI warnings
+export OMPI_MCA_coll_hcoll_enable=0
+export OMPI_MCA_coll=^hcoll
+export PMIX_MCA_gds=hash
+
+# --- Run ---
+echo "Starting estimation at $(date)"
+echo "  Mod:   ${MOD}"
+echo "  Spec:  ${SPEC}"
+echo "  Grid:  ${GRID}"
+echo "  N_sim: ${N_SIM}"
+echo "  Nodes: $((PBS_NCPUS / 104))"
+echo "  Cores: $PBS_NCPUS"
+
+mpiexec -n $PBS_NCPUS \
+    --map-by ppr:13:numa \
+    python3 -u -m mpi4py -m examples.durables.estimate \
+        --mod "$MOD" \
+        --spec "$SPEC" \
+        --scratch /scratch/tp66/$USER/durables_est \
+        --results /g/data/tp66/results/durables/estimation \
+        --setting-override n_a=$GRID n_h=$GRID n_w=$GRID \
+        --calib-override t0=20 \
+        --N-sim $N_SIM
+
+echo "Finished at $(date)"
+
+# --- Move logs to dated subfolder ---
+LOG_DIR=/g/data/tp66/logs/durables/$(date +%Y-%m-%d)
+mkdir -p "$LOG_DIR"
+mv /g/data/tp66/logs/durables/${PBS_JOBNAME}.o${PBS_JOBID%%.*} "$LOG_DIR/" 2>/dev/null
+mv /g/data/tp66/logs/durables/${PBS_JOBNAME}.e${PBS_JOBID%%.*} "$LOG_DIR/" 2>/dev/null

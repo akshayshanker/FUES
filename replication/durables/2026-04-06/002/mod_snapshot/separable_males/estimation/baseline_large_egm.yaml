@@ -1,0 +1,161 @@
+# Estimation spec: LARGE EGM (FUES) — MALES
+# 1000-grid, 1040 samples (10 normalsr nodes), FUES adjuster (default method)
+
+estimation:
+  free:
+    beta:
+      bounds: [0.88, 0.99]
+    alpha:
+      bounds: [0.3, 0.95]
+    gamma_c:
+      bounds: [1.2, 6.0]
+    gamma_h:
+      bounds: [1.2, 6.0]
+    tau:
+      bounds: [0.04, 0.25]
+
+  method: cross-entropy
+  method_options:
+    n_samples: 1040
+    n_elite: 20
+    max_iter: 200
+    tol: 1e-6
+    sampling_seed: 42           # RNG for CE parameter draws (which thetas to try)
+    simulation_seed: 99         # RNG for model simulation shocks (CRN — same for all thetas)
+    noise_fraction: 0.10        # 10% uniform draws for exploration
+    alpha_smooth: 0.6           # blend elite with previous (prevents spurious convergence)
+
+  # --- Output paths ---
+  # scratch_dir: fast intermediate storage (purged after 100 days on Gadi)
+  # results_dir: persistent final storage (never auto-purged)
+  # These MUST be distinct on HPC. Can be the same for local development.
+  # {user} is expanded from $USER at runtime.
+  scratch_dir: /scratch/tp66/{user}/durables_est
+  results_dir: /g/data/tp66/results/durables/estimation
+
+  # --- Save verbosity ---
+  save_nests: none              # none | elite | all — which .nst files to save per iteration
+  save_panels: best             # none | best | elite | all — which sim_panels to save
+  save_mean: false              # save model at elite mean theta (in addition to best)
+
+# ---------------------------------------------------------------
+# Moment specification
+# ---------------------------------------------------------------
+moments:
+  # --- Data source ---
+  # For recovery test: generate moments from model at theta_true
+  data_source: precomputed     # selfgen | precomputed
+  data_file: moments_data.csv  # used only when data_source: precomputed
+
+  # --- Panel structure ---
+  setup:
+    time_var: t
+    id_var: _idx
+    # Panel arrays from _records_to_panels are shape (T=70, N) where
+    # row index = age. Data lives at rows 40-69 (t0=40 to T-1=69).
+    # Set t0=0 here so _age_group_masks doesn't subtract — the array
+    # index IS the age.
+    t0: 0
+    T: 70
+
+    # 9 age groups matching the Eggsandbaskets CSV rows (age9 = 1..9).
+    # From tseries_generator.py line 706: age_buckets = np.arange(19, 65, 5)
+    # Intervals are (left-open, right-closed]: (19,24], (24,29], ..., (59,64]
+    # Real ages — each bin spans 5 years.
+    # Durables2_0 runs t0=40 to T=70, so only age groups 5-9 overlap.
+    # Groups 1-4 (ages 20-39) fall outside the durables model horizon.
+    age_groups:
+      1: [20, 24]     # (19,24] — outside durables (t0=40)
+      2: [25, 29]     # (24,29] — outside durables
+      3: [30, 34]     # (29,34] — outside durables
+      4: [35, 39]     # (34,39] — outside durables
+      5: [40, 44]     # (39,44] — first group with durables overlap
+      6: [45, 49]     # (44,49]
+      7: [50, 54]     # (49,54]
+      8: [55, 59]     # (54,59]
+      9: [60, 64]     # (59,64] — last group before durables terminal (T=70)
+
+    # Variable mapping (Eggsandbaskets → durables):
+    #   wealth_real  = housing stock      → h
+    #   fin_assets   = financial + pension → a
+    #   consumption2 = consumption        → c
+    #   DC_product   = adjustment frac    → discrete
+
+  # --- Way 1: Bulk generation (canonical names) ---
+  # These moments are always computed. When data_source: selfgen,
+  # the same moment_fn is applied to both simulated and "data" panels.
+  identification:
+    mean:
+      - c                              # consumption level
+      - a                              # financial assets (~ fin_assets)
+      - h                              # housing stock (~ wealth_real)
+    sd:
+      - c
+      - a
+      - h
+    corrs:
+      - [c, h]                        # consumption-housing correlation (~ corr_cons_realw)
+      - [c, a]                        # consumption-financial assets
+      - [a, h]                        # financial-housing correlation
+    autocorrs:
+      - c                              # consumption persistence
+      - a                              # financial wealth persistence
+      - h                              # housing stock persistence (~ autocorr_wealth_real)
+    conditional:
+      discrete:
+        0:                             # keeper branch
+          mean: [c, a]
+        1:                             # adjuster branch
+          mean: [c, h]
+
+  # --- Way 2: Explicit targets matching Eggsandbaskets CSV columns ---
+  # Used when data_source: precomputed with moments.csv.
+  # Maps CSV column names to computations over sim_panels.
+  # Only the moments the durables model CAN produce are listed here.
+  # The _14_1 suffix in the CSV encodes pension/cohort conditions
+  # that don't exist in durables — we pick one column per moment type.
+  # --- Way 2: Explicit targets matching Eggsandbaskets CSV columns ---
+  # Suffix _1 = males, _14 = wave 14 cohort.
+  # Mapping: wealth_real = h (housing), fin_assets = a (financial)
+  targets:
+    # --- Means ---
+    - key: av_consumption2_14_1
+      stat: mean
+      var: c
+    - key: av_wealth_real_14_1
+      stat: mean
+      var: h                           # wealth_real = housing stock
+    - key: av_a_tot_14_1
+      stat: mean
+      var: a                           # fin_assets = financial assets
+
+    # --- Standard deviations ---
+    - key: sd_consumption2_14_1
+      stat: sd
+      var: c
+    - key: sd_wealth_real_14_1
+      stat: sd
+      var: h
+    - key: sd_a_tot_14_1
+      stat: sd
+      var: a
+
+    # --- Correlations ---
+    - key: corr_cons_realw_14_1
+      stat: corr
+      vars: [c, h]                     # consumption vs housing (= real wealth)
+
+    # --- Autocorrelations ---
+    - key: autocorr_wealth_real_1
+      stat: autocorr
+      var: h                           # housing persistence
+    - key: autocorr_wealth_fin_1
+      stat: autocorr
+      var: a                           # financial wealth persistence
+    - key: autocorr_consumption_1
+      stat: autocorr
+      var: c
+
+    # NOTE: DC_product is pension choice (DC vs DB), not housing adjustment.
+    # The durables model's adjustment fraction is in the bulk generation section
+    # (branch_fractions: [discrete]) with no CSV counterpart.

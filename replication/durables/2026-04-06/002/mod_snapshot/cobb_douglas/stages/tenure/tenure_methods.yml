@@ -1,0 +1,7 @@
+stage: AdjustmentDecision
+
+methods:
+  - on: cntn_to_dcsn_mover
+    schemes:
+      - scheme: branching_aggregator
+        method: !max

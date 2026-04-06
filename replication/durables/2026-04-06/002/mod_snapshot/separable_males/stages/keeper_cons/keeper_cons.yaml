@@ -1,0 +1,83 @@
+name: KeeperConsumption
+
+symbols:
+  spaces:
+    Xw: '@def R+'          # cash-on-hand domain
+    Xh: '@def R+'          # housing stock domain
+    Xa: '@def R+'          # financial savings domain
+
+  prestate:
+    w_kp: '@in Xw'       # cash-on-hand from branching stage
+    h_kp: '@in Xh'       # housing stock from branching stage
+
+  states:
+    w_kp: '@in Xw'       # cash-on-hand (pass-through)
+    h_kp: '@in Xh'       # housing stock (conditioning variable, no choice)
+
+  poststates:
+    a_nxt: '@in Xa'        # end-of-period financial savings
+    h_nxt: '@in Xh'        # end-of-period housing = h_kp (already depreciated by tenure)
+
+  controls:
+    c: '@in R+'
+
+  values:
+    V[<]: '@in R'
+    V: '@in R'
+    V[>]: '@in R'          # V[>]: R^2 -> R (depends on a_nxt, h_nxt)
+
+  values_marginal:
+    d_{w}V[<]: '@in R'
+    d_{h}V[<]: '@in R'
+    d_{w}V: '@in R'
+    d_{h}V: '@in R'
+    d_{a_nxt}V[>]: '@in R+'     # partial_{a_nxt} v[>]
+    d_{h_nxt}V[>]: '@in R+'     # partial_{h_nxt} v[>]
+
+  functions:
+    u: 'c, h -> alpha * c^(1 - gamma_c) / (1 - gamma_c) + (1 - alpha) * (kappa * h)^(1 - gamma_h) / (1 - gamma_h)'
+    d_{c}u: 'c -> alpha * c^(-gamma_c)'
+    d_{h}u: 'h -> (1 - alpha) * kappa^(1 - gamma_h) * h^(-gamma_h)'
+
+  settings:
+    m_bar: '@in R+'
+    n_a: '@in N+'
+    n_h: '@in N+'
+    a_min: '@in R+'
+    a_max: '@in R+'
+    h_min: '@in R+'
+    h_max: '@in R+'
+
+  parameters:
+    R: '@in R+'
+    beta: '@in (0,1)'
+    alpha: '@in (0,1)'
+    delta: '@in [0,1]'
+    gamma_c: '@in R+'
+    gamma_h: '@in R+'
+    kappa: '@in R+'
+
+equations:
+  arvl_to_dcsn_transition: identity    # w_kp, h_kp in prestate & states -> Rule 3
+
+  dcsn_to_cntn_transition: |
+    a_nxt = w_kp - c
+    h_nxt = h_kp
+
+  cntn_to_dcsn_mover:
+    Bellman: |
+      V = max_{c}(u(c, h_kp) + beta * V[>])
+    InvEuler: |
+      c[>] = (alpha / (beta * d_{a_nxt}V[>]))^(1 / gamma_c)
+    cntn_to_dcsn_transition: |
+      w_kp[>] = a_nxt + c[>]
+    MarginalBellman: |
+      d_{w}V = d_{c}u(c)
+      d_{h}V = d_{h}u(h_kp) + beta * d_{h_nxt}V[>]
+
+  dcsn_to_arvl_mover:
+    Bellman: |
+      V[<] = V
+    ShadowBellman: |
+      d_{w}V[<] = d_{w}V
+      d_{h}V[<] = d_{h}V

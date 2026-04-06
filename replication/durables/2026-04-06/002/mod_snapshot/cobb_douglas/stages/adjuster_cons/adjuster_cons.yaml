@@ -1,0 +1,92 @@
+name: AdjusterConsumption
+
+symbols:
+  spaces:
+    Xw: '@def R+'          # total wealth domain
+    Xa: '@def R+'          # financial savings domain
+    Xh: '@def R+'          # housing stock domain
+
+  prestate:
+    w_adj: '@in Xw'        # total wealth from branching stage
+
+  states:
+    m: '@in Xw'            # total wealth (decision perch)
+
+  poststates:
+    a_nxt: '@in Xa'        # end-of-period financial savings
+    h_nxt: '@in Xh'        # end-of-period housing stock
+
+  controls:
+    c: '@in R+'            # consumption
+    h_choice: '@in R+'     # housing choice (adjuster picks freely)
+
+  values:
+    V[<]: '@in R'
+    V: '@in R'
+    V[>]: '@in R'
+
+  values_marginal:
+    d_{w}V[<]: '@in R'
+    d_{w}V: '@in R'
+    d_{a_nxt}V[>]: '@in R+'      # partial_{a_nxt} v[>]
+    d_{h_nxt}V[>]: '@in R+'      # partial_{h_nxt} v[>]
+
+  functions:
+    # Cobb-Douglas CRRA
+    u: 'c, h -> (c^alpha * (h + d_ubar)^(1 - alpha))^(1 - rho) / (1 - rho)'
+
+    # du_c(c, h) = alpha * c^(alpha*(1-rho)-1) * (h + d_ubar)^((1-alpha)*(1-rho))
+    d_{c}u: 'c, h -> alpha * c^(alpha * (1 - rho) - 1) * (h + d_ubar)^((1 - alpha) * (1 - rho))'
+
+    # du_h(c, h) = (1-alpha) * c^(alpha*(1-rho)) * (h + d_ubar)^((1-alpha)*(1-rho)-1)
+    d_{h}u: 'c, h -> (1 - alpha) * c^(alpha * (1 - rho)) * (h + d_ubar)^((1 - alpha) * (1 - rho) - 1)'
+
+  settings:
+    m_bar: '@in R+'
+    n_w: '@in N+'
+    w_min: '@in R+'
+    w_max: '@in R+'
+
+  parameters:
+    alpha: '@in (0,1)'
+    beta: '@in (0,1)'
+    R: '@in R+'
+    tau: '@in R+'
+    rho: '@in R+'
+    d_ubar: '@in R+'
+
+equations:
+  arvl_to_dcsn_transition: |
+    m = w_adj
+
+  dcsn_to_cntn_transition: |
+    a_nxt = m - c - (1 + tau) * h_choice
+    h_nxt = h_choice
+
+  cntn_to_dcsn_mover:
+    Bellman: |
+      V = max_{c, h_choice}(u(c, h_choice) + beta * V[>])
+
+    # Two FOCs (from durable-cons/fues_utils.py):
+    #   Asset Euler:   d_{c}u(c, h) = beta * d_{a_nxt}V[>]
+    #   Durable FOC:   (1 + tau) * d_{c}u(c, h) = d_{h}u(c, h) + beta * d_{h_nxt}V[>]
+    #
+    # Solving strategy (same as consav durable-cons/fues_utils.py):
+    #   For each h_choice on grid:
+    #     1. From asset Euler: c = inv_marg_func(beta * d_{a_nxt}V[>], h_choice)
+    #     2. Evaluate durable FOC residual: (1+tau)*du_c(c,h) - du_h(c,h) - beta*dV_h
+    #     3. Root-find over a_nxt to satisfy both FOCs simultaneously
+    InvEuler: |
+      solve_{c[>], h_choice[>]}{d_{c}u(c[>], h_choice[>]) - beta * d_{a_nxt}V[>] = 0, (1 + tau) * d_{c}u(c[>], h_choice[>]) - d_{h}u(c[>], h_choice[>]) - beta * d_{h_nxt}V[>] = 0}
+
+    cntn_to_dcsn_transition: |
+      m[>] = a_nxt + c[>] + (1 + tau) * h_choice[>]
+
+    MarginalBellman: |
+      d_{w}V = d_{c}u(c, h_choice)
+
+  dcsn_to_arvl_mover:
+    Bellman: |
+      V[<] = V
+    ShadowBellman: |
+      d_{w}V[<] = d_{w}V

@@ -1,0 +1,52 @@
+#!/bin/bash
+#PBS -N durables-compare
+#PBS -P tp66
+#PBS -q expresssr
+#PBS -l ncpus=2,mem=80GB,walltime=02:00:00
+#PBS -l storage=scratch/tp66+gdata/tp66
+#PBS -l wd
+#PBS -j oe
+#PBS -r y
+#PBS -o /g/data/tp66/logs/durables/
+#PBS -e /g/data/tp66/logs/durables/
+
+# ======================================================================
+#  Durables Model - EGM(FUES) vs NEGM comparison
+# ======================================================================
+
+set -euo pipefail
+
+# --- Path Setup ---
+if [[ -n "${PBS_O_WORKDIR:-}" ]]; then
+    REPO_ROOT="$(cd "$PBS_O_WORKDIR/../.." && pwd)"
+else
+    REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+fi
+
+# --- Environment ---
+module purge
+module load python3/3.12.1
+
+FUES_VENV="${FUES_VENV:-$HOME/venvs/fues}"
+source "$FUES_VENV/bin/activate"
+
+export PYTHONPATH="$REPO_ROOT/src:$REPO_ROOT${PYTHONPATH:+:$PYTHONPATH}"
+export OMP_NUM_THREADS=1
+export NUMBA_NUM_THREADS=1
+export NUMBA_CACHE_DIR=/scratch/tp66/$USER/numba_cache
+mkdir -p "$NUMBA_CACHE_DIR"
+
+echo "========================================================"
+echo "Durables: EGM(FUES) vs NEGM comparison"
+echo "Job ID: ${PBS_JOBID:-local} | Node: $(hostname)"
+echo "========================================================"
+
+cd "$REPO_ROOT"
+
+python3 -m examples.durables.run \
+    --compare FUES NEGM \
+    --simulate --n-sim 10000 --seed 42 \
+    --calib-override t0=20 \
+    --output-dir /scratch/tp66/$USER/FUES/durables
+
+echo "Job completed at $(date)"
