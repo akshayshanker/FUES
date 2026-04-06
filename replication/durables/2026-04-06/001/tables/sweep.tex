@@ -1,0 +1,43 @@
+\documentclass[11pt]{article}
+\usepackage{booktabs}
+\usepackage[margin=1in]{geometry}
+\begin{document}
+\pagestyle{empty}
+\begin{table}[htbp]
+\centering
+\begingroup
+\small
+\setlength{\tabcolsep}{3pt}
+\renewcommand{\arraystretch}{1.05}
+\caption{Durables Model: Per-Period Timing and Accuracy}
+\label{table:housing1}
+\begin{tabular}{@{}rr rrrrr rrrrr@{}}
+\toprule
+& & \multicolumn{5}{c}{FUES} & \multicolumn{5}{c}{NEGM} \\
+\cmidrule(lr){3-7} \cmidrule(lr){8-12}
+& & \multicolumn{2}{c}{Time} & \multicolumn{3}{c}{Euler} & \multicolumn{2}{c}{Time} & \multicolumn{3}{c}{Euler} \\
+\cmidrule(lr){3-4} \cmidrule(lr){5-7} \cmidrule(lr){8-9} \cmidrule(lr){10-12}
+$N_A$ & $\tau$ & NA & Adj & Comb & NA & Adj & NA & Adj & Comb & NA & Adj \\
+\midrule
+250 & 0.05 & 170 & 17 & -4.03 & -4.05 & -3.56 & 167 & 95 & -3.91 & -3.93 & -2.42 \\
+ & 0.07 & 169 & 17 & -4.06 & -4.08 & -3.50 & 167 & 94 & -3.95 & -3.97 & -2.49 \\
+ & 0.12 & 170 & 17 & -4.08 & -4.09 & -3.53 & 167 & 94 & -4.01 & -4.02 & -2.45 \\
+\midrule
+500 & 0.05 & 457 & 32 & -4.46 & -4.48 & -3.94 & 458 & 97 & -4.39 & -4.41 & -2.58 \\
+ & 0.07 & 456 & 29 & -4.52 & -4.54 & -4.14 & 462 & 98 & -4.44 & -4.46 & -2.59 \\
+ & 0.12 & 457 & 29 & -4.51 & -4.53 & -3.95 & 461 & 102 & -4.45 & -4.46 & -2.74 \\
+\midrule
+750 & 0.05 & 839 & 47 & -4.70 & -4.73 & -4.11 & 871 & 98 & -4.61 & -4.63 & -2.52 \\
+ & 0.07 & 829 & 45 & -4.75 & -4.77 & -4.17 & 871 & 98 & -4.58 & -4.60 & -0.99 \\
+ & 0.12 & 836 & 45 & -4.76 & -4.78 & -4.02 & 864 & 102 & -4.72 & -4.74 & -2.61 \\
+\midrule
+1,000 & 0.05 & 1245 & 57 & -4.81 & -4.83 & -4.24 & 1239 & 93 & -3.75 & -3.93 & 2.68 \\
+ & 0.07 & 1230 & 48 & -4.89 & -4.91 & -4.25 & 1306 & 96 & -4.36 & -4.50 & 11.65 \\
+ & 0.12 & 1285 & 46 & -4.91 & -4.93 & -4.17 & 1253 & 93 & -4.87 & -4.88 & -2.70 \\
+\bottomrule
+\end{tabular}
+\vspace{0.3em}
+\par\small \textit{Notes:} Time in ms; Euler errors in $\log_{10}$ scale. \textbf{Comb}: combined mean. \textbf{NA}: non-adjusters. \textbf{Adj}: adjusters. Parameters: $\beta=0.94$, $\gamma_c=3.5$, $\gamma_h=1.5$, $\alpha=0.70$, $\delta=0.00$, $r=1.04$, $r_H=1.00$, $\rho_w=0.82$, $\sigma_w=0.11$, $N_{sim}=10{,}000$.
+\endgroup
+\end{table}
+\end{document}
