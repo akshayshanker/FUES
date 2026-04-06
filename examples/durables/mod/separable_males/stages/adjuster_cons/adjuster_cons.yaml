@@ -41,6 +41,9 @@ symbols:
     n_w: '@in N+'
     w_min: '@in R+'
     w_max: '@in R+'
+    extrap_policy: '@in N'
+    clamp_max_factor: '@in R+'
+    n_sections: '@in N+'
 
   parameters:
     alpha: '@in (0,1)'

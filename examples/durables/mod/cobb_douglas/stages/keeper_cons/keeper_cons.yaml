@@ -55,6 +55,8 @@ symbols:
     a_max: '@in R+'
     h_min: '@in R+'
     h_max: '@in R+'
+    extrap_policy: '@in N'
+    clamp_max_factor: '@in R+'
 
   parameters:
     R: '@in R+'
