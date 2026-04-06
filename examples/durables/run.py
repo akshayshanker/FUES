@@ -548,7 +548,14 @@ def run_sweep(run):
             summaries, fmt='tex',
             caption='Durables Model: Per-Period Timing and Accuracy')
         with open(os.path.join(tdir, 'sweep.tex'), 'w') as f:
+            preamble = ('\\documentclass[11pt]{article}\n'
+                        '\\usepackage{booktabs}\n'
+                        '\\usepackage[margin=1in]{geometry}\n'
+                        '\\begin{document}\n'
+                        '\\pagestyle{empty}\n')
+            f.write(preamble)
             f.write(tex)
+            f.write('\n\\end{document}\n')
         return results
 
     grid_sizes = run.sweep_grids or [100, 200, 300]
