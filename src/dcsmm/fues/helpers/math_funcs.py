@@ -393,6 +393,98 @@ def _interp_1d_binary(xp, yp, x, extrap):
 
 
 @njit(cache=True)
+def interp_as_3(xp, y1, y2, y3, x, extrap=False):
+    """Fused 3-output 1D interpolation with single linear walk.
+
+    Interpolates three y-arrays at the same x-points using one pass
+    over the sorted xp grid. O(n + m) instead of 3 * O(n + m).
+
+    Parameters
+    ----------
+    xp : 1D array  – data x-coordinates (must be increasing)
+    y1, y2, y3 : 1D arrays – three data y-arrays
+    x : 1D array – query points (should be sorted for linear walk)
+    extrap : bool – linearly extrapolate outside xp bounds
+
+    Returns
+    -------
+    out1, out2, out3 : 1D arrays
+    """
+    n_x = len(x)
+    n_xp = len(xp)
+    out1 = np.empty(n_x)
+    out2 = np.empty(n_x)
+    out3 = np.empty(n_x)
+
+    if n_xp == 0:
+        for i in range(n_x):
+            out1[i] = out2[i] = out3[i] = 0.0
+        return out1, out2, out3
+
+    if n_xp == 1:
+        for i in range(n_x):
+            out1[i] = y1[0]
+            out2[i] = y2[0]
+            out3[i] = y3[0]
+        return out1, out2, out3
+
+    x_lo, x_hi = xp[0], xp[-1]
+    _MAX_SLOPE = 1e8
+
+    dx_left = xp[1] - xp[0]
+    sl1 = (y1[1] - y1[0]) / dx_left if dx_left != 0.0 else 0.0
+    sl2 = (y2[1] - y2[0]) / dx_left if dx_left != 0.0 else 0.0
+    sl3 = (y3[1] - y3[0]) / dx_left if dx_left != 0.0 else 0.0
+
+    dx_right = xp[-1] - xp[-2]
+    sr1 = (y1[-1] - y1[-2]) / dx_right if dx_right != 0.0 else 0.0
+    sr2 = (y2[-1] - y2[-2]) / dx_right if dx_right != 0.0 else 0.0
+    sr3 = (y3[-1] - y3[-2]) / dx_right if dx_right != 0.0 else 0.0
+
+    for s in [sl1, sl2, sl3, sr1, sr2, sr3]:
+        pass  # slope capping applied inline below
+
+    j = 0
+    for i in range(n_x):
+        xi = x[i]
+        if xi <= x_lo:
+            if extrap:
+                d = xi - x_lo
+                out1[i] = y1[0] + d * (sl1 if abs(sl1) <= _MAX_SLOPE else (_MAX_SLOPE if sl1 > 0 else -_MAX_SLOPE))
+                out2[i] = y2[0] + d * (sl2 if abs(sl2) <= _MAX_SLOPE else (_MAX_SLOPE if sl2 > 0 else -_MAX_SLOPE))
+                out3[i] = y3[0] + d * (sl3 if abs(sl3) <= _MAX_SLOPE else (_MAX_SLOPE if sl3 > 0 else -_MAX_SLOPE))
+            else:
+                out1[i] = y1[0]
+                out2[i] = y2[0]
+                out3[i] = y3[0]
+        elif xi >= x_hi:
+            if extrap:
+                d = xi - x_hi
+                out1[i] = y1[-1] + d * (sr1 if abs(sr1) <= _MAX_SLOPE else (_MAX_SLOPE if sr1 > 0 else -_MAX_SLOPE))
+                out2[i] = y2[-1] + d * (sr2 if abs(sr2) <= _MAX_SLOPE else (_MAX_SLOPE if sr2 > 0 else -_MAX_SLOPE))
+                out3[i] = y3[-1] + d * (sr3 if abs(sr3) <= _MAX_SLOPE else (_MAX_SLOPE if sr3 > 0 else -_MAX_SLOPE))
+            else:
+                out1[i] = y1[-1]
+                out2[i] = y2[-1]
+                out3[i] = y3[-1]
+        else:
+            while j < n_xp - 2 and xp[j + 1] <= xi:
+                j += 1
+            dx = xp[j + 1] - xp[j]
+            if dx != 0.0:
+                t = (xi - xp[j]) / dx
+                out1[i] = y1[j] + t * (y1[j + 1] - y1[j])
+                out2[i] = y2[j] + t * (y2[j + 1] - y2[j])
+                out3[i] = y3[j] + t * (y3[j + 1] - y3[j])
+            else:
+                out1[i] = y1[j]
+                out2[i] = y2[j]
+                out3[i] = y3[j]
+
+    return out1, out2, out3
+
+
+@njit(cache=True)
 def _bsearch(grid, x):
     """Binary search: return (lo, t) where grid[lo] <= x < grid[lo+1], t in [0,1]."""
     n = len(grid)
@@ -1281,65 +1373,6 @@ def correct_jumps1d_arr(data, x, gradient_jump_threshold, v_arr, d_arr, a_arr):
 # ============== Fused Multi-Array Interpolation ==============
 
 
-@njit(cache=True)
-def interp_as_3(xp, yp1, yp2, yp3, x):
-    """Interpolate three y-arrays on the same (xp, x) grids in one walk.
-
-    Both xp and x must be sorted ascending. Avoids tripling the walk
-    cost when interpolating multiple policies on the same grid.
-
-    Returns
-    -------
-    out1, out2, out3 : 1D arrays
-    """
-    n_x = len(x)
-    n_xp = len(xp)
-    out1 = np.empty(n_x)
-    out2 = np.empty(n_x)
-    out3 = np.empty(n_x)
-
-    if n_xp == 0:
-        for i in range(n_x):
-            out1[i] = 0.0
-            out2[i] = 0.0
-            out3[i] = 0.0
-        return out1, out2, out3
-
-    if n_xp == 1:
-        for i in range(n_x):
-            out1[i] = yp1[0]
-            out2[i] = yp2[0]
-            out3[i] = yp3[0]
-        return out1, out2, out3
-
-    x_lo, x_hi = xp[0], xp[-1]
-
-    j = 0
-    for i in range(n_x):
-        xi = x[i]
-        if xi <= x_lo:
-            out1[i] = yp1[0]
-            out2[i] = yp2[0]
-            out3[i] = yp3[0]
-        elif xi >= x_hi:
-            out1[i] = yp1[-1]
-            out2[i] = yp2[-1]
-            out3[i] = yp3[-1]
-        else:
-            while j < n_xp - 2 and xp[j + 1] <= xi:
-                j += 1
-            dx = xp[j + 1] - xp[j]
-            if dx != 0.0:
-                t = (xi - xp[j]) / dx
-                out1[i] = yp1[j] + t * (yp1[j + 1] - yp1[j])
-                out2[i] = yp2[j] + t * (yp2[j + 1] - yp2[j])
-                out3[i] = yp3[j] + t * (yp3[j + 1] - yp3[j])
-            else:
-                out1[i] = yp1[j]
-                out2[i] = yp2[j]
-                out3[i] = yp3[j]
-
-    return out1, out2, out3
 
 
 @njit(cache=True)

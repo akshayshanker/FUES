@@ -14,7 +14,6 @@ YAML sub-equations implemented:
 import numpy as np
 from numba import njit, prange
 from dcsmm.fues import FUES_jit
-from dcsmm.fues.fues_v0dev import uniqueEG
 from dcsmm.fues.fues_v0_2dev import (
     EPS_D as _FUES_EPS_D,
     EPS_SEP as _FUES_EPS_SEP,
@@ -23,6 +22,7 @@ from dcsmm.fues.fues_v0_2dev import (
 from dcsmm.fues.helpers.math_funcs import (
     interp_as_scalar,
     interp_as,
+    interp_as_3,
     find_roots_piecewise_linear,
     correct_jumps1d_arr,
 )
@@ -446,14 +446,15 @@ def _make_egm_adjuster(callables, grids, stage):
             c_at_b = -1.0  # sentinel
             if _cd_utility:
                 # CD: solve (1+τ)*du_c(c,h) - du_h(c,h) - dv_h(b) = 0
+                # Tight bracket: c can't exceed budget residual
                 c_lo = 1e-6
-                c_hi = 100.0
+                c_hi = max(1e-5, 10.0)
                 res_lo = _constraint_resid(c_lo, h_choice, dv_h_b)
                 res_hi = _constraint_resid(c_hi, h_choice, dv_h_b)
                 if res_lo * res_hi < 0.0:
                     result = brentq(
                         _constraint_resid_brentq, c_lo, c_hi,
-                        args=(h_choice, dv_h_b), xtol=1e-10)
+                        args=(h_choice, dv_h_b), xtol=1e-8)
                     if result is not None and result[0] > 0.0:
                         c_at_b = result[0]
             else:
@@ -557,13 +558,6 @@ def _make_egm_adjuster(callables, grids, stage):
             m_pts = m_cntn_raw[iz].ravel()[mask]
             c_pts = m_pts - h_pts * fac_housing - a_pts
 
-            uid = uniqueEG(m_pts, v_pts)
-            m_pts = m_pts[uid]
-            v_pts = v_pts[uid]
-            c_pts = c_pts[uid]
-            a_pts = a_pts[uid]
-            h_pts = h_pts[uid]
-
             sidx = np.argsort(m_pts)
             m_s = m_pts[sidx]
             v_s = v_pts[sidx]
@@ -590,19 +584,18 @@ def _make_egm_adjuster(callables, grids, stage):
                 'a_nxt_eval': a_clean.copy(),
             }
 
-            c_clean = m_clean - h_clean * fac_housing - a_clean
+            # Fused 3-output interpolation: a, h, V in one walk.
+            # c derived from budget constraint (exact, no interp error).
+            a_raw, h_raw, v_raw = interp_as_3(
+                m_clean, a_clean, h_clean, v_clean, m_grid, extrap)
 
-            a_nxt[iz] = clamp_policy(
-                interp_as(m_clean, a_clean, m_grid, extrap=extrap),
-                b, grid_max_A * clamp_fac)
-            h_choice_out[iz] = clamp_policy(
-                interp_as(m_clean, h_clean, m_grid, extrap=extrap),
-                b, grid_max_H * clamp_fac)
+            a_nxt[iz] = clamp_policy(a_raw, b, grid_max_A * clamp_fac)
+            h_choice_out[iz] = clamp_policy(h_raw, b, grid_max_H * clamp_fac)
+            V[iz] = clamp_value(v_raw)
+            # Budget-constraint c: exact at every grid point
             c[iz] = clamp_policy(
-                interp_as(m_clean, c_clean, m_grid, extrap=extrap),
+                m_grid - fac_housing * h_choice_out[iz] - a_nxt[iz],
                 1e-10, 1e10)
-            V[iz] = clamp_value(
-                interp_as(m_clean, v_clean, m_grid, extrap=extrap))
 
 
             if correct_jumps:
@@ -748,13 +741,13 @@ def _make_egm_adjuster(callables, grids, stage):
                 dv_a_b = interp_as_scalar(a_grid, dv_a_1d, b)
                 c_at_b = -1.0
                 if _cd_utility:
-                    c_lo, c_hi = 1e-6, 100.0
+                    c_lo, c_hi = 1e-6, 10.0
                     res_lo = _constraint_resid(c_lo, h_ch, dv_h_b)
                     res_hi = _constraint_resid(c_hi, h_ch, dv_h_b)
                     if res_lo * res_hi < 0.0:
                         result = brentq(
                             _constraint_resid_brentq, c_lo, c_hi,
-                            args=(h_ch, dv_h_b), xtol=1e-10)
+                            args=(h_ch, dv_h_b), xtol=1e-8)
                         if result is not None and result[0] > 0.0:
                             c_at_b = result[0]
                 else:
