@@ -503,11 +503,10 @@ def nb_plot_adjuster_comparison(results, grids, plot_t, i_z=0,
             axes[1].plot(xh, yh, color=col, ls=styles[method],
                          linewidth=1.4, label=lbl)
 
-    title_ages = ', '.join(str(a) for a in ages)
     method_title = labels.get(methods[0], methods[0]) if len(methods) == 1 else 'FUES vs NEGM'
     axes[0].set_xlabel('Adjuster wealth $m$')
     axes[0].set_ylabel("Financial assets $a'$")
-    axes[0].set_title(f'{method_title}: savings (age {title_ages})', fontweight='600')
+    axes[0].set_title(f'{method_title}: savings', fontweight='600')
     axes[0].set_xlim(0, xlim)
     axes[0].set_ylim(*(ylim_a if ylim_a else (0, None)))
     if n_age > 1:
@@ -532,7 +531,7 @@ def nb_plot_adjuster_comparison(results, grids, plot_t, i_z=0,
     axes[1].set_xlabel('Adjuster wealth $m$')
     axes[1].set_ylabel("Housing choice $h'$")
     axes[1].set_title(
-        f'{method_title}: housing (age {title_ages})',
+        f'{method_title}: housing',
         fontweight='600')
     axes[1].set_xlim(0, xlim)
     axes[1].set_ylim(*(ylim_h if ylim_h else (0, None)))
@@ -657,7 +656,7 @@ def nb_plot_adjuster_egm(nest, grids, plot_t=None, i_z=0, xlim=14,
                    zorder=6)
     ax.set_xlabel('Endogenous wealth $\\hat{m}$')
     ax.set_ylabel("Financial assets $a'$")
-    ax.set_title(f'Financial assets (age {plot_t}, $z_{{{i_z}}}$)', fontweight='600')
+    ax.set_title("Financial assets $a'$", fontweight='600')
     ax.set_xlim(0, xlim)
     ax.set_ylim(*(ylim_a if ylim_a else (0, a_ymax)))
     ax.legend(frameon=False, fontsize=8)
@@ -678,7 +677,7 @@ def nb_plot_adjuster_egm(nest, grids, plot_t=None, i_z=0, xlim=14,
                    zorder=6)
     ax.set_xlabel('Endogenous wealth $\\hat{m}$')
     ax.set_ylabel("Housing choice $h'$")
-    ax.set_title(f'Housing (age {plot_t}, $z_{{{i_z}}}$)', fontweight='600')
+    ax.set_title("Housing $H_{\\succ}$", fontweight='600')
     ax.set_xlim(0, xlim)
     ax.set_ylim(*(ylim_h if ylim_h else (0, h_ymax)))
     ax.legend(frameon=False, fontsize=8)
@@ -706,7 +705,7 @@ def nb_plot_adjuster_egm(nest, grids, plot_t=None, i_z=0, xlim=14,
         ax.set_xlabel('Endogenous wealth $\\hat{m}$')
         ax.set_ylabel('CE composite good')
         ax.set_title(
-            f'CE value (age {plot_t}, $z_{{{i_z}}}$)',
+            'CE value',
             fontweight='600')
         ax.set_xlim(0, xlim)
         if ylim_v:
@@ -764,8 +763,7 @@ def nb_plot_keeper_egm(nest, grids, plot_t=None, i_z=0, i_h=None, xlim=7.5,
     ax.plot(x, y, color=t['accent'], linewidth=1.3, label='FUES envelope', zorder=5)
     ax.set_xlabel('Cash-on-hand $w_{\\mathrm{keep}}$')
     ax.set_ylabel('Consumption $c$')
-    ax.set_title(f'Keeper consumption (age {plot_t}, $z_{{{i_z}}}$, '
-                 f'$h={hk:.2f}$)', fontweight='600')
+    ax.set_title('Keeper consumption', fontweight='600')
     ax.set_xlim(0, xlim)
     ax.set_ylim(*(ylim_c if ylim_c else (0, None)))
     ax.legend(frameon=False, fontsize=8)
@@ -780,8 +778,7 @@ def nb_plot_keeper_egm(nest, grids, plot_t=None, i_z=0, i_h=None, xlim=7.5,
     ax.plot(x, y, color=t['accent'], linewidth=1.3, label='FUES envelope', zorder=5)
     ax.set_xlabel('Cash-on-hand $w_{\\mathrm{keep}}$')
     ax.set_ylabel("Financial assets $a'$")
-    ax.set_title(f'Keeper savings (age {plot_t}, $z_{{{i_z}}}$, '
-                 f'$h={hk:.2f}$)', fontweight='600')
+    ax.set_title('Keeper savings', fontweight='600')
     ax.set_xlim(0, xlim)
     ax.set_ylim(*(ylim_a if ylim_a else (0, None)))
     ax.legend(frameon=False, fontsize=8)
@@ -829,8 +826,8 @@ def nb_plot_keeper_policy(results, grids, plot_t, i_z=0, i_h=None, xlim=7.5,
     method_title = labels.get(methods[0], methods[0]) if len(methods) == 1 else 'FUES vs NEGM'
     ylims = [ylim_c, ylim_a]
     for idx, (ax, ylabel, title) in enumerate([
-        (axes[0], 'Consumption $c$', f'{method_title}: keeper consumption ($h={hk:.2f}$)'),
-        (axes[1], "Financial assets $a'$", f'{method_title}: keeper savings ($h={hk:.2f}$)'),
+        (axes[0], 'Consumption $c$', f'{method_title}: keeper consumption'),
+        (axes[1], "Financial assets $a'$", f'{method_title}: keeper savings'),
     ]):
         ax.set_xlabel('Cash-on-hand $w_{\\mathrm{keep}}$')
         ax.set_ylabel(ylabel)
@@ -921,7 +918,7 @@ def nb_plot_value_functions(results, grids, plot_t, i_z=0, i_h=None,
     hk = h_grid[i_h]
     axes[0].set_xlabel('Cash-on-hand $w_{\\mathrm{keep}}$')
     axes[0].set_ylabel('CE composite good')
-    axes[0].set_title(f'Keeper CE value (age {plot_t}, $h={hk:.2f}$)',
+    axes[0].set_title('Keeper CE value',
                       fontweight='600')
     axes[0].set_xlim(0, xlim_keep)
     axes[0].set_ylim(*(ylim_keep if ylim_keep else (0, None)))
@@ -930,7 +927,7 @@ def nb_plot_value_functions(results, grids, plot_t, i_z=0, i_h=None,
 
     axes[1].set_xlabel('Adjuster wealth $m$')
     axes[1].set_ylabel('CE composite good')
-    axes[1].set_title(f'Adjuster CE value (age {plot_t})', fontweight='600')
+    axes[1].set_title('Adjuster CE value', fontweight='600')
     axes[1].set_xlim(0, xlim_adj)
     axes[1].set_ylim(*(ylim_adj if ylim_adj else (0, None)))
     axes[1].legend(frameon=False, fontsize=8)
@@ -1048,13 +1045,13 @@ def nb_plot_adjuster_egm_interactive(nest, grids, plot_t=None, i_z=0, xlim=14):
     rf_v = refined[i_z].get('vf') if has_refined else None
 
     fig_a = _make_fig(
-        f"Adjuster financial assets a' (age {plot_t}, z={i_z})",
+        "Adjuster financial assets a'",
         'Endogenous wealth m̂', "a'",
         m_pts, a_pts, rf_m, rf_a,
     )
 
     fig_h = _make_fig(
-        f"Adjuster housing h' (age {plot_t}, z={i_z})",
+        "Adjuster housing h'",
         'Endogenous wealth m̂', "h'",
         m_pts, h_pts, rf_m, rf_h,
     )
@@ -1067,7 +1064,7 @@ def nb_plot_adjuster_egm_interactive(nest, grids, plot_t=None, i_z=0, xlim=14):
         ce_mask = np.isfinite(ce_raw) & (ce_raw > 0)
         ce_rf = _ce_transform(rf_v, _rho) if rf_v is not None else None
         fig_v = _make_fig(
-            f"Adjuster CE value (age {plot_t}, z={i_z})",
+            "Adjuster CE value",
             'Endogenous wealth m̂', 'CE',
             m_pts[ce_mask], ce_raw[ce_mask],
             rf_m, ce_rf,
@@ -1089,7 +1086,7 @@ def nb_plot_adjuster_egm_interactive(nest, grids, plot_t=None, i_z=0, xlim=14):
         fig_v.update_xaxes(title_text='Adjuster wealth m', range=[0, xlim])
         fig_v.update_yaxes(title_text='CE composite good', rangemode='tozero')
         fig_v.update_layout(
-            title=f"Adjuster CE value (age {plot_t}, z={i_z})",
+            title="Adjuster CE value",
             height=400, width=620, dragmode='zoom',
             margin=dict(t=50, b=40, l=60, r=30), **layout_kw,
         )

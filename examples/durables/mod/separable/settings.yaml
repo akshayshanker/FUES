@@ -15,7 +15,7 @@ settings:
 
   # Total wealth grid (adjuster)
   n_w: 300
-  w_min: 2.0e-02
+  w_min: 1e-10
   w_max: 12.5
   grid_phi: 1.01
 
