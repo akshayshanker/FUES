@@ -52,7 +52,7 @@ symbols:
 
   parameters:
     R: '@in R+'
-    beta: '@in (0,1)'
+    beta: '@in (n_beta_1, n_beta_2)'
     alpha: '@in (0,1)'
     delta: '@in [0,1]'
     gamma_c: '@in R+'
