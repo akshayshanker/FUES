@@ -75,6 +75,12 @@ source setup/setup.sh
 
 First source creates `.venv` (or `$HOME/venvs/fues` on Gadi), installs `dcsmm[examples]` in editable mode, and verifies the install. Re-source any time to activate; pass `--update` to `git pull` + reinstall.
 
+Contributing? Add pytest + autopep8 on top:
+
+```bash
+pip install -e ".[dev]" --no-deps
+```
+
 Run the full timing sweep:
 
 ```bash

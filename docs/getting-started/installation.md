@@ -61,6 +61,12 @@ First source creates `.venv` (or `$HOME/venvs/fues` on Gadi), installs
 `source setup/setup.sh` just reactivates. Pass `--update` to `git pull`
 and reinstall `dcsmm`/`kikku` after pulling new code.
 
+Contributing? Add `pytest` + `autopep8` on top of the examples install:
+
+```bash
+pip install -e ".[dev]" --no-deps
+```
+
 Run the full timing sweep:
 
 ```bash
