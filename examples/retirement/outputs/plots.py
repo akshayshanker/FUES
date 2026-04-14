@@ -6,8 +6,9 @@ Author: Akshay Shanker, University of New South Wales, akshay.shanker@me.com
 import numpy as np
 import time
 import os
-from HARK.interpolation import LinearInterp
-from HARK.dcegm import calc_nondecreasing_segments, upper_envelope
+# HARK is imported lazily inside plot_dcegm_cf (the only function that uses it).
+# Keeps the module loadable on installs that have seaborn/matplotlib but not HARK
+# (e.g. Gadi's durables-est venv), so plot_egrids / plot_cons_pol stay available.
 import seaborn as sns
 from matplotlib.ticker import FormatStrFormatter
 import matplotlib.pylab as pl
@@ -186,7 +187,9 @@ def plot_dcegm_cf(age, g_size, e_grid, vf_work, c_worker, dela_worker, a_prime, 
                   save_path, tag='sigma05', plot=True):
     """Plot comparison of DC-EGM and FUES for worker at a specific age.
 
-    Figure 5 in FUES paper.
+    Figure 5 in FUES paper. HARK is required here; install via the
+    ``[examples]`` extra. Imported inside the function so the module stays
+    loadable on HARK-less installs (matplotlib / seaborn still available).
 
     Parameters
     ----------
@@ -213,6 +216,9 @@ def plot_dcegm_cf(age, g_size, e_grid, vf_work, c_worker, dela_worker, a_prime, 
     plot : bool, optional
         If True, generates plot. Default is True.
     """
+    from HARK.interpolation import LinearInterp
+    from HARK.dcegm import calc_nondecreasing_segments, upper_envelope
+
     x = e_grid[age]
     vf = vf_work[age]
     c = c_worker[age]

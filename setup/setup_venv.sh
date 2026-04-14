@@ -54,11 +54,13 @@ if [[ -d "/scratch/tp66" ]]; then
     pip install EconModel consav --quiet
 
     echo ""
-    echo "=== Step 3: Install dcsmm (editable, durables-est profile) ==="
+    echo "=== Step 3: Install dcsmm (editable, examples profile) ==="
     cd "$REPO_ROOT"
-    # Core deps include consav and quantecon (used in horses code).
-    # durables-est adds kikku[estimation] + pyyaml.
-    pip install -e ".[durables-est]" --quiet
+    # One canonical install for all pipelines. [examples] pulls HARK
+    # (needed by retirement's plot_dcegm_cf), seaborn, matplotlib, dill,
+    # pykdtree, and kikku[estimation] — so durables sweeps, retirement
+    # timings, and the estimation flow all work from the same venv.
+    pip install -e ".[examples]" --quiet
 
     echo ""
     echo "=== Step 4: Install dolang + dolo ==="
@@ -76,6 +78,8 @@ if [[ -d "/scratch/tp66" ]]; then
     python3 -c "import numba; print(f'numba {numba.__version__}')"
     python3 -c "import scipy; print(f'scipy {scipy.__version__}')"
     python3 -c "import matplotlib; print(f'matplotlib {matplotlib.__version__}')"
+    python3 -c "import seaborn; print(f'seaborn {seaborn.__version__}')"
+    python3 -c "from HARK.interpolation import LinearInterp; from HARK.dcegm import upper_envelope; print('OK: HARK (retirement plot_dcegm_cf)')"
     python3 -c "from dcsmm.fues import FUES; print('OK: dcsmm.fues')"
     python3 -c "from kikku.run.estimate import estimate; print('OK: kikku.run.estimate')"
     python3 -c "from kikku.dynx import load_syntax; print('OK: kikku.dynx')"

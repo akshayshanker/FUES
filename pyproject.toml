@@ -30,11 +30,13 @@ durables-est = [
   "quantecon",
   "kikku[estimation] @ git+https://github.com/bright-forest/kikku.git",
 ]
-# Full examples (notebooks, benchmarks, all models)
+# Full examples (notebooks, benchmarks, all models). This is the canonical
+# install — both durables and retirement pipelines, including the post-sweep
+# DC-EGM plot that needs HARK. Covers the estimation flow via kikku[estimation].
 examples = [
   "pyyaml", "matplotlib", "seaborn", "tqdm", "dill>=0.3.6",
   "econ-ark", "ConSav", "pykdtree>=1.3.12",
-  "kikku @ git+https://github.com/bright-forest/kikku.git",
+  "kikku[estimation] @ git+https://github.com/bright-forest/kikku.git",
 ]
 dev = [
   "pyyaml", "matplotlib", "seaborn", "tqdm", "dill>=0.3.6",
