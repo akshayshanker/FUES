@@ -30,7 +30,7 @@ dependencies = [
 # Everything the applied examples need on top of the core benchmark stack:
 # applied models (quantecon), notebooks + plots (matplotlib, seaborn, tqdm),
 # estimation flow (kikku[estimation], dill, pykdtree), config loading (pyyaml).
-# This is what Gadi's setup_venv.sh installs.
+# This is what setup/setup.sh installs on both Gadi and local.
 examples = [
   "pyyaml",
   "matplotlib",

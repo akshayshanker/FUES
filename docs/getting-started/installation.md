@@ -53,12 +53,13 @@ dolo-plus compiler. Use this if you are modifying the source.
 ```bash
 git clone https://github.com/akshayshanker/FUES.git
 cd FUES
-bash setup/setup_venv.sh
-source .venv/bin/activate
+source setup/setup.sh
 ```
 
-This creates a local `.venv`, installs `dcsmm` in editable mode, and verifies
-the install.
+First source creates `.venv` (or `$HOME/venvs/fues` on Gadi), installs
+`dcsmm[examples]` in editable mode, and verifies the install. Subsequent
+`source setup/setup.sh` just reactivates. Pass `--update` to `git pull`
+and reinstall `dcsmm`/`kikku` after pulling new code.
 
 Run the full timing sweep:
 

@@ -71,7 +71,7 @@ FUES_VENV="${FUES_VENV:-$HOME/venvs/fues}"
 if [[ ! -f "${FUES_VENV}/bin/activate" ]]; then
   {
     echo "ERROR: fues venv not found at: ${FUES_VENV}"
-    echo "Run: bash scripts/setup_venv.sh"
+    echo "Run: source setup/setup.sh (from repo root)"
   } | tee -a "${LOG_FILE}" >&2
   exit 1
 fi

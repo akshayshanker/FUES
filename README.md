@@ -70,11 +70,10 @@ Full setup with editable install, examples, and all dependencies including the d
 ```bash
 git clone https://github.com/akshayshanker/FUES.git
 cd FUES
-bash setup/setup_venv.sh
-source .venv/bin/activate
+source setup/setup.sh
 ```
 
-This creates a local `.venv`, installs `dcsmm` in editable mode, and verifies the install.
+First source creates `.venv` (or `$HOME/venvs/fues` on Gadi), installs `dcsmm[examples]` in editable mode, and verifies the install. Re-source any time to activate; pass `--update` to `git pull` + reinstall.
 
 Run the full timing sweep:
 
@@ -112,7 +111,7 @@ FUES/
 │   └── housing_renting/  # discrete housing + capital tax
 ├── experiments/          # PBS/HPC scripts with param overrides
 ├── replication/          # paper tables + figures (committed outputs)
-├── setup/                # setup_venv.sh, load_env.sh
+├── setup/                # setup.sh (install + activate + env, one script)
 └── docs/                 # mkdocs site
 ```
 

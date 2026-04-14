@@ -149,4 +149,4 @@ Three tiers — pick one:
 | `pip install -e ".[examples]"` | Above + matplotlib, seaborn, tqdm, pyyaml, quantecon, dill, pykdtree, `kikku[estimation]` | Run the durables + retirement pipelines, notebooks, Gadi sweeps |
 | `pip install -e ".[dev]"` | `[examples]` + pytest + autopep8 | Contributing / running the test suite |
 
-On Gadi, `bash setup/setup_venv.sh` installs `[examples]` and verifies HARK / kikku / mpi4py in one shot.
+On Gadi (or local), `source setup/setup.sh` installs `[examples]` and verifies HARK / kikku / mpi4py in one shot. Re-run any time to just activate; pass `--update` to `git pull` + reinstall.

@@ -1,10 +1,11 @@
 #!/bin/bash
 # Quick setup for estimation venv on Gadi.
-# Just calls the main setup script.
+# Thin wrapper — use `source setup/setup.sh` from the repo root instead.
 #
-# Usage:
-#   cd /home/141/as3442/dev/fues.dev/FUES
-#   bash experiments/durables/estimation/setup_venv.sh
+# Usage (from repo root, `source` so venv activation persists):
+#   source setup/setup.sh
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
-exec bash "$REPO_ROOT/setup/setup_venv.sh"
+echo "NOTE: prefer 'source setup/setup.sh' from $REPO_ROOT"
+# shellcheck disable=SC1091
+source "$REPO_ROOT/setup/setup.sh"
