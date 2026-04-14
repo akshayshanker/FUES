@@ -9,21 +9,6 @@ from .diagnostics import (
     print_euler_stats,
     consumption_deviation,
 )
-from .plots import (
-    setup_nb_style,
-    nb_plot_policies_comparison,
-    nb_plot_keeper_ages,
-    nb_plot_adjuster_comparison,
-    nb_plot_adjuster_egm,
-    nb_plot_keeper_egm,
-    nb_plot_keeper_policy,
-    nb_plot_value_functions,
-    nb_plot_adjuster_egm_interactive,
-    plot_policies,
-    plot_grids,
-    plot_lifecycle,
-    plot_euler_histogram,
-)
 from .notebook import (
     FilteredStdout, ce_utility,
     print_solve_summary, build_comparison_row,
@@ -36,6 +21,35 @@ from .tables import (
     generate_sweep_table,
     write_euler_detail,
 )
+
+# Plot functions are loaded lazily so importing `outputs` does not pull
+# matplotlib/seaborn at module load — keeps Gadi (sweep-only) installs
+# free of plotting deps. `from examples.durables.outputs import plot_*`
+# still works (PEP 562 __getattr__), but only triggers the seaborn import
+# at the moment the attribute is accessed.
+_LAZY_PLOTS = {
+    "setup_nb_style",
+    "nb_plot_policies_comparison",
+    "nb_plot_keeper_ages",
+    "nb_plot_adjuster_comparison",
+    "nb_plot_adjuster_egm",
+    "nb_plot_keeper_egm",
+    "nb_plot_keeper_policy",
+    "nb_plot_value_functions",
+    "nb_plot_adjuster_egm_interactive",
+    "plot_policies",
+    "plot_grids",
+    "plot_lifecycle",
+    "plot_euler_histogram",
+}
+
+
+def __getattr__(name):
+    if name in _LAZY_PLOTS:
+        from . import plots
+        return getattr(plots, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 __all__ = [
     "derive_savings",

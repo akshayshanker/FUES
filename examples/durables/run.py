@@ -30,12 +30,14 @@ from kikku.run.metrics import format_table, write_table
 
 from .solve import solve, read_scheme_method, METHOD_SHORTCUT
 from .outputs import (
-    plot_policies, plot_grids, plot_lifecycle, get_timing, derive_savings,
+    get_timing, derive_savings,
     compute_euler_stats, print_euler_stats,
     generate_comparison_table,
     generate_sweep_table,
     write_euler_detail,
 )
+# Plot functions imported lazily inside run_single (the only caller) so the
+# sweep path on Gadi never needs matplotlib/seaborn.
 from .horses.simulate import (
     simulate_lifecycle,
     evaluate_euler_c,
@@ -45,9 +47,7 @@ from .horses.simulate import (
 
 def _run_settings(run):
     """Merge ``run.settings`` and ``run.config`` into one dict (config wins)."""
-    if run.config:
-        return {**dict(run.settings), **dict(run.config)}
-    return dict(run.settings)
+    return {**dict(run.settings), **dict(run.config)}
 
 
 def _run_ue_method(run):
@@ -57,6 +57,12 @@ def _run_ue_method(run):
     When both are set, the shortcut is expanded first and the explicit
     overrides are layered on top.
     """
+    # TODO(delete): shallow adapter bridging kikku's two method fields
+    # (run.method + run.method_overrides) onto solve()'s single ue_method
+    # kwarg. The combined branch is unused in practice — every caller sets
+    # either the shortcut or the overrides, never both. Inline as
+    # `run.method_overrides or run.method` at call sites and delete once
+    # we're confident no one relies on the combined-merge semantics.
     if run.method_overrides:
         combined = {t: run.method for t in METHOD_SHORTCUT} if run.method else {}
         combined.update(run.method_overrides)
@@ -147,17 +153,18 @@ def run_single(run):
     tau = float(stage0.calibration["tau"])
     savings = derive_savings(nest, grids, tau)
 
-    for age in plot_ages:
-        if age not in all_t:
-            print(f'Age {age} not in solution '
-                  f'(range {all_t[0]}–{all_t[-1]}), skipping.')
-            continue
-        plot_policies(nest, grids, savings,
-                      output_dir=plots_dir, plot_t=age)
-        if store_cntn:
-            plot_grids(nest, grids,
-                       output_dir=plots_dir, plot_t=age)
     if plot_ages:
+        from .outputs.plots import plot_policies, plot_grids
+        for age in plot_ages:
+            if age not in all_t:
+                print(f'Age {age} not in solution '
+                      f'(range {all_t[0]}–{all_t[-1]}), skipping.')
+                continue
+            plot_policies(nest, grids, savings,
+                          output_dir=plots_dir, plot_t=age)
+            if store_cntn:
+                plot_grids(nest, grids,
+                           output_dir=plots_dir, plot_t=age)
         print(f'Plots saved to {plots_dir}/')
 
     if run.simulate:
@@ -195,6 +202,7 @@ def run_single(run):
             print(f"  NPV utility: mean={np.mean(npv):.4f}, "
                   f"std={np.std(npv):.4f}")
 
+        from .outputs.plots import plot_lifecycle
         plot_lifecycle(sim_data, euler_c, nest, output_dir=plots_dir)
 
     # Save single-run summary table
@@ -219,10 +227,8 @@ def build_sweep_grid(run):
     - a dotted path (``stage.scheme`` or ``stage.target.scheme``) — method-tag
       override for a specific scheme
 
-    Falls back to a default ``n_a`` grid when neither ``sweep_params`` nor
-    ``sweep_grids`` is set. Returns ``list[dict]`` — each is a flat point
-    ``{axis_name: value, ...}``. Roles are re-classified at solve time by
-    key lookup.
+    Returns ``list[dict]`` — each is a flat point ``{axis_name: value, ...}``.
+    Roles are re-classified at solve time by key lookup.
     """
     axes = {}
     for spec in run.sweep_params:
@@ -239,7 +245,9 @@ def build_sweep_grid(run):
         axes['n_a'] = list(run.sweep_grids)
 
     if not axes:
-        axes['n_a'] = [100, 200, 300]
+        raise ValueError(
+            "No sweep axes specified. Pass --sweep-params key=v1,v2,... "
+            "or --sweep-grids n1,n2,... .")
 
     # Validate each axis is classifiable.
     calib_keys = set(run.calib.keys())
@@ -348,7 +356,7 @@ def run_sweep(run):
     Writes ``sweep.md`` and ``sweep.tex`` on rank 0. Returns the flat
     results list (empty on non-root MPI ranks).
     """
-    base_calib = dict(run.calib or {})
+    base_calib = dict(run.calib)
     base_config = _run_settings(run)
     comm = _get_mpi_comm()
     points = build_sweep_grid(run)
@@ -374,12 +382,11 @@ def run_sweep(run):
                 triple, tag = parse_method_override_str(f"{k}={v}")
                 mo_point[triple] = str(tag).strip()
 
-        overrides = dict(run.method_overrides or {})
+        overrides = dict(run.method_overrides)
         overrides.update(mo_point)
         if overrides:
             ue = {t: per_method for t in METHOD_SHORTCUT} if per_method else {}
             ue.update(overrides)
-            ue = ue or None
         else:
             ue = per_method
 
@@ -472,8 +479,8 @@ def run_sweep(run):
             cal_params['r_H'] = cal_params.pop('R_H')
         cal_params['N_sim'] = run.n_sim
         summaries.append({
-            'Grid_Size': int(row.get('n_a', base_config.get('n_a', 0)) or 0),
-            'Tau': float(row.get('tau', base_calib.get('tau', 0.0)) or 0.0),
+            'Grid_Size': int(row.get('n_a', base_config.get('n_a', 0))),
+            'Tau': float(row.get('tau', base_calib.get('tau', 0.0))),
             'Method': row.get('method', ''),
             'Avg_Keeper_ms': row.get('keeper_ms', 0.0),
             'Avg_Adj_ms': row.get('adj_ms', 0.0),
