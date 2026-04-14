@@ -20,10 +20,16 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Durables estimation on Gadi: minimal deps, fast import, no sympy/HARK
+# Durables estimation on Gadi: minimal deps, fast import, no sympy/HARK.
+# Plotting deps (matplotlib/seaborn) are pulled in because
+# examples/durables/outputs/plots.py imports them at module load, so the
+# `run` path dies with ModuleNotFoundError even when no plots are produced.
 durables-est = [
   "pyyaml",
   "quantecon",
+  "matplotlib",
+  "seaborn",
+  "tqdm",
   "kikku[estimation] @ git+https://github.com/bright-forest/kikku.git",
 ]
 # Full examples (notebooks, benchmarks, all models)
