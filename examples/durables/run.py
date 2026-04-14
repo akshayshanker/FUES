@@ -115,7 +115,7 @@ def run_single(run):
 
     settings = _run_settings(run)
     nest, grids = solve(
-        str(run.syntax_dir),
+        str(run.model_dir),
         ue_method=_run_ue_method(run),
         draw={"calibration": run.calib, "settings": settings},
         verbose=False,
@@ -361,7 +361,7 @@ def run_sweep(run):
     comm = _get_mpi_comm()
     points = build_sweep_grid(run)
 
-    syntax = str(run.syntax_dir)
+    syntax = str(run.model_dir)
     calib_keys = set(base_calib.keys())
     settings_keys = set(base_config.keys())
 

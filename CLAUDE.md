@@ -9,8 +9,9 @@ attribute:
 
 1. **Grep the entire repo** for every reference — not just the file you're
    editing. Include `run.py`, `solve.py`, tests, PBS scripts, notebooks.
-2. **Check kikku's actual attribute names** — `RunSpec` uses `syntax_dir`,
-   NOT `model_dir`. Always verify against the installed kikku source:
+2. **Check kikku's actual attribute names** — `RunSpec` now uses
+   `model_dir` (the `syntax_dir` alias is deprecated as of kikku's latest
+   cli.py). Always verify against the installed kikku source:
    `grep -n 'attr_name' $(python3 -c "import kikku.run.cli; print(kikku.run.cli.__file__)")`
 3. **Test the CLI entry point** after any change to run.py:
    `python3 -c "from examples.durables.run import main; print('OK')"`
@@ -24,7 +25,7 @@ attribute:
 |----------|----------|-------|-------|
 | `solve_block` | `solve` | `examples/durables/solve.py` | run.py imported the old name |
 | `_solver_config` | `_solve_overrides` | `examples/durables/run.py` | Returns 3-tuple, not dict |
-| `run.model_dir` | `run.syntax_dir` | kikku `RunSpec` | kikku attribute, not ours to name |
+| `run.syntax_dir` | `run.model_dir` | kikku `RunSpec` | kikku reversed course — `syntax_dir` is now the deprecated alias |
 | `examples/durables/syntax` | `examples/durables/mod/separable` | directory path | Tests and precompile had stale refs |
 | `examples.durables.simulate` | `examples.durables.horses.simulate` | import path | Test file had stale import |
 
