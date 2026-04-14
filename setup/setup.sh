@@ -100,14 +100,26 @@ else
     source "$VENV_DIR/bin/activate"
 fi
 
-# ---- --update: pull + reinstall (no-deps; pinned scientific stack) -----
+# ---- --update: pull + reinstall -----------------------------------------
+# Reinstall dcsmm[examples] without --no-deps so pip picks up any deps
+# added since last install (e.g. HARK when migrating an old durables-est
+# venv). pip's default behaviour leaves already-compatible packages
+# untouched, so the pinned numpy/numba/scipy stack isn't disturbed.
+# kikku is force-reinstalled --no-deps to pick up upstream fixes without
+# re-resolving its (light) deps.
 if [[ "$UPDATE" -eq 1 ]]; then
     echo "[setup] git pull"
     git pull
-    echo "[setup] Reinstalling dcsmm + kikku (--no-deps)"
-    pip install -e ".[examples]" --no-deps --quiet
+    echo "[setup] Reinstalling dcsmm[examples]"
+    pip install -e ".[examples]" --quiet
+    echo "[setup] Force-reinstalling kikku"
     pip install --force-reinstall --no-deps \
         "kikku[estimation] @ git+https://github.com/bright-forest/kikku.git" --quiet
+    echo "[setup] Verifying critical imports"
+    python3 -c "from HARK.interpolation import LinearInterp; print('  OK: HARK')"
+    python3 -c "import consav; print('  OK: consav')"
+    python3 -c "from dcsmm.fues import FUES; print('  OK: dcsmm.fues')"
+    python3 -c "from kikku.run.sweep import sweep; print('  OK: kikku.run.sweep')"
 fi
 
 # ---- Runtime environment ------------------------------------------------
