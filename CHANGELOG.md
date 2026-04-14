@@ -2,6 +2,140 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.6.0dev4] - 2026-04-15 — Single-script setup, unified install, examples polish
+
+This release merges the `durables-ddsl-phase2` branch into `main`. Most of
+the work is in the example models, the install process, and the docs; the
+core FUES algorithm is nearly unchanged (three small additions noted
+below).
+
+### Installing is simpler
+
+There are now three clear tiers. Pick one:
+
+| Command | What you get | When to use |
+|---|---|---|
+| `pip install -e .` | Just the algorithm: FUES, RFC, DCEGM/MSS, and ConSav's upper envelope, wired through the unified `uenvelope` dispatcher. | You want to drop FUES into your own project and compare it to the usual benchmarks. |
+| `pip install -e ".[examples]"` | The above plus everything needed to run the shipped example models and notebooks (plotting libraries, config loader, kikku, pykdtree, dill). | You're running the retirement or durables examples, or working through the notebooks. |
+| `pip install -e ".[dev]"` | The above plus `pytest` and `autopep8`. | You're contributing code. |
+
+HARK (via `econ-ark`) and ConSav are now part of the core install.
+They're what we benchmark FUES against, so it doesn't make sense to
+leave them out of the default.
+
+The four previous setup scripts have been consolidated into a single
+`setup/setup.sh`. Usage:
+
+```bash
+source setup/setup.sh            # install if needed, then activate
+source setup/setup.sh --update   # git pull, refresh install, activate
+```
+
+First run creates the virtual environment (at `$HOME/venvs/fues` on NCI
+Gadi, `.venv` locally), installs the package, verifies that every
+import works, and activates the environment in your current shell.
+Later runs are fast — they just activate.
+
+The older profile names (`durables-est`, `mpi`) have been removed. If
+you had a venv built under the old `durables-est` profile, run
+`source setup/setup.sh --update` to pick up HARK and the other deps
+you were previously missing.
+
+### Durables model
+
+The discrete–continuous housing model (Druedahl & Jørgensen-style, with
+adjustment frictions and a tenure choice) has had a substantial pass:
+
+- **Terminal utility** is now added to the net-present-value lifetime
+  utility used in welfare comparisons. The previous version silently
+  dropped it, which shifted welfare rankings slightly.
+- **2D interpolation** now uses a library routine that handles
+  non-uniform grids correctly. You can pack more grid points at the
+  bottom of the wealth and house-size dimensions (where policy
+  functions curve sharply) without introducing interpolation error.
+  A `grid_phi` setting controls how aggressively the grid is packed.
+- **Certainty-equivalent welfare** can now skip a configurable number
+  of initial periods (`ce_burn_in`), so artefacts from the starting
+  distribution don't distort the welfare number.
+- **Initial-condition dispersion**: simulations can optionally draw
+  initial wealth and housing from a log-normal distribution rather
+  than point masses (`init_dispersion` setting).
+- **FUES guard parameters** (tolerances, extrapolation behaviour,
+  clamp factors) now live in `settings.yaml` rather than being
+  hard-coded. You can experiment without editing source.
+- **Sweeps across parameter grids** are MPI-aware: if you launch under
+  `mpiexec -n N`, work is distributed across ranks; otherwise it
+  runs serially. Command-line: `--sweep-params key=v1,v2,...` and
+  `--sweep-grids n1,n2,...`.
+- **Lazy plot loading**: the sweep path no longer requires matplotlib
+  or seaborn to be present. Plot functions are loaded only at the
+  moment they're called.
+
+### Retirement model
+
+The Iskhakov et al. (2017) retirement–consumption model:
+
+- **On clusters**, the final solve-and-plot block after the timing
+  sweep now runs on the first MPI rank only. Previously every rank
+  silently repeated the work and raced on file writes.
+- **Same lazy plot loading** as durables. You can now run the timing
+  benchmarks on a minimal install without pulling the full plotting
+  stack.
+- **Paper-faithful documentation**: `docs/examples/retirement_choice_model.md`
+  contains the model exactly as written in Appendix 1 of the paper,
+  plus the modular Bellman form used in the notebook.
+
+### FUES algorithm itself
+
+Three new additions, nothing removed or renamed:
+
+- **`FUES_jit`** — a Numba-compatible entry point. If you're wiring
+  FUES into a jitted solver loop, you can now call it from inside
+  `@njit` functions. The existing `FUES` function is unchanged.
+- **Two new interpolation helpers** in `dcsmm.fues.helpers`:
+  `interp_as_3` (interpolates three outputs in a single pass — useful
+  when you're interpolating value, control, and a marginal together)
+  and `interp2d_nonuniform` (2D bilinear interpolation on uneven
+  grids).
+- **Extrapolation slope cap**: `interp_as` and `interp_as_scalar` now
+  cap the extrapolation slope at `1e8`. Previously, a very steep edge
+  interval could produce wildly large extrapolated values; now they
+  saturate at a large finite number. Interpolation inside the grid is
+  unaffected.
+
+The upper-envelope dispatcher now recognises `"MSS"` as an alias for
+`"DCEGM"` — they're the same method, two names used in the
+literature. No behaviour change, just a convenience.
+
+If HARK, ConSav, or pykdtree happen to be missing, the relevant
+methods (DCEGM, LTM, RFC) now fail with a clear message instead of
+breaking the whole package at import time.
+
+### Docs
+
+- Install instructions rewritten around the three tiers and the
+  single setup script (`README.md`, `docs/getting-started/installation.md`,
+  `docs/running-locally.md`, `docs/running-on-gadi.md`).
+- Paper-faithful model docs added for both the retirement model
+  and the continuous-housing model.
+- Cohort tables in the notebooks now render cleanly (plain-text
+  headers, no stray cells, trimmed plot output).
+
+### Under the hood (only relevant if you're writing new examples)
+
+- Moved to the `spec_factory` module of the bright-forest dolo fork
+  for all model building. Every example registry now ships a
+  `spec_factory.yaml` alongside `calibration.yaml` and `settings.yaml`.
+- `solve()` and `solve_nest()` have a single unified `ue_method=`
+  keyword replacing the previous `method=` and `method_switch=` pair.
+- Durables example registry collapsed: the male-specific variant is
+  now a 14-line overlay of the base model instead of a near-duplicate.
+- Kikku upgraded to the version exposing `comm` and `on_error`
+  keyword arguments, which the new MPI-aware sweep paths rely on.
+- `CLAUDE.md` added to the repo root — a short running list of
+  rename history and gotchas, intended to keep future refactors
+  from reintroducing bugs.
+
 ## [0.6.0dev3] - 2026-03-15 – Kikku package, solver refactor, generic EGM operators
 
 ### Architecture
