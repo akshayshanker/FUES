@@ -20,6 +20,19 @@
 #  in the core deps (EGM_UE benchmarks need them).
 # ==========================================================================
 
+# Refuse to run when executed as `bash setup.sh` — the venv activation
+# and env exports would vanish with the subshell. Must be `source`d.
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    echo "ERROR: setup.sh must be sourced, not executed directly." >&2
+    echo "" >&2
+    echo "  You ran:    bash setup/setup.sh" >&2
+    echo "  Should be:  source setup/setup.sh" >&2
+    echo "" >&2
+    echo "Running with bash puts the venv activation in a subshell that" >&2
+    echo "exits immediately, leaving your parent shell unchanged." >&2
+    exit 1
+fi
+
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
