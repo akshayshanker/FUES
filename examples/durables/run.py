@@ -17,33 +17,21 @@ Usage:
 """
 
 import itertools
-import math
 import os
 from dataclasses import replace
 from pathlib import Path
 import numpy as np
 import yaml
 
-from kikku.dynx.methods import parse_method_override_str
+from dolo.compiler.spec_factory import parse_method_override_str
 from kikku.run import parse_run
-from kikku.run.sweep import param_grid, sweep
+from kikku.run.sweep import sweep
 from kikku.run.metrics import format_table, write_table
 
 from .solve import solve, read_scheme_method, METHOD_SHORTCUT
-
-
-def _build_method_overrides(method=None, method_overrides=None):
-    """Expand --method shortcut + merge explicit overrides into one dict."""
-    result = {}
-    if method is not None:
-        for target in METHOD_SHORTCUT:
-            result[target] = method
-    if method_overrides:
-        result.update(method_overrides)
-    return result or None
 from .outputs import (
     plot_policies, plot_grids, plot_lifecycle, get_timing, derive_savings,
-    consumption_deviation, compute_euler_stats, print_euler_stats,
+    compute_euler_stats, print_euler_stats,
     generate_comparison_table,
     generate_sweep_table,
     write_euler_detail,
@@ -55,15 +43,25 @@ from .horses.simulate import (
 )
 
 
-def _solve_overrides(run):
-    """Extract the three DDSL override dicts from a RunSpec.
+def _run_settings(run):
+    """Merge ``run.settings`` and ``run.config`` into one dict (config wins)."""
+    if run.config:
+        return {**dict(run.settings), **dict(run.config)}
+    return dict(run.settings)
 
-    Returns (method_overrides, calib_overrides, setting_overrides).
+
+def _run_ue_method(run):
+    """Combine ``run.method`` (shortcut string) and ``run.method_overrides``
+    (explicit tuple-keyed dict) into a single ``ue_method`` value for ``solve``.
+
+    When both are set, the shortcut is expanded first and the explicit
+    overrides are layered on top.
     """
-    mo = _build_method_overrides(run.method, run.method_overrides)
-    calib = run.calib or None
-    settings = {**dict(run.settings), **dict(run.config)} if run.config else dict(run.settings)
-    return mo, calib, settings or None
+    if run.method_overrides:
+        combined = {t: run.method for t in METHOD_SHORTCUT} if run.method else {}
+        combined.update(run.method_overrides)
+        return combined or None
+    return run.method  # str or None; solve() accepts both forms
 
 
 def _parse_plot_ages(raw):
@@ -77,6 +75,31 @@ def _parse_plot_ages(raw):
     return None
 
 
+def _parse_compare_spec(spec):
+    """Parse one --compare entry into ``(label, method, method_overrides)``.
+
+    A bare name (e.g. ``'FUES'``) expands via METHOD_SHORTCUT in ``solve()``.
+    An override spec (e.g. ``'keeper_cons.upper_envelope=MSS'``) is used
+    directly.
+    """
+    if '=' in spec:
+        key, tag = parse_method_override_str(spec)
+        return f"{key[0]}.{key[2]}={tag}", None, {key: tag}
+    return spec, spec, None
+
+
+def _get_mpi_comm():
+    """Return MPI communicator if available and size > 1, else None."""
+    try:
+        from mpi4py import MPI
+        comm = MPI.COMM_WORLD
+        if comm.Get_size() > 1:
+            return comm
+    except ImportError:
+        pass
+    return None
+
+
 def run_single(run):
     """Solve and optionally simulate + plot.
 
@@ -84,13 +107,13 @@ def run_single(run):
     """
     store_cntn = bool(run.settings.get('store_cntn', 0))
 
-    mo, calib, settings = _solve_overrides(run)
+    settings = _run_settings(run)
     nest, grids = solve(
         str(run.syntax_dir),
-        method_overrides=mo,
-        calib_overrides=calib,
-        setting_overrides=settings,
-        verbose=False)
+        ue_method=_run_ue_method(run),
+        draw={"calibration": run.calib, "settings": settings},
+        verbose=False,
+    )
     adj0 = nest["periods"][0]["stages"]["adjuster_cons"]
     method_label = run.method or read_scheme_method(adj0, 'upper_envelope')
     print(f'{len(nest["solutions"])} periods solved')
@@ -176,11 +199,9 @@ def run_single(run):
 
     # Save single-run summary table
     os.makedirs(tables_dir, exist_ok=True)
-    from kikku.run.metrics import format_table, write_table
-    print('\n' + format_table([results_row],
-          [k for k in results_row.keys()]))
+    print('\n' + format_table([results_row], list(results_row.keys())))
     write_table(os.path.join(tables_dir, 'summary.md'),
-                [results_row], [k for k in results_row.keys()])
+                [results_row], list(results_row.keys()))
 
     return {
         'nest': nest, 'grids': grids,
@@ -189,9 +210,19 @@ def run_single(run):
 
 
 def build_sweep_grid(run):
-    """Parse ``run.sweep_params`` into Cartesian sweep points (model-specific).
+    """Build Cartesian sweep points from ``run.sweep_params`` + ``run.sweep_grids``.
 
-    Each point supplies calib/settings/method overrides for one ``solve`` call.
+    Axes are:
+    - ``method`` — upper-envelope method name (from ``run.methods``)
+    - any key in ``run.calib`` — calibration parameter
+    - any key in ``run.settings`` — numerical setting
+    - a dotted path (``stage.scheme`` or ``stage.target.scheme``) — method-tag
+      override for a specific scheme
+
+    Falls back to a default ``n_a`` grid when neither ``sweep_params`` nor
+    ``sweep_grids`` is set. Returns ``list[dict]`` — each is a flat point
+    ``{axis_name: value, ...}``. Roles are re-classified at solve time by
+    key lookup.
     """
     axes = {}
     for spec in run.sweep_params:
@@ -199,35 +230,26 @@ def build_sweep_grid(run):
             raise ValueError(
                 f"Invalid --sweep-params entry (expected key=val1,val2,...): {spec!r}")
         key, rest = spec.split('=', 1)
-        key = key.strip()
-        vals = [
-            yaml.safe_load(p.strip())
-            for p in rest.split(',')
-            if p.strip()
-        ]
+        vals = [yaml.safe_load(p.strip()) for p in rest.split(',') if p.strip()]
         if not vals:
             raise ValueError(f"Empty value list for sweep axis {key!r}")
-        axes[key] = vals
+        axes[key.strip()] = vals
 
     if run.sweep_grids is not None and 'n_a' not in axes:
         axes['n_a'] = list(run.sweep_grids)
 
+    if not axes:
+        axes['n_a'] = [100, 200, 300]
+
+    # Validate each axis is classifiable.
     calib_keys = set(run.calib.keys())
     settings_keys = set(run.settings.keys())
-    roles = {}
     for key in axes:
-        if key == 'method':
-            roles[key] = 'method'
-        elif key in calib_keys:
-            roles[key] = 'calib'
-        elif key in settings_keys:
-            roles[key] = 'setting'
-        elif '.' in key:
-            roles[key] = 'method_override'
-        else:
-            raise ValueError(
-                f"Unknown sweep axis {key!r}: not 'method', not in "
-                f"calibration/settings keys, and not a dotted method path.")
+        if key == 'method' or key in calib_keys or key in settings_keys or '.' in key:
+            continue
+        raise ValueError(
+            f"Unknown sweep axis {key!r}: not 'method', not in "
+            f"calibration/settings keys, and not a dotted method path.")
 
     if 'method' in axes:
         for m in axes['method']:
@@ -239,70 +261,18 @@ def build_sweep_grid(run):
     if 'method' in key_order:
         key_order = ['method'] + [k for k in key_order if k != 'method']
 
-    points = []
-    for combo in itertools.product(*(axes[k] for k in key_order)):
-        params = dict(zip(key_order, combo))
-        calib_overrides = {}
-        setting_overrides = {}
-        method = None
-        mo_point = {}
-        for k, v in params.items():
-            role = roles[k]
-            if role == 'method':
-                method = v
-            elif role == 'calib':
-                calib_overrides[k] = v
-            elif role == 'setting':
-                setting_overrides[k] = v
-            else:
-                triple, tag = parse_method_override_str(f"{k}={v}")
-                mo_point[triple] = str(tag).strip()
-        label = ','.join(f"{k}={v}" for k, v in params.items())
-        points.append({
-            'calib_overrides': calib_overrides,
-            'setting_overrides': setting_overrides,
-            'method': method,
-            'method_overrides': mo_point if mo_point else None,
-            'label': label,
-            'params': dict(params),
-        })
-    return points
-
-
-def _effective_setting(key, point, base_config):
-    if key in point['params']:
-        return point['params'][key]
-    return base_config.get(key)
-
-
-def _effective_calib(key, point, base_calib):
-    if key in point['params']:
-        return point['params'][key]
-    return base_calib.get(key)
-
-
-def _parse_compare_spec(spec):
-    """Parse one --compare entry into (label, method, method_overrides).
-
-    A bare name (e.g. 'FUES') expands via METHOD_SHORTCUT in solve().
-    An override spec (e.g. 'keeper_cons.upper_envelope=MSS') is used directly.
-    """
-    from kikku.dynx.methods import parse_method_override_str
-
-    if '=' in spec:
-        key, tag = parse_method_override_str(spec)
-        label = f"{key[0]}.{key[2]}={tag}"
-        return label, None, {key: tag}
-    else:
-        return spec, spec, None
+    return [
+        dict(zip(key_order, combo))
+        for combo in itertools.product(*(axes[k] for k in key_order))
+    ]
 
 
 def run_comparison(run):
     """Compare methods, print and save comparison tables.
 
     Each ``--compare`` entry is either a bare method name (expanded via
-    ``METHOD_SHORTCUT``) or a ``stage.scheme=TAG`` override spec.
-    Produces one combined table with all entries.
+    ``METHOD_SHORTCUT`` inside ``solve``) or a ``stage.scheme=TAG`` override
+    spec. Produces one combined table with all entries.
 
     Returns ``{label: {nest, grids, ...}, ...}``.
     """
@@ -324,7 +294,8 @@ def run_comparison(run):
         method_dir = os.path.join(base_dir, label)
         spec_run = replace(
             run,
-                        method_overrides=_build_method_overrides(method, method_overrides or run.method_overrides),
+            method=method,
+            method_overrides=method_overrides or run.method_overrides,
             output_dir=Path(method_dir),
         )
         result = run_single(spec_run)
@@ -365,64 +336,67 @@ def run_comparison(run):
     return all_results
 
 
-def _get_mpi_comm():
-    """Return MPI communicator if available and size > 1, else None."""
-    try:
-        from mpi4py import MPI
-        comm = MPI.COMM_WORLD
-        if comm.Get_size() > 1:
-            return comm
-    except ImportError:
-        pass
-    return None
+def run_sweep(run):
+    """Parameter sweep via ``kikku.run.sweep.sweep()`` with MPI support.
 
+    Sweep axes come from ``build_sweep_grid(run)`` (combining
+    ``run.sweep_params`` + ``run.sweep_grids``, defaulting to a small
+    ``n_a`` grid). One solve_fn handles every point, one metric_fns set
+    extracts scalar metrics, and the call is MPI-aware (``comm=None``
+    when running locally).
 
-def _run_sweep_params_path(run, base_calib, base_config):
-    """Multi-axis sweep using kikku's sweep() with MPI support.
-
-    Builds the Cartesian product of sweep axes, wraps each point
-    into a solve_fn compatible with kikku.run.sweep.sweep(), and
-    lets sweep() handle MPI distribution + best-of-n timing.
+    Writes ``sweep.md`` and ``sweep.tex`` on rank 0. Returns the flat
+    results list (empty on non-root MPI ranks).
     """
+    base_calib = dict(run.calib or {})
+    base_config = _run_settings(run)
     comm = _get_mpi_comm()
     points = build_sweep_grid(run)
 
     syntax = str(run.syntax_dir)
-
-    # Pre-compute key classification for solve_fn
     calib_keys = set(base_calib.keys())
     settings_keys = set(base_config.keys())
 
     def solve_fn(params):
-        """Solve one sweep point. params is flat: {method: .., n_a: .., tau: ..}."""
-        method = params.get('method', run.method)
-        mo = dict(run.method_overrides or {})
+        """Solve one sweep point. ``params`` is a flat ``{axis: value}`` dict."""
+        per_method = params.get('method', run.method)
         calib_use = dict(base_calib)
         cfg_use = dict(base_config)
+        mo_point = {}
         for k, v in params.items():
             if k == 'method':
                 continue
-            elif k in calib_keys:
+            if k in calib_keys:
                 calib_use[k] = v
             elif k in settings_keys:
                 cfg_use[k] = v
+            elif '.' in k:
+                triple, tag = parse_method_override_str(f"{k}={v}")
+                mo_point[triple] = str(tag).strip()
+
+        overrides = dict(run.method_overrides or {})
+        overrides.update(mo_point)
+        if overrides:
+            ue = {t: per_method for t in METHOD_SHORTCUT} if per_method else {}
+            ue.update(overrides)
+            ue = ue or None
+        else:
+            ue = per_method
 
         nest, grids = solve(
             syntax,
-            method_overrides=_build_method_overrides(method, mo),
-            calib_overrides=calib_use,
-            setting_overrides=cfg_use,
-            verbose=False)
+            ue_method=ue,
+            draw={"calibration": calib_use, "settings": cfg_use},
+            verbose=False,
+        )
 
         adj0 = nest["periods"][0]["stages"]["adjuster_cons"]
-        method_label = method or read_scheme_method(adj0, 'upper_envelope')
+        method_label = per_method or read_scheme_method(adj0, 'upper_envelope')
         timing = get_timing(nest)
 
         result = {
-            'nest': nest, 'grids': grids,
             'method_label': method_label,
             'timing': timing,
-            'calib_use': calib_use,
         }
 
         if run.simulate:
@@ -441,7 +415,6 @@ def _run_sweep_params_path(run, base_calib, base_config):
 
         return result
 
-    # Build metric extraction functions
     metric_fns = {
         'solve_ms': lambda r: r['timing']['solve_time'] * 1000,
         'keeper_ms': lambda r: r['timing']['keeper_ms'],
@@ -457,11 +430,8 @@ def _run_sweep_params_path(run, base_calib, base_config):
             'adj_rate': lambda r: r['adj_rate'],
         })
 
-    # Pass flat param dicts to kikku's sweep (MPI-aware)
-    flat_grid = [p['params'] for p in points]
-
-    raw_results = sweep(
-        solve_fn, flat_grid, metric_fns,
+    results = sweep(
+        solve_fn, points, metric_fns,
         n_reps=run.sweep_runs,
         warmup=run.warmup,
         best='min',
@@ -469,29 +439,41 @@ def _run_sweep_params_path(run, base_calib, base_config):
         comm=comm,
     )
 
-    # Build summaries for LaTeX table (only on rank 0 after gather)
-    results = []
+    # Non-root MPI ranks return early (results gathered on rank 0 only).
+    if not results:
+        return results
+
+    # Column order: sweep axes first (sorted), then metric tail.
+    omit_md = {'euler_c_keeper', 'euler_c_adjuster'}
+    metric_tail = ['method', 'solve_ms', 'keeper_ms', 'adj_ms']
+    if run.simulate:
+        metric_tail += ['euler_c_mean', 'euler_h_mean', 'adj_rate']
+    row0 = results[0]
+    param_cols = sorted(k for k in row0 if k not in set(metric_tail) | omit_md)
+    cols = [c for c in param_cols + metric_tail if c in row0]
+
+    print('\n' + format_table(results, cols))
+    tdir = os.path.join(str(run.output_dir), 'tables')
+    os.makedirs(tdir, exist_ok=True)
+    write_table(os.path.join(tdir, 'sweep.md'), results, cols)
+
+    # LaTeX summary table (durables-specific column shape).
     summaries = []
-    for row in raw_results:
-        n_a_eff = row.get('n_a', base_config.get('n_a', 0))
-        tau_eff = row.get('tau', base_calib.get('tau', 0.0))
-
-        results.append(row)
-
-        cal_params = {}
-        for k in ('beta', 'gamma_c', 'gamma_h', 'alpha', 'delta',
-                  'R', 'R_H', 'phi_w', 'sigma_w'):
-            if k in base_calib:
-                cal_params[k] = base_calib[k]
+    for row in results:
+        cal_params = {
+            k: base_calib[k]
+            for k in ('beta', 'gamma_c', 'gamma_h', 'alpha', 'delta',
+                      'R', 'R_H', 'phi_w', 'sigma_w')
+            if k in base_calib
+        }
         if 'R' in cal_params:
             cal_params['r'] = cal_params.pop('R')
         if 'R_H' in cal_params:
             cal_params['r_H'] = cal_params.pop('R_H')
         cal_params['N_sim'] = run.n_sim
-
         summaries.append({
-            'Grid_Size': int(n_a_eff) if n_a_eff is not None else 0,
-            'Tau': float(tau_eff) if tau_eff is not None else 0.0,
+            'Grid_Size': int(row.get('n_a', base_config.get('n_a', 0)) or 0),
+            'Tau': float(row.get('tau', base_calib.get('tau', 0.0)) or 0.0),
             'Method': row.get('method', ''),
             'Avg_Keeper_ms': row.get('keeper_ms', 0.0),
             'Avg_Adj_ms': row.get('adj_ms', 0.0),
@@ -502,153 +484,20 @@ def _run_sweep_params_path(run, base_calib, base_config):
             **cal_params,
         })
 
-    return results, summaries
-
-
-def run_sweep(run):
-    """Parameter sweep over grid sizes with timing and optional Euler metrics.
-
-    With ``run.simulate``, a single ``trial_fn`` runs solve + simulate +
-    post-hoc Euler once per grid point (and per rep); metrics are plain
-    key lookups on the returned dict.
-
-    Returns list[dict] — flat results from sweep().
-    """
-    base_calib = dict(run.calib or {})
-    _, _, base_config = _solve_overrides(run)
-
-    if run.sweep_params:
-        results, summaries = _run_sweep_params_path(
-            run, base_calib, base_config)
-
-        # Only rank 0 has gathered results; non-root ranks get []
-        if not results:
-            return results
-
-        omit_md = {'euler_c_keeper', 'euler_c_adjuster'}
-        if run.simulate:
-            metric_tail = [
-                'n_a', 'method', 'solve_ms', 'keeper_ms', 'adj_ms',
-                'euler_c_mean', 'euler_h_mean', 'adj_rate',
-            ]
-        else:
-            metric_tail = [
-                'n_a', 'method', 'solve_ms', 'keeper_ms', 'adj_ms',
-            ]
-        row0 = results[0]
-        param_cols = sorted(
-            k for k in row0 if k not in set(metric_tail) | omit_md)
-        cols = [c for c in param_cols + metric_tail if c in row0]
-        print('\n' + format_table(results, cols))
-        output_dir = str(run.output_dir)
-        tdir = os.path.join(output_dir, 'tables')
-        os.makedirs(tdir, exist_ok=True)
-        write_table(os.path.join(tdir, 'sweep.md'), results, cols)
-        tex = generate_sweep_table(
-            summaries, fmt='tex',
-            caption='Durables Model: Per-Period Timing and Accuracy')
-        with open(os.path.join(tdir, 'sweep.tex'), 'w') as f:
-            preamble = ('\\documentclass[11pt]{article}\n'
-                        '\\usepackage{booktabs}\n'
-                        '\\usepackage[margin=1in]{geometry}\n'
-                        '\\begin{document}\n'
-                        '\\pagestyle{empty}\n')
-            f.write(preamble)
-            f.write(tex)
-            f.write('\n\\end{document}\n')
-        return results
-
-    grid_sizes = run.sweep_grids or [100, 200, 300]
-    grid = param_grid(n_a=grid_sizes)
-
-    mo, _, _ = _solve_overrides(run)
-
-    if run.simulate:
-        def trial_fn(ov):
-            cfg = {**base_config, 'n_a': ov['n_a']}
-            nest, grids = solve(
-                str(run.syntax_dir),
-                method_overrides=mo,
-                calib_overrides=base_calib,
-                setting_overrides=cfg,
-                verbose=False)
-            adj0 = nest["periods"][0]["stages"]["adjuster_cons"]
-            method_label = run.method or read_scheme_method(adj0, 'upper_envelope')
-            st0 = nest["periods"][0]["stages"]["keeper_cons"]
-            use_emp = st0.calibration.get("init_method", "standard") == "empirical"
-            sim_data = simulate_lifecycle(
-                nest, grids,
-                N=run.n_sim, seed=run.seed,
-                use_empirical_init=use_emp)
-            euler_c = evaluate_euler_c(
-                sim_data, nest, grids)
-            euler_h = evaluate_euler_h(
-                sim_data, nest, grids)
-            timing = get_timing(nest)
-            d = sim_data['discrete']
-            ec_stats = compute_euler_stats(euler_c, d)
-            eh_stats = compute_euler_stats(euler_h, d)
-            return {
-                'method': method_label,
-                'solve_ms': timing['solve_time'] * 1000,
-                'keeper_ms': timing['keeper_ms'],
-                'adj_ms': timing['adj_ms'],
-                'euler_c_mean': ec_stats.get('combined', {}).get(
-                    'mean', np.nan),
-                'euler_h_mean': eh_stats.get('combined', {}).get(
-                    'mean', np.nan),
-                'adj_rate': np.mean(d[d >= 0]) * 100,
-            }
-
-        metric_keys = [
-            'solve_ms', 'keeper_ms', 'adj_ms',
-            'euler_c_mean', 'euler_h_mean', 'adj_rate',
-        ]
-        metric_fns = {
-            k: (lambda k=k: (lambda r: r[k]))()
-            for k in metric_keys
-        }
-        metric_fns['method'] = lambda r: r['method']
-        results = sweep(
-            trial_fn, grid, metric_fns,
-            n_reps=run.sweep_runs, warmup=run.warmup,
-            best='min')
-        cols = [
-            'n_a', 'method', 'solve_ms', 'keeper_ms', 'adj_ms',
-            'euler_c_mean', 'euler_h_mean', 'adj_rate',
-        ]
-    else:
-        def solve_fn(ov):
-            cfg = {**base_config, 'n_a': ov['n_a']}
-            nest, grids = solve(
-                str(run.syntax_dir),
-                method_overrides=mo,
-                calib_overrides=base_calib,
-                setting_overrides=cfg,
-                verbose=False)
-            adj0 = nest["periods"][0]["stages"]["adjuster_cons"]
-            method_label = run.method or read_scheme_method(adj0, 'upper_envelope')
-            return {'nest': nest, 'method': method_label}
-
-        metric_fns = {
-            'solve_ms': lambda r: get_timing(r['nest'])['solve_time'] * 1000,
-            'keeper_ms': lambda r: get_timing(r['nest'])['keeper_ms'],
-            'adj_ms': lambda r: get_timing(r['nest'])['adj_ms'],
-            'method': lambda r: r['method'],
-        }
-        results = sweep(
-            solve_fn, grid, metric_fns,
-            n_reps=run.sweep_runs, warmup=run.warmup,
-            best='min')
-        cols = ['n_a', 'method', 'solve_ms', 'keeper_ms', 'adj_ms']
-
-    if results:
-        print('\n' + format_table(results, cols))
-        output_dir = str(run.output_dir)
-        os.makedirs(os.path.join(output_dir, 'tables'), exist_ok=True)
-        write_table(
-            os.path.join(output_dir, 'tables', 'sweep.md'),
-            results, cols)
+    tex = generate_sweep_table(
+        summaries, fmt='tex',
+        caption='Durables Model: Per-Period Timing and Accuracy')
+    preamble = (
+        '\\documentclass[11pt]{article}\n'
+        '\\usepackage{booktabs}\n'
+        '\\usepackage[margin=1in]{geometry}\n'
+        '\\begin{document}\n'
+        '\\pagestyle{empty}\n'
+    )
+    with open(os.path.join(tdir, 'sweep.tex'), 'w') as f:
+        f.write(preamble)
+        f.write(tex)
+        f.write('\n\\end{document}\n')
 
     return results
 

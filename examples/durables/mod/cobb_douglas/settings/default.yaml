@@ -1,0 +1,82 @@
+# Numerical settings (consumed by configure functor)
+# Small grids for testing; paper uses 300 each
+settings:
+  T: 70
+
+  # Financial asset grid
+  n_a: 300
+  a_min: 1.0e-02
+  a_max: 7.5
+
+  # Housing asset grid
+  n_h: 300
+  h_min: 1.0e-02
+  h_max: 7.5
+
+  # Total wealth grid (adjuster)
+  n_w: 300
+  w_min: 1.0e-05
+  w_max: 12.0
+  grid_phi: 1.01
+
+  # FUES upper envelope
+  m_bar: 1.01
+  fues_lb: 5
+  fues_eps_d: 1.0e-08
+  fues_eps_sep: 1.0e-05
+  fues_eps_fwd_back: 0.05
+  fues_parallel_guard: 1.0e-07
+
+  # FUES intersection options (keeper)
+  keeper_include_intersections: 0
+  keeper_no_double_jumps: 1
+  keeper_single_intersection: 1
+  keeper_disable_jump_checks: 0
+
+  # FUES intersection options (adjuster)
+  adj_include_intersections: 0
+  adj_no_double_jumps: 1
+  adj_single_intersection: 1
+  adj_disable_jump_checks: 1
+
+  correct_jumps: 1
+  clamp_max_factor: 1.1
+
+  # Adjuster EGM root scan: 0 = full grid (exact), >0 = coarse step size
+  root_eps: 0.0
+  egm_n: 25
+
+  # Income discretisation: number of Tauchen grid points for AR(1) process
+  # See methodization.yaml for method choice (Tauchen vs Rouwenhorst vs quadrature)
+  N_wage: 4
+
+  # HD Lambda
+  N_HD_LAMBDA: 1
+
+  # Store raw EGM (cntn perch) grids in solution
+  store_cntn: 0
+
+  # Plot ages (empty list = auto: third-to-last period)
+  plot_ages: []
+
+  # Simulation initial conditions: 'standard' or 'empirical'
+  init_method: standard
+
+  # JIT warmup periods to skip when reporting timing averages
+  warmup_periods: 3
+
+  b: 1.0e-02
+  normalisation: 1.0e-05
+
+  # Simulation guard: skip agent-periods with c or a below this threshold
+  # when computing Euler errors and NPV utility. Old default was 0.1;
+  # lowered to 1e-10 to avoid discarding legitimate low-consumption states.
+  # Extrapolation: 1 = linear extrapolation outside grid, 0 = clamp to boundary.
+  # Applies to all 1D interp_as/interp_as_scalar calls and eval_linear (2D).
+  extrap_policy: 0
+
+  sim_guard: 0.01
+  util_floor: -1.0e10
+
+  # NEGM: number of search intervals per h' optimisation.
+  n_sections: 1

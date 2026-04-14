@@ -2,7 +2,7 @@
 
 Functional pipeline::
 
-    load_syntax → instantiate_period → period_to_graph → backward_paths
+    spec_factory → make → period_to_graph → backward_paths
                         ↓                                       ↓
                   RetirementModel(period)                  solve_backward
                         ↓                                  (wave loop)
@@ -19,10 +19,12 @@ T = I ∘ B is visible inline in solve_period.
 import numpy as np
 import time
 from pathlib import Path
+from collections.abc import Mapping
 
-from kikku.dynx import period_to_graph, backward_paths
-from kikku.dynx import load_syntax, instantiate_period
-from kikku.dynx.methods import override_methods
+from dolo.compiler.period_factory import make as make_period
+from dolo.compiler.period_factory import period_to_graph
+from dolo.compiler.nest_factory import backward_paths
+from dolo.compiler.spec_factory import load as load_spec, make as make_spec
 
 from .model import RetirementModel
 from .operators import make_retire_cons, make_work_cons, make_labour_mkt_decision
@@ -30,7 +32,7 @@ from .model import make_worker_egm_fns, make_retiree_egm_fns
 
 
 # ============================================================
-# Method shortcut (--method expands before instantiate_period)
+# Method shortcut (--method expands before make)
 # ============================================================
 
 METHOD_SHORTCUT = [
@@ -38,6 +40,24 @@ METHOD_SHORTCUT = [
     ('retire_cons', 'cntn_to_dcsn_mover', 'upper_envelope'),
     ('labour_mkt_decision', 'cntn_to_dcsn_mover', 'upper_envelope'),
 ]
+
+
+def _resolve_ue_method(ue_method):
+    """Resolve the ``ue_method`` argument into a ``$method_switch`` slot dict.
+
+    - ``None`` -> ``None`` (no override).
+    - str (e.g. ``'FUES'``) -> broadcast to all METHOD_SHORTCUT targets.
+    - dict ``{(stage, target, scheme): tag, ...}`` -> passed through.
+    """
+    if ue_method is None:
+        return None
+    if isinstance(ue_method, str):
+        return {target: ue_method for target in METHOD_SHORTCUT}
+    if isinstance(ue_method, Mapping):
+        return dict(ue_method)
+    raise TypeError(
+        f"ue_method must be None, str, or dict; got {type(ue_method).__name__}"
+    )
 
 
 # ============================================================
@@ -58,7 +78,7 @@ def read_scheme_method(stage, scheme_name,
     for scheme in mover_dict.get('schemes', []):
         if scheme.get('scheme') == scheme_name:
             tag = scheme.get('method', {})
-            if isinstance(tag, dict):
+            if isinstance(tag, Mapping):
                 return tag.get('__yaml_tag__', default)
             return str(tag)
     return default
@@ -175,23 +195,25 @@ def solve_backward(T, model, stage_ops, waves):
 # Entry point
 # ============================================================
 
-def solve_nest(syntax_dir, method_overrides=None,
-               calib_overrides=None, setting_overrides=None,
-               model=None, stage_ops=None, waves=None,
-               # Deprecated — use method_overrides + setting_overrides
-               method=None, config_overrides=None):
-    """Canonical pipeline: load → build → solve backward.
+def solve_nest(
+    registry_dir,
+    spec_factory_name="spec_factory.yaml",
+    draw=None,
+    ue_method=None,
+    model=None,
+    stage_ops=None,
+    waves=None,
+):
+    """Canonical retirement pipeline: spec_factory → build → solve backward.
 
     Composition algebra::
 
-        load_syntax → calibration, settings, sources, template
-        override_methods (shortcut + explicit overrides)
-        instantiate_period → period
+        spec_factory.load → recipe
+        spec_factory.make(recipe, draw, method_switch) → SpecGraph
+        period_factory.make(spec, 0, template, sym_stages) → period
         period_to_graph → graph → backward_paths → waves
         RetirementModel(period) → model
-        make_retire_cons(model, callables) → {dcsn_mover, arvl_mover}
-        make_work_cons(model, callables, ue_method) → {dcsn_mover, arvl_mover}
-        make_labour_mkt_decision(model) → {dcsn_mover}
+        make_retire_cons/work_cons/labour_mkt_decision → stage_ops
         solve_backward(T, model, ops, waves) → solutions
 
     For stationary models, pass back ``model``, ``stage_ops``,
@@ -199,23 +221,26 @@ def solve_nest(syntax_dir, method_overrides=None,
 
     Parameters
     ----------
-    syntax_dir : str or Path
-        Root syntax directory.
-    method : str or None
-        Upper-envelope method (FUES/DCEGM/RFC/CONSAV). Expanded to
-        ``METHOD_SHORTCUT`` before instantiation. If ``None``, only
-        ``method_overrides`` and YAML defaults apply.
-    calib_overrides, config_overrides : dict, optional
-        Sparse overrides.
+    registry_dir : str or Path
+        Path to the model registry (e.g. 'examples/retirement/syntax').
+    spec_factory_name : str
+        Name of the spec_factory YAML file.
+    draw : dict, optional
+        Tier-wrapped overrides for the `$draw` slot:
+        `{'calibration': {...}, 'settings': {...}}`.
+    ue_method : str or dict, optional
+        Upper-envelope method selection. Targets the `$method_switch` slot.
+
+        - String (``'FUES'``, ``'DCEGM'``, ``'RFC'``, ``'CONSAV'``) is broadcast
+          via ``METHOD_SHORTCUT`` to the standard upper-envelope targets.
+        - Dict ``{(stage, target, scheme): tag, ...}`` is passed through
+          directly for fine-grained control.
     model : RetirementModel, optional
         Reuse to skip reconstruction.
     stage_ops : dict, optional
         Reuse to skip JIT recompilation.
     waves : list[list[str]], optional
         Reuse to skip graph construction.
-    method_overrides : dict, optional
-        ``{(stage, target, scheme): tag, ...}`` merged after the
-        ``method`` shortcut; passed to ``override_methods``.
 
     Returns
     -------
@@ -224,35 +249,73 @@ def solve_nest(syntax_dir, method_overrides=None,
     stage_ops : dict
     waves : list[list[str]]
     """
-    syntax_dir = Path(syntax_dir)
+    from pathlib import Path as _Path
+    from dolo.compiler.tag_tolerant_yaml import load_yaml_tag_tolerant
+    from dolo.compiler.nest_factory.loader import load_inter_connector
 
-    # Backward compat: config_overrides → setting_overrides
-    if config_overrides is not None and setting_overrides is None:
-        setting_overrides = config_overrides
+    registry_dir = _Path(registry_dir)
+
+    # Resolve ue_method into the $method_switch slot value.
+    method_switch = _resolve_ue_method(ue_method)
+
+    if not (registry_dir / spec_factory_name).exists():
+        raise FileNotFoundError(
+            f"No {spec_factory_name} in {registry_dir}. "
+            f"Every retirement registry must provide a spec_factory YAML; "
+            f"migrate legacy registries by mirroring examples/retirement/syntax/."
+        )
 
     if model is None or stage_ops is None or waves is None:
-        calibration, settings, stage_sources, \
-            period_template, inter_conn = load_syntax(
-                syntax_dir, calib_overrides, setting_overrides,
-            )
-        # method= is deprecated — callers should use method_overrides
-        all_method_overrides = {}
-        if method is not None:
-            for target in METHOD_SHORTCUT:
-                all_method_overrides[target] = method
-        if method_overrides:
-            all_method_overrides.update(method_overrides)
-        if all_method_overrides:
-            stage_sources = override_methods(stage_sources, all_method_overrides)
-        period = instantiate_period(
-            calibration, settings, stage_sources, period_template,
-        )
+        recipe = load_spec(str(registry_dir / spec_factory_name))
+
+        slot_bindings = {}
+        if draw:
+            slot_bindings['draw'] = draw
+        if method_switch:
+            slot_bindings['method_switch'] = method_switch
+        spec = make_spec(recipe, registry_dir=str(registry_dir),
+                         **slot_bindings)
+
+        # Load sym stage sources
+        stage_names = list(recipe.stages.keys())
+        stages_dir = registry_dir / "stages"
+        sym_stages = {}
+        for name in stage_names:
+            stage_yaml_path = stages_dir / name / f"{name}.yaml"
+            with open(stage_yaml_path) as f:
+                yaml_text = f.read()
+            sym_stages[name] = {
+                "yaml_text": yaml_text,
+                "yaml_path": str(stage_yaml_path),
+            }
+
+        # Load period template
+        period_raw = load_yaml_tag_tolerant(registry_dir / "period.yaml")
+        tmpl_stage_names = []
+        for entry in period_raw.get('stages', []):
+            if isinstance(entry, dict):
+                tmpl_stage_names.extend(entry.keys())
+            else:
+                tmpl_stage_names.append(str(entry))
+        period_template = {
+            "name": period_raw.get("name", "retirement"),
+            "stages": tmpl_stage_names,
+            "connectors": period_raw.get("connectors", []),
+        }
+
+        # Build period via 0.1s path (SpecGraph)
+        period = make_period(spec, 0, period_template, sym_stages)
+
+        # Derive topology
+        inter_conn = load_inter_connector(registry_dir)
         graph = period_to_graph(period)
         waves = backward_paths(graph, inter_conn)
+
         if model is None:
             model = RetirementModel(period)
+
         if stage_ops is None:
-            stages_dict = period["stages"] if "stages" in period else period
+            stages_dict = period["stages"]
             work_stage = stages_dict["work_cons"]
             ue = read_scheme_method(work_stage, 'upper_envelope')
             beta, R = model.beta, model.R
@@ -267,5 +330,6 @@ def solve_nest(syntax_dir, method_overrides=None,
             }
 
     solutions = solve_backward(int(model.T), model, stage_ops, waves)
-
     return {"solutions": solutions}, model, stage_ops, waves
+
+

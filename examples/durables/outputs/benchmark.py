@@ -43,8 +43,7 @@ def run_comparison(syntax_dir, calib_overrides=None,
     t0 = time.time()
     nest, grids = solve(
         syntax_dir,
-        calib_overrides=calib_overrides,
-        setting_overrides=setting_overrides,
+        draw={"calibration": calib_overrides, "settings": setting_overrides},
         verbose=False,
     )
     solutions = nest["solutions"]
@@ -89,8 +88,7 @@ def run_timing(syntax_dir, n_runs=3, calib_overrides=None,
     def solve_fn(ov):
         nest, grids = solve(
             syntax_dir,
-            calib_overrides=base_calib,
-            setting_overrides=base_settings,
+            draw={"calibration": base_calib, "settings": base_settings},
             verbose=False,
         )
         last_result.update({

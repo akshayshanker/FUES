@@ -1,0 +1,28 @@
+# spec_factory.yaml — retirement choice model
+#
+# Source names are relative to the registry root (syntax/).
+# Extensions (.yaml/.yml) are resolved automatically.
+stages:
+  retire_cons:
+    calibration:
+      all: [calibration, $draw]
+    settings:
+      all: [settings, $draw]
+    methods:
+      all: [stages/retire_cons/retire_cons_methods, $method_switch]
+
+  work_cons:
+    calibration:
+      all: [calibration, $draw]
+    settings:
+      all: [settings, $draw]
+    methods:
+      all: [stages/work_cons/work_cons_methods, $method_switch]
+
+  labour_mkt_decision:
+    calibration:
+      all: [calibration, $draw]
+    settings:
+      all: [settings, $draw]
+    methods:
+      all: [stages/labour_mkt_decision/labour_mkt_decision_methods, $method_switch]

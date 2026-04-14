@@ -41,7 +41,7 @@ from kikku.run.estimate import (
 from kikku.run.moments import make_moment_fn, moment_names as get_moment_names
 from kikku.run.mpi import get_comm, is_root, bcast_item
 
-from .solve import solve_block as solve
+from .solve import solve
 from .horses.simulate import simulate_lifecycle
 
 
@@ -130,7 +130,7 @@ def _run_single_estimation(
     # deviation weighting (1/data² for |data|>=1) treats all means/SDs
     # consistently (all >> 1 in AUD) and correlations as absolute (|data| < 1).
     raw_moment_fn = make_moment_fn(moment_spec)
-    from kikku.dynx import load_syntax
+    from dolo.compiler.stage_factory import load_syntax
     _cal, _sett, *_ = load_syntax(mod_dir, calib_overrides, setting_overrides)
     denorm = 1.0 / float(_sett.get('normalisation', 1.0))
 
@@ -163,8 +163,10 @@ def _run_single_estimation(
             print("  Data source: selfgen...")
             nest_data, grids_data = solve(
                 str(mod_dir),
-                calib_overrides=calib_overrides,
-                setting_overrides=setting_overrides,
+                draw={
+                    "calibration": calib_overrides,
+                    "settings": setting_overrides,
+                },
                 verbose=False,
                 strip_solved=False,  # keep full nest for .nst save
             )
@@ -202,9 +204,11 @@ def _run_single_estimation(
         merged_calib = {**calib_overrides, **theta}
         nest, grids = solve(
             str(mod_dir),
-            method=solver_method,
-            calib_overrides=merged_calib,
-            setting_overrides=setting_overrides,
+            ue_method=solver_method,
+            draw={
+                "calibration": merged_calib,
+                "settings": setting_overrides,
+            },
             verbose=False,
             strip_solved=True,
         )

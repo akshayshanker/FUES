@@ -104,9 +104,11 @@ def make_callables(period_h):
 
     All parameters are baked into @njit closures at construction time.
     """
-    # Period calibration is merged into every stage; keeper_cons holds the
-    # full preference / income block used by all three callable bundles.
-    cal = period_h["stages"]["keeper_cons"].calibration
+    # Merge calibration + settings for backward compat with parameter lookups.
+    # Calibration has economic parameters; settings has numerical config
+    # (normalisation, b, N_wage, T, etc.) — callables need both.
+    stage = period_h["stages"]["keeper_cons"]
+    cal = {**(stage.calibration or {}), **(stage.settings or {})}
 
     chi = float(cal["chi"])
     alpha = float(cal["alpha"])

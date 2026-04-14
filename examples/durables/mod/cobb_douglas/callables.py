@@ -131,7 +131,11 @@ def make_callables(period_h):
     Reads parameters from the calibrated stage objects.
     Expects: alpha, rho, d_ubar (NOT gamma_c, gamma_h, kappa, chi).
     """
-    cal = period_h["stages"]["keeper_cons"].calibration
+    # Merge calibration + settings for backward compat with parameter lookups.
+    # Calibration has economic parameters; settings has numerical config
+    # (normalisation, b, N_wage, T, etc.) — callables need both.
+    stage = period_h["stages"]["keeper_cons"]
+    cal = {**(stage.calibration or {}), **(stage.settings or {})}
 
     alpha = float(cal["alpha"])
     rho = float(cal["rho"])

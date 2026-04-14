@@ -34,8 +34,10 @@ class TestDurables2Simulate(unittest.TestCase):
         """Solve at t0=50 (10 periods) and simulate."""
         cls.nest, cls.grids = solve(
             SYNTAX_DIR,
-            calib_overrides={'t0': 50},
-            setting_overrides={'n_a': 30, 'n_h': 30, 'n_w': 30},
+            draw={
+                'calibration': {'t0': 50},
+                'settings': {'n_a': 30, 'n_h': 30, 'n_w': 30},
+            },
         )
         cls.cal = next(iter(cls.nest["periods"][0]["stages"].values())).calibration
         cls.sett = next(iter(cls.nest["periods"][0]["stages"].values())).settings
@@ -54,7 +56,7 @@ class TestDurables2Simulate(unittest.TestCase):
 
     def test_output_shapes(self):
         """Euler and sim_data arrays have shape (T, N)."""
-        T = int(self.cal["T"])
+        T = int(self.sett["T"])
         self.assertEqual(self.euler.shape, (T, N_SIM))
         for key in ('a', 'h', 'c', 'y', 'z_idx', 'discrete',
                      'a_nxt', 'h_nxt'):
@@ -74,7 +76,7 @@ class TestDurables2Simulate(unittest.TestCase):
     def test_euler_finite(self):
         """At least 10% of (agent, period) cells should have finite Euler."""
         valid = self.euler[~np.isnan(self.euler)]
-        T_sim = int(self.cal["T"]) - int(self.cal["t0"])
+        T_sim = int(self.sett["T"]) - int(self.cal["t0"])
         min_expected = int(0.10 * T_sim * N_SIM)
         self.assertGreater(
             len(valid), min_expected,

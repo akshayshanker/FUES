@@ -33,13 +33,13 @@ class TestRetirementModel(unittest.TestCase):
         for method in UE_METHODS:
             # Warmup (JIT compile)
             _, m_, ops_, w_ = solve_nest(
-                SYNTAX_DIR, method=method,
-                config_overrides={"grid_size": GRID_SIZE},
+                SYNTAX_DIR, ue_method=method,
+                draw={"settings": {"grid_size": GRID_SIZE}},
             )
             # Timed run (reuse model + ops)
             nest, model, _, _ = solve_nest(
-                SYNTAX_DIR, method=method,
-                config_overrides={"grid_size": GRID_SIZE},
+                SYNTAX_DIR, ue_method=method,
+                draw={"settings": {"grid_size": GRID_SIZE}},
                 model=m_, stage_ops=ops_, waves=w_,
             )
             cls.solutions[method] = nest

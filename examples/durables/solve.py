@@ -4,14 +4,14 @@ import os
 import time
 import numpy as np
 from pathlib import Path
-from kikku.dynx import (
-    load_syntax, instantiate_period,
-    period_to_graph, backward_paths,
-)
-from kikku.dynx.methods import override_methods
-from dolo.compiler.calibration import (
-    calibrate as calibrate_stage,
-)
+from collections.abc import Mapping
+from dolo.compiler.stage_factory import calibrate as calibrate_stage
+from dolo.compiler.period_factory import make
+from dolo.compiler.period_factory import period_to_graph
+from dolo.compiler.period_factory import load as load_period_template
+from dolo.compiler.nest_factory import backward_paths
+from dolo.compiler.nest_factory.loader import load_inter_connector
+from dolo.compiler.spec_factory import load as load_spec, make as make_spec
 
 import sys
 import importlib.util as _imputil
@@ -60,6 +60,24 @@ METHOD_SHORTCUT = [
 ]
 
 
+def _resolve_ue_method(ue_method):
+    """Resolve the ``ue_method`` argument into a ``$method_switch`` slot dict.
+
+    - ``None`` -> ``None`` (no override).
+    - str (e.g. ``'FUES'``) -> broadcast to all METHOD_SHORTCUT targets.
+    - dict ``{(stage, target, scheme): tag, ...}`` -> passed through.
+    """
+    if ue_method is None:
+        return None
+    if isinstance(ue_method, str):
+        return {target: ue_method for target in METHOD_SHORTCUT}
+    if isinstance(ue_method, Mapping):
+        return dict(ue_method)
+    raise TypeError(
+        f"ue_method must be None, str, or dict; got {type(ue_method).__name__}"
+    )
+
+
 def read_scheme_method(stage, scheme_name, mover='cntn_to_dcsn_mover',
                        default='FUES'):
     """Read method tag for a scheme from stage.methods."""
@@ -69,7 +87,7 @@ def read_scheme_method(stage, scheme_name, mover='cntn_to_dcsn_mover',
     for scheme in mover_dict.get('schemes', []):
         if scheme.get('scheme') == scheme_name:
             tag = scheme.get('method', {})
-            if isinstance(tag, dict):
+            if isinstance(tag, Mapping):
                 return tag.get('__yaml_tag__', default)
             return str(tag)
     return default
@@ -414,7 +432,7 @@ def accrete_and_solve(
     return nest
 
 
-def precompile(syntax_dir='examples/durables/mod/separable', method=None):
+def precompile(registry_dir='examples/durables/mod/separable', method=None):
     """Warm Numba JIT caches with a tiny solve (small grids, 2 periods).
 
     Call once before timed solves to avoid JIT compilation overhead
@@ -422,47 +440,54 @@ def precompile(syntax_dir='examples/durables/mod/separable', method=None):
     call; subsequent calls with any grid size reuse the cached machine code.
     """
     tiny_config = {'n_a': 10, 'n_h': 10, 'n_w': 10, 't0': 40, 'N_wage': 2}
-    solve(syntax_dir, method=method,
-          setting_overrides=tiny_config, verbose=False)
+    solve(registry_dir, method=method,
+          draw={'settings': tiny_config}, verbose=False)
 
 
 def solve(
-    syntax_dir,
-    method_overrides=None,
-    calib_overrides=None,
-    setting_overrides=None,
+    registry_dir,
+    spec_factory_name="spec_factory.yaml",
+    draw=None,
+    ue_method=None,
     grids=None,
     verbose=False,
     progress=None,
     strip_solved=False,
-    # Deprecated — use method_overrides. Kept for backward compat.
-    method=None,
 ):
-    """Full DDSL pipeline: load -> accrete+solve.
+    """Full DDSL pipeline: spec_factory → accrete+solve.
 
     Parameters
     ----------
-    method_overrides : dict, optional
-        ``{(stage, target, scheme): tag, ...}`` passed to
-        :func:`kikku.dynx.methods.override_methods`.
-    method : str, optional
-        **Deprecated.** Shortcut that expands via ``METHOD_SHORTCUT``
-        into ``method_overrides``. Prefer passing ``method_overrides``
-        directly.
+    registry_dir : str or Path
+        Path to the model registry (e.g. 'examples/durables/mod/separable').
+    spec_factory_name : str
+        Name of the spec_factory YAML file in the registry.
+    draw : dict, optional
+        Overrides for the `$draw` slot. Use the tier-wrapped form:
+        `{'calibration': {...}, 'settings': {...}}`.
+    ue_method : str or dict, optional
+        Upper-envelope method selection. Targets the `$method_switch` slot
+        in the spec_factory.
+
+        - String (e.g. ``'FUES'``, ``'NEGM'``) is broadcast via
+          ``METHOD_SHORTCUT`` to the standard upper-envelope targets.
+        - Dict ``{(stage, target, scheme): tag, ...}`` is passed through
+          directly for fine-grained control.
+    grids : dict, optional
+        Pre-built grids. If None, built from the resolved spec.
     verbose : bool or str
-        ``True``: print waves (unless ``progress='bar'``) and per-period solve output.
-        ``False``: minimal.
-        ``'summary'``: final timing summary only from backward induction.
+        True: print waves (unless progress='bar') and per-period output.
+        False: minimal.
+        'summary': final timing summary only.
     progress : str, optional
-        ``'bar'``: tqdm progress bar during accretion (see :func:`accrete_and_solve`).
+        'bar': tqdm progress bar during accretion.
 
     Returns
     -------
     nest, grids
     """
-    syntax_dir = Path(syntax_dir)
+    registry_dir = Path(registry_dir)
 
-    # --- Memory diagnostics (activate with FUES_MEM_DIAG=1 env var) ---
     _is_rank0 = True
     try:
         from mpi4py import MPI
@@ -481,33 +506,61 @@ def solve(
     if _mem_diag:
         _r0 = _rss()
 
-    calibration, yaml_settings, stage_sources, period_template, inter_conn = load_syntax(
-        syntax_dir, calib_overrides, setting_overrides
-    )
+    # Resolve ue_method into the $method_switch slot value.
+    # - String: broadcast via METHOD_SHORTCUT to the standard UE targets.
+    # - Dict: use directly (tuple-keyed override form).
+    method_switch = _resolve_ue_method(ue_method)
+
+    if not (registry_dir / spec_factory_name).exists():
+        raise FileNotFoundError(
+            f"No {spec_factory_name} in {registry_dir}. "
+            f"Every durables registry must provide a spec_factory YAML; "
+            f"migrate legacy registries by mirroring mod/separable/ or "
+            f"mod/cobb_douglas/."
+        )
+
+    # 1. Load spec_factory spec_recipe
+    spec_recipe = load_spec(str(registry_dir / spec_factory_name))
+
+    # 2. Resolve input params, settings and methods with slots
+    slot_bindings = {}
+    if draw:
+        slot_bindings['draw'] = draw
+    if method_switch:
+        slot_bindings['method_switch'] = method_switch
+    spec = make_spec(spec_recipe, registry_dir=str(registry_dir), **slot_bindings)
 
     if _mem_diag:
-        print(f"      [solve] load_syntax: +{_rss()-_r0}MB")
+        print(f"      [solve] spec_factory: +{_rss()-_r0}MB")
 
-    # method= is deprecated — callers should use method_overrides directly.
-    # For backward compat, expand the shortcut here if provided.
-    all_method_overrides = {}
-    if method is not None:
-        import warnings
-        warnings.warn(
-            "solve(method=...) is deprecated; use method_overrides instead.",
-            DeprecationWarning, stacklevel=2)
-        for target in METHOD_SHORTCUT:
-            all_method_overrides[target] = method
-    if method_overrides:
-        all_method_overrides.update(method_overrides)
-    if all_method_overrides:
-        stage_sources = override_methods(stage_sources, all_method_overrides)
-    period_inst = instantiate_period(
-        calibration, yaml_settings, stage_sources, period_template
-    )
+    # 3. Load stage YAMLs for period building
+    stage_names = list(spec_recipe.stages.keys())
+    stages_dir = registry_dir / "stages"
+    spec_stages_source = {}
+    for name in stage_names:
+        stage_yaml_path = stages_dir / name / f"{name}.yaml"
+        with open(stage_yaml_path) as f:
+            yaml_text = f.read()
+        spec_stages_source[name] = {
+            "yaml_text": yaml_text,
+            "yaml_path": str(stage_yaml_path),
+        }
+
+    # 4. Load period template via period_factory.load
+    period_source = load_period_template(registry_dir / "period.yaml")
+
+    # 5. Build period using SpecGraph (0.1s path) for horizon 0
+    period_inst = make(spec, 0, period_source, spec_stages_source)
 
     if _mem_diag:
         print(f"      [solve] instantiate: +{_rss()-_r0}MB")
+
+    # 6. Load inter-connector from nest.yaml
+    inter_conn = load_inter_connector(registry_dir)
+
+    # 7. Build calibration + settings dicts from spec for grid construction (we pre-construct grids once for memory)
+    calibration = dict(spec[stage_names[0]][0]["calibration"])
+    yaml_settings = dict(spec[stage_names[0]][0]["settings"])
 
     if grids is None:
         grids = make_grids(calibration, yaml_settings)
@@ -515,22 +568,20 @@ def solve(
     if _mem_diag:
         print(f"      [solve] make_grids: +{_rss()-_r0}MB")
 
-    # T, t0 are period-level calibration; any stage carries them after merge.
-    stage_ref = period_inst["stages"]["keeper_cons"]
-    T = int(stage_ref.settings["T"])
-    t0 = int(stage_ref.calibration["t0"])
-
-    # Keep wave derivation for diagnostics.
+    # 8. Derive graph topology
     graph = period_to_graph(period_inst)
     waves = backward_paths(graph, inter_conn)
     if verbose is True and progress != "bar":
         print(f"Waves: {waves}")
 
+    # 9. Solve
+    stage_ref = period_inst["stages"]["keeper_cons"]
+    T = int(stage_ref.settings["T"])
+    t0 = int(stage_ref.calibration["t0"])
     H = T - t0
     store_cntn = bool(int(yaml_settings.get("store_cntn", 0)))
 
-    # Load callables from the syntax directory
-    make_callables_fn = _load_callables_from_syntax(syntax_dir)
+    make_callables_fn = _load_callables_from_syntax(registry_dir)
 
     nest = accrete_and_solve(
         H, period_inst, calibration, grids,
@@ -542,9 +593,10 @@ def solve(
     if _mem_diag:
         print(f"      [solve] accrete_and_solve: +{_rss()-_r0}MB")
 
-    # Expose topology so the forward simulator uses the same graph
-    # that was solved, not a fresh parse of the syntax directory.
     nest["graph"] = graph
     nest["inter_conn"] = inter_conn
 
     return nest, grids
+
+
+# Backward compatibility alias (estimate.py imports this name)
