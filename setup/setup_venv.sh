@@ -80,7 +80,9 @@ if [[ -d "/scratch/tp66" ]]; then
     python3 -c "from kikku.run.estimate import estimate; print('OK: kikku.run.estimate')"
     python3 -c "from kikku.dynx import load_syntax; print('OK: kikku.dynx')"
     python3 -c "import dolo; print('OK: dolo')"
-    python3 -c "from mpi4py import MPI; print(f'OK: mpi4py')"
+    python3 -c "from dolo.compiler.spec_factory import load, make; print('OK: dolo.compiler.spec_factory')"
+    python3 -c "import inspect; from kikku.run.sweep import sweep; sig = inspect.signature(sweep); assert 'comm' in sig.parameters and 'on_error' in sig.parameters; print('OK: kikku.run.sweep has comm + on_error')"
+    python3 -c "from mpi4py import MPI; print(f'OK: mpi4py ({MPI.Get_library_version().splitlines()[0][:60]})')"
 
     echo ""
     echo "=== Done (Gadi) ==="
@@ -119,6 +121,8 @@ else
     python3 -c "from dcsmm.fues import FUES; print('OK: dcsmm.fues')"
     python3 -c "from kikku.run.estimate import estimate; print('OK: kikku.run.estimate')"
     python3 -c "import dolo; print('OK: dolo')"
+    python3 -c "from dolo.compiler.spec_factory import load, make; print('OK: dolo.compiler.spec_factory')"
+    python3 -c "import inspect; from kikku.run.sweep import sweep; sig = inspect.signature(sweep); assert 'comm' in sig.parameters and 'on_error' in sig.parameters; print('OK: kikku.run.sweep has comm + on_error')"
 
     echo ""
     echo "=== Done (local) ==="
