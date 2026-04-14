@@ -26,7 +26,6 @@ PARAMS_FILE="params/baseline.yml"   # Options: baseline.yml, high_beta.yml, low_
 # Baseline model settings
 GRID_SIZE=2000              # Baseline grid size for plots (overrides params file)
 PLOT_AGE=16                 # Age to plot EGM grids
-OUTPUT_DIR=""               # Leave empty for default (results/retirement)
 
 # Timing sweep settings
 RUN_TIMINGS=true           # Run full timing comparison (slow)
@@ -104,14 +103,10 @@ fi
 
 EXAMPLE_DIR="${REPO_ROOT}/examples/retirement"
 
-if [[ -z "$OUTPUT_DIR" ]]; then
-    if [[ -d "${SCRATCH_ROOT}" ]]; then
-        OUTPUT_DIR="${SCRATCH_ROOT}/FUES/retirement"
-    else
-        OUTPUT_DIR="${REPO_ROOT}/results/retirement"
-    fi
-fi
-# make_run_dir creates YYYY-MM-DD/NNN/ inside OUTPUT_DIR automatically
+# Match the durables PBS convention: single-line hardcoded scratch path.
+# Override via `OUTPUT_DIR=/some/path qsub ...` for local runs.
+# make_run_dir creates YYYY-MM-DD/NNN/ inside OUTPUT_DIR automatically.
+OUTPUT_DIR="${OUTPUT_DIR:-/scratch/tp66/$USER/FUES/retirement}"
 
 # Make repo + src importable (fixes `import dcsmm` without pip install)
 export PYTHONPATH="${REPO_ROOT}:${REPO_ROOT}/src${PYTHONPATH:+:${PYTHONPATH}}"

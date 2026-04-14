@@ -17,9 +17,10 @@ from kikku.run import parse_run
 from examples.retirement.solve import solve_nest, METHOD_SHORTCUT
 
 from examples.retirement.outputs import (
-    plot_egrids, plot_cons_pol, plot_dcegm_cf,
     euler, get_policy, get_timing,
 )
+# Plot functions imported lazily inside the rank-0 post-sweep block so the
+# MPI sweep path never pulls seaborn / HARK at module load.
 from examples.retirement.benchmark import test_Timings
 
 UE_METHODS = ('RFC', 'FUES', 'DCEGM', 'CONSAV')
@@ -30,6 +31,18 @@ def _solver_config(run):
     return {**dict(run.settings), **dict(run.config)}
 
 
+def _get_mpi_comm():
+    """Return ``MPI.COMM_WORLD`` when running under ``mpiexec -n >1``; else None."""
+    try:
+        from mpi4py import MPI
+        comm = MPI.COMM_WORLD
+        if comm.Get_size() > 1:
+            return comm
+    except ImportError:
+        pass
+    return None
+
+
 def main():
     run = parse_run(
         name='retirement',
@@ -38,6 +51,9 @@ def main():
         modes=['sweep'],
         output='results/retirement',
     )
+
+    comm = _get_mpi_comm()
+    is_root = comm is None or comm.Get_rank() == 0
 
     calib_overrides = run.calib or None
     solver_cfg = _solver_config(run)
@@ -52,16 +68,18 @@ def main():
     run_dir = str(run.output_dir)
     syntax_dir = run.model_dir
 
-    print(f'Model dir: {syntax_dir}')
-    print(f'Output directory: {run_dir}')
-    if calib_overrides:
-        print(f'Calib overrides: {calib_overrides}')
-    if config_overrides:
-        print(f'Config overrides: {config_overrides}')
+    if is_root:
+        print(f'Model dir: {syntax_dir}')
+        print(f'Output directory: {run_dir}')
+        if calib_overrides:
+            print(f'Calib overrides: {calib_overrides}')
+        if config_overrides:
+            print(f'Config overrides: {config_overrides}')
 
     save_path = os.path.join(run_dir, 'plots')
-    os.makedirs(save_path, exist_ok=True)
-    os.makedirs(os.path.join(run_dir, 'tables'), exist_ok=True)
+    if is_root:
+        os.makedirs(save_path, exist_ok=True)
+        os.makedirs(os.path.join(run_dir, 'tables'), exist_ok=True)
 
     if run_timings:
         grid_sizes_str = ','.join(str(g) for g in run.sweep_grids) \
@@ -82,6 +100,12 @@ def main():
             config_overrides=config_overrides,
             latex_grids=latex_grids,
         )
+
+    # Post-sweep: final single-solve + plots are rank-0 only. Non-root
+    # ranks under MPI exit here so we don't duplicate N× the solve and
+    # race on plot-file writes.
+    if not is_root:
+        return
 
     print('\nSolving via canonical pipeline...')
     solutions = {}
@@ -134,6 +158,11 @@ def main():
             f'| {t[0]*1000:<15.3f} | {t[1]*1000:<14.3f} |'
         )
     print()
+
+    # Lazy plot imports: keep seaborn / HARK off the MPI-worker import path.
+    from examples.retirement.outputs import (
+        plot_egrids, plot_cons_pol, plot_dcegm_cf,
+    )
 
     print(f'Generating plots to {save_path}...')
     rfc = solutions['RFC']
