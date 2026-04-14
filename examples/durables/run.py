@@ -95,13 +95,19 @@ def _parse_compare_spec(spec):
 
 
 def _get_mpi_comm():
-    """Return MPI communicator if available and size > 1, else None."""
+    """Return MPI communicator if available and size > 1, else None.
+
+    Catches ``RuntimeError`` too: on Macs with ``mpi4py`` installed but no
+    MPI runtime (``libmpi.dylib``), the import succeeds but ``MPI.COMM_WORLD``
+    access raises ``RuntimeError: cannot load MPI library``. We want those
+    local runs to fall back to serial, not crash.
+    """
     try:
         from mpi4py import MPI
         comm = MPI.COMM_WORLD
         if comm.Get_size() > 1:
             return comm
-    except ImportError:
+    except (ImportError, RuntimeError):
         pass
     return None
 
