@@ -7,8 +7,9 @@ import numpy as np
 import time
 import os
 # HARK is imported lazily inside plot_dcegm_cf (the only function that uses it).
-# Keeps the module loadable on installs that have seaborn/matplotlib but not HARK
-# (e.g. Gadi's durables-est venv), so plot_egrids / plot_cons_pol stay available.
+# HARK is part of the core install (see pyproject.toml), but keeping this import
+# function-local means rewriting plot_egrids / plot_cons_pol without HARK stays
+# possible and keeps the DC-EGM coupling explicit.
 import seaborn as sns
 from matplotlib.ticker import FormatStrFormatter
 import matplotlib.pylab as pl

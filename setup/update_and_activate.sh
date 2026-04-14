@@ -45,15 +45,17 @@ pip install --force-reinstall --no-deps \
 python3 -c "import kikku; print(f'  kikku installed from: {kikku.__file__}')"
 
 echo ""
-echo "=== Reinstalling dcsmm (editable) ==="
-pip install -e ".[durables-est]" --quiet --no-deps
+echo "=== Reinstalling dcsmm (editable, examples profile) ==="
+pip install -e ".[examples]" --quiet --no-deps
 python3 -c "import dcsmm; print(f'  dcsmm installed from: {dcsmm.__file__}')"
 
 echo ""
 echo "=== Verify ==="
 python3 -c "from kikku.run.estimate import estimate; print('  OK: kikku.run.estimate')"
 python3 -c "from kikku.run.moments import make_moment_fn; print('  OK: kikku.run.moments')"
-python3 -c "from examples.durables2_0.estimate import main; print('  OK: examples.durables2_0.estimate')"
+python3 -c "from HARK.interpolation import LinearInterp; print('  OK: HARK (retirement plots)')"
+python3 -c "from examples.durables.run import main; print('  OK: examples.durables.run')"
+python3 -c "from examples.retirement.run import main; print('  OK: examples.retirement.run')"
 
 echo ""
 echo "=== Ready ==="

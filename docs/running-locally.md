@@ -141,13 +141,12 @@ python -m examples.retirement.run --calib-override beta=0.96
 
 ## Installation
 
-```bash
-# Core only (FUES algorithm)
-pip install -e .
+Three tiers — pick one:
 
-# Full examples (seaborn, HARK, tqdm, kikku, etc.)
-pip install -e ".[examples]"
+| Install | Gets you | When to use |
+|---|---|---|
+| `pip install -e .` | FUES + EGM_UE benchmarks (numpy, numba, scipy, interpolation, ConSav, HARK) | Just the algorithm — compare FUES vs DCEGM vs ConSav upper envelopes |
+| `pip install -e ".[examples]"` | Above + matplotlib, seaborn, tqdm, pyyaml, quantecon, dill, pykdtree, `kikku[estimation]` | Run the durables + retirement pipelines, notebooks, Gadi sweeps |
+| `pip install -e ".[dev]"` | `[examples]` + pytest + autopep8 | Contributing / running the test suite |
 
-# Development (+ pytest)
-pip install -e ".[dev]"
-```
+On Gadi, `bash setup/setup_venv.sh` installs `[examples]` and verifies HARK / kikku / mpi4py in one shot.

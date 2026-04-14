@@ -9,42 +9,44 @@ description = "Fast Upper Envelope Scan (Dobrescu & Shanker, 2022)."
 readme = "README.md"
 requires-python = ">=3.11"
 
-# Core: just the FUES algorithm. No HARK, no consav, no heavy deps.
+# Core = FUES + EGM_UE benchmark stack. Comparing FUES to DCEGM needs
+# HARK (via econ-ark), and comparing to the consav upper-envelope engine
+# needs ConSav, so both are in core. quantecon / matplotlib / seaborn /
+# kikku etc. are applied-example territory and live in [examples].
 dependencies = [
   "numpy>=1.23",
   "numba",
   "scipy",
   "interpolation>=0.5.2",
   "ConSav",
-  "quantecon",
+  "econ-ark",
 ]
 
+# Three tiers. Pick one:
+#   pip install -e .             → bare: FUES + EGM_UE benchmarks
+#   pip install -e ".[examples]" → durables + retirement + notebooks + plots
+#   pip install -e ".[dev]"      → [examples] + pytest + autopep8
 [project.optional-dependencies]
-# Durables estimation on Gadi: minimal deps, fast import, no sympy/HARK.
-# Plotting deps (matplotlib/seaborn) are intentionally absent — `outputs`
-# loads `.plots` lazily (PEP 562), and run.py imports plot functions only
-# inside the branches that call them, so the sweep path never touches
-# matplotlib/seaborn. Add them back if you need plots on Gadi.
-durables-est = [
-  "pyyaml",
-  "quantecon",
-  "kikku[estimation] @ git+https://github.com/bright-forest/kikku.git",
-]
-# Full examples (notebooks, benchmarks, all models). This is the canonical
-# install — both durables and retirement pipelines, including the post-sweep
-# DC-EGM plot that needs HARK. Covers the estimation flow via kikku[estimation].
+# Everything the applied examples need on top of the core benchmark stack:
+# applied models (quantecon), notebooks + plots (matplotlib, seaborn, tqdm),
+# estimation flow (kikku[estimation], dill, pykdtree), config loading (pyyaml).
+# This is what Gadi's setup_venv.sh installs.
 examples = [
-  "pyyaml", "matplotlib", "seaborn", "tqdm", "dill>=0.3.6",
-  "econ-ark", "ConSav", "pykdtree>=1.3.12",
+  "pyyaml",
+  "matplotlib",
+  "seaborn",
+  "tqdm",
+  "dill>=0.3.6",
+  "quantecon",
+  "pykdtree>=1.3.12",
   "kikku[estimation] @ git+https://github.com/bright-forest/kikku.git",
 ]
+# Dev = [examples] + test + format. pip resolves the self-reference.
 dev = [
-  "pyyaml", "matplotlib", "seaborn", "tqdm", "dill>=0.3.6",
-  "econ-ark", "ConSav", "pykdtree>=1.3.12",
-  "kikku @ git+https://github.com/bright-forest/kikku.git",
-  "pytest", "autopep8",
+  "dcsmm[examples]",
+  "pytest",
+  "autopep8",
 ]
-mpi = ["mpi4py>=3.1"]
 
 [project.urls]
 "Source" = "https://github.com/akshayshanker/FUES"
