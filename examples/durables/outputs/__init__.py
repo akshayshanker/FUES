@@ -22,11 +22,10 @@ from .tables import (
     write_euler_detail,
 )
 
-# Plot functions are loaded lazily so importing `outputs` does not pull
-# matplotlib/seaborn at module load — keeps Gadi (sweep-only) installs
-# free of plotting deps. `from examples.durables.outputs import plot_*`
-# still works (PEP 562 __getattr__), but only triggers the seaborn import
-# at the moment the attribute is accessed.
+# Plot functions load lazily — matplotlib / seaborn stay out of the
+# import graph until a plot name is actually accessed.
+from examples._lazy import make_lazy_plot_getter
+
 _LAZY_PLOTS = {
     "setup_nb_style",
     "nb_plot_policies_comparison",
@@ -42,13 +41,7 @@ _LAZY_PLOTS = {
     "plot_lifecycle",
     "plot_euler_histogram",
 }
-
-
-def __getattr__(name):
-    if name in _LAZY_PLOTS:
-        from . import plots
-        return getattr(plots, name)
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+__getattr__ = make_lazy_plot_getter(_LAZY_PLOTS, __name__ + ".plots")
 
 
 __all__ = [

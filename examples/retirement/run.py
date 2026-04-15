@@ -10,18 +10,14 @@ Usage:
 """
 
 import os
-from pathlib import Path
 
 from kikku.run import parse_run
 
+from examples._mpi import get_mpi_comm as _get_mpi_comm
 from examples.retirement.solve import solve_nest, METHOD_SHORTCUT
-
 from examples.retirement.outputs import (
     euler, get_policy, get_timing,
 )
-# Plot functions imported lazily inside the rank-0 post-sweep block so the
-# MPI sweep path never pulls seaborn / HARK at module load.
-from examples.retirement.benchmark import test_Timings
 
 UE_METHODS = ('RFC', 'FUES', 'DCEGM', 'CONSAV')
 
@@ -29,23 +25,6 @@ UE_METHODS = ('RFC', 'FUES', 'DCEGM', 'CONSAV')
 def _solver_config(run):
     """Merge settings tier + config tier for ``load_syntax`` (settings.yaml overlay)."""
     return {**dict(run.settings), **dict(run.config)}
-
-
-def _get_mpi_comm():
-    """Return ``MPI.COMM_WORLD`` when running under ``mpiexec -n >1``; else None.
-
-    Catches ``RuntimeError`` too: Macs with ``mpi4py`` installed but no MPI
-    runtime library raise ``RuntimeError: cannot load MPI library`` on
-    ``MPI.COMM_WORLD`` access. Fall back to serial there rather than crash.
-    """
-    try:
-        from mpi4py import MPI
-        comm = MPI.COMM_WORLD
-        if comm.Get_size() > 1:
-            return comm
-    except (ImportError, RuntimeError):
-        pass
-    return None
 
 
 def main():
@@ -61,14 +40,13 @@ def main():
     is_root = comm is None or comm.Get_rank() == 0
 
     calib_overrides = run.calib or None
-    solver_cfg = _solver_config(run)
-    config_overrides = solver_cfg if solver_cfg else None
+    cfg = _solver_config(run)
+    config_overrides = cfg or None
 
-    eff = dict(solver_cfg)
-    plot_age = int(eff.get('plot_age', 5))
-    run_timings = bool(int(eff.get('run_timings', 0)))
-    sweep_deltas_str = str(eff.get('sweep_deltas', '0.25,0.5,1,2'))
-    latex_grids_str = eff.get('latex_grids', None)
+    plot_age = int(cfg.get('plot_age', 5))
+    run_timings = bool(int(cfg.get('run_timings', 0)))
+    sweep_deltas_str = str(cfg.get('sweep_deltas', '0.25,0.5,1,2'))
+    latex_grids_str = cfg.get('latex_grids', None)
 
     run_dir = str(run.output_dir)
     syntax_dir = run.model_dir
@@ -87,6 +65,10 @@ def main():
         os.makedirs(os.path.join(run_dir, 'tables'), exist_ok=True)
 
     if run_timings:
+        # Lazy-imported so non-timing runs (and sweep workers that early-exit
+        # below) don't pull kikku.run.sweep + yaml + benchmark internals.
+        from examples.retirement.benchmark import test_Timings
+
         grid_sizes_str = ','.join(str(g) for g in run.sweep_grids) \
             if run.sweep_grids else '500,1000,2000,3000,10000'
         grid_sizes = [int(x) for x in grid_sizes_str.split(',')]

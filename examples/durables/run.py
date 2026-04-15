@@ -57,17 +57,11 @@ def _run_ue_method(run):
     When both are set, the shortcut is expanded first and the explicit
     overrides are layered on top.
     """
-    # TODO(delete): shallow adapter bridging kikku's two method fields
-    # (run.method + run.method_overrides) onto solve()'s single ue_method
-    # kwarg. The combined branch is unused in practice — every caller sets
-    # either the shortcut or the overrides, never both. Inline as
-    # `run.method_overrides or run.method` at call sites and delete once
-    # we're confident no one relies on the combined-merge semantics.
     if run.method_overrides:
         combined = {t: run.method for t in METHOD_SHORTCUT} if run.method else {}
         combined.update(run.method_overrides)
         return combined or None
-    return run.method  # str or None; solve() accepts both forms
+    return run.method
 
 
 def _parse_plot_ages(raw):
@@ -94,22 +88,7 @@ def _parse_compare_spec(spec):
     return spec, spec, None
 
 
-def _get_mpi_comm():
-    """Return MPI communicator if available and size > 1, else None.
-
-    Catches ``RuntimeError`` too: on Macs with ``mpi4py`` installed but no
-    MPI runtime (``libmpi.dylib``), the import succeeds but ``MPI.COMM_WORLD``
-    access raises ``RuntimeError: cannot load MPI library``. We want those
-    local runs to fall back to serial, not crash.
-    """
-    try:
-        from mpi4py import MPI
-        comm = MPI.COMM_WORLD
-        if comm.Get_size() > 1:
-            return comm
-    except (ImportError, RuntimeError):
-        pass
-    return None
+from examples._mpi import get_mpi_comm as _get_mpi_comm
 
 
 def run_single(run):

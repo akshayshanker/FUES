@@ -11,7 +11,7 @@
 # Single-core retirement model runner (NO sweep) that saves ALL outputs to scratch.
 #
 # - Runs `examples/retirement/run.py` (baseline solve + plots)
-# - Uses the fues venv (defaults to /scratch/tp66/$USER/venvs/dcsmm)
+# - Uses the fues venv (defaults to $HOME/venvs/fues)
 # - Ensures repo + src are on PYTHONPATH for `dcsmm` imports
 #
 # Usage:
@@ -22,7 +22,7 @@
 #   GRID_SIZE=3000
 #   PLOT_AGE=17
 #   OUTPUT_BASE="/scratch/tp66/$USER/FUES/solutions/retirement"
-#   FUES_VENV="/scratch/tp66/$USER/venvs/dcsmm"
+#   FUES_VENV="$HOME/venvs/fues"
 #
 
 set -euo pipefail
