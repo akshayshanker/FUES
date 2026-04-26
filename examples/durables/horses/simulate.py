@@ -536,3 +536,56 @@ def simulate_lifecycle(nest, grids,
         sim_data, nest, nest["solutions"][0]["callables"]))
 
     return sim_data
+
+
+# ---------------------------------------------------------------------------
+# Per-θ simulate + Euler bundle: kernel-side helper
+# ---------------------------------------------------------------------------
+
+
+def _unpack_means(stats: dict, prefix: str) -> dict:
+    """Flatten ``stats`` (combined/keeper/adjuster) means into ``f"{prefix}_*"``."""
+    if "combined" in stats:
+        return {
+            f"{prefix}_all":    stats["combined"]["mean"],
+            f"{prefix}_keeper": stats["keeper"]["mean"],
+            f"{prefix}_adj":    stats["adjuster"]["mean"],
+        }
+    nan = float("nan")
+    return {f"{prefix}_all": nan, f"{prefix}_keeper": nan, f"{prefix}_adj": nan}
+
+
+def simulate_one(nest, grids, sim_spec) -> dict:
+    """Simulate, evaluate Euler errors, return a flat payload for the kernel.
+
+    Output is a dict the kernel ``**``-merges into its result. Keeps
+    ``sim_data``, ``euler_c_stats`` and ``euler_h_stats`` intact for plotting
+    and detailed reporting; flattens the c/h means to scalar fields the
+    metric functions consume directly.
+    """
+    from ..outputs.diagnostics import compute_euler_stats
+
+    stage0 = nest["periods"][0]["stages"]["keeper_cons"]
+    use_empirical_init = (
+        stage0.calibration.get("init_method", "standard") == "empirical"
+    )
+    sim_data = simulate_lifecycle(
+        nest, grids,
+        N=sim_spec.n_sim, seed=sim_spec.seed,
+        use_empirical_init=use_empirical_init,
+    )
+    euler_c  = evaluate_euler_c(sim_data, nest, grids)
+    euler_h  = evaluate_euler_h(sim_data, nest, grids)
+    d        = sim_data["discrete"]
+    ec_stats = compute_euler_stats(euler_c, d)
+    eh_stats = compute_euler_stats(euler_h, d)
+
+    payload = {
+        "sim_data":      sim_data,
+        "euler_c_stats": ec_stats,
+        "euler_h_stats": eh_stats,
+        "adj_rate":      float(np.mean(d[d >= 0]) * 100),
+    }
+    payload.update(_unpack_means(ec_stats, "euler_c"))
+    payload.update(_unpack_means(eh_stats, "euler_h"))
+    return payload

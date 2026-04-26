@@ -148,6 +148,74 @@ def _one_delta_for_plots(
     return default
 
 
+# ---------------------------------------------------------------------------
+# Per-θ kernels (module-level factories)
+# ---------------------------------------------------------------------------
+
+
+def make_solve_test_timing(
+    wdir: str, true_solutions: dict | None, base_c: dict
+) -> "Callable[[TestSpec], dict]":
+    """Timing kernel: solve → policy + Euler + cdev vs. high-grid truth → pack."""
+    if true_solutions is None:
+        raise RuntimeError("make_solve_test_timing: missing true_solutions")
+
+    def solve_test(t: TestSpec) -> dict:
+        nest, model, _, _ = solve_nest(wdir, **t.slots)
+        c_ref = get_policy(nest, "c", stage="labour_mkt_decision")
+        tim   = get_timing(nest)
+        ts    = true_solutions[_row_delta(t, base_c)]
+        return {
+            "ue_time":    float(tim[0]),
+            "total_time": float(tim[1]),
+            "error":      float(euler(model, c_ref)),
+            "cdev":       float(consumption_deviation(
+                model, c_ref, ts["c_true"], ts["a_grid"]
+            )),
+        }
+
+    return solve_test
+
+
+def make_solve_test_plots(wdir: str) -> "Callable[[TestSpec], dict]":
+    """Plot kernel: solve → unpack stage policies/grids/value-fn for figures."""
+    def solve_test(t: TestSpec) -> dict:
+        nest, model, _, _ = solve_nest(wdir, **t.slots)
+        label = t.label or read_scheme_method(
+            nest["periods"][0]["stages"]["work_cons"], "upper_envelope"
+        )
+        c_ref = get_policy(nest, "c", stage="labour_mkt_decision")
+        return {
+            "nest":           nest,
+            "model":          model,
+            "endog_grid":     get_policy(nest, "x_dcsn_hat", stage="work_cons"),
+            "vf_unrefined":   get_policy(nest, "v_dcsn_hat", stage="work_cons"),
+            "c_unrefined":    get_policy(nest, "c_dcsn_hat", stage="work_cons"),
+            "dela_unrefined": get_policy(nest, "dela_dcsn_hat", stage="work_cons"),
+            "c_refined":      c_ref,
+            "c_worker":       get_policy(nest, "c", stage="work_cons"),
+            "timing":         get_timing(nest),
+            "euler_error":    float(euler(model, c_ref)),
+            "label":          label,
+        }
+
+    return solve_test
+
+
+_TIMING_METRIC_FNS = {
+    "error":      lambda r: r["error"],
+    "ue_time":    lambda r: r["ue_time"],
+    "total_time": lambda r: r["total_time"],
+    "cdev":       lambda r: r["cdev"],
+}
+
+_PLOT_METRIC_FNS = {
+    "euler_error": lambda r: r["euler_error"],
+    "ue_ms":       lambda r: r["timing"][0] * 1000,
+    "tot_ms":      lambda r: r["timing"][1] * 1000,
+}
+
+
 def main() -> None:
     run = parse_cli(
         name="retirement",
@@ -209,64 +277,12 @@ def main() -> None:
     use_comm = None if only_methods else comm
     wdir = str(run.base_spec).replace("\\", "/")
 
-    def _solve_test_timing(t: TestSpec) -> dict:
-        if true_solutions is None:
-            raise RuntimeError("timing solve_test: missing true_solutions")
-        nest, model, _, _ = solve_nest(wdir, **t.slots)
-        c_ref = get_policy(nest, "c", stage="labour_mkt_decision")
-        tim = get_timing(nest)
-        err = euler(model, c_ref)
-        dk = _row_delta(t, base_c)
-        ts = true_solutions[dk]
-        cdev = consumption_deviation(
-            model, c_ref, ts["c_true"], ts["a_grid"]
-        )
-        return {
-            "ue_time": float(tim[0]),
-            "total_time": float(tim[1]),
-            "error": float(err),
-            "cdev": float(cdev),
-        }
-
-    def _solve_test_plots(t: TestSpec) -> dict:
-        nest, model, _, _ = solve_nest(wdir, **t.slots)
-        _label = t.label or read_scheme_method(
-            nest["periods"][0]["stages"]["work_cons"], "upper_envelope"
-        )
-        c_ref = get_policy(nest, "c", stage="labour_mkt_decision")
-        err = euler(model, c_ref)
-        tim = get_timing(nest)
-        return {
-            "nest": nest,
-            "model": model,
-            "endog_grid": get_policy(nest, "x_dcsn_hat", stage="work_cons"),
-            "vf_unrefined": get_policy(nest, "v_dcsn_hat", stage="work_cons"),
-            "c_unrefined": get_policy(nest, "c_dcsn_hat", stage="work_cons"),
-            "dela_unrefined": get_policy(
-                nest, "dela_dcsn_hat", stage="work_cons"
-            ),
-            "c_refined": c_ref,
-            "c_worker": get_policy(nest, "c", stage="work_cons"),
-            "timing": tim,
-            "euler_error": err,
-            "label": _label,
-        }
-
     if only_methods:
-        solve_test = _solve_test_plots
-        metric_fns = {
-            "euler_error": lambda r: r["euler_error"],
-            "ue_ms": lambda r: r["timing"][0] * 1000,
-            "tot_ms": lambda r: r["timing"][1] * 1000,
-        }
+        solve_test = make_solve_test_plots(wdir)
+        metric_fns = _PLOT_METRIC_FNS
     else:
-        solve_test = _solve_test_timing
-        metric_fns = {
-            "error": lambda r: r["error"],
-            "ue_time": lambda r: r["ue_time"],
-            "total_time": lambda r: r["total_time"],
-            "cdev": lambda r: r["cdev"],
-        }
+        solve_test = make_solve_test_timing(wdir, true_solutions, base_c)
+        metric_fns = _TIMING_METRIC_FNS
 
     if only_methods and comm is not None and not is_root:
         return
