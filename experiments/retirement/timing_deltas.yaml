@@ -1,10 +1,7 @@
-# v3: slot-range payload — one bundle per row; $draw in calibration
-# Used as: --slot-range @experiments/retirement/timing_deltas.yaml
-- draw:
-    calibration: { delta: 0.25 }
-- draw:
-    calibration: { delta: 0.5 }
-- draw:
-    calibration: { delta: 1.0 }
-- draw:
-    calibration: { delta: 2.0 }
+# v3: flat $draw per row (delta is calibration; must match timing_grids shape
+# for Cartesian merge — tier-wrapped draw breaks tier-unwrap when mixed with
+# flat keys from other axes). Used as: --slot-range @experiments/retirement/timing_deltas.yaml
+- draw: { delta: 0.25 }
+- draw: { delta: 0.5 }
+- draw: { delta: 1.0 }
+- draw: { delta: 2.0 }

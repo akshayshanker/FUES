@@ -23,7 +23,7 @@ run:
 
 ```bash
 python -m examples.retirement.run \
-    --settings-override grid_size=3000 \
+    --slot-override '$draw.grid_size=3000' \
     --output-dir results/retirement
 ```
 

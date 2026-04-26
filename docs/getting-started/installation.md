@@ -41,7 +41,7 @@ dependencies and activates the environment in your current shell.
 You can then run a retirement solve:
 
 ```bash
-python -m examples.retirement.run --settings-override grid_size=3000
+python -m examples.retirement.run --slot-override '$draw.grid_size=3000'
 ```
 
 Related pages:

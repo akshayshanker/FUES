@@ -29,36 +29,34 @@ results/durables/2026-03-25/001/
 
 Default: `results/<model>/`. Override with `--output-dir`.
 
-## Overrides (kikku RunSpec v2)
+## Overrides (kikku RunSpec v3)
 
-Tiers and merge order follow `kikku.run.parse_cli` — the runner maps each
-key to the params / settings / methods YAMLs declared under `base_spec`.
+All overrides go through **slots** named in the model’s `spec_factory.yaml`
+(typically `$draw` for calibration + settings, `$method_switch` for methods
+YAML-shaped blocks). Merge order is argv order (see `kikku.run.parse_cli`).
 
-| Tier | Flag | What it patches |
-|------|------|-----------------|
-| Economic parameters | `--params-override key=val` | calibration (params) |
-| Numerical settings | `--settings-override key=val` | `settings` |
-| Method slots (dotted) | `--methods-override stg.mover.scheme=TAG` | methods YAML |
-| Merged from file | `--override-file path.yml` | params + settings split by key |
+| Use case | v3 |
+|----------|-----|
+| Per-key cal / settings | `slot-override` with `$draw.KEY=VAL` (FUES examples route both through the `draw` slot) |
+| Methods YAML patches | `slot-spec` with a file or inline JSON; top-level `method_switch` (nested methods block) |
+| Bundle from disk | `slot-spec @path` (YAML must use top-level **slot** keys such as `draw:`) |
+| Sweeps (one or more axes) | Repeat `slot-range` (list of bundle dicts per flag); Cartesian product |
 
 ```bash
-# Override calibration
---params-override beta=0.96 --params-override tau=0.12
+# Economic parameters and numerics (FUES: both route through $draw in examples)
+--slot-override '$draw.beta=0.96' --slot-override '$draw.tau=0.12'
+--slot-override '$draw.n_a=500' --slot-override '$draw.n_h=300'
 
-# Override settings
---settings-override n_a=500 --settings-override n_h=300
+# NEGM on adjuster upper_envelope: pass a method_switch slot (string tag expands in solve)
+--slot-spec='{"method_switch":"NEGM"}'
 
-# Override a method path (same string as in the methods YAML)
---methods-override adjuster_cons.cntn_to_dcsn_mover.upper_envelope=NEGM
-
-# Bulk overrides from YAML
---override-file params/baseline.yml
+# Bulk slot bundle from YAML (top-level keys = slot names; see experiments/retirement/params/baseline.yml)
+--slot-spec @experiments/retirement/params/baseline.yml
 ```
 
-Precedence is argv merge order, then the base YAMLs. A single string tag such
-as `FUES` or `NEGM` is still given **via** `--methods-override` on the
-`upper_envelope` path for the relevant stage, not a bare `--method` flag (that
-form was removed in RunSpec v2).
+String tags like `FUES` or `NEGM` for the upper envelope are typically passed
+as the `method_switch` **slot** value (via `--slot-spec` or a small YAML file),
+not as a removed bare `--method` flag.
 
 ## Modes
 
@@ -67,31 +65,33 @@ form was removed in RunSpec v2).
 ```bash
 python -m examples.durables.run
 python -m examples.durables.run \
-  --methods-override adjuster_cons.cntn_to_dcsn_mover.upper_envelope=NEGM
+  --slot-spec='{"method_switch":"NEGM"}'
 python -m examples.durables.run --simulate --n-sim 10000
 ```
 
-### Compare
+### Compare (single scalar axis on one slot)
 
 ```bash
-# Adjuster FUES vs NEGM (method path = adjuster stage upper_envelope slot)
+# Compare two calibration values on $draw.beta
 python -m examples.durables.run \
-  --compare adjuster_cons.cntn_to_dcsn_mover.upper_envelope=FUES,NEGM \
+  --compare '$draw.beta=0.92,0.96' \
   --simulate
 ```
+
+For two method tags, use a two-row `--slot-range` (or `--sweep` with one axis)
+instead of `--compare`, because method blocks are not one-level `slot.subkey`.
 
 ### Sweep
 
 ```bash
-# One-axis settings sweep (grid_size example)
+# One-axis settings sweep
 python -m examples.durables.run --sweep \
-  --settings-range '[{"grid_size":100},{"grid_size":200},{"grid_size":300}]'
+  --slot-range='[{"draw":{"grid_size":100}},{"draw":{"grid_size":200}},{"draw":{"grid_size":300}}]'
 
-# Multi-axis (paper table): use --params-range / --settings-range / --methods-range
-# with JSON lists of partial override dicts; kikku takes the Cartesian product.
+# Multi-axis: repeated --slot-range; kikku takes the Cartesian product
 python -m examples.durables.run --sweep \
-  --params-range '[{"n_a":250,"tau":0.05},{"n_a":500,"tau":0.12}]' \
-  --methods-range '[{"adjuster_cons.cntn_to_dcsn_mover.upper_envelope":"FUES"},{"adjuster_cons.cntn_to_dcsn_mover.upper_envelope":"NEGM"}]' \
+  --slot-range='[{"draw":{"n_a":250,"tau":0.05}},{"draw":{"n_a":500,"tau":0.12}}]' \
+  --slot-range='[{"method_switch":"FUES"},{"method_switch":"NEGM"}]' \
   --simulate --n-sim 10000
 ```
 
@@ -103,42 +103,42 @@ python -m examples.durables.run
 
 # NEGM adjuster
 python -m examples.durables.run \
-  --methods-override adjuster_cons.cntn_to_dcsn_mover.upper_envelope=NEGM
+  --slot-spec='{"method_switch":"NEGM"}'
 
 # Finer grids
-python -m examples.durables.run --settings-override n_a=600 --settings-override n_h=600
+python -m examples.durables.run --slot-override '$draw.n_a=600' --slot-override '$draw.n_h=600'
 
 # Shorter horizon (faster)
-python -m examples.durables.run --params-override t0=55
+python -m examples.durables.run --slot-override '$draw.t0=55'
 
 # EGM grid diagnostics
-python -m examples.durables.run --settings-override store_cntn=1
+python -m examples.durables.run --slot-override '$draw.store_cntn=1'
 
-# Paper table (abridged — use full product JSON for a complete replication)
+# Paper table (abridged)
 python -m examples.durables.run --sweep \
-  --params-override t0=20 \
+  --slot-override '$draw.t0=20' \
   --simulate --n-sim 10000
 ```
 
 ## Retirement examples
 
 ```bash
-# Default (all 4 UE methods)
+# Default (all 4 UE methods, expanded by the runner when no method_switch)
 python -m examples.retirement.run
 
-# Two UE tags on the work_cons upper_envelope slot
-python -m examples.retirement.run \
-  --compare work_cons.cntn_to_dcsn_mover.upper_envelope=FUES,RFC
-
-# Timing benchmark: full Cartesian sweep via kikku ranges (post-solve plot uses
-# the largest grid in the test set; see experiments/retirement/retirement_timings.sh)
+# Two method tags: two-row slot-range
 python -m examples.retirement.run --sweep \
-  --params-range '[{"delta":0.5}]' \
-  --settings-range '[{"grid_size":1000},{"grid_size":2000},{"grid_size":3000}]' \
+  --slot-range='[{"method_switch":"FUES"},{"method_switch":"RFC"}]'
+
+# Timing benchmark: full Cartesian sweep (see experiments/retirement/retirement_timings.sh)
+python -m examples.retirement.run --sweep \
+  --slot-range @experiments/retirement/timing_deltas.yaml \
+  --slot-range @experiments/retirement/timing_grids.yaml \
+  --slot-range @experiments/retirement/timing_methods.yaml \
   --sweep-runs 3
 
 # Params
-python -m examples.retirement.run --params-override beta=0.96
+python -m examples.retirement.run --slot-override '$draw.beta=0.96'
 ```
 
 ## See also
