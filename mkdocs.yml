@@ -1,9 +1,12 @@
 site_name: FUES
-site_description: Fast Upper-Envelope Scan for discrete-continuous dynamic programming
+site_description: >-
+  A fast upper envelope scan method for discrete–continuous dynamic programming.
+  Dobrescu and Shanker (2022).
 site_author: Loretti I. Dobrescu and Akshay Shanker
 site_url: https://akshayshanker.github.io/FUES/
 repo_url: https://github.com/akshayshanker/FUES
 repo_name: akshayshanker/FUES
+edit_uri: edit/main/docs/
 
 theme:
   name: material
@@ -14,14 +17,14 @@ theme:
       primary: custom
       accent: custom
       toggle:
-        icon: material/brightness-7
+        icon: material/weather-sunny
         name: Switch to dark mode
     - media: "(prefers-color-scheme: dark)"
       scheme: slate
       primary: custom
       accent: custom
       toggle:
-        icon: material/brightness-4
+        icon: material/weather-night
         name: Switch to light mode
   font:
     text: IBM Plex Sans
@@ -29,16 +32,20 @@ theme:
   logo: images/fues-logo.svg
   icon:
     repo: fontawesome/brands/github
+    edit: material/pencil-outline
   features:
     - navigation.instant
     - navigation.tracking
     - navigation.sections
-    - navigation.expand
+    - navigation.indexes
     - navigation.top
+    - navigation.footer
     - content.code.copy
     - content.code.annotate
+    - content.action.edit
     - search.highlight
     - search.suggest
+    - search.share
     - toc.follow
 
 extra_css:
@@ -57,6 +64,9 @@ markdown_extensions:
       alternate_style: true
   - pymdownx.critic
   - pymdownx.mark
+  - pymdownx.caret
+  - pymdownx.tilde
+  - pymdownx.smartsymbols
   - admonition
   - pymdownx.details
   - attr_list
@@ -66,44 +76,64 @@ markdown_extensions:
   - tables
   - toc:
       permalink: true
+      permalink_title: "Link to this section"
 
 plugins:
-  - search
+  - search:
+      lang: en
   - mkdocs-jupyter:
       include_source: true
       ignore_h1_titles: true
+      execute: false
 
 extra_javascript:
   - javascripts/mathjax.js
   - javascripts/fues-interactive.js
   - https://cdn.plot.ly/plotly-2.35.2.min.js
-  # - javascripts/thebe-config.js?v=7  # disabled: no live execution
+  # - javascripts/thebe-config.js?v=8  # disabled: static docs, no live kernel
   - https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js
 
 copyright: >-
-  &copy; Akshay Shanker &mdash;
-  Logo font: TNG Title by Ukraine Fonts
+  Copyright &copy; 2022–2026 Akshay Shanker.
+  Documentation built with Material for MkDocs.
 
 extra:
+  generator: false
   social:
     - icon: fontawesome/brands/github
       link: https://github.com/akshayshanker/FUES
+      name: Source code on GitHub
+    - icon: fontawesome/solid/file-lines
+      link: https://papers.ssrn.com/sol3/papers.cfm?abstract_id=4181302
+      name: Working paper on SSRN
 
 nav:
   - Home: index.md
-  - Getting Started:
-    - Installation: getting-started/installation.md
-  - Algorithm: algorithm/fues-algorithm.md
-  - Examples:
+
+  - Method:
+    - The FUES algorithm: algorithm/fues-algorithm.md
+
+  - Applications:
     - Overview: examples/index.md
-    - Retirement Choice: examples/retirement.md
-    - Durables: examples/durables.md
-    - Housing-Renting: examples/housing-renting.md
+    - Retirement choice: examples/retirement_choice_model.md
+    - Continuous housing: examples/continuous_housing_model.md
+    - Housing-renting (draft): examples/housing-renting.md
+
   - Notebooks:
-    - Durables (Cobb-Douglas): notebooks/durables_fues.ipynb
-    - Durables (Separable): notebooks/durables_fues_separable.ipynb
-    - Retirement: notebooks/retirement_fues.ipynb
-  - API Reference:
-    - FUES & EGM_UE: api/fues.md
-    - Retirement Example: api/retirement.md
-  - Changelog: changelog.md
+    - Overview: tutorials/index.md
+    - EGM / FUES walkthrough: notebooks/egm_fues_transparent.ipynb
+    - Retirement benchmarks: notebooks/retirement_fues.ipynb
+    - Durables (Cobb–Douglas): notebooks/durables_fues.ipynb
+    - Durables (separable): notebooks/durables_fues_separable.ipynb
+
+  - Reproducibility:
+    - Overview: reproducibility/index.md
+    - Quickstart: start-here/quickstart.md
+    - Running locally: running-locally.md
+    - Running on PBS / Gadi: running-on-gadi.md
+
+  - Reference:
+    - Installation: getting-started/installation.md
+    - Core API: api/fues.md
+    - Retirement internals: api/retirement.md
+    - Changelog: changelog.md

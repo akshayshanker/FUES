@@ -1,6 +1,7 @@
 """PBS cluster timing comparison for the retirement notebook.
 
-Parses a timing markdown file produced by ``run.py --run-timings``
+Parses a timing markdown file produced by the canonical kikku sweep
+(``--sweep`` with ``--params-range`` / ``--settings-range`` / ``--methods-range``)
 and plots the results. Kept separate from ``outputs/plots.py``
 because it's ad-hoc analysis, not reusable infrastructure.
 """

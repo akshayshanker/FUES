@@ -5,9 +5,9 @@ Requires Python 3.11+.
 
 ## Option 1: Library only
 
-Install FUES and the upper-envelope interface without cloning the repo. This is
-the simplest option if you want to use `fues` and the benchmark upper-envelope
-methods in your own application.
+Install FUES and the upper-envelope interface without cloning the repo. Use
+this option if you want `fues` and the comparison methods inside another
+application.
 
 ```bash
 pip install git+https://github.com/akshayshanker/FUES.git
@@ -24,31 +24,10 @@ Runtime dependencies, including `numba`, `numpy`, `scipy`,
 installed automatically. See `pyproject.toml` for the full list and version
 pins.
 
-## Option 2: With examples
+## Option 2: Repo checkout with examples
 
-Clone the repo and install with example dependencies (`matplotlib`, `pyyaml`,
-`seaborn`, [`kikku`](https://github.com/bright-forest/kikku)). This includes
-everything in Option 1 plus the example models in the repo checkout.
-
-```bash
-git clone https://github.com/akshayshanker/FUES.git
-cd FUES
-pip install ".[examples]"
-```
-
-You can then run a simple example solve:
-
-```bash
-python examples/retirement/run.py --grid-size 3000
-```
-
-The interactive notebook at `examples/retirement/notebooks/retirement_fues.ipynb`
-walks through the retirement model step by step.
-
-## Option 3: Developer (editable)
-
-Full setup with editable install, examples, and all dependencies including the
-dolo-plus compiler. Use this if you are modifying the source.
+Use this option if you also want the benchmark applications, notebooks, and
+replication scripts as well as the core library.
 
 ```bash
 git clone https://github.com/akshayshanker/FUES.git
@@ -56,21 +35,45 @@ cd FUES
 source setup/setup.sh
 ```
 
-First source creates `.venv` (or `$HOME/venvs/fues` on Gadi), installs
-`dcsmm[examples]` in editable mode, and verifies the install. Subsequent
-`source setup/setup.sh` just reactivates. Pass `--update` to `git pull`
-and reinstall `dcsmm`/`kikku` after pulling new code.
+The setup script installs `dcsmm` in editable mode together with the example
+dependencies and activates the environment in your current shell.
 
-Contributing? Add `pytest` + `autopep8` on top of the examples install:
+You can then run a retirement solve:
 
 ```bash
-pip install -e ".[dev]" --no-deps
+python -m examples.retirement.run --settings-override grid_size=3000
 ```
 
-Run the full timing sweep:
+Related pages:
+
+- [Quickstart](../start-here/quickstart.md) for the minimal run commands
+- [Running Locally](../running-locally.md) for command-line workflows
+- [Tutorials](../tutorials/index.md) for notebook walkthroughs
+
+## Option 3: Manual editable install
+
+Use this only if you already manage your own virtual environment and want to
+install the package manually rather than through `setup/setup.sh`.
 
 ```bash
-python examples/retirement/run.py --run-timings
+git clone https://github.com/akshayshanker/FUES.git
+cd FUES
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e ".[examples]"
+```
+
+To add the developer extras:
+
+```bash
+pip install -e ".[dev]"
+```
+
+After pulling new code in a repo checkout managed by the setup script, refresh
+the environment with:
+
+```bash
+source setup/setup.sh --update
 ```
 
 ## Verify installation
@@ -81,4 +84,6 @@ from dcsmm.uenvelope import EGM_UE
 
 print("FUES and EGM_UE imported successfully")
 ```
+
+For batch runs and HPC setup, continue to [Running on PBS / Gadi](../running-on-gadi.md).
 

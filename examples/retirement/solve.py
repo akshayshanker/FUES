@@ -42,21 +42,21 @@ METHOD_SHORTCUT = [
 ]
 
 
-def _resolve_ue_method(ue_method):
-    """Resolve the ``ue_method`` argument into a ``$method_switch`` slot dict.
+def _resolve_method_switch(method_switch):
+    """Resolve the ``method_switch`` argument into a ``$method_switch`` slot dict.
 
     - ``None`` -> ``None`` (no override).
     - str (e.g. ``'FUES'``) -> broadcast to all METHOD_SHORTCUT targets.
     - dict ``{(stage, target, scheme): tag, ...}`` -> passed through.
     """
-    if ue_method is None:
+    if method_switch is None:
         return None
-    if isinstance(ue_method, str):
-        return {target: ue_method for target in METHOD_SHORTCUT}
-    if isinstance(ue_method, Mapping):
-        return dict(ue_method)
+    if isinstance(method_switch, str):
+        return {target: method_switch for target in METHOD_SHORTCUT}
+    if isinstance(method_switch, Mapping):
+        return dict(method_switch)
     raise TypeError(
-        f"ue_method must be None, str, or dict; got {type(ue_method).__name__}"
+        f"method_switch must be None, str, or dict; got {type(method_switch).__name__}"
     )
 
 
@@ -199,7 +199,7 @@ def solve_nest(
     registry_dir,
     spec_factory_name="spec_factory.yaml",
     draw=None,
-    ue_method=None,
+    method_switch=None,
     model=None,
     stage_ops=None,
     waves=None,
@@ -228,8 +228,8 @@ def solve_nest(
     draw : dict, optional
         Tier-wrapped overrides for the `$draw` slot:
         `{'calibration': {...}, 'settings': {...}}`.
-    ue_method : str or dict, optional
-        Upper-envelope method selection. Targets the `$method_switch` slot.
+    method_switch : str or dict, optional
+        Upper-envelope method selection. Targets the ``$method_switch`` slot.
 
         - String (``'FUES'``, ``'DCEGM'``, ``'RFC'``, ``'CONSAV'``) is broadcast
           via ``METHOD_SHORTCUT`` to the standard upper-envelope targets.
@@ -255,8 +255,8 @@ def solve_nest(
 
     registry_dir = _Path(registry_dir)
 
-    # Resolve ue_method into the $method_switch slot value.
-    method_switch = _resolve_ue_method(ue_method)
+    # Resolve into the $method_switch slot value.
+    slot_method_switch = _resolve_method_switch(method_switch)
 
     if not (registry_dir / spec_factory_name).exists():
         raise FileNotFoundError(
@@ -271,8 +271,8 @@ def solve_nest(
         slot_bindings = {}
         if draw:
             slot_bindings['draw'] = draw
-        if method_switch:
-            slot_bindings['method_switch'] = method_switch
+        if slot_method_switch:
+            slot_bindings['method_switch'] = slot_method_switch
         spec = make_spec(recipe, registry_dir=str(registry_dir),
                          **slot_bindings)
 

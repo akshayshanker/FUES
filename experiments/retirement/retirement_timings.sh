@@ -27,12 +27,11 @@ PARAMS_FILE="params/baseline.yml"   # Options: baseline.yml, high_beta.yml, low_
 GRID_SIZE=2000              # Baseline grid size for plots (overrides params file)
 PLOT_AGE=16                 # Age to plot EGM grids
 
-# Timing sweep settings
-RUN_TIMINGS=true           # Run full timing comparison (slow)
-SWEEP_GRIDS="1000,2000,3000,4000,5000,6000,7000,8000,9000,10000,11000,12000,13000,14000,15000"
-SWEEP_DELTAS="0.25,0.5,1,2"              # Delta values for sweep
-SWEEP_RUNS=3                            # Number of runs per config (best of n)
-LATEX_GRIDS="1000,2000,3000,6000,10000"  # Subset for paper LaTeX tables (md gets all)
+# Timing sweep (RunSpec v2: YAML ranges, no run_timings / sweep_grids extras)
+RUN_TIMINGS=true             # true = full (grid×delta×method) sweep + tables + plots
+SWEEP_RUNS=3                 # kikku best-of-n per test row
+LATEX_GRIDS="1000,2000,3000,6000,10000"  # LaTeX table subset; md gets all
+RANGES_DIR="experiments/retirement"      # @files resolved from REPO root (see cd below)
 
 # ======================================================================
 #  ENVIRONMENT SETUP
@@ -122,9 +121,8 @@ echo "  Grid size: $GRID_SIZE"
 echo "  Plot age: $PLOT_AGE"
 echo "  Run timings: $RUN_TIMINGS"
 if [[ "$RUN_TIMINGS" == "true" ]]; then
-echo "    Sweep grids: $SWEEP_GRIDS"
-echo "    Sweep deltas: $SWEEP_DELTAS"
-echo "    Sweep runs: $SWEEP_RUNS"
+    echo "    Full timing sweep: params/settings/methods ranges (YAML @files)"
+    echo "    Sweep runs: $SWEEP_RUNS"
 fi
 echo "  Output: $OUTPUT_DIR"
 echo "  Log: $LOG_FILE"
@@ -145,19 +143,22 @@ export OMPI_MCA_coll_hcoll_enable=0
 export OMPI_MCA_coll=^hcoll
 export PMIX_MCA_gds=hash
 
-# Build command using new CLI interface (parse_run)
+# Build command (kikku v2: Cartesian product of @file ranges, single sweep in run.py)
 CMD="mpiexec -n $PBS_NCPUS python3 -u -m mpi4py -m examples.retirement.run"
 CMD="$CMD --override-file $PARAMS_FILE"
-CMD="$CMD --setting-override grid_size=$GRID_SIZE"
-CMD="$CMD --setting-override plot_age=$PLOT_AGE"
+CMD="$CMD --settings-override plot_age=$PLOT_AGE"
 CMD="$CMD --output-dir $OUTPUT_DIR"
 
 if [[ "$RUN_TIMINGS" == "true" ]]; then
-    CMD="$CMD --setting-override run_timings=1"
-    CMD="$CMD --setting-override sweep_deltas=$SWEEP_DELTAS"
-    CMD="$CMD --config-override latex_grids=$LATEX_GRIDS"
-    CMD="$CMD --sweep-grids $SWEEP_GRIDS"
+    CMD="$CMD --sweep"
+    CMD="$CMD --params-range @${RANGES_DIR}/timing_deltas.yaml"
+    CMD="$CMD --settings-range @${RANGES_DIR}/timing_grids.yaml"
+    CMD="$CMD --methods-range @${RANGES_DIR}/timing_methods.yaml"
+    CMD="$CMD --latex-grids=$LATEX_GRIDS"
     CMD="$CMD --sweep-runs $SWEEP_RUNS"
+else
+    # Single-baseline 4-UE run with plot grid; no multi-axis ranges
+    CMD="$CMD --settings-override grid_size=$GRID_SIZE"
 fi
 
 # Run

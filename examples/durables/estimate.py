@@ -17,7 +17,7 @@ Usage:
         --spec baseline.yaml \
         --scratch /scratch/tp66/$USER/est \
         --results results/durables \
-        --setting-override n_a=300 n_h=300 n_w=300
+        --settings-override n_a=300 n_h=300 n_w=300
 """
 
 import argparse
@@ -80,6 +80,19 @@ def _sweep_point_label(point):
     return '_'.join(f'{k}={v}' for k, v in sorted(point.items()))
 
 
+def _solver_method_from_cli(args):
+    """Return upper-envelope tag from ``--methods-override`` (kikku path=value), or None."""
+    raw = getattr(args, "methods_override", None) or []
+    for item in raw:
+        s = str(item).strip()
+        if "=" not in s:
+            continue
+        path, val = s.split("=", 1)
+        if "upper_envelope" in path:
+            return val.strip()
+    return None
+
+
 def _run_single_estimation(
     mod_dir, spec_path, spec, est_yaml, args,
     calib_overrides, setting_overrides, comm,
@@ -98,7 +111,7 @@ def _run_single_estimation(
 
     simulation_seed = int(method_options.get('simulation_seed', 99))
     N_sim = args.N_sim
-    solver_method = args.method
+    solver_method = _solver_method_from_cli(args)
     spec_name = Path(args.spec).stem
     mod_name = Path(args.mod).name  # e.g. 'separable', 'separable_males'
 
@@ -204,7 +217,7 @@ def _run_single_estimation(
         merged_calib = {**calib_overrides, **theta}
         nest, grids = solve(
             str(mod_dir),
-            ue_method=solver_method,
+            method_switch=solver_method,
             draw={
                 "calibration": merged_calib,
                 "settings": setting_overrides,
@@ -461,17 +474,25 @@ def main():
         '--results', type=str, default=None,
         help='Results dir for final outputs (overrides YAML)')
     parser.add_argument(
-        '--setting-override', nargs='*', default=[],
+        '--settings-override', nargs='*', default=[],
+        dest='settings_override',
         help='Grid/solver overrides (e.g. n_a=300 n_h=300)')
     parser.add_argument(
-        '--calib-override', nargs='*', default=[],
-        help='Calibration overrides (e.g. t0=20)')
+        '--params-override', nargs='*', default=[],
+        dest='params_override',
+        help='Calibration / parameter overrides (e.g. t0=20)')
     parser.add_argument(
         '--N-sim', type=int, default=10000,
         help='Number of simulation agents (default: 10000)')
     parser.add_argument(
-        '--method', type=str, default=None,
-        help='Solver method override for adjuster (e.g. NEGM). Default: YAML methods.')
+        '--methods-override', nargs='*', default=[],
+        dest='methods_override',
+        help=(
+            'Adjuster upper-envelope scheme, e.g. '
+            'adjuster_cons.cntn_to_dcsn_mover.upper_envelope=NEGM '
+            '(same path as kikku RunSpec).'
+        ),
+    )
     parser.add_argument(
         '--local-results', type=str, default=None,
         help='Local results dir (default: experiments/durables/estimation/results/). '
@@ -514,8 +535,8 @@ def main():
     scratch_dir = scratch_dir.replace('{user}', os.environ.get('USER', 'unknown'))
     results_dir = results_dir.replace('{user}', os.environ.get('USER', 'unknown'))
 
-    setting_overrides = _parse_key_value_list(args.setting_override)
-    calib_overrides = _parse_key_value_list(args.calib_override)
+    setting_overrides = _parse_key_value_list(args.settings_override)
+    calib_overrides = _parse_key_value_list(args.params_override)
 
     # run_id: use --run-id if provided (restart loop), otherwise generate fresh
     run_id = args.run_id or datetime.now().strftime('%Y%m%d_%H%M%S')

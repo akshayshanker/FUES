@@ -1,6 +1,9 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 630 640" width="48" height="48">
+<svg xmlns="http://www.w3.org/2000/svg"
+     viewBox="5 0 619 595"
+     role="img"
+     aria-label="FUES">
   <g transform="translate(0, 595) scale(1, -1)">
     <path d="M213 470 269 595H624L570 470ZM5 0 172 375H527L473 250H272L162 0Z"
-          fill="#ffffff" />
+          fill="#f3e9cc" />
   </g>
 </svg>

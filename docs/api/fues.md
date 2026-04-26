@@ -85,12 +85,15 @@ Unified entry point for all upper envelope algorithms. Wraps FUES, MSS, RFC, and
 EGM_UE(
     x_dcsn_hat, v_hat, v_cntn_hat, kappa_hat,
     x_cntn_hat, X_dcsn, uc_func_partial, u_func,
-    ue_method="FUES", m_bar=1.0, lb=4,
+    method_switch="FUES", m_bar=1.0, lb=4,
     rfc_radius=0.75, rfc_n_iter=20,
     interpolate=False, include_intersections=True,
     ue_kwargs=None,
 )
 ```
+
+The deprecated keyword ``ue_method`` is still accepted as an alias of
+``method_switch`` (not both at once).
 
 ### Returns
 
@@ -108,7 +111,7 @@ EGM_UE(
 
 ### Available methods
 
-| `ue_method` | Algorithm | Source |
+| `method_switch` | Algorithm | Source |
 |-------------|-----------|--------|
 | `"FUES"` | Fast Upper-Envelope Scan | Dobrescu & Shanker (2022) |
 | `"DCEGM"` | Monotone segment selection (MSS) | Iskhakov et al. (2017), via [HARK](https://github.com/econ-ark/HARK) |

@@ -1,0 +1,17 @@
+# Settings-range payload for retirement timing studies (grid_size only per row).
+# Used as: --settings-range @experiments/retirement/timing_grids.yaml
+- grid_size: 1000
+- grid_size: 2000
+- grid_size: 3000
+- grid_size: 4000
+- grid_size: 5000
+- grid_size: 6000
+- grid_size: 7000
+- grid_size: 8000
+- grid_size: 9000
+- grid_size: 10000
+- grid_size: 11000
+- grid_size: 12000
+- grid_size: 13000
+- grid_size: 14000
+- grid_size: 15000

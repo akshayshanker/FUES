@@ -216,8 +216,10 @@ or an interactive job:
 ```bash
 source "$FUES_VENV/bin/activate"
 mpiexec -n 2 python3 -m mpi4py -m examples.durables.run \
-    --sweep --sweep-params n_a=60,80 method=FUES,NEGM --sweep-runs 1 \
-    --simulate --n-sim 500 --seed 42 --calib-override t0=60 \
+    --sweep \
+    --params-range '[{"n_a":60,"tau":0.12},{"n_a":80,"tau":0.12}]' \
+    --methods-range '[{"adjuster_cons.cntn_to_dcsn_mover.upper_envelope":"FUES"},{"adjuster_cons.cntn_to_dcsn_mover.upper_envelope":"NEGM"}]' \
+    --sweep-runs 1 --simulate --n-sim 500 --seed 42 --params-override t0=60 \
     --output-dir "${SCRATCH_DIR}/FUES/durables_smoke"
 ```
 

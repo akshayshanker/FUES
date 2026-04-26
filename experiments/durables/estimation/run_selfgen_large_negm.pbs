@@ -14,7 +14,7 @@
 # ---------------------------------------------------------------
 # SELFGEN LARGE NEGM: 600-grid, 1040 samples, 10 normalsr nodes
 # Recovery test — data generated from YAML calibration defaults.
-# Uses --method NEGM to override adjuster upper envelope method.
+# NEGM on adjuster upper_envelope via --methods-override (see run spec).
 # Estimated cost: 2.0 SU x 1040 cores x 5h = 10400 SU max
 # ---------------------------------------------------------------
 
@@ -67,10 +67,10 @@ mpiexec -n $PBS_NCPUS \
         --spec "$SPEC" \
         --scratch /scratch/tp66/$USER/durables_est \
         --results /g/data/tp66/results/durables/estimation \
-        --setting-override n_a=$GRID n_h=$GRID n_w=$GRID \
-        --calib-override t0=20 \
+        --settings-override n_a=$GRID n_h=$GRID n_w=$GRID \
+        --params-override t0=20 \
         --N-sim $N_SIM \
-        --method NEGM
+        --methods-override adjuster_cons.cntn_to_dcsn_mover.upper_envelope=NEGM
 
 echo "Finished at $(date)"
 

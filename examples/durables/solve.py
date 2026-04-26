@@ -60,21 +60,21 @@ METHOD_SHORTCUT = [
 ]
 
 
-def _resolve_ue_method(ue_method):
-    """Resolve the ``ue_method`` argument into a ``$method_switch`` slot dict.
+def _resolve_method_switch(method_switch):
+    """Resolve the ``method_switch`` argument into a ``$method_switch`` slot dict.
 
     - ``None`` -> ``None`` (no override).
     - str (e.g. ``'FUES'``) -> broadcast to all METHOD_SHORTCUT targets.
     - dict ``{(stage, target, scheme): tag, ...}`` -> passed through.
     """
-    if ue_method is None:
+    if method_switch is None:
         return None
-    if isinstance(ue_method, str):
-        return {target: ue_method for target in METHOD_SHORTCUT}
-    if isinstance(ue_method, Mapping):
-        return dict(ue_method)
+    if isinstance(method_switch, str):
+        return {target: method_switch for target in METHOD_SHORTCUT}
+    if isinstance(method_switch, Mapping):
+        return dict(method_switch)
     raise TypeError(
-        f"ue_method must be None, str, or dict; got {type(ue_method).__name__}"
+        f"method_switch must be None, str, or dict; got {type(method_switch).__name__}"
     )
 
 
@@ -149,7 +149,13 @@ def _strip_old_solution(sol):
 
 
 def recalibrate_period(period, calib_h):
-    """Pure fn: return new period with updated calibration."""
+    """Pure fn: return new period with updated calibration.
+
+    TODO(delete): used by the backward loop solely to bump the scalar
+    ``age`` in each stage's calibration. That's a heavy functorial rebuild
+    for a single scalar. Thread age through the operator call sites
+    directly and this helper disappears. See ``accrete_and_solve``.
+    """
     new_stages = {}
     for name, stage in period["stages"].items():
         new_stages[name] = calibrate_stage(stage, calib_h)
@@ -296,6 +302,14 @@ def accrete_and_solve(
         loop. Keeps only what simulation and Euler need. Reduces peak memory
         by ~70% for large grids. Default False (notebooks keep full solutions).
         text unless ``verbose`` is ``True`` (sub-stage timings still off during bar).
+
+    TODO(delete ``recalibrate_period``): each iteration of the backward
+    loop currently rebuilds a period via ``recalibrate_period(period, calib_h)``
+    just to bump the single scalar ``age``. That is a per-period functorial
+    rebuild for a scalar that the operators could read from a context object.
+    Once the solver stops reaching into ``stage.calibration`` for age, this
+    helper becomes dead weight and the backward loop can iterate over a
+    single built period with age threaded through ``stage_ops`` directly.
     """
     nest = {"periods": [], "solutions": []}
 
@@ -440,7 +454,7 @@ def precompile(registry_dir='examples/durables/mod/separable', method=None):
     call; subsequent calls with any grid size reuse the cached machine code.
     """
     tiny_config = {'n_a': 10, 'n_h': 10, 'n_w': 10, 't0': 40, 'N_wage': 2}
-    solve(registry_dir, method=method,
+    solve(registry_dir, method_switch=method,
           draw={'settings': tiny_config}, verbose=False)
 
 
@@ -448,7 +462,7 @@ def solve(
     registry_dir,
     spec_factory_name="spec_factory.yaml",
     draw=None,
-    ue_method=None,
+    method_switch=None,
     grids=None,
     verbose=False,
     progress=None,
@@ -465,8 +479,8 @@ def solve(
     draw : dict, optional
         Overrides for the `$draw` slot. Use the tier-wrapped form:
         `{'calibration': {...}, 'settings': {...}}`.
-    ue_method : str or dict, optional
-        Upper-envelope method selection. Targets the `$method_switch` slot
+    method_switch : str or dict, optional
+        Upper-envelope method selection. Targets the ``$method_switch`` slot
         in the spec_factory.
 
         - String (e.g. ``'FUES'``, ``'NEGM'``) is broadcast via
@@ -506,10 +520,10 @@ def solve(
     if _mem_diag:
         _r0 = _rss()
 
-    # Resolve ue_method into the $method_switch slot value.
+    # Resolve into the $method_switch slot value.
     # - String: broadcast via METHOD_SHORTCUT to the standard UE targets.
     # - Dict: use directly (tuple-keyed override form).
-    method_switch = _resolve_ue_method(ue_method)
+    slot_method_switch = _resolve_method_switch(method_switch)
 
     if not (registry_dir / spec_factory_name).exists():
         raise FileNotFoundError(
@@ -526,8 +540,8 @@ def solve(
     slot_bindings = {}
     if draw:
         slot_bindings['draw'] = draw
-    if method_switch:
-        slot_bindings['method_switch'] = method_switch
+    if slot_method_switch:
+        slot_bindings['method_switch'] = slot_method_switch
     spec = make_spec(spec_recipe, registry_dir=str(registry_dir), **slot_bindings)
 
     if _mem_diag:
@@ -597,6 +611,3 @@ def solve(
     nest["inter_conn"] = inter_conn
 
     return nest, grids
-
-
-# Backward compatibility alias (estimate.py imports this name)

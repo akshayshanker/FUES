@@ -12,14 +12,14 @@
 | $y$ | Per-period wage (constant) |
 | $r$ | Interest rate |
 | $\beta$ | Discount factor |
-| $\tau$ | Utility cost of working |
+| $\tau$ | Utility cost of working (named `delta` in the code) |
 | $S = [0, \bar{a}]$ | Financial assets space |
 | $V_t^d(a)$ | Value function at time $t$ conditional on work status $d$ |
 | $\sigma_t^d(a, d_{t+1})$ | Continuation state policy function conditional on discrete choice |
 | $\mathcal{I}_t(a, d)$ | Discrete choice policy function |
-| $\mathbb{D}$ | Set of all feasible future discrete choice sequences |
-| $\mathbf{d} = \{d_{t+1}, d_{t+2}, \ldots, d_T\}$ | A sequence of future discrete choices |
-| $Q_{t+1}^{\mathbf{d}}$ | Value function conditional on a given sequence $\mathbf{d}$ |
+| $\mathbb{D}$ | Set of feasible future work-retire sequences |
+| $\mathbf{d} = \{d_{t+1}, d_{t+2}, \ldots, d_T\}$ | One feasible future sequence |
+| $V_t^{\mathbf{d}}(a)$ | Value function conditional on a fixed future sequence $\mathbf{d}$ |
 
 ## Model Environment
 
@@ -29,10 +29,15 @@ $$
 a_{t+1} = (1+r)a_t + d_t y - c_t.
 $$
 
-Per-period utility is given by $u(c_t) - \tau d_{t+1}$. Letting the function $u$ be defined by $u(c) = \log(c)$, the agent's maximization problem becomes
+Per-period utility is given by $u(c_t) - \tau d_{t+1}$. Letting $u(c) = \log(c)$, the lifetime problem can be written as
 
 $$
-V_0^{d_0}(a_0) = \max_{(c_t, d_{t+1})_{t=0}^{T}} \left\{ \sum_{t=0}^{T} \left[ \beta^t \left( u(c_t) - \tau d_{t+1} \right) \right] \right\},
+V_0^{d_0}(a_0)
+= \max_{(c_t)_{t=0}^{T},\, (d_{t+1})_{t=0}^{T-1}}
+\left\{
+\sum_{t=0}^{T} \beta^t u(c_t)
+- \sum_{t=0}^{T-1} \beta^t \tau d_{t+1}
+\right\},
 $$
 
 subject to the budget constraint, $a_t \in S$ for each $t$, and $d_{t+1} = 0$ if $d_t = 0$ (i.e., the agent is unable to return to work after retiring).
@@ -51,23 +56,30 @@ $$
 
 with $a' = (1+r)a - c$; at time $T$, their value function is $V_T^0(a) = u((1+r)a)$.
 
-The optimization problem for the retirees is a standard concave problem. For the workers, however, the optimization problem is not concave since they optimize jointly a discrete choice and a continuous choice. Moreover, even conditional on $d_{t+1} = 1$, next period value function $V_{t+1}^1$ will not be concave since the value function represents the supremum over *all future feasible combinations of discrete choices*. The non-concavity of $V_{t+1}^1$ produces the "secondary kinks" described by Iskhakov et al. (2017).
+The retiree's problem is a standard concave savings problem. The worker's problem is different: the current discrete choice and the option to switch in future periods make the continuation value non-concave. Even when the current branch is fixed, the next-period worker value $V_{t+1}^1$ is itself the upper envelope over feasible future work-retire paths. This is the source of the "secondary kinks" in Iskhakov et al. (2017).
 
-To see how the choice at period $t$ implicitly controls the future sequence of discrete choices and produces the secondary kinks, write the time $t$ worker's value function as
-
-$$
-V_t^1(a) = \max_c \max_{\mathbf{d} \in \mathbb{D}} \left\{ u(c) + \beta Q_{t+1}^{\mathbf{d}}(a') \right\},
-$$
-
-where $Q_{t+1}^{\mathbf{d}}$ is the $t+1$ value function conditional on a given sequence of future discrete choices $\mathbf{d}$, with $\mathbf{d} = \{d_{t+1}, d_{t+2}, \ldots, d_T\}$. In particular, letting $\boldsymbol{\bar{\tau}} = \{\tau, \beta\tau, \beta^2\tau, \ldots, \beta^{T-1}\tau\}$, we have
+To make this explicit, let $\mathbb{D}$ denote the set of feasible future sequences $\mathbf{d} = \{d_{t+1}, d_{t+2}, \ldots, d_T\}$ consistent with retirement irreversibility. For any fixed sequence $\mathbf{d}$, define the branch-conditioned value
 
 $$
-Q_{t+1}^{\mathbf{d}}(a) = \max_{(c_k)_{k=t+1}^{T}} \left\{ \sum_{k=t+1}^{T} \beta^{k-t-1} u(c_k) \right\} - \boldsymbol{\bar{\tau}}^{\text{tr}} \mathbf{d}.
+V_t^{\mathbf{d}}(a)
+= \max_{(c_k)_{k=t}^{T}}
+\left\{
+\sum_{k=t}^{T} \beta^{k-t} u(c_k)
+- \sum_{k=t}^{T-1} \beta^{k-t} \tau d_{k+1}
+\right\},
 $$
 
-To sum up, the value function non-concavity, even holding the choice $d_{t+1}$ fixed, is brought on by the implicit changes in the entire future sequence of discrete choices as one controls the choice variable $c$. In this case, the Bellman equation still holds, and one can numerically implement VFI to compute a solution. The challenge arises when solving the Bellman equation using numerical methods becomes computationally burdensome. An efficient strategy in this case involves recovering the policy function by solving for points that satisfy the first order conditions (FOCs — i.e., the Euler equations) of the Bellman equation. However, since the upper envelope is not concave, the points satisfying the FOCs could be associated with any future sequence of discrete choices, and may not be on the upper envelope.
+subject to the budget constraint and the fixed sequence $\mathbf{d}$. The worker's value is then
+
+$$
+V_t^1(a) = \max_{\mathbf{d} \in \mathbb{D}} V_t^{\mathbf{d}}(a).
+$$
+
+Each $V_t^{\mathbf{d}}$ is concave in assets, but their pointwise maximum need not be. EGM therefore returns candidate points that satisfy branch-specific first-order conditions but may lie below the global upper envelope. FUES is the step that recovers that envelope.
 
 ## Euler Equations
+
+The weak inequalities below allow for the occasionally binding asset constraint $a_{t+1} \geq 0$; at interior points they hold with equality.
 
 If the agent chooses $d_{t+1} = 1$ (i.e., they continue as a worker in $t+1$), we can write the time $t$ worker Euler equation as
 
@@ -75,7 +87,7 @@ $$
 u'(c_t^1) \geq \beta(1+r) u'(c_{t+1}),
 $$
 
-where $c_t^1$ is the time $t$ consumption policy conditional on $d_{t+1} = 1$, while $c_{t+1}$ is the unconditional time $t+1$ consumption policy. On the other hand, if the agent chooses $d_{t+1} = 0$ (i.e., they retire), then the Euler equation is
+where $c_t^1$ is the time $t$ consumption policy conditional on $d_{t+1} = 1$, while $c_{t+1}$ is the time $t+1$ consumption policy under the optimal continuation choice. On the other hand, if the agent chooses $d_{t+1} = 0$ (i.e., they retire), then the Euler equation is
 
 $$
 u'(c_t^0) \geq \beta(1+r) u'(c_{t+1}^0),
@@ -83,7 +95,7 @@ $$
 
 where $c_t^0$ and $c_{t+1}^0$ are the consumption policies conditional on $d_{t+1} = 0$ and $d_{t+2} = 0$.
 
-**Functional Euler equations.** It will now be helpful to write the Euler equation in its functional form. Let $\sigma_t^d : S \times \{0,1\} \to \mathbb{R}_+$ be the conditional continuation state policy function for the worker at time $t$ if $d=1$, and for the retiree if $d=0$. Note that $\sigma_t^d$ will depend, through its second argument, on the discrete choice (to work or not to work in $t+1$) made by the worker at time $t$. Time $t$ and $t+1$ policy functions will satisfy the functional Euler equation
+**Functional Euler equations.** It is useful to write the Euler equation in functional form. Let $\sigma_t^d : S \times \{0,1\} \to \mathbb{R}_+$ be the conditional continuation-state policy function for the worker at time $t$ if $d=1$, and for the retiree if $d=0$. The second argument records the discrete choice made for time $t+1$. Time $t$ and $t+1$ policy functions then satisfy
 
 $$
 u'\bigl((1+r)a + dy - \sigma_t^d(a, d_{t+1})\bigr) \geq \beta(1+r) u'\bigl((1+r)\sigma_t^d(a, d_{t+1}) + d_{t+1}y - \sigma_{t+1}^{d_{t+1}}(a', d_{t+2})\bigr),
@@ -103,11 +115,11 @@ Since the discrete choice is itself a function of the state, define a discrete c
 
 ## Modular Bellman Form
 
-The formulation above follows the standard presentation in the literature — a single Bellman equation with nested discrete and continuous choices. Below we rewrite the same model in **modular Bellman form**: each period is decomposed into self-contained stages, each with its own state space, value function, and optimality condition. This decomposition is the basis for the stage-based computational pipeline.
+The formulation above follows the standard presentation in the literature: one Bellman equation with nested discrete and continuous choices. Below we rewrite the same model in staged Bellman form. In the code, each period is decomposed into linked subproblems with their own state spaces and Bellman operators.
 
 An agent lives for $T$ periods. Each period she holds assets $a \geq 0$ and makes two choices: a **discrete** choice $d \in \{\text{work}, \text{retire}\}$ and a **continuous** choice of consumption $c$. Working yields wage income $y$ but costs disutility $\tau$; retirement is absorbing. Assets earn gross return $(1{+}r)$.
 
-The sequence of events within a period are:
+The sequence of events within a period is:
 - workers and retirees start with beginning-of-period assets $a$ and $a_{\text{ret}}$ respectively
 - earn returns and receive income to produce cash-on-hand $w = (1{+}r)a + y$ for workers or $w_{\text{ret}} = (1{+}r)a_{\text{ret}}$ for retirees
 - consume $c$, leaving end-of-period savings $b = w - c$ (or $b_{\text{ret}} = w_{\text{ret}} - c$)
@@ -125,7 +137,7 @@ Note that workers arrive at $a$ (into the branching stage); retirees arrive at $
 
 ### Stage operators
 
-Within each stage, the state space is represented at three nodes: arrival ($\mathsf{X}_{\prec}$), decision ($\mathsf{X}$), and continuation ($\mathsf{X}_{\succ}$). Solving proceeds backward: given a continuation-value function $\mathrm{v}_{\succ}$ on $\mathsf{X}_{\succ}$, the decision mover $\mathbb{B}$ produces the decision-value function $\mathrm{v}$ on $\mathsf{X}$, and the arrival mover $\mathbb{I}$ passes $\mathrm{v}$ back to $\mathsf{X}_{\prec}$.
+Within each stage, the state space is represented at three information sets: arrival ($\mathsf{X}_{\prec}$), decision ($\mathsf{X}$), and continuation ($\mathsf{X}_{\succ}$). We keep the code's operator labels $\mathbb{B}$ and $\mathbb{I}$: $\mathbb{B}$ is the within-stage Bellman step and $\mathbb{I}$ maps the decision value back to the arrival state.
 
 ### `work_cons` — worker consumption (EGM + FUES)
 
@@ -139,7 +151,7 @@ The first-order condition is $1/c = \beta\,\partial\mathrm{v}_{\succ}(b)$.
 
 *EGM.* Given an exogenous grid $\{b_0^{\#},\dots,b_N^{\#}\}$ on the continuation state, the FOC yields optimal consumption $c_i^{\#} = \bigl(\beta\,\partial\mathrm{v}_{\succ}(b_i^{\#})\bigr)^{-1}$ and the budget constraint recovers the endogenous grid $w_i^{\#} = b_i^{\#} + c_i^{\#}$. Each pair $(w_i^{\#},\, c_i^{\#})$ satisfies the FOC, and the corresponding value is $q_i^{\#} = \log(c_i^{\#}) + \beta\,\mathrm{v}_{\succ}(b_i^{\#})$.
 
-*Non-concavity.* The worker's $\mathrm{v}_{\succ}$ is the upper envelope of concave functions (one for each future discrete-choice sequence) and is not itself concave. As a result the endogenous grid $\{w_i^{\#}\}$ may be non-monotone, and the points $(w_i^{\#},\, q_i^{\#})$ define a correspondence rather than a function. An upper-envelope algorithm recovers the monotone upper envelope of $\{(w_i^{\#},\, q_i^{\#})\}$, thereby approximating $\mathrm{v}$. This is where FUES comes in.
+*Non-concavity.* The worker's $\mathrm{v}_{\succ}$ is the upper envelope of concave functions, one for each feasible future discrete-choice sequence, and is not itself concave. As a result the endogenous grid $\{w_i^{\#}\}$ may be non-monotone, and the points $(w_i^{\#},\, q_i^{\#})$ define a correspondence rather than a function. The upper-envelope step in FUES recovers the relevant branch of this correspondence.
 
 **Arrival mover $\mathbb{I}$** (decision → arrival)
 
@@ -189,7 +201,7 @@ Identity: $(\mathbb{I}\mathrm{v})(a) = \mathrm{v}(a)$.
 >
 > $$Q_t^{\text{retire}}(a) = \max_c \bigl\{ \log(c) + \beta\, V_{t+1}^0\bigl((1{+}r)a - c\bigr) \bigr\}, \qquad V_t^0(a) = \max_c \bigl\{ \log(c) + \beta\, V_{t+1}^0\bigl((1{+}r)a - c\bigr) \bigr\}$$
 
-## Computation 
+## Computation
 
 
 ## Solve interface
@@ -201,23 +213,23 @@ from examples.retirement.solve import solve_nest
 from examples.retirement.outputs import euler, get_policy
 
 nest, model, stage_ops, waves = solve_nest(
-    'examples/retirement/syntax',
-    method='FUES',
-    config_overrides={'grid_size': 3000, 'T': 50},
+    "examples/retirement/syntax",
+    method_switch="FUES",
+    draw={"settings": {"grid_size": 3000, "T": 50}},
 )
 
 # Euler error (log10)
-sigma_work = get_policy(nest, 'c', stage='labour_mkt_decision')
-print(f'Euler error: {euler(model, sigma_work):.4f}')
+sigma_work = get_policy(nest, "c", stage="labour_mkt_decision")
+print(f"Euler error: {euler(model, sigma_work):.4f}")
 ```
 
-`solve_nest` runs a pipeline on each stage declared in `syntax/stages/`:
+`solve_nest` exposes the canonical retirement pipeline:
 
-1. **Load** — read calibration, settings, stage YAML sources, period template, and inter-period connectors from `syntax/`.
-2. **Methodize** — attach the upper-envelope method (FUES, DCEGM, RFC, or CONSAV).
-3. **Configure** — bind numerical settings (grid sizes, bounds, $\bar{M}$) from `settings.yaml`.
-4. **Calibrate** — bind economic parameters ($\beta$, $\delta$, $r$, $y$) from `calibration.yaml`.
-5. **Graph** — build the stage DAG and derive the backward solve order (waves) via topological sort.
+1. **Load syntax** — read the stage YAML, period template, and inter-period connectors from `syntax/`.
+2. **Select the upper-envelope method** — `FUES`, `DCEGM`, `RFC`, or `CONSAV`.
+3. **Bind settings and calibration** — read numerical settings from `settings.yaml` and economic parameters from `calibration.yaml`.
+4. **Build the stage graph** — derive the backward solve order (`waves`) from the period DAG.
+5. **Solve backward** — apply the stage operators period by period.
 
 It then solves the three stages in reverse topological order each period:
 
@@ -225,55 +237,69 @@ It then solves the three stages in reverse topological order each period:
 2. **`work_cons`** — worker EGM + upper envelope. This is where FUES runs.
 3. **`labour_mkt_decision`** — pointwise $\max(\mathrm{v}^{\text{work}} - \tau,\; \mathrm{v}^{\text{retire}})$ to evaluate the discrete choice.
 
-The returned `nest` dict contains the full solution history. Use `get_policy(nest, key, stage=...)` to extract policies and `get_timing(nest)` to extract UE and total solve times.
+The returned `nest` dict contains the full solution history. Use `get_policy(nest, key, stage=...)` to extract policies and `get_timing(nest)` to extract mean upper-envelope and total solve times.
 
 For stationary models or repeated solves, pass back `model`, `stage_ops`, and `waves` to skip the pipeline:
 
 ```python
 # First call: full pipeline
 nest, model, stage_ops, waves = solve_nest(
-    'examples/retirement/syntax',
-    method='FUES',
-    config_overrides={'grid_size': 3000, 'T': 50},
+    "examples/retirement/syntax",
+    method_switch="FUES",
+    draw={"settings": {"grid_size": 3000, "T": 50}},
 )
 
 # Subsequent calls: reuse model, operators, and graph
 nest2, _, _, _ = solve_nest(
-    'examples/retirement/syntax',
-    method='FUES',
-    calib_overrides={'beta': 0.94},
-    config_overrides={'grid_size': 5000, 'T': 50},
-    model=model, stage_ops=stage_ops, waves=waves,
+    "examples/retirement/syntax",
+    method_switch="FUES",
+    draw={
+        "calibration": {"beta": 0.94},
+        "settings": {"grid_size": 5000, "T": 50},
+    },
+    model=model,
+    stage_ops=stage_ops,
+    waves=waves,
 )
 ```
 
 ## Running locally
 
-`run.py` is a command-line wrapper around `solve_nest`. It loads baseline economic parameters from `syntax/calibration.yaml` and numerical settings from `syntax/settings.yaml`, applies any command-line overrides, solves with all four methods, and prints a comparison table. Parameters can be overridden at the command line.
+`run.py` is a command-line wrapper around `solve_nest`. It loads baseline economic parameters from `syntax/calibration.yaml` and numerical settings from `syntax/settings.yaml`, applies any command-line overrides, solves the model under the available upper-envelope methods, and prints a comparison table. The API names are `FUES`, `RFC`, `DCEGM`, and `CONSAV`; in plots and tables, `DCEGM` and `CONSAV` are displayed under the paper labels MSS and LTM.
 
-The override mechanism works at two levels:
+The override mechanism is split by role:
 
-- **`--calib-override key=value`** overrides economic parameters (e.g. `beta`, `delta`, `y`) defined in `calibration.yaml`.
-- **`--config-override key=value`** overrides numerical settings (e.g. `grid_size`, `T`, `m_bar`) defined in `settings.yaml`.
-- **`--override-file path.yml`** loads a sparse YAML file; keys matching `settings.yaml` are treated as config overrides, all others as calibration overrides.
+- **`--params-override key=value`** overrides economic parameters (e.g. `beta`, `delta`, `y`) from `calibration.yaml`. The code name `delta` corresponds to $\tau$ in the paper notation used above.
+- **`--settings-override key=value`** overrides numerical settings (e.g. `grid_size`, `T`, `plot_age`) from `settings.yaml`.
+- **`--latex-grids=…`** (runner extra) gives the subset of grid sizes included in **LaTeX** timing/accuracy tables (markdown tables list all sweeps rows).
+- **`--override-file path.yml`** loads a sparse YAML file; keys matching `settings.yaml` are treated as settings overrides and the remaining keys as calibration overrides.
 
-Each stage in `syntax/stages/` declares which parameters it consumes. The configure and calibrate functors bind only the relevant parameters to each stage, so extra keys are ignored.
+Each stage in `syntax/stages/` declares which parameters it consumes. The pipeline binds only the relevant settings and calibration entries to each stage, so unrelated keys are ignored.
 
-Outputs are saved to `--output-dir` and include EGM grid plots, consumption policy plots, and a printed table of Euler errors and timing for all four upper-envelope methods (FUES, RFC, MSS, LTM).
+Outputs are saved to `--output-dir` and include EGM grid plots, consumption policy plots, and printed timing and Euler-error tables. The table headings follow the paper labels MSS and LTM even though the callable method tags are `DCEGM` and `CONSAV`.
 
 All commands run from the repo root (`FUES/`).
 
 ```bash
 # Single run (baseline calibration from syntax/)
-python examples/retirement/run.py --grid-size 3000 --output-dir results/retirement
+python -m examples.retirement.run \
+    --settings-override grid_size=3000 \
+    --output-dir results/retirement
 
 # Override parameters
-python examples/retirement/run.py --calib-override beta=0.96 --config-override T=50
+python -m examples.retirement.run \
+    --params-override beta=0.96 \
+    --settings-override T=50
 
-# Full timing sweep (all methods × grid sizes × delta values)
-python examples/retirement/run.py --run-timings \
-    --sweep-grids 1000,2000,3000,6000,10000 \
-    --sweep-deltas 0.25,0.5,1,2 \
+# Full timing sweep: Cartesian product of params × settings × methods (YAML @
+# files in experiments/retirement/); post-solve policy plots use the largest
+# grid_size in the test set
+python -m examples.retirement.run --sweep \
+    --params-range @experiments/retirement/timing_deltas.yaml \
+    --settings-range @experiments/retirement/timing_grids.yaml \
+    --methods-range @experiments/retirement/timing_methods.yaml \
+    --latex-grids=1000,2000,3000,6000,10000 \
+    --sweep-runs 3 \
     --output-dir results/retirement
 ```
 
@@ -284,19 +310,17 @@ The paper's timing and accuracy tables (Tables 1--2) were produced on NCI Gadi (
 ```bash
 # On Gadi: submit the PBS batch job
 cd FUES
-source setup/load_env.sh
+source setup/setup.sh
 qsub experiments/retirement/retirement_timings.sh
 ```
 
-This runs the full sweep (15 grid sizes × 4 delta values × 4 methods × 3 repetitions) and produces:
+This runs the full sweep (15 grid sizes × 4 work-cost values × 4 methods × 3 repetitions) and produces:
 
 - `retirement_timing.md` / `.tex` — timing table (ms per period)
 - `retirement_accuracy.md` / `.tex` — Euler error and consumption deviation tables
 - EGM grid plots at the configured age
 
-Outputs are written to `experiments/retirement/results/`. Pre-computed benchmark results from the paper are available in the same directory.
-
-The LaTeX tables include only the paper grid sizes (1k, 2k, 3k, 6k, 10k) via `--latex-grids`. The markdown tables include all 15 grid sizes for the [notebook comparison](../notebooks/retirement_fues.ipynb).
+By default the PBS script writes results to `OUTPUT_DIR` (on Gadi this defaults to `/scratch/tp66/$USER/FUES/retirement`) and mirrors logs to `/g/data/tp66/logs/retirement`. The LaTeX tables use the subset of paper grid sizes (1k, 2k, 3k, 6k, 10k) controlled by `LATEX_GRIDS`; the markdown tables report the full sweep used in the [notebook comparison](../notebooks/retirement_fues.ipynb).
 
 ### PBS settings
 
@@ -317,11 +341,11 @@ Instead of entering parameters manually, sparse YAML override files in `experime
 | ------------------ | -------------------- |
 | `baseline.yml`     | $\beta=0.96$, $T=50$ |
 | `high_beta.yml`    | $\beta=0.99$         |
-| `low_delta.yml`    | $\tau=0.5$, $T=50$ |
-| `long_horizon.yml` | $T=50$,              |
+| `low_delta.yml`    | `delta=0.5` in code (that is, lower $\tau$ in paper notation), $T=50$ |
+| `long_horizon.yml` | $\beta=0.96$, $T=50$, tighter lower-bound settings |
 
 ```bash
-python examples/retirement/run.py --override-file experiments/retirement/params/long_horizon.yml
+python -m examples.retirement.run --override-file experiments/retirement/params/long_horizon.yml
 ```
 
 ## Benchmark results
@@ -349,7 +373,7 @@ Parameters: $T=50$, $\beta=0.96$, $r=0.02$, $y=20$, $a \in [0, 500]$. No taste s
 | 1000 | 1.00 | -1.630 | -1.658 | -1.629 |
 | 3000 | 1.00 | -1.629 | -1.660 | -1.629 |
 
-FUES is 5--20× faster than MSS and 10--20× faster than RFC across all configurations. Euler errors are comparable, with FUES slightly more accurate. FUES scales sub-linearly, MSS scales linearly and LTM scales quadratically. 
+In the displayed benchmarks, FUES is 5--20× faster than MSS and 10--20× faster than RFC, with comparable Euler errors. The broader sweep in the paper and notebook extends the comparison to LTM as well.
 
 
 ## Code structure
@@ -372,7 +396,7 @@ examples/retirement/
 ├── benchmark.py                # Timing sweeps (via solve_nest)
 ├── notebooks/
 │   ├── retirement_fues.ipynb   # Interactive walkthrough
-│   └── model.md                # Model description (source of truth)
+│   └── model.md                # Notebook model description
 └── outputs/
     ├── diagnostics.py          # Nest accessors, euler, deviation
     ├── plots.py                # Paper + notebook plot functions

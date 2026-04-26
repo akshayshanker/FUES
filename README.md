@@ -81,10 +81,15 @@ Contributing? Add pytest + autopep8 on top:
 pip install -e ".[dev]" --no-deps
 ```
 
-Run the full timing sweep:
+Run a timing sweep (Cartesian product of param/settings/method rows; see
+`experiments/retirement/retirement_timings.sh`):
 
 ```bash
-python examples/retirement/run.py --run-timings
+python -m examples.retirement.run --sweep \
+  --params-range @experiments/retirement/timing_deltas.yaml \
+  --settings-range @experiments/retirement/timing_grids.yaml \
+  --methods-range @experiments/retirement/timing_methods.yaml \
+  --sweep-runs 3
 ```
 
 ---

@@ -44,9 +44,9 @@ echo "========================================================"
 cd "$REPO_ROOT"
 
 python3 -m examples.durables.run \
-    --compare FUES NEGM \
+    --compare adjuster_cons.cntn_to_dcsn_mover.upper_envelope=FUES,NEGM \
     --simulate --n-sim 10000 --seed 42 \
-    --calib-override t0=20 \
+    --params-override t0=20 \
     --output-dir /scratch/tp66/$USER/FUES/durables
 
 echo "Job completed at $(date)"

@@ -1,237 +1,524 @@
-/* FUES docs — Daft Punk x LCARS: amber/gold accents, deep-space blacks,
-   warm typography, generous space, Material Design 2 elevation */
+/* FUES documentation — academic + LCARS-flavoured branding.
+ *
+ * Palette: warm ivory paper, deep-space navy header, burnt-amber accent.
+ * Type: IBM Plex Sans throughout; IBM Plex Serif for the abstract.
+ * The only display gesture is the header wordmark (tracked-out uppercase)
+ * that echoes the TNG Title glyph used in the logo.
+ */
+
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=IBM+Plex+Serif:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap");
 
 :root {
-  /* Deep-space header, warm amber accent */
-  --md-primary-fg-color: #121218;
-  --md-primary-fg-color--light: #1e1e28;
-  --md-primary-fg-color--dark: #0a0a10;
-  --md-accent-fg-color: #c87f2a;
+  /* Palette (light) */
+  --fues-paper:       #fbf9f4;   /* cream paper */
+  --fues-ink:         #1a1a1f;   /* body text */
+  --fues-ink-soft:    #3a3a42;   /* muted ink */
+  --fues-rule:        #d9d3c3;   /* hairlines */
+  --fues-rule-soft:   #eae3d1;
+  --fues-navy:        #0e1016;   /* header background */
+  --fues-navy-2:      #161a24;
+  --fues-cream:       #f3e9cc;   /* header text on navy */
+  --fues-cream-soft:  rgba(243, 233, 204, 0.75);
+  --fues-accent:      #c88438;   /* burnt amber */
+  --fues-accent-hi:   #e0a14d;   /* amber hover / highlight */
+  --fues-accent-soft: rgba(200, 132, 56, 0.08);
+  --fues-link:        #9a5a1f;
 
-  /* Warm light backgrounds */
-  --md-default-bg-color: #faf9f6;
-  --md-default-fg-color: #1c1c1e;
-  --md-typeset-a-color: #b07020;
-  --md-code-bg-color: #f3f1ec;
+  /* Material overrides */
+  --md-primary-fg-color:         var(--fues-navy);
+  --md-primary-fg-color--light:  var(--fues-navy-2);
+  --md-primary-fg-color--dark:   #06080c;
+  --md-accent-fg-color:          var(--fues-accent);
+  --md-default-bg-color:         var(--fues-paper);
+  --md-default-fg-color:         var(--fues-ink);
+  --md-default-fg-color--light:  var(--fues-ink-soft);
+  --md-typeset-a-color:          var(--fues-link);
+  --md-code-bg-color:            #f2ede0;
 
-  /* Material 2 elevation */
-  --elevation-1: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.06);
-  --elevation-2: 0 3px 6px rgba(0,0,0,0.10), 0 2px 4px rgba(0,0,0,0.06);
+  --elevation-1: 0 1px 2px rgba(14, 16, 22, 0.08);
+  --elevation-2: 0 2px 6px rgba(14, 16, 22, 0.12);
 }
 
 [data-md-color-scheme="slate"] {
-  --md-primary-fg-color: #0a0a10;
-  --md-primary-fg-color--light: #121218;
-  --md-primary-fg-color--dark: #060608;
-  --md-accent-fg-color: #e8a838;
-  --md-default-bg-color: #0d0d14;
-  --md-default-fg-color: #e4e2dc;
-  --md-typeset-a-color: #e8a838;
-  --md-code-bg-color: #161620;
-  --elevation-1: 0 1px 3px rgba(0,0,0,0.4);
-  --elevation-2: 0 3px 6px rgba(0,0,0,0.5);
+  --fues-paper:      #0e1017;
+  --fues-ink:        #e7e3d8;
+  --fues-ink-soft:   #bab3a4;
+  --fues-rule:       #2a2f3c;
+  --fues-rule-soft:  #1e232e;
+  --fues-navy:       #06080c;
+  --fues-navy-2:     #0b0e17;
+  --fues-cream:      #f3e9cc;
+  --fues-cream-soft: rgba(243, 233, 204, 0.75);
+  --fues-accent:     #e0a14d;
+  --fues-accent-hi:  #f3b764;
+  --fues-accent-soft: rgba(224, 161, 77, 0.10);
+  --fues-link:       #e0a14d;
+
+  --md-primary-fg-color:         var(--fues-navy);
+  --md-primary-fg-color--light:  var(--fues-navy-2);
+  --md-primary-fg-color--dark:   #03050a;
+  --md-accent-fg-color:          var(--fues-accent);
+  --md-default-bg-color:         var(--fues-paper);
+  --md-default-fg-color:         var(--fues-ink);
+  --md-default-fg-color--light:  var(--fues-ink-soft);
+  --md-typeset-a-color:          var(--fues-link);
+  --md-code-bg-color:            #151823;
+  --elevation-1: 0 1px 2px rgba(0,0,0,0.4);
+  --elevation-2: 0 2px 6px rgba(0,0,0,0.55);
 }
 
-/* ── Header: deep-space black ── */
+/* ══════════════════════════════════════════════════════════════════════
+ * HEADER — deep-space navy, warm cream wordmark
+ *
+ * Material's header has a fixed structure: .md-logo + .md-header__title,
+ * where .md-header__title holds two stacked .md-header__topic elements
+ * (site name and current page, swapping on scroll). We DO NOT override
+ * that layout — we only restyle typography and colours.
+ * ══════════════════════════════════════════════════════════════════════ */
+
 .md-header {
-  background: #0e0e16;
+  background: var(--fues-navy);
   box-shadow: var(--elevation-2);
-  letter-spacing: 0.02em;
+  color: var(--fues-cream);
 }
 
+/* Logo + wordmark alignment.
+ *
+ * Material sets a default logo image to height:1.2rem and fixes the
+ * header row to height:2.4rem. We keep that 2.4rem row height and
+ * size the logo to the cap-height of the FUES wordmark so the F glyph
+ * and the FUES caps read as the same height to the eye.
+ *
+ * IBM Plex Sans cap-height ≈ 0.71 × em. Wordmark font-size = 1.3rem,
+ * so caps span ≈ 0.92rem. We set the logo image to that height. */
+
+.md-header__button.md-logo {
+  margin: 0 0.5rem 0 0 !important;
+  padding: 0 !important;
+  display: flex !important;
+  align-items: center !important;
+}
+
+.md-header__button.md-logo img,
+.md-header__button.md-logo svg {
+  width: auto !important;
+  height: 0.92rem !important;
+  display: block !important;
+}
+
+/* Wordmark — tracked-out uppercase, cream on navy */
 .md-header__title {
-  font-weight: 700;
+  font-family: "IBM Plex Sans", system-ui, sans-serif !important;
+  font-weight: 600 !important;
+  font-size: 1.3rem !important;
+  line-height: 2.4rem !important;
+  letter-spacing: 0.06em !important;
+  text-transform: uppercase !important;
+  color: var(--fues-cream) !important;
+  margin-left: 0 !important;
 }
 
+.md-header__title .md-ellipsis {
+  color: var(--fues-cream) !important;
+}
+
+/* Per-page topic (the second stacked element) — smaller, muted */
+.md-header__topic[data-md-component="header-topic"] .md-ellipsis {
+  font-weight: 400;
+  font-size: 0.82rem;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--fues-cream-soft);
+}
+
+/* GitHub repo source block */
+.md-header__source .md-source,
+.md-header__source .md-source__repository {
+  color: var(--fues-cream);
+  font-family: "IBM Plex Sans", sans-serif;
+}
+
+.md-header__source .md-source__facts {
+  color: var(--fues-cream-soft);
+}
+
+/* Search input (in-header) */
+.md-search__form {
+  border-radius: 3px;
+  background: rgba(243, 233, 204, 0.09);
+  color: var(--fues-cream);
+}
+
+.md-search__form:hover {
+  background: rgba(243, 233, 204, 0.14);
+}
+
+.md-search__input {
+  font-family: "IBM Plex Sans", sans-serif;
+  font-size: 0.78rem;
+  color: var(--fues-cream);
+}
+
+.md-search__input::placeholder {
+  color: var(--fues-cream-soft);
+}
+
+.md-search__icon {
+  color: var(--fues-cream-soft);
+}
+
+/* Tabs (second nav row, below header) */
 .md-tabs {
-  background: #0e0e16;
-  border-bottom: 1px solid rgba(232, 168, 56, 0.12);
+  background: var(--fues-navy);
+  border-bottom: 1px solid rgba(224, 161, 77, 0.22);
 }
 
-/* ── Typography: tight heading hierarchy ── */
+.md-tabs__list {
+  padding: 0 0.2rem;
+}
+
+.md-tabs__link {
+  font-family: "IBM Plex Sans", sans-serif;
+  font-weight: 500;
+  font-size: 0.76rem;
+  letter-spacing: 0.035em;
+  text-transform: uppercase;
+  color: var(--fues-cream-soft);
+  opacity: 1;
+  margin-top: 0;
+  padding: 0.6rem 0.9rem 0.55rem;
+}
+
+.md-tabs__link--active,
+.md-tabs__link:hover {
+  color: var(--fues-cream);
+}
+
+.md-tabs__link--active {
+  border-bottom: 2px solid var(--fues-accent);
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+ * BODY TYPOGRAPHY — clean academic sans
+ * ══════════════════════════════════════════════════════════════════════ */
+
+body,
+.md-typeset {
+  font-family: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
+}
+
+.md-typeset {
+  font-size: 0.8rem;
+  line-height: 1.65;
+  color: var(--fues-ink);
+}
+
 .md-typeset h1 {
-  font-weight: 700;
-  letter-spacing: -0.01em;
-}
-
-[data-md-color-scheme="slate"] .md-typeset h1 {
-  color: #f0ede6;
+  font-family: "IBM Plex Sans", system-ui, sans-serif;
+  font-weight: 600;
+  font-size: 1.75rem;
+  line-height: 1.2;
+  letter-spacing: -0.005em;
+  margin: 0.1em 0 0.5em;
+  color: var(--fues-ink);
 }
 
 .md-typeset h2 {
+  font-family: "IBM Plex Sans", system-ui, sans-serif;
   font-weight: 600;
-  margin-top: 1.6em;
+  font-size: 1.22rem;
+  letter-spacing: 0;
+  margin-top: 1.9em;
   padding-bottom: 0.25em;
-  border-bottom: 1px solid #ddd5ca;
-  color: #2a2520;
-}
-
-[data-md-color-scheme="slate"] .md-typeset h2 {
-  color: #e4ddd0;
-  border-bottom-color: rgba(228, 221, 208, 0.15);
+  border-bottom: 1px solid var(--fues-rule);
+  color: var(--fues-ink);
 }
 
 .md-typeset h3 {
+  font-family: "IBM Plex Sans", system-ui, sans-serif;
   font-weight: 600;
-  color: #444;
-}
-
-[data-md-color-scheme="slate"] .md-typeset h3 {
-  color: #bab0a0;
+  font-size: 1.02rem;
+  color: var(--fues-ink);
+  margin-top: 1.6em;
 }
 
 .md-typeset h4 {
+  font-family: "IBM Plex Sans", system-ui, sans-serif;
   font-weight: 600;
-  color: #666;
-  text-transform: uppercase;
-  font-size: 0.8em;
-  letter-spacing: 0.04em;
-}
-
-[data-md-color-scheme="slate"] .md-typeset h4 {
-  color: #9a9488;
-}
-
-/* ── Code ── */
-.md-typeset code {
-  background-color: var(--md-code-bg-color);
-  border-radius: 3px;
-  padding: 0.1em 0.35em;
-  font-size: 0.85em;
-}
-
-.md-typeset pre {
-  border-radius: 4px;
-}
-
-/* ── Admonitions ── */
-.md-typeset .admonition,
-.md-typeset details {
-  border-radius: 4px;
-  border-left-width: 3px;
-}
-
-.md-typeset .admonition.note,
-.md-typeset details.note {
-  border-color: #c87f2a;
-}
-
-.md-typeset .note > .admonition-title,
-.md-typeset .note > summary {
-  background: rgba(200, 127, 42, 0.06);
-}
-
-.md-typeset .admonition.warning,
-.md-typeset details.warning {
-  border-color: #cc4444;
-}
-
-.md-typeset .admonition.tip,
-.md-typeset details.tip {
-  border-color: #2aaa8a;
-}
-
-.md-typeset .admonition.abstract,
-.md-typeset details.abstract {
-  border-color: #6a8caa;
-}
-
-.md-typeset .admonition.example,
-.md-typeset details.example {
-  border-color: #9a7acc;
-}
-
-/* ── Body font size (IBM Plex Sans runs slightly large) ── */
-.md-typeset {
   font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--fues-ink-soft);
+  margin-top: 1.4em;
 }
 
-/* ── Tables ── */
-.md-typeset table:not([class]) {
-  font-size: 0.72rem;
+.md-typeset p,
+.md-typeset li {
+  hyphens: auto;
 }
 
-.md-typeset table:not([class]) th {
-  font-weight: 600;
-  letter-spacing: 0.02em;
-}
+/* ══════════════════════════════════════════════════════════════════════
+ * LINKS — subtle amber underline
+ * ══════════════════════════════════════════════════════════════════════ */
 
-/* ── Links ── */
 .md-typeset a {
-  text-decoration-color: rgba(176, 112, 32, 0.25);
+  text-decoration: underline;
+  text-decoration-color: rgba(154, 90, 31, 0.30);
+  text-decoration-thickness: 1px;
   text-underline-offset: 2px;
+  transition: text-decoration-color 0.15s ease;
 }
 
 .md-typeset a:hover {
   text-decoration-color: currentColor;
 }
 
-/* ── Navigation ── */
+/* ══════════════════════════════════════════════════════════════════════
+ * CODE
+ * ══════════════════════════════════════════════════════════════════════ */
+
+.md-typeset code {
+  background-color: var(--md-code-bg-color);
+  border-radius: 3px;
+  padding: 0.08em 0.35em;
+  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 0.82em;
+}
+
+.md-typeset pre > code {
+  font-size: 0.78rem;
+  line-height: 1.55;
+}
+
+.md-typeset .highlight,
+.md-typeset pre {
+  border-radius: 4px;
+  box-shadow: var(--elevation-1);
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+ * TABLES — booktabs
+ * ══════════════════════════════════════════════════════════════════════ */
+
+.md-typeset table:not([class]) {
+  font-size: 0.74rem;
+  border: none;
+  border-top: 2px solid var(--fues-ink);
+  border-bottom: 2px solid var(--fues-ink);
+  margin: 1.4em auto;
+  box-shadow: none;
+}
+
+.md-typeset table:not([class]) th {
+  background: transparent;
+  border-bottom: 1px solid var(--fues-ink);
+  font-family: "IBM Plex Sans", sans-serif;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  padding: 0.5em 0.8em;
+  color: var(--fues-ink);
+}
+
+.md-typeset table:not([class]) td {
+  border: none;
+  padding: 0.4em 0.8em;
+  color: var(--fues-ink-soft);
+}
+
+.md-typeset table:not([class]) tr:not(:last-child) td {
+  border-bottom: 1px solid var(--fues-rule-soft);
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+ * ADMONITIONS
+ * ══════════════════════════════════════════════════════════════════════ */
+
+.md-typeset .admonition,
+.md-typeset details {
+  border-radius: 4px;
+  border-left-width: 3px;
+  border-top: none;
+  border-right: none;
+  border-bottom: none;
+  box-shadow: none;
+  background: var(--fues-accent-soft);
+  font-size: 0.78rem;
+}
+
+.md-typeset .admonition-title,
+.md-typeset summary {
+  font-family: "IBM Plex Sans", sans-serif;
+  font-weight: 600;
+  font-size: 0.78rem;
+  letter-spacing: 0.02em;
+  background: transparent;
+  padding-left: 1.9em;
+}
+
+.md-typeset .admonition.note,
+.md-typeset details.note       { border-color: var(--fues-accent); }
+.md-typeset .admonition.warning,
+.md-typeset details.warning    { border-color: #b94a3c; background: rgba(185, 74, 60, 0.06); }
+.md-typeset .admonition.tip,
+.md-typeset details.tip        { border-color: #2a7a70; background: rgba(42, 122, 112, 0.06); }
+.md-typeset .admonition.abstract,
+.md-typeset details.abstract   { border-color: #3a5a80; background: rgba(58, 90, 128, 0.06); }
+.md-typeset .admonition.example,
+.md-typeset details.example    { border-color: #6a4c8a; background: rgba(106, 76, 138, 0.06); }
+.md-typeset .admonition.info,
+.md-typeset details.info       { border-color: #3a5a80; background: rgba(58, 90, 128, 0.06); }
+
+/* ══════════════════════════════════════════════════════════════════════
+ * BLOCKQUOTES
+ * ══════════════════════════════════════════════════════════════════════ */
+
+.md-typeset blockquote {
+  border-left: 2px solid var(--fues-accent);
+  padding: 0.3em 1.1em;
+  background: transparent;
+  color: var(--fues-ink-soft);
+  font-style: normal;
+  margin: 1.2em 0;
+}
+
+.md-typeset blockquote p {
+  margin: 0.2em 0;
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+ * SIDEBAR NAV
+ * ══════════════════════════════════════════════════════════════════════ */
+
+.md-nav {
+  font-size: 0.76rem;
+}
+
+.md-nav__title {
+  font-family: "IBM Plex Sans", sans-serif;
+  font-weight: 600;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--fues-ink-soft);
+}
+
 .md-nav__item--active > .md-nav__link {
   font-weight: 600;
-  color: var(--md-accent-fg-color);
+  color: var(--fues-accent);
 }
 
-/* ── Footer: match header ── */
+/* ══════════════════════════════════════════════════════════════════════
+ * FOOTER
+ * ══════════════════════════════════════════════════════════════════════ */
+
 .md-footer {
-  background: #0e0e16;
+  background: var(--fues-navy);
+  color: var(--fues-cream-soft);
 }
 
-/* ── Blockquotes ── */
-.md-typeset blockquote {
-  border-left: 3px solid #c87f2a;
-  padding: 0.4em 1em;
-  background: rgba(200, 127, 42, 0.03);
+.md-footer-meta {
+  background: #06080c;
 }
 
-[data-md-color-scheme="slate"] .md-typeset blockquote {
-  background: rgba(232, 168, 56, 0.05);
+.md-footer a,
+.md-footer-meta a {
+  color: var(--fues-cream);
 }
 
-/* ═══════════════════════════════════════════════════════════════════
-   Jupyter notebook styling (mkdocs-jupyter)
-   ═══════════════════════════════════════════════════════════════════ */
+/* ══════════════════════════════════════════════════════════════════════
+ * PAPER-STYLE ABSTRACT BOX (home page)
+ * ══════════════════════════════════════════════════════════════════════ */
 
-/* ── Input cells ── */
+.paper-card {
+  border: 1px solid var(--fues-rule);
+  background: #fff;
+  padding: 1.25rem 1.5rem 1.1rem;
+  margin: 1.4rem 0 1.8rem;
+  box-shadow: var(--elevation-1);
+}
+
+[data-md-color-scheme="slate"] .paper-card {
+  background: #13161f;
+  border-color: var(--fues-rule);
+}
+
+.paper-card .citation {
+  font-family: "IBM Plex Sans", sans-serif;
+  font-size: 0.68rem;
+  color: var(--fues-ink-soft);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  margin: 0;
+}
+
+.paper-card .title {
+  font-family: "IBM Plex Serif", Georgia, serif;
+  font-weight: 600;
+  font-size: 1.25rem;
+  line-height: 1.3;
+  margin: 0.35em 0 0.35em;
+  color: var(--fues-ink);
+}
+
+.paper-card .authors {
+  font-family: "IBM Plex Serif", Georgia, serif;
+  font-style: italic;
+  font-size: 0.88rem;
+  color: var(--fues-ink-soft);
+  margin: 0 0 0.9em;
+}
+
+.paper-card .abstract {
+  font-family: "IBM Plex Serif", Georgia, serif;
+  font-size: 0.88rem;
+  line-height: 1.6;
+  color: var(--fues-ink);
+  margin: 0;
+}
+
+.paper-card .keywords {
+  font-size: 0.72rem;
+  color: var(--fues-ink-soft);
+  margin: 0.9em 0 0;
+  padding-top: 0.6em;
+  border-top: 1px solid var(--fues-rule-soft);
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+ * JUPYTER NOTEBOOK (mkdocs-jupyter)
+ * ══════════════════════════════════════════════════════════════════════ */
+
 [data-md-color-scheme="slate"] .jupyter-wrapper .jp-InputArea-editor,
 [data-md-color-scheme="slate"] .jupyter-wrapper .highlight {
-  background-color: #161620 !important;
+  background-color: #13161f !important;
 }
 
-/* ── Output cells ── */
 .jupyter-wrapper .jp-OutputArea-output {
   background-color: transparent;
 }
 
 [data-md-color-scheme="slate"] .jupyter-wrapper .jp-OutputArea-output {
-  color: #e4e2dc;
+  color: var(--fues-ink);
   background-color: transparent !important;
 }
 
 [data-md-color-scheme="slate"] .jupyter-wrapper .jp-OutputArea-output pre {
-  color: #e4e2dc !important;
-  background-color: #161620 !important;
+  color: var(--fues-ink) !important;
+  background-color: #13161f !important;
 }
 
-[data-md-color-scheme="slate"] .jupyter-wrapper .jp-OutputArea-child {
-  background-color: transparent !important;
-}
-
-[data-md-color-scheme="slate"] .jupyter-wrapper .jp-Cell-outputWrapper {
-  background-color: transparent !important;
-}
-
+[data-md-color-scheme="slate"] .jupyter-wrapper .jp-OutputArea-child,
+[data-md-color-scheme="slate"] .jupyter-wrapper .jp-Cell-outputWrapper,
 [data-md-color-scheme="slate"] .jupyter-wrapper .jp-OutputArea {
   background-color: transparent !important;
 }
 
-/* Output HTML tables (e.g. pandas) */
 [data-md-color-scheme="slate"] .jupyter-wrapper .jp-RenderedHTMLCommon.jp-OutputArea-output {
-  background-color: #161620 !important;
-  color: #e4e2dc !important;
+  background-color: #13161f !important;
+  color: var(--fues-ink) !important;
 }
 
-/* ── Notebook markdown cells + all text in dark mode ── */
 [data-md-color-scheme="slate"] .jupyter-wrapper .jp-RenderedHTMLCommon,
 [data-md-color-scheme="slate"] .jupyter-wrapper .jp-RenderedHTMLCommon p,
 [data-md-color-scheme="slate"] .jupyter-wrapper .jp-RenderedHTMLCommon li,
@@ -241,43 +528,40 @@
 [data-md-color-scheme="slate"] .jupyter-wrapper .jp-RenderedHTMLCommon h4,
 [data-md-color-scheme="slate"] .jupyter-wrapper .jp-RenderedHTMLCommon td,
 [data-md-color-scheme="slate"] .jupyter-wrapper .jp-RenderedHTMLCommon th {
-  color: #e4e2dc !important;
+  color: var(--fues-ink) !important;
 }
 
 [data-md-color-scheme="slate"] .jupyter-wrapper .jp-RenderedHTMLCommon th {
-  background-color: #1a1a24 !important;
-  border-color: #2a2a36 !important;
+  background-color: #171b27 !important;
+  border-color: #2a2f3c !important;
 }
 
 [data-md-color-scheme="slate"] .jupyter-wrapper .jp-RenderedHTMLCommon td {
-  border-color: #22222e !important;
+  border-color: #22272f !important;
 }
 
 [data-md-color-scheme="slate"] .jupyter-wrapper .jp-RenderedHTMLCommon table {
-  background-color: #0d0d14 !important;
+  background-color: var(--fues-paper) !important;
 }
 
 [data-md-color-scheme="slate"] .jupyter-wrapper .jp-RenderedHTMLCommon a {
-  color: #e8a838 !important;
+  color: var(--fues-link) !important;
 }
 
 [data-md-color-scheme="slate"] .jupyter-wrapper .jp-RenderedHTMLCommon code {
-  color: #e4e2dc;
-  background-color: #161620;
+  color: var(--fues-ink);
+  background-color: #171b27;
 }
 
-/* ── Notebook text output (stdout/stderr) ── */
 [data-md-color-scheme="slate"] .jupyter-wrapper .jp-RenderedText pre {
-  color: #e4e2dc !important;
+  color: var(--fues-ink) !important;
 }
 
-/* ── Plot images: invert in dark mode for white-background matplotlib ── */
 [data-md-color-scheme="slate"] .jupyter-wrapper .jp-OutputArea-output img,
-[data-md-color-scheme="slate"] .md-content img:not(.emojione):not(.twemoji):not(.gemoji) {
+[data-md-color-scheme="slate"] .md-content img:not(.emojione):not(.twemoji):not(.gemoji):not(.no-invert) {
   filter: invert(0.88) hue-rotate(180deg);
 }
 
-/* ── Plotly outputs & SVG icons: exempt from inversion ── */
 [data-md-color-scheme="slate"] .jupyter-wrapper .jp-OutputArea-output .plotly,
 [data-md-color-scheme="slate"] .md-content .md-typeset .twemoji,
 [data-md-color-scheme="slate"] .md-header img,
@@ -285,13 +569,11 @@
   filter: none;
 }
 
-/* ── Hide In/Out prompts ── */
 .jupyter-wrapper .jp-InputPrompt,
 .jupyter-wrapper .jp-OutputPrompt {
   display: none !important;
 }
 
-/* ── Notebook cell spacing ── */
 .jupyter-wrapper .jp-OutputArea-output img {
   display: block;
   margin: 0.4rem auto;

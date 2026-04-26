@@ -1,6 +1,10 @@
 # Retirement Example — API Reference
 
-Auto-generated from docstrings. See [Retirement Choice Model](../examples/retirement.md) for usage and the [notebook](../notebooks/retirement_fues.ipynb) for a walkthrough.
+Partially auto-generated from docstrings. Treat this page as an internal
+reference for the retirement example code, not as the primary user guide. For
+usage and model description, see
+[Retirement Choice](../examples/retirement_choice_model.md) and the
+[retirement notebook](../notebooks/retirement_fues.ipynb).
 
 
 ## Pipeline (`solve.py`)
@@ -8,10 +12,10 @@ Auto-generated from docstrings. See [Retirement Choice Model](../examples/retire
 ### `solve_nest`
 
 ```python
-solve_nest(syntax_dir, method='FUES', calib_overrides=None, config_overrides=None)
+solve_nest(registry_dir, spec_factory_name="spec_factory.yaml", draw=None, ue_method=None, model=None, stage_ops=None, waves=None)
 ```
 
-Canonical pipeline: load config, build nest, solve.
+Canonical pipeline: load syntax, build the stage graph, and solve backward.
 
 Three-functor pipeline:
 
@@ -21,25 +25,20 @@ Three-functor pipeline:
 3. Build and solve the nest via
    :func:`_accrete_nest`.
 
-The ``method`` parameter (FUES/DCEGM/RFC/CONSAV) is a
-methodization concern -- it selects the upper-envelope
-algorithm.  Method overrides per stage are bound during
-the methodize functor in :func:`instantiate_period` via the
-``*_methods.yml`` files.
+The `ue_method` parameter selects the upper-envelope algorithm
+(`FUES`, `DCEGM`, `RFC`, or `CONSAV`). The `draw` argument carries
+tiered overrides of the form `{"calibration": {...}, "settings": {...}}`.
 
 Parameters
 ----------
-syntax_dir : str or Path
+registry_dir : str or Path
     Root syntax directory containing ``calibration.yaml``,
     ``settings.yaml``, ``period.yaml``, and ``stages/``.
-method : str
-    Upper-envelope method for the worker stage.
-calib_overrides : dict, optional
-    Override economic parameters (e.g.
-    ``{"beta": 0.96, "delta": 2}``).
-config_overrides : dict, optional
-    Override numerical settings (e.g.
-    ``{"grid_size": 5000, "T": 50}``).
+draw : dict, optional
+    Tiered overrides, e.g.
+    ``{"calibration": {"beta": 0.96}, "settings": {"grid_size": 5000}}``.
+ue_method : str or dict, optional
+    Upper-envelope method selection.
 
 Returns
 -------
@@ -249,39 +248,48 @@ dict
 
 ## Benchmark (`benchmark.py`)
 
-### `test_Timings`
+Helpers used by the canonical kikku path in `run.py`: the Cartesian product of
+`--params-range`, `--settings-range`, and `--methods-range` is `run.test_set`;
+`sweep` produces `list[SweepResult]`, and these functions precompute reference
+policies and format tables.
+
+### `load_baseline`
 
 ```python
-test_Timings(grid_sizes, delta_values, n=3, results_dir='results', true_grid_size=20000, true_method='DCEGM', calib_overrides=None, config_overrides=None, latex_grids=None)
+load_baseline() -> tuple[dict, dict]
 ```
 
-Run timing benchmarks across grid sizes and delta values.
+Load default calibration and settings from `syntax/calibration.yaml` and
+`syntax/settings.yaml`.
 
-All runs go through the canonical pipeline (solve_nest).
+### `precompute_true_solutions`
 
-Parameters
-----------
-grid_sizes : list
-    List of grid sizes to test.
-delta_values : list
-    List of delta values to test.
-n : int
-    Number of runs per configuration (best of n). Default is 3.
-results_dir : str
-    Directory to save results. Default is "results".
-true_grid_size : int
-    Grid size for computing "true" reference solution. Default is 20000.
-true_method : str
-    Method used for "true" reference solution. Default is 'DCEGM'.
-calib_overrides : dict, optional
-    Extra calibration overrides (e.g. from --override-file).
-    ``delta`` is always overridden per sweep row.
-config_overrides : dict, optional
-    Extra config overrides (e.g. from --override-file).
-    ``grid_size`` and ``padding_mbar`` are always overridden per sweep row.
-latex_grids : list of int, optional
-    Subset of grid_sizes to include in LaTeX tables.
-    Markdown tables always include all grid sizes.
+```python
+precompute_true_solutions(deltas, true_grid_size, true_method, base_params, base_settings, *, comm) -> dict[float, dict]
+```
+
+On rank 0, solve once per `delta` at `true_grid_size` with `true_method`, then
+broadcast the mapping to all ranks. Values are `{'c_true', 'a_grid'}` for
+consumption-deviation metrics.
+
+### `format_timing_sweep_for_tables`
+
+```python
+format_timing_sweep_for_tables(results, *, method_order=METHODS) -> dict[str, list]
+```
+
+Reshape flat `SweepResult` rows into row lists for the timing/accuracy writers
+(keys: ``errors``, ``ue_ms``, ``total_ms``, ``cdev``).
+
+### `write_timing_sweep_tables`
+
+```python
+write_timing_sweep_tables(results, results_dir, *, benchmark_params, latex_grids)
+```
+
+Call `format_timing_sweep_for_tables` and write markdown/LaTeX via
+`outputs` table generators. ``latex_grids`` selects which grid sizes appear in
+LaTeX output; markdown includes all completed rows.
 
 
 ## CLI (`run.py`)

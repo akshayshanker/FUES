@@ -1,10 +1,12 @@
-# How FUES Works
+# The FUES algorithm
 
 ## The problem in one picture
 
-In discrete-continuous problems, the Euler equation generates a value correspondence rather than the optimal solution.
-
-After EGM inverts the Euler equation, some candidate points lie on the upper envelope and others satisfy only local first-order conditions. FUES recovers the upper envelope by scanning the ordered endogenous grid from left to right.
+In discrete–continuous problems the Euler equation generates a value
+correspondence rather than the optimal policy. After EGM inverts the Euler
+equation, some candidate points lie on the upper envelope while others satisfy
+only local first-order conditions. FUES recovers the upper envelope by
+scanning the ordered endogenous grid from left to right.
 
 ![FUES scan diagram](../images/fues-scan.svg)
 

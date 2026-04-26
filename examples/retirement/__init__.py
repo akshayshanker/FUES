@@ -2,7 +2,7 @@
 
 Callers should import directly from submodules:
     from examples.retirement.solve import solve_nest
-    from examples.retirement.benchmark import test_Timings
+    from examples.retirement.benchmark import load_baseline, write_timing_sweep_tables
     from examples.retirement.outputs import euler, get_policy
     from examples.retirement.outputs import plot_egrids, plot_cons_pol, plot_dcegm_cf
 

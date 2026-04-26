@@ -1,0 +1,6 @@
+# Params-range payload: one dict per delta (work utility cost).
+# Used as: --params-range @experiments/retirement/timing_deltas.yaml
+- delta: 0.25
+- delta: 0.5
+- delta: 1.0
+- delta: 2.0

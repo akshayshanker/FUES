@@ -54,13 +54,18 @@ export OMPI_MCA_coll_hcoll_enable=0
 export OMPI_MCA_coll=^hcoll
 export PMIX_MCA_gds=hash
 
+# RunSpec v2: params/product JSON + methods-range (FUES vs NEGM on adjuster UE)
+DUR_PARAMS_RANGE='[{"n_a":250,"tau":0.05},{"n_a":250,"tau":0.07},{"n_a":250,"tau":0.12},{"n_a":500,"tau":0.05},{"n_a":500,"tau":0.07},{"n_a":500,"tau":0.12},{"n_a":750,"tau":0.05},{"n_a":750,"tau":0.07},{"n_a":750,"tau":0.12},{"n_a":1000,"tau":0.05},{"n_a":1000,"tau":0.07},{"n_a":1000,"tau":0.12}]'
+DUR_METHODS_RANGE='[{"adjuster_cons.cntn_to_dcsn_mover.upper_envelope":"FUES"},{"adjuster_cons.cntn_to_dcsn_mover.upper_envelope":"NEGM"}]'
+
 # make_run_dir is MPI-safe: rank 0 creates YYYY-MM-DD/NNN/, broadcasts to all
 mpiexec -n $PBS_NCPUS python3 -u -m mpi4py -m examples.durables.run \
     --sweep \
-    --sweep-params n_a=250,500,750,1000 tau=0.05,0.07,0.12 method=FUES,NEGM \
+    --params-range "$DUR_PARAMS_RANGE" \
+    --methods-range "$DUR_METHODS_RANGE" \
     --sweep-runs 3 \
     --simulate --n-sim 10000 --seed 42 \
-    --calib-override t0=20 \
+    --params-override t0=20 \
     --output-dir /scratch/tp66/$USER/FUES/durables
 
 echo "Job completed at $(date)"

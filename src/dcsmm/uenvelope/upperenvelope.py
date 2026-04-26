@@ -107,7 +107,7 @@ def EGM_UE(
     X_dcsn: Optional[np.ndarray],
     uc_func_partial: Callable,
     u_func: Callable,
-    ue_method: str = "FUES",
+    method_switch: str | None = None,
     m_bar: float = 1.0,
     lb: int = 4,
     rfc_radius: float = 0.75,
@@ -115,6 +115,7 @@ def EGM_UE(
     interpolate: bool = False,
     include_intersections: bool = True,
     ue_kwargs: Optional[Dict[str, Any]] = None,
+    ue_method: str | None = None,
 ) -> tuple[Dict[str, np.ndarray], Dict[str, np.ndarray], Dict[str, np.ndarray]]:
     """Universal entry point for all upper-envelope algorithms.
 
@@ -150,10 +151,13 @@ def EGM_UE(
     u_func : callable or dict
         Utility function (or ``{"func": njit_u, "args": ...}``
         dict for engines like CONSAV that need it directly).
-    ue_method : str, default ``"FUES"``
-        Name of the registered upper-envelope engine to use.
-        Available engines: FUES, FUES_V0DEV, FUES_V0_1DEV,
+    method_switch : str, optional
+        Name of the registered upper-envelope engine to use. Defaults
+        to ``"FUES"`` when both ``method_switch`` and ``ue_method`` are
+        omitted. Available engines: FUES, FUES_V0DEV, FUES_V0_1DEV,
         FUES_V0_2DEV, DCEGM, RFC, SIMPLE, CONSAV.
+    ue_method : str, optional
+        Deprecated alias for ``method_switch``; do not pass both.
     m_bar : float, default 1.0
         Jump-detection threshold passed to FUES / RFC engines.
     lb : int, default 4
@@ -197,14 +201,20 @@ def EGM_UE(
     if X_dcsn is None:
         raise ValueError("X_dcsn must be provided for interpolation")
 
+    if method_switch is not None and ue_method is not None and method_switch != ue_method:
+        raise ValueError("Pass only one of method_switch, ue_method")
+    algo = method_switch if method_switch is not None else ue_method
+    if algo is None:
+        algo = "FUES"
+
     # -------- raw (always reported) -----------------------------------
     raw = {"x_dcsn_hat": x_dcsn_hat, "v_hat": v_hat, "kappa_hat": kappa_hat, "x_cntn_hat": x_cntn_hat}
 
     # -------- select engine ------------------------------------------
-    engine = get_engine(ue_method)
+    engine = get_engine(algo)
     if engine is None:
         raise ValueError(
-            f"Unknown UE method '{ue_method}'. Available: {', '.join(available())}"
+            f"Unknown UE method '{algo}'. Available: {', '.join(available())}"
         )
 
     # -------- build kwargs: ue_kwargs first, explicit params override --

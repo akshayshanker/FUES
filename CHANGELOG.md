@@ -2,6 +2,29 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.6.0dev5 — 2026-04-25 — RunSpec v2 (BREAKING)
+
+Implements `kikku-runspec-v2`. See `bellman-ddsl/AI/dev-specs/kikku/kikku-runspec-v2.md`.
+
+### Breaking changes
+
+- Solver kwarg renamed: `ue_method` → `method_switch` (including `EGM_UE`, `solve_nest`, `solve`)
+- CLI flag set rewritten: `--config-override`, `--calib-override`, `--sweep-grids`, `--sweep-params`, `--method`, `--setting-override` (singular) all removed from kikku runners
+- New flags: `--params-override`, `--settings-override`, `--methods-override`, `--params-range`, `--settings-range`, `--methods-range`, `--params-spec`, `--settings-spec`, `--methods-spec`, `--compare`
+- `RunSpec` field set restructured around `test_set: tuple[TestSpec, ...]`
+- `sweep()` now returns `list[SweepResult]` instead of merged dicts
+
+### Migration
+
+- All PBS scripts under `experiments/` migrated to v2 vocabulary
+- `examples.durables.estimate` uses `--settings-override`, `--params-override`, `--methods-override` (replaces `--method`)
+- Notebooks and `docs/` updated
+- `examples/durables/run.py`, `examples/retirement/run.py`, `examples/retirement/benchmark.py` rewritten (earlier in this dev cycle)
+
+### Pre-existing fix
+
+- `examples/durables/solve.py:precompile()` now correctly passes `method_switch=method` (was passing `method=method` which `solve` does not accept)
+
 ## [0.6.0dev4] - 2026-04-15 — Single-script setup, unified install, examples polish
 
 Merges `durables-ddsl-phase2` into `main`. Most of the work is in the

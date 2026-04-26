@@ -1,73 +1,39 @@
-"""Run the durables DDSL pipeline: single-point, method comparison, or sweep.
+"""Run the durables DDSL pipeline via kikku v2 (``parse_cli`` + ``sweep``)."""
 
-Usage:
-    # Single-point (default)
-    python -m examples.durables.run
-    python -m examples.durables.run --method NEGM --simulate
+from __future__ import annotations
 
-    # Method comparison (FUES vs NEGM)
-    python -m examples.durables.run --compare FUES NEGM
-
-    # Parameter sweep
-    python -m examples.durables.run --sweep --sweep-grids 100,200,300
-
-    # Overrides
-    python -m examples.durables.run --calib-override t0=50
-    python -m examples.durables.run --setting-override plot_ages=50,55
-"""
-
-import itertools
 import os
-from dataclasses import replace
 from pathlib import Path
+
 import numpy as np
 import yaml
 
-from dolo.compiler.spec_factory import parse_method_override_str
-from kikku.run import parse_run
-from kikku.run.sweep import sweep
-from kikku.run.metrics import format_table, write_table
+from kikku.run import parse_cli, sweep, write_results_table
+from kikku.run.sweep import SweepResult
+from kikku.run.types import RunSpec, TestSpec
 
-from .solve import solve, read_scheme_method, METHOD_SHORTCUT
-from .outputs import (
-    get_timing, derive_savings,
-    compute_euler_stats, print_euler_stats,
-    generate_comparison_table,
-    generate_sweep_table,
-    write_euler_detail,
-)
-# Plot functions imported lazily inside run_single (the only caller) so the
-# sweep path on Gadi never needs matplotlib/seaborn.
+from examples._mpi import get_mpi_comm as _get_mpi_comm
 from .horses.simulate import (
-    simulate_lifecycle,
     evaluate_euler_c,
     evaluate_euler_h,
+    simulate_lifecycle,
 )
-
-
-def _run_settings(run):
-    """Merge ``run.settings`` and ``run.config`` into one dict (config wins)."""
-    return {**dict(run.settings), **dict(run.config)}
-
-
-def _run_ue_method(run):
-    """Combine ``run.method`` (shortcut string) and ``run.method_overrides``
-    (explicit tuple-keyed dict) into a single ``ue_method`` value for ``solve``.
-
-    When both are set, the shortcut is expanded first and the explicit
-    overrides are layered on top.
-    """
-    if run.method_overrides:
-        combined = {t: run.method for t in METHOD_SHORTCUT} if run.method else {}
-        combined.update(run.method_overrides)
-        return combined or None
-    return run.method
+from .outputs import (
+    compute_euler_stats,
+    generate_comparison_table,
+    generate_sweep_table,
+    get_timing,
+    print_euler_stats,
+    derive_savings,
+    write_euler_detail,
+)
+from .solve import read_scheme_method, solve
 
 
 def _parse_plot_ages(raw):
     """Convert plot_ages setting (list, string, int, or empty) to list or None."""
     if isinstance(raw, str):
-        return [int(a) for a in raw.split(',') if a.strip()]
+        return [int(a) for a in raw.split(",") if a.strip()]
     if isinstance(raw, (int, float)):
         return [int(raw)]
     if isinstance(raw, list) and raw:
@@ -75,443 +41,391 @@ def _parse_plot_ages(raw):
     return None
 
 
-def _parse_compare_spec(spec):
-    """Parse one --compare entry into ``(label, method, method_overrides)``.
-
-    A bare name (e.g. ``'FUES'``) expands via METHOD_SHORTCUT in ``solve()``.
-    An override spec (e.g. ``'keeper_cons.upper_envelope=MSS'``) is used
-    directly.
-    """
-    if '=' in spec:
-        key, tag = parse_method_override_str(spec)
-        return f"{key[0]}.{key[2]}={tag}", None, {key: tag}
-    return spec, spec, None
-
-
-from examples._mpi import get_mpi_comm as _get_mpi_comm
-
-
-def run_single(run):
-    """Solve and optionally simulate + plot.
-
-    Returns ``{'nest', 'grids', 'results_row', 'euler_stats'}``.
-    """
-    store_cntn = bool(run.settings.get('store_cntn', 0))
-
-    settings = _run_settings(run)
-    nest, grids = solve(
-        str(run.model_dir),
-        ue_method=_run_ue_method(run),
-        draw={"calibration": run.calib, "settings": settings},
-        verbose=False,
-    )
-    adj0 = nest["periods"][0]["stages"]["adjuster_cons"]
-    method_label = run.method or read_scheme_method(adj0, 'upper_envelope')
-    print(f'{len(nest["solutions"])} periods solved')
-
-    stage0 = nest["periods"][0]["stages"]["keeper_cons"]
-    # Post-solve: runner keys are merged onto stage.calibration with economic params.
-    plot_ages = _parse_plot_ages(stage0.calibration.get("plot_ages", []))
-    use_empirical_init = (
-        stage0.calibration.get("init_method", "standard") == "empirical")
-
-    timing = get_timing(nest)
-    print(f'Mean timing — keeper: {timing["keeper_ms"]:.1f}ms, '
-          f'adj: {timing["adj_ms"]:.1f}ms')
-
-    results_row = {
-        'Method': method_label,
-        'Keeper (ms)': timing['keeper_ms'],
-        'Adj (ms)': timing['adj_ms'],
-        'Total (ms)': timing['keeper_ms'] + timing['adj_ms'],
-    }
-    euler_stats = None
-
-    base_dir = str(run.output_dir)
-    plots_dir = os.path.join(base_dir, 'plots')
-    tables_dir = os.path.join(base_dir, 'tables')
-
-    all_t = sorted(s['t'] for s in nest['solutions'])
-    if plot_ages is None:
-        plot_ages = [all_t[-3] if len(all_t) >= 3 else all_t[-1]]
-
-    tau = float(stage0.calibration["tau"])
-    savings = derive_savings(nest, grids, tau)
-
-    if plot_ages:
-        from .outputs.plots import plot_policies, plot_grids
-        for age in plot_ages:
-            if age not in all_t:
-                print(f'Age {age} not in solution '
-                      f'(range {all_t[0]}–{all_t[-1]}), skipping.')
-                continue
-            plot_policies(nest, grids, savings,
-                          output_dir=plots_dir, plot_t=age)
-            if store_cntn:
-                plot_grids(nest, grids,
-                           output_dir=plots_dir, plot_t=age)
-        print(f'Plots saved to {plots_dir}/')
-
-    if run.simulate:
-        sim_data = simulate_lifecycle(
-            nest, grids,
-            N=run.n_sim, seed=run.seed,
-            use_empirical_init=use_empirical_init)
-
-        euler_c = evaluate_euler_c(sim_data, nest, grids)
-        euler_h = evaluate_euler_h(sim_data, nest, grids)
-        d = sim_data['discrete']
-        ec_stats = compute_euler_stats(euler_c, d)
-        eh_stats = compute_euler_stats(euler_h, d)
-        euler_stats = {'consumption': ec_stats, 'housing': eh_stats}
-
-        print("Consumption Euler (c FOC):")
-        print_euler_stats(ec_stats)
-        print("\nHousing FOC (adjusters):")
-        print_euler_stats(eh_stats)
-
-        adj_rate = np.mean(d[d >= 0]) * 100
-
-        if 'combined' in ec_stats:
-            results_row['Euler c (keeper)'] = ec_stats['keeper']['mean']
-            results_row['Euler c (adj)'] = ec_stats['adjuster']['mean']
-            results_row['Euler c (all)'] = ec_stats['combined']['mean']
-            results_row['Adj Rate'] = adj_rate
-        if 'combined' in eh_stats:
-            results_row['Euler h (keeper)'] = eh_stats['keeper']['mean']
-            results_row['Euler h (adj)'] = eh_stats['adjuster']['mean']
-            results_row['Euler h (all)'] = eh_stats['combined']['mean']
-
-        if 'npv_utility' in sim_data:
-            npv = sim_data['npv_utility']
-            print(f"  NPV utility: mean={np.mean(npv):.4f}, "
-                  f"std={np.std(npv):.4f}")
-
-        from .outputs.plots import plot_lifecycle
-        plot_lifecycle(sim_data, euler_c, nest, output_dir=plots_dir)
-
-    # Save single-run summary table
-    os.makedirs(tables_dir, exist_ok=True)
-    print('\n' + format_table([results_row], list(results_row.keys())))
-    write_table(os.path.join(tables_dir, 'summary.md'),
-                [results_row], list(results_row.keys()))
-
-    return {
-        'nest': nest, 'grids': grids,
-        'results_row': results_row, 'euler_stats': euler_stats,
-    }
-
-
-def build_sweep_grid(run):
-    """Build Cartesian sweep points from ``run.sweep_params`` + ``run.sweep_grids``.
-
-    Axes are:
-    - ``method`` — upper-envelope method name (from ``run.methods``)
-    - any key in ``run.calib`` — calibration parameter
-    - any key in ``run.settings`` — numerical setting
-    - a dotted path (``stage.scheme`` or ``stage.target.scheme``) — method-tag
-      override for a specific scheme
-
-    Returns ``list[dict]`` — each is a flat point ``{axis_name: value, ...}``.
-    Roles are re-classified at solve time by key lookup.
-    """
-    axes = {}
-    for spec in run.sweep_params:
-        if '=' not in spec:
-            raise ValueError(
-                f"Invalid --sweep-params entry (expected key=val1,val2,...): {spec!r}")
-        key, rest = spec.split('=', 1)
-        vals = [yaml.safe_load(p.strip()) for p in rest.split(',') if p.strip()]
-        if not vals:
-            raise ValueError(f"Empty value list for sweep axis {key!r}")
-        axes[key.strip()] = vals
-
-    if run.sweep_grids is not None and 'n_a' not in axes:
-        axes['n_a'] = list(run.sweep_grids)
-
-    if not axes:
-        raise ValueError(
-            "No sweep axes specified. Pass --sweep-params key=v1,v2,... "
-            "or --sweep-grids n1,n2,... .")
-
-    # Validate each axis is classifiable.
-    calib_keys = set(run.calib.keys())
-    settings_keys = set(run.settings.keys())
-    for key in axes:
-        if key == 'method' or key in calib_keys or key in settings_keys or '.' in key:
-            continue
-        raise ValueError(
-            f"Unknown sweep axis {key!r}: not 'method', not in "
-            f"calibration/settings keys, and not a dotted method path.")
-
-    if 'method' in axes:
-        for m in axes['method']:
-            if m not in run.methods:
-                raise ValueError(
-                    f"Invalid sweep method {m!r}; allowed: {list(run.methods)}")
-
-    key_order = sorted(axes.keys())
-    if 'method' in key_order:
-        key_order = ['method'] + [k for k in key_order if k != 'method']
-
-    return [
-        dict(zip(key_order, combo))
-        for combo in itertools.product(*(axes[k] for k in key_order))
-    ]
-
-
-def run_comparison(run):
-    """Compare methods, print and save comparison tables.
-
-    Each ``--compare`` entry is either a bare method name (expanded via
-    ``METHOD_SHORTCUT`` inside ``solve``) or a ``stage.scheme=TAG`` override
-    spec. Produces one combined table with all entries.
-
-    Returns ``{label: {nest, grids, ...}, ...}``.
-    """
-    specs = list(run.compare_methods)
-    base_dir = str(run.output_dir)
-    table_dir = os.path.join(base_dir, 'tables')
-
-    all_results = {}
-    rows = []
-    euler_stats_by_label = {}
-
-    for spec in specs:
-        label, method, method_overrides = _parse_compare_spec(spec)
-
-        print(f'\n{"="*60}')
-        print(f'  {label}')
-        print(f'{"="*60}')
-
-        method_dir = os.path.join(base_dir, label)
-        spec_run = replace(
-            run,
-            method=method,
-            method_overrides=method_overrides or run.method_overrides,
-            output_dir=Path(method_dir),
-        )
-        result = run_single(spec_run)
-        result['results_row']['Method'] = label
-        all_results[label] = result
-        rows.append(result['results_row'])
-        if result['euler_stats'] is not None:
-            euler_stats_by_label[label] = result['euler_stats']
-
-    os.makedirs(table_dir, exist_ok=True)
-
-    print(f'\n{"="*60}')
-    print('  Method comparison')
-    print(f'{"="*60}')
-
-    md_table = generate_comparison_table(rows, fmt='md',
-                                         caption='Durables Model Comparison')
-    print(md_table)
-
-    md_path = os.path.join(table_dir, 'comparison.md')
-    with open(md_path, 'w') as f:
-        f.write(md_table)
-
-    tex_table = generate_comparison_table(rows, fmt='tex',
-                                          caption='Durables Model Comparison')
-    tex_path = os.path.join(table_dir, 'comparison.tex')
-    with open(tex_path, 'w') as f:
-        f.write(tex_table)
-
-    print(f'\nTables saved to {md_path}, {tex_path}')
-
-    if run.simulate and euler_stats_by_label:
-        path = write_euler_detail(euler_stats_by_label, table_dir)
-        print(f'Euler detail saved to {path}')
-    elif not run.simulate:
-        print('\n(Run with --simulate for Euler accuracy columns)')
-
-    return all_results
-
-
-def run_sweep(run):
-    """Parameter sweep via ``kikku.run.sweep.sweep()`` with MPI support.
-
-    Sweep axes come from ``build_sweep_grid(run)`` (combining
-    ``run.sweep_params`` + ``run.sweep_grids``, defaulting to a small
-    ``n_a`` grid). One solve_fn handles every point, one metric_fns set
-    extracts scalar metrics, and the call is MPI-aware (``comm=None``
-    when running locally).
-
-    Writes ``sweep.md`` and ``sweep.tex`` on rank 0. Returns the flat
-    results list (empty on non-root MPI ranks).
-    """
-    base_calib = dict(run.calib)
-    base_config = _run_settings(run)
-    comm = _get_mpi_comm()
-    points = build_sweep_grid(run)
-
-    syntax = str(run.model_dir)
-    calib_keys = set(base_calib.keys())
-    settings_keys = set(base_config.keys())
-
-    def solve_fn(params):
-        """Solve one sweep point. ``params`` is a flat ``{axis: value}`` dict."""
-        per_method = params.get('method', run.method)
-        calib_use = dict(base_calib)
-        cfg_use = dict(base_config)
-        mo_point = {}
-        for k, v in params.items():
-            if k == 'method':
-                continue
-            if k in calib_keys:
-                calib_use[k] = v
-            elif k in settings_keys:
-                cfg_use[k] = v
-            elif '.' in k:
-                triple, tag = parse_method_override_str(f"{k}={v}")
-                mo_point[triple] = str(tag).strip()
-
-        overrides = dict(run.method_overrides)
-        overrides.update(mo_point)
-        if overrides:
-            ue = {t: per_method for t in METHOD_SHORTCUT} if per_method else {}
-            ue.update(overrides)
-        else:
-            ue = per_method
-
-        nest, grids = solve(
-            syntax,
-            ue_method=ue,
-            draw={"calibration": calib_use, "settings": cfg_use},
-            verbose=False,
-        )
-
-        adj0 = nest["periods"][0]["stages"]["adjuster_cons"]
-        method_label = per_method or read_scheme_method(adj0, 'upper_envelope')
-        timing = get_timing(nest)
-
-        result = {
-            'method_label': method_label,
-            'timing': timing,
-        }
-
-        if run.simulate:
-            st0 = nest["periods"][0]["stages"]["keeper_cons"]
-            use_emp = st0.calibration.get("init_method", "standard") == "empirical"
-            sim_data = simulate_lifecycle(
-                nest, grids,
-                N=run.n_sim, seed=run.seed,
-                use_empirical_init=use_emp)
-            euler_c = evaluate_euler_c(sim_data, nest, grids)
-            euler_h = evaluate_euler_h(sim_data, nest, grids)
-            d = sim_data['discrete']
-            result['ec_stats'] = compute_euler_stats(euler_c, d)
-            result['eh_stats'] = compute_euler_stats(euler_h, d)
-            result['adj_rate'] = np.mean(d[d >= 0]) * 100
-
-        return result
-
-    metric_fns = {
-        'solve_ms': lambda r: r['timing']['solve_time'] * 1000,
-        'keeper_ms': lambda r: r['timing']['keeper_ms'],
-        'adj_ms': lambda r: r['timing']['adj_ms'],
-        'method': lambda r: r['method_label'],
-    }
-    if run.simulate:
-        metric_fns.update({
-            'euler_c_mean': lambda r: r['ec_stats'].get('combined', {}).get('mean', np.nan),
-            'euler_c_keeper': lambda r: r['ec_stats'].get('keeper', {}).get('mean', np.nan),
-            'euler_c_adjuster': lambda r: r['ec_stats'].get('adjuster', {}).get('mean', np.nan),
-            'euler_h_mean': lambda r: r['eh_stats'].get('combined', {}).get('mean', np.nan),
-            'adj_rate': lambda r: r['adj_rate'],
-        })
-
-    results = sweep(
-        solve_fn, points, metric_fns,
-        n_reps=run.sweep_runs,
-        warmup=run.warmup,
-        best='min',
-        on_error='skip',
-        comm=comm,
-    )
-
-    # Non-root MPI ranks return early (results gathered on rank 0 only).
+def _method_label_from_testspec(t: TestSpec) -> str | None:
+    if not t.methods:
+        return None
+    vals = {str(v) for v in t.methods.values() if v is not None and v != ""}
+    if len(vals) == 1:
+        return next(iter(vals))
+    return None
+
+
+def _load_baseline_calib(base: Path) -> dict:
+    cands = [base / "calibration.yaml", base / "calibration" / "main.yaml"]
+    for p in cands:
+        if p.is_file():
+            raw = yaml.safe_load(p.read_text()) or {}
+            if "calibration" in raw and isinstance(raw["calibration"], dict):
+                return dict(raw["calibration"])
+            return dict(raw) if raw else {}
+    return {}
+
+
+def _write_durables_latex(results: list[SweepResult], run: RunSpec) -> None:
+    """Bespoke per-row LaTeX summary (sweep) — rank-0 caller only."""
     if not results:
-        return results
-
-    # Column order: sweep axes first (sorted), then metric tail.
-    omit_md = {'euler_c_keeper', 'euler_c_adjuster'}
-    metric_tail = ['method', 'solve_ms', 'keeper_ms', 'adj_ms']
-    if run.simulate:
-        metric_tail += ['euler_c_mean', 'euler_h_mean', 'adj_rate']
-    row0 = results[0]
-    param_cols = sorted(k for k in row0 if k not in set(metric_tail) | omit_md)
-    cols = [c for c in param_cols + metric_tail if c in row0]
-
-    print('\n' + format_table(results, cols))
-    tdir = os.path.join(str(run.output_dir), 'tables')
+        return
+    base = Path(run.base_spec)
+    base_calib = _load_baseline_calib(base)
+    base_settings = _merge_first_settings_row(run, results[0].point)
+    tdir = os.path.join(str(run.output_dir), "tables")
     os.makedirs(tdir, exist_ok=True)
-    write_table(os.path.join(tdir, 'sweep.md'), results, cols)
-
-    # LaTeX summary table (durables-specific column shape).
+    n_sim = run.sim.n_sim if run.sim is not None else 0
     summaries = []
-    for row in results:
+    for sr in results:
+        row = sr.metrics
+        t = sr.point
         cal_params = {
             k: base_calib[k]
-            for k in ('beta', 'gamma_c', 'gamma_h', 'alpha', 'delta',
-                      'R', 'R_H', 'phi_w', 'sigma_w')
+            for k in (
+                "beta",
+                "gamma_c",
+                "gamma_h",
+                "alpha",
+                "delta",
+                "R",
+                "R_H",
+                "phi_w",
+                "sigma_w",
+            )
             if k in base_calib
         }
-        if 'R' in cal_params:
-            cal_params['r'] = cal_params.pop('R')
-        if 'R_H' in cal_params:
-            cal_params['r_H'] = cal_params.pop('R_H')
-        cal_params['N_sim'] = run.n_sim
-        summaries.append({
-            'Grid_Size': int(row.get('n_a', base_config.get('n_a', 0))),
-            'Tau': float(row.get('tau', base_calib.get('tau', 0.0))),
-            'Method': row.get('method', ''),
-            'Avg_Keeper_ms': row.get('keeper_ms', 0.0),
-            'Avg_Adj_ms': row.get('adj_ms', 0.0),
-            'Euler_Combined': row.get('euler_c_mean', np.nan),
-            'Euler_Keeper': row.get('euler_c_keeper', np.nan),
-            'Euler_Adjuster': row.get('euler_c_adjuster', np.nan),
-            'Euler_H_Adjuster': row.get('euler_h_mean', np.nan),
-            **cal_params,
-        })
-
+        cal_params = {**cal_params, **t.params}
+        if "R" in cal_params:
+            cal_params["r"] = cal_params.pop("R")
+        if "R_H" in cal_params:
+            cal_params["r_H"] = cal_params.pop("R_H")
+        cal_params["N_sim"] = n_sim
+        summaries.append(
+            {
+                "Grid_Size": int(
+                    row.get("n_a", t.settings.get("n_a", base_settings.get("n_a", 0)))
+                ),
+                "Tau": float(
+                    row.get("tau", t.params.get("tau", cal_params.get("tau", 0.0)))
+                ),
+                "Method": row.get("method", ""),
+                "Avg_Keeper_ms": row.get("keeper_ms", 0.0),
+                "Avg_Adj_ms": row.get("adj_ms", 0.0),
+                "Euler_Combined": row.get("euler_c_mean", np.nan),
+                "Euler_Keeper": row.get("euler_c_keeper", np.nan),
+                "Euler_Adjuster": row.get("euler_c_adjuster", np.nan),
+                "Euler_H_Adjuster": row.get("euler_h_mean", np.nan),
+                **cal_params,
+            }
+        )
     tex = generate_sweep_table(
-        summaries, fmt='tex',
-        caption='Durables Model: Per-Period Timing and Accuracy')
-    preamble = (
-        '\\documentclass[11pt]{article}\n'
-        '\\usepackage{booktabs}\n'
-        '\\usepackage[margin=1in]{geometry}\n'
-        '\\begin{document}\n'
-        '\\pagestyle{empty}\n'
+        summaries, fmt="tex", caption="Durables Model: Per-Period Timing and Accuracy"
     )
-    with open(os.path.join(tdir, 'sweep.tex'), 'w') as f:
+    preamble = (
+        "\\documentclass[11pt]{article}\n"
+        "\\usepackage{booktabs}\n"
+        "\\usepackage[margin=1in]{geometry}\n"
+        "\\begin{document}\n"
+        "\\pagestyle{empty}\n"
+    )
+    with open(os.path.join(tdir, "sweep.tex"), "w", encoding="utf-8") as f:
         f.write(preamble)
         f.write(tex)
-        f.write('\n\\end{document}\n')
-
-    return results
+        f.write("\n\\end{document}\n")
 
 
-def main():
-    run = parse_run(
-        name='durables',
-        syntax='examples/durables/mod/separable',
-        methods=['FUES', 'NEGM'],
-        modes=['compare', 'sweep', 'simulate'],
-        output='results/durables',
+def _merge_first_settings_row(run: RunSpec, t: TestSpec) -> dict:
+    base = Path(run.base_spec)
+    cands = [base / "settings.yaml", base / "settings" / "default.yaml"]
+    d: dict = {}
+    for p in cands:
+        if p.is_file():
+            raw = yaml.safe_load(p.read_text()) or {}
+            if "settings" in raw and isinstance(raw["settings"], dict):
+                d = dict(raw["settings"])
+            else:
+                d = dict(raw) if raw else {}
+            break
+    d = {**d, **t.settings}
+    return d
+
+
+def _comparison_rows_from_sweep(
+    results: list[SweepResult], run: RunSpec
+) -> tuple[list[dict], dict]:
+    rows: list[dict] = []
+    for sr in results:
+        t = sr.point
+        m = dict(sr.metrics)
+        label = t.label
+        if not label:
+            label = m.get("method", "")
+        row = {
+            "Method": label,
+            "Keeper (ms)": m.get("keeper_ms", 0.0),
+            "Adj (ms)": m.get("adj_ms", 0.0),
+            "Total (ms)": m.get("keeper_ms", 0.0) + m.get("adj_ms", 0.0),
+        }
+        for k, outk in [
+            ("euler_c_keeper", "Euler c (keeper)"),
+            ("euler_c_adjuster", "Euler c (adj)"),
+            ("euler_c_mean", "Euler c (all)"),
+            ("euler_h_keeper", "Euler h (keeper)"),
+            ("euler_h_adjuster", "Euler h (adj)"),
+            ("euler_h_mean", "Euler h (all)"),
+            ("adj_rate", "Adj Rate"),
+        ]:
+            if k in m and not (isinstance(m[k], float) and m[k] != m[k]):
+                row[outk] = m[k]
+        rows.append(row)
+    base_calib = _load_baseline_calib(Path(run.base_spec))
+    first = {**base_calib, **(results[0].point.params if results else {})}
+    return rows, first
+
+
+def main() -> None:
+    run = parse_cli(
+        name="durables",
+        base_spec="examples/durables/mod/separable",
+        modes=["compare", "sweep", "simulate"],
+        output="results/durables",
+    )
+    comm = _get_mpi_comm()
+    is_root = comm is None or comm.Get_rank() == 0
+    if is_root:
+        print(f"Output directory: {run.output_dir}")
+
+    def solve_test(t: TestSpec) -> dict:
+        nest, grids = solve(
+            str(run.base_spec),
+            draw={"calibration": t.params, "settings": t.settings},
+            method_switch=t.methods,
+            verbose=False,
+        )
+        adj0 = nest["periods"][0]["stages"]["adjuster_cons"]
+        method_label = _method_label_from_testspec(
+            t
+        ) or read_scheme_method(adj0, "upper_envelope")
+        if is_root:
+            print(f'{len(nest["solutions"])} periods solved')
+        timing = get_timing(nest)
+        if is_root:
+            print(
+                f'Mean timing — keeper: {timing["keeper_ms"]:.1f}ms, '
+                f'adj: {timing["adj_ms"]:.1f}ms'
+            )
+        out: dict = {
+            "nest": nest,
+            "grids": grids,
+            "method_label": method_label,
+            "timing": timing,
+        }
+        store_cntn = bool(t.settings.get("store_cntn", 0))
+        stage0 = nest["periods"][0]["stages"]["keeper_cons"]
+        plot_ages = _parse_plot_ages(
+            stage0.calibration.get("plot_ages", [])
+        )
+        if plot_ages is None:
+            all_t = sorted(s["t"] for s in nest["solutions"])
+            plot_ages = [all_t[-3] if len(all_t) >= 3 else all_t[-1]]
+        use_empirical_init = (
+            stage0.calibration.get("init_method", "standard") == "empirical"
+        )
+        base_dir = str(run.output_dir)
+        plots_dir = os.path.join(base_dir, "plots")
+        if is_root:
+            os.makedirs(plots_dir, exist_ok=True)
+        tau = float(stage0.calibration["tau"])
+        savings = derive_savings(nest, grids, tau)
+        if is_root and plot_ages:
+            from .outputs.plots import plot_grids, plot_policies
+
+            for age in plot_ages:
+                all_t = sorted(s["t"] for s in nest["solutions"])
+                if age not in all_t:
+                    if is_root:
+                        print(
+                            f"Age {age} not in solution "
+                            f"(range {all_t[0]}–{all_t[-1]}), skipping."
+                        )
+                    continue
+                plot_policies(
+                    nest, grids, savings, output_dir=plots_dir, plot_t=age
+                )
+                if store_cntn:
+                    plot_grids(nest, grids, output_dir=plots_dir, plot_t=age)
+            if is_root and plot_ages:
+                print(f"Plots saved to {plots_dir}/")
+
+        if run.sim is not None:
+            sim_data = simulate_lifecycle(
+                nest,
+                grids,
+                N=run.sim.n_sim,
+                seed=run.sim.seed,
+                use_empirical_init=use_empirical_init,
+            )
+            euler_c = evaluate_euler_c(sim_data, nest, grids)
+            euler_h = evaluate_euler_h(sim_data, nest, grids)
+            d = sim_data["discrete"]
+            ec_stats = compute_euler_stats(euler_c, d)
+            eh_stats = compute_euler_stats(euler_h, d)
+            out["euler_c_stats"] = ec_stats
+            out["euler_h_stats"] = eh_stats
+            if is_root:
+                print("Consumption Euler (c FOC):")
+                print_euler_stats(ec_stats)
+                print("\nHousing FOC (adjusters):")
+                print_euler_stats(eh_stats)
+            if is_root and "npv_utility" in sim_data:
+                npv = sim_data["npv_utility"]
+                print(
+                    f"  NPV utility: mean={np.mean(npv):.4f}, "
+                    f"std={np.std(npv):.4f}"
+                )
+            if is_root and run.sim.plots:
+                from .outputs.plots import plot_lifecycle
+
+                plot_lifecycle(sim_data, euler_c, nest, output_dir=plots_dir)
+            if "combined" in ec_stats:
+                out["euler_c_all"] = ec_stats["combined"]["mean"]
+                out["euler_c_keeper"] = ec_stats["keeper"]["mean"]
+                out["euler_c_adj"] = ec_stats["adjuster"]["mean"]
+            else:
+                out["euler_c_all"] = float("nan")
+                out["euler_c_keeper"] = float("nan")
+                out["euler_c_adj"] = float("nan")
+            if "combined" in eh_stats:
+                out["euler_h_keeper"] = eh_stats["keeper"]["mean"]
+                out["euler_h_adj"] = eh_stats["adjuster"]["mean"]
+                out["euler_h_all"] = eh_stats["combined"]["mean"]
+            else:
+                out["euler_h_keeper"] = float("nan")
+                out["euler_h_adj"] = float("nan")
+                out["euler_h_all"] = float("nan")
+            out["adj_rate"] = float(np.mean(d[d >= 0]) * 100)
+        return out
+
+    def _m_n_a(r: dict) -> float:
+        return float(
+            r["nest"]["periods"][0]["stages"]["keeper_cons"].settings.get(
+                "n_a", np.nan
+            )
+        )
+
+    def _m_tau(r: dict) -> float:
+        return float(
+            r["nest"]["periods"][0]["stages"]["keeper_cons"].calibration.get(
+                "tau", float("nan")
+            )
+        )
+
+    metric_fns: dict = {
+        "solve_ms": lambda r: r["timing"]["solve_time"] * 1000,
+        "keeper_ms": lambda r: r["timing"]["keeper_ms"],
+        "adj_ms": lambda r: r["timing"]["adj_ms"],
+        "method": lambda r: r["method_label"],
+        "n_a": _m_n_a,
+        "tau": _m_tau,
+    }
+    if run.sim is not None:
+        metric_fns.update(
+            {
+                "euler_c_mean": lambda r: r.get("euler_c_all", np.nan),
+                "euler_c_keeper": lambda r: r.get("euler_c_keeper", np.nan),
+                "euler_c_adjuster": lambda r: r.get("euler_c_adj", np.nan),
+                "euler_h_mean": lambda r: r.get("euler_h_all", np.nan),
+                "euler_h_keeper": lambda r: r.get("euler_h_keeper", np.nan),
+                "euler_h_adjuster": lambda r: r.get("euler_h_adj", np.nan),
+                "adj_rate": lambda r: r.get("adj_rate", np.nan),
+            }
+        )
+
+    n_reps_use = 1 if run.mode == "single" else run.sweep_runs
+    warmup_use = False if run.mode == "single" else run.warmup
+    results = sweep(
+        solve_test,
+        list(run.test_set),
+        metric_fns,
+        n_reps=n_reps_use,
+        warmup=warmup_use,
+        best="min",
+        on_error="raise",
+        comm=comm,
+        verbose=run.verbose,
     )
 
-    print(f'Output directory: {run.output_dir}')
+    if not is_root or not results:
+        return
 
-    if run.mode == 'compare':
-        run_comparison(run)
-    elif run.mode == 'sweep':
-        run_sweep(run)
+    tdir = os.path.join(str(run.output_dir), "tables")
+    os.makedirs(tdir, exist_ok=True)
+    write_results_table(
+        results, os.path.join(tdir, "sweep.md"), fmt="markdown"
+    )
+
+    if run.mode == "compare":
+        rows, params = _comparison_rows_from_sweep(results, run)
+        from kikku.run.metrics import format_table
+
+        if rows:
+            print("\n" + format_table(rows, list(rows[0].keys())))
+        md_table = generate_comparison_table(
+            rows, fmt="md", caption="Durables Model Comparison", params=params
+        )
+        with open(
+            os.path.join(tdir, "comparison.md"), "w", encoding="utf-8"
+        ) as f:
+            f.write(md_table)
+        tex_table = generate_comparison_table(
+            rows, fmt="tex", caption="Durables Model Comparison", params=params
+        )
+        with open(
+            os.path.join(tdir, "comparison.tex"), "w", encoding="utf-8"
+        ) as f:
+            f.write(tex_table)
+        print(f"Tables saved to {tdir} (comparison.md, comparison.tex)")
+        if run.sim is not None:
+            euler_by_label = {}
+            for r in results:
+                if r.result is None:
+                    continue
+                lab = r.point.label
+                if not lab:
+                    lab = r.result.get("method_label", "")
+                euler_by_label[lab] = {
+                    "consumption": r.result.get("euler_c_stats", {}),
+                    "housing": r.result.get("euler_h_stats", {}),
+                }
+            if euler_by_label:
+                p = write_euler_detail(euler_by_label, tdir)
+                print(f"Euler detail saved to {p}")
     else:
-        run_single(run)
+        from kikku.run.metrics import format_table
+
+        if len(results) == 1:
+            sr = results[0]
+            r0 = sr.result
+            m = {**sr.metrics}
+            if r0 is not None and run.sim is not None and "euler_c_all" in r0:
+                m["Euler c (all)"] = r0.get("euler_c_all", np.nan)
+            row = {
+                "Method": m.get("method", ""),
+                "Keeper (ms)": m.get("keeper_ms", 0.0),
+                "Adj (ms)": m.get("adj_ms", 0.0),
+                "Total (ms)": m.get("keeper_ms", 0.0) + m.get("adj_ms", 0.0),
+            }
+            for k, outk in [
+                ("euler_c_keeper", "Euler c (keeper)"),
+                ("euler_c_adjuster", "Euler c (adj)"),
+                ("euler_c_mean", "Euler c (all)"),
+                ("euler_h_keeper", "Euler h (keeper)"),
+                ("euler_h_adjuster", "Euler h (adj)"),
+                ("euler_h_mean", "Euler h (all)"),
+                ("adj_rate", "Adj Rate"),
+            ]:
+                if k in m:
+                    row[outk] = m[k]
+            print("\n" + format_table([row], list(row.keys())))
+        if run.mode == "sweep" and len(results) > 1:
+            _write_durables_latex(results, run)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
