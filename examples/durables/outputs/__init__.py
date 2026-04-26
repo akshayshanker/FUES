@@ -21,6 +21,7 @@ from .tables import (
     generate_sweep_table,
     write_euler_detail,
 )
+from .writer import write_outputs
 
 # Plot functions load lazily — matplotlib / seaborn stay out of the
 # import graph until a plot name is actually accessed.
@@ -62,4 +63,5 @@ __all__ = [
     "generate_vertical_comparison",
     "generate_sweep_table",
     "write_euler_detail",
+    "write_outputs",
 ]

@@ -8,7 +8,6 @@ import sys
 from dataclasses import replace
 
 from kikku.run import parse_cli, sweep
-from kikku.run.sweep import SweepResult
 from kikku.run.types import RunSpec, TestSpec
 
 from examples._mpi import get_mpi_comm as _get_mpi_comm
@@ -18,10 +17,13 @@ from examples.retirement.outputs import (
     euler,
     get_policy,
     get_timing,
+    write_plot_outputs,
+    write_timing_outputs,
 )
 from examples.retirement.solve import (
     METHOD_SHORTCUT,
     expand_method_shortcut,
+    read_scheme_method,
     solve_nest,
 )
 
@@ -146,80 +148,6 @@ def _one_delta_for_plots(
     return default
 
 
-def _post_timing_plots(
-    run: RunSpec,
-    *,
-    max_grid: int,
-    ref_delta: float,
-    calib0: dict,
-    settings0: dict,
-    save_path: str,
-) -> None:
-    """On rank 0, four one-off solves on ``max_grid`` for EGM / policy figures."""
-    from examples.retirement.outputs import plot_cons_pol, plot_dcegm_cf, plot_egrids
-
-    solutions: dict = {}
-    for m in UE_METHODS:
-        cal = dict(calib0)
-        cal["delta"] = ref_delta
-        stg = {**settings0, "grid_size": max_grid, "padding_mbar": -0.011}
-        nest, model, _, _ = solve_nest(
-            str(run.base_spec),
-            method_switch=m,
-            draw={"calibration": cal, "settings": stg},
-        )
-        c_ref = get_policy(nest, "c", stage="labour_mkt_decision")
-        tim = get_timing(nest)
-        solutions[m] = {
-            "nest": nest,
-            "model": model,
-            "endog_grid": get_policy(nest, "x_dcsn_hat", stage="work_cons"),
-            "vf_unrefined": get_policy(nest, "v_dcsn_hat", stage="work_cons"),
-            "c_unrefined": get_policy(nest, "c_dcsn_hat", stage="work_cons"),
-            "dela_unrefined": get_policy(
-                nest, "dela_dcsn_hat", stage="work_cons"
-            ),
-            "c_refined": c_ref,
-            "c_worker": get_policy(nest, "c", stage="work_cons"),
-            "timing": tim,
-        }
-
-    rfc = solutions["RFC"]
-    model = rfc["model"]
-    smooth_sigma = model.smooth_sigma
-    sigma_tag = (
-        "sigma0" if abs(smooth_sigma) < 1e-12 else f"sigma{int(round(smooth_sigma * 100)):02d}"
-    )
-    grid_size = int(max_grid)
-
-    print(f"Generating plots to {save_path}...")
-    plot_egrids(
-        int(settings0.get("plot_age", 5)),
-        rfc["endog_grid"],
-        rfc["vf_unrefined"],
-        rfc["c_unrefined"],
-        rfc["dela_unrefined"],
-        grid_size,
-        model,
-        save_path,
-        tag=sigma_tag,
-    )
-    plot_cons_pol(solutions["FUES"]["c_worker"], model, save_path)
-    plot_dcegm_cf(
-        int(settings0.get("plot_age", 5)),
-        grid_size,
-        rfc["endog_grid"],
-        rfc["vf_unrefined"],
-        rfc["c_unrefined"],
-        rfc["dela_unrefined"],
-        model.asset_grid_A,
-        model,
-        save_path,
-        tag=sigma_tag,
-    )
-    return
-
-
 def main() -> None:
     run = parse_cli(
         name="retirement",
@@ -300,24 +228,11 @@ def main() -> None:
             "cdev": float(cdev),
         }
 
-    def _label_from_method_slot(t: TestSpec) -> str | None:
-        ms = t.slots.get("method_switch")
-        if not ms:
-            return None
-        if isinstance(ms, str):
-            return ms
-        for ent in (ms or {}).get("methods", []) or []:
-            for sch in (ent or {}).get("schemes", []) or []:
-                m = sch.get("method")
-                if m is not None:
-                    return str(m)
-        return None
-
     def _solve_test_plots(t: TestSpec) -> dict:
-        _label = t.label
-        if not _label:
-            _label = _label_from_method_slot(t) or ""
         nest, model, _, _ = solve_nest(wdir, **t.slots)
+        _label = t.label or read_scheme_method(
+            nest["periods"][0]["stages"]["work_cons"], "upper_envelope"
+        )
         c_ref = get_policy(nest, "c", stage="labour_mkt_decision")
         err = euler(model, c_ref)
         tim = get_timing(nest)
@@ -367,119 +282,36 @@ def main() -> None:
         comm=use_comm,
         verbose=run.verbose,
     )
-    if not results:
+    if not results or not is_root:
         return
 
-    if not only_methods and is_root:
+    if not only_methods:
         bparams = {
-            **base_c,
-            **base_s,
-            **calib0,
-            **settings0,
+            **base_c, **base_s, **calib0, **settings0,
             "true_grid_size": 20000,
             "true_method": "DCEGM",
         }
-        lgx = _latex_int_list(ex, "latex_grids")
-        rbench.write_timing_sweep_tables(
-            results,
-            os.path.join(run_dir, "tables"),
-            benchmark_params=bparams,
-            latex_grids=lgx,
-        )
-        print("Timing / accuracy tables written to tables/")
         max_g = _max_grid_in_testset(run.test_set, base_c, base_s)
         d0 = _one_delta_for_plots(
-            run.test_set, base_c, float(calib0.get("delta", base_c.get("delta", 1.0)))
+            run.test_set, base_c,
+            float(calib0.get("delta", base_c.get("delta", 1.0))),
         )
-        _post_timing_plots(
-            run,
+        write_timing_outputs(
+            results, run,
+            benchmark_params=bparams,
+            latex_grids=_latex_int_list(ex, "latex_grids"),
+            save_path=save_path,
             max_grid=max_g,
             ref_delta=d0,
             calib0=calib0,
             settings0=settings0,
+        )
+    else:
+        write_plot_outputs(
+            results,
+            settings0=settings0,
             save_path=save_path,
         )
-        return
-
-    # ---- plot-only: same rank-0 table print + figures from sweep payloads ----
-    if not is_root:
-        return
-
-    def _sweepresult_to_block(sr: SweepResult) -> dict:
-        r = sr.result
-        if r is None:
-            raise RuntimeError("missing result payload from solve_test")
-        m = r["label"] or (sr.point.label or "UNK")
-        return {
-            m: {
-                "nest": r["nest"],
-                "model": r["model"],
-                "endog_grid": r["endog_grid"],
-                "vf_unrefined": r["vf_unrefined"],
-                "c_unrefined": r["c_unrefined"],
-                "dela_unrefined": r["dela_unrefined"],
-                "c_refined": r["c_refined"],
-                "c_worker": r["c_worker"],
-                "timing": r["timing"],
-            }
-        }
-
-    solutions: dict = {}
-    for sr in results:
-        solutions.update(_sweepresult_to_block(sr))
-
-    model = solutions[UE_METHODS[0]]["model"]
-    grid_size = model.grid_size
-    smooth_sigma = model.smooth_sigma
-    sigma_tag = (
-        "sigma0" if abs(smooth_sigma) < 1e-12 else f"sigma{int(round(smooth_sigma * 100)):02d}"
-    )
-
-    errors: dict = {}
-    for m in UE_METHODS:
-        errors[m] = euler(model, solutions[m]["c_refined"])
-
-    print()
-    print("| Method | Euler Error    | Avg UE time(ms) | Total time(ms) |")
-    print("|--------|----------------|-----------------|----------------|")
-    for m in UE_METHODS:
-        t_ = solutions[m]["timing"]
-        print(
-            f"| {m:<6s} | {errors[m]:<14.6f} "
-            f"| {t_[0]*1000:<15.3f} | {t_[1]*1000:<14.3f} |"
-        )
-    print()
-
-    from examples.retirement.outputs import plot_cons_pol, plot_dcegm_cf, plot_egrids
-
-    print(f"Generating plots to {save_path}...")
-    rfc = solutions["RFC"]
-    plot_egrids(
-        int(settings0.get("plot_age", 5)),
-        rfc["endog_grid"],
-        rfc["vf_unrefined"],
-        rfc["c_unrefined"],
-        rfc["dela_unrefined"],
-        grid_size,
-        model,
-        save_path,
-        tag=sigma_tag,
-    )
-    plot_cons_pol(solutions["FUES"]["c_worker"], model, save_path)
-    plot_dcegm_cf(
-        int(settings0.get("plot_age", 5)),
-        grid_size,
-        rfc["endog_grid"],
-        rfc["vf_unrefined"],
-        rfc["c_unrefined"],
-        rfc["dela_unrefined"],
-        model.asset_grid_A,
-        model,
-        save_path,
-        tag=sigma_tag,
-    )
-
-    print("Done!")
 
 
 if __name__ == "__main__":

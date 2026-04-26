@@ -8,6 +8,7 @@ from .diagnostics import (
     consumption_deviation,
 )
 from .tables import generate_timing_table_combined, generate_accuracy_table
+from .writer import write_timing_outputs, write_plot_outputs
 
 # Plot functions (and therefore seaborn + HARK) load lazily — sweep-only
 # installs can import `outputs` without pulling the plotting stack.
@@ -40,4 +41,7 @@ __all__ = [
     "get_solution_at_age",
     "euler",
     "consumption_deviation",
+    # Writer dispatch
+    "write_timing_outputs",
+    "write_plot_outputs",
 ]
