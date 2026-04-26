@@ -30,7 +30,7 @@ the adjuster FOC at comparable runtimes. See the
 Both applications share a single command-line interface. Typical entry points:
 
 ```bash
-python -m examples.retirement.run --settings-override grid_size=3000
+python -m examples.retirement.run --slot-override '$draw.grid_size=3000'
 python -m examples.durables.run
 ```
 

@@ -267,12 +267,13 @@ nest2, _, _, _ = solve_nest(
 
 `run.py` is a command-line wrapper around `solve_nest`. It loads baseline economic parameters from `syntax/calibration.yaml` and numerical settings from `syntax/settings.yaml`, applies any command-line overrides, solves the model under the available upper-envelope methods, and prints a comparison table. The API names are `FUES`, `RFC`, `DCEGM`, and `CONSAV`; in plots and tables, `DCEGM` and `CONSAV` are displayed under the paper labels MSS and LTM.
 
-The override mechanism is split by role:
+All overrides go through a single CLI family that binds slots declared in
+`spec_factory.yaml`:
 
-- **`--params-override key=value`** overrides economic parameters (e.g. `beta`, `delta`, `y`) from `calibration.yaml`. The code name `delta` corresponds to $\tau$ in the paper notation used above.
-- **`--settings-override key=value`** overrides numerical settings (e.g. `grid_size`, `T`, `plot_age`) from `settings.yaml`.
-- **`--latex-grids=…`** (runner extra) gives the subset of grid sizes included in **LaTeX** timing/accuracy tables (markdown tables list all sweeps rows).
-- **`--override-file path.yml`** loads a sparse YAML file; keys matching `settings.yaml` are treated as settings overrides and the remaining keys as calibration overrides.
+- **`--slot-override '$draw.key=value'`** overrides any economic parameter (e.g. `beta`, `delta`, `y` from `calibration.yaml`) or numerical setting (e.g. `grid_size`, `T`, `plot_age` from `settings.yaml`). In the retirement model both calibration and settings route through the `$draw` slot; `spec_factory` dispatches each key to its declared address. The code name `delta` corresponds to $\tau$ in the paper notation used above.
+- **`--slot-spec @path.yml`** loads a sparse slot-bundle YAML (top-level slot keys, e.g. `draw:`); see `experiments/retirement/params/baseline.yml`.
+- **`--slot-spec='{"method_switch":"NEGM"}'`** selects an upper-envelope method by tag; `expand_method_shortcut` in `solve.py` turns the tag into the full method-block payload.
+- **`--latex-grids=…`** (runner extra) gives the subset of grid sizes included in **LaTeX** timing/accuracy tables (markdown tables list all sweep rows).
 
 Each stage in `syntax/stages/` declares which parameters it consumes. The pipeline binds only the relevant settings and calibration entries to each stage, so unrelated keys are ignored.
 
@@ -283,21 +284,22 @@ All commands run from the repo root (`FUES/`).
 ```bash
 # Single run (baseline calibration from syntax/)
 python -m examples.retirement.run \
-    --settings-override grid_size=3000 \
+    --slot-override '$draw.grid_size=3000' \
     --output-dir results/retirement
 
 # Override parameters
 python -m examples.retirement.run \
-    --params-override beta=0.96 \
-    --settings-override T=50
+    --slot-override '$draw.beta=0.96' \
+    --slot-override '$draw.T=50'
 
-# Full timing sweep: Cartesian product of params × settings × methods (YAML @
-# files in experiments/retirement/); post-solve policy plots use the largest
-# grid_size in the test set
+# Full timing sweep: Cartesian product across delta × grid_size × method axes
+# (YAML @files in experiments/retirement/, each a slot-bundle list — top-level
+# `draw:` for delta and grid_size, `method_switch:` for methods). Post-solve
+# policy plots use the largest grid_size in the test set.
 python -m examples.retirement.run --sweep \
-    --params-range @experiments/retirement/timing_deltas.yaml \
-    --settings-range @experiments/retirement/timing_grids.yaml \
-    --methods-range @experiments/retirement/timing_methods.yaml \
+    --slot-range @experiments/retirement/timing_deltas.yaml \
+    --slot-range @experiments/retirement/timing_grids.yaml \
+    --slot-range @experiments/retirement/timing_methods.yaml \
     --latex-grids=1000,2000,3000,6000,10000 \
     --sweep-runs 3 \
     --output-dir results/retirement
@@ -335,7 +337,7 @@ Edit `experiments/retirement/retirement_timings.sh` to change:
 
 ### Override files
 
-Instead of entering parameters manually, sparse YAML override files in `experiments/retirement/params/` specify only values that differ from the `syntax/` defaults:
+Instead of entering parameters manually, sparse slot-bundle YAML files in `experiments/retirement/params/` specify only the values that differ from the `syntax/` defaults. Each file has a top-level `draw:` key wrapping the calibration and settings overrides; `spec_factory` dispatches each entry to its declared address.
 
 | File               | Key changes          |
 | ------------------ | -------------------- |
@@ -345,7 +347,7 @@ Instead of entering parameters manually, sparse YAML override files in `experime
 | `long_horizon.yml` | $\beta=0.96$, $T=50$, tighter lower-bound settings |
 
 ```bash
-python -m examples.retirement.run --override-file experiments/retirement/params/long_horizon.yml
+python -m examples.retirement.run --slot-spec @experiments/retirement/params/long_horizon.yml
 ```
 
 ## Benchmark results
