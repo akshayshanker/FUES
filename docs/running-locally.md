@@ -29,23 +29,28 @@ results/durables/2026-03-25/001/
 
 Default: `results/<model>/`. Override with `--output-dir`.
 
-## Overrides (kikku RunSpec v3)
+## Overrides (kikku RunSpec v4)
 
 All overrides go through **slots** named in the model’s `spec_factory.yaml`
 (typically `$draw` for calibration + settings, `$method_switch` for methods
 YAML-shaped blocks). Merge order is argv order (see `kikku.run.parse_cli`).
 
-| Use case | v3 |
+| Use case | v4 |
 |----------|-----|
-| Per-key cal / settings | `slot-override` with `$draw.KEY=VAL` (FUES examples route both through the `draw` slot) |
-| Methods YAML patches | `slot-spec` with a file or inline JSON; top-level `method_switch` (nested methods block) |
-| Bundle from disk | `slot-spec @path` (YAML must use top-level **slot** keys such as `draw:`) |
-| Sweeps (one or more axes) | Repeat `slot-range` (list of bundle dicts per flag); Cartesian product |
+| Per-key cal / settings | `--slot-override $draw.KEY=VAL` (FUES examples route both through the `draw` slot; deep paths supported) |
+| Deep override into a nested slot | `--slot-override $slot.k1.k2.k3=VAL` (full dot-path syntax) |
+| Methods YAML patches | `--slot-spec` with a file or inline JSON; top-level `method_switch` (nested methods block) |
+| Bundle from disk | `--slot-spec @path` (YAML must use top-level **slot** keys such as `draw:`) |
+| One-axis sweep on a slot subkey | `--slot-range $slot.path=[v1, v2, ...]` (axis form) |
+| Multi-row sweep with verbatim bundles | `--slot-range '[{...}, {...}]'` (bundle-list form) |
+| Cartesian sweep | Repeat `--slot-range` (mix axis and bundle-list forms freely) |
 
 ```bash
-# Economic parameters and numerics (FUES: both route through $draw in examples)
+# v4 deep-path override (was --slot-spec '{"draw":{"calibration":{"beta":0.96}}}' in v3)
+--slot-override '$draw.calibration.beta=0.96' --slot-override '$draw.settings.n_a=500'
+
+# Single-level (unchanged from v3, when both calibration and settings live flat in $draw)
 --slot-override '$draw.beta=0.96' --slot-override '$draw.tau=0.12'
---slot-override '$draw.n_a=500' --slot-override '$draw.n_h=300'
 
 # NEGM on adjuster upper_envelope: pass a method_switch slot (string tag expands in solve)
 --slot-spec='{"method_switch":"NEGM"}'
@@ -57,6 +62,10 @@ YAML-shaped blocks). Merge order is argv order (see `kikku.run.parse_cli`).
 String tags like `FUES` or `NEGM` for the upper envelope are typically passed
 as the `method_switch` **slot** value (via `--slot-spec` or a small YAML file),
 not as a removed bare `--method` flag.
+
+> **Type-collision under deep paths.** Repeated `--slot-override` flags walk
+> the path creating empty dicts as needed; if a prior write put a non-dict at
+> a path component, it is replaced by an empty dict (argv-order, last-writer-wins).
 
 ## Modes
 
@@ -84,15 +93,24 @@ instead of `--compare`, because method blocks are not one-level `slot.subkey`.
 ### Sweep
 
 ```bash
-# One-axis settings sweep
+# One-axis sweep on a slot subkey (v4 axis form — terser than bundle-list)
 python -m examples.durables.run --sweep \
-  --slot-range='[{"draw":{"grid_size":100}},{"draw":{"grid_size":200}},{"draw":{"grid_size":300}}]'
+  --slot-range '$draw.grid_size=[100, 200, 300]'
 
-# Multi-axis: repeated --slot-range; kikku takes the Cartesian product
+# Multi-axis Cartesian: repeat --slot-range; mix axis and bundle-list forms freely
 python -m examples.durables.run --sweep \
-  --slot-range='[{"draw":{"n_a":250,"tau":0.05}},{"draw":{"n_a":500,"tau":0.12}}]' \
+  --slot-range '$draw.n_a=[250, 500]' \
+  --slot-range '$draw.tau=[0.05, 0.12]' \
   --slot-range='[{"method_switch":"FUES"},{"method_switch":"NEGM"}]' \
   --simulate --n-sim 10000
+
+# @file for long axes (file content is a YAML list of values)
+python -m examples.durables.run --sweep \
+  --slot-range '$draw.beta=@experiments/beta_grid.yaml'
+
+# Bundle-list form (legacy, still supported — use for non-Cartesian / paired rows)
+python -m examples.durables.run --sweep \
+  --slot-range='[{"draw":{"grid_size":100}},{"draw":{"grid_size":200}}]'
 ```
 
 ## Durables examples

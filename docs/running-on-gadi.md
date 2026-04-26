@@ -217,12 +217,19 @@ or an interactive job:
 source "$FUES_VENV/bin/activate"
 mpiexec -n 2 python3 -m mpi4py -m examples.durables.run \
     --sweep \
-    --slot-range '[{"draw":{"n_a":60,"tau":0.12}},{"draw":{"n_a":80,"tau":0.12}}]' \
+    --slot-range '$draw.n_a=[60, 80]' \
+    --slot-override '$draw.tau=0.12' \
     --slot-range '[{"method_switch":"FUES"},{"method_switch":"NEGM"}]' \
     --sweep-runs 1 --simulate --n-sim 500 --seed 42 \
     --slot-override '$draw.t0=60' \
     --output-dir "${SCRATCH_DIR}/FUES/durables_smoke"
 ```
+
+The `$draw.n_a=[…]` axis form (v4) is terser than the v3 bundle-list
+equivalent for one-subkey sweeps; `tau` and `t0` go through
+`--slot-override` because they are constant across the rows. The
+`method_switch` axis stays as a bundle-list because each row is a
+distinct whole-slot payload (string tag expanded in `solve.py`).
 
 ## Common issues
 
