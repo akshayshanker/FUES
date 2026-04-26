@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.6.0dev6 — 2026-04-26 — RunSpec v3 (slot semantics, BREAKING)
+
+Implements `kikku-runspec-v3`. CLI is slot-keyed only (`--slot-override`, `--slot-spec`, `--slot-range`, `--compare`); the v2 three-tier kikku flags are removed. `TestSpec` is `{slots, label}`; FUES `solve` / `solve_nest` accept `**t.slots` and `expand_method_shortcut` in each example `solve.py`. Estimation and `housing_renting/` unchanged.
+
 ## 0.6.0dev5 — 2026-04-25 — RunSpec v2 (BREAKING)
 
 Implements `kikku-runspec-v2`. See `bellman-ddsl/AI/dev-specs/kikku/kikku-runspec-v2.md`.

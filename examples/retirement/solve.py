@@ -42,18 +42,29 @@ METHOD_SHORTCUT = [
 ]
 
 
-def _resolve_method_switch(method_switch):
-    """Resolve the ``method_switch`` argument into a ``$method_switch`` slot dict.
+def expand_method_shortcut(
+    tag: str, shortcut: list[tuple[str, str, str]]
+) -> dict:
+    """Build a v3 ``$method_switch`` slot value: ``{methods: [{on, schemes: [...]}]}``."""
+    methods: list[dict] = []
+    for _stage, on_mover, scheme in shortcut:
+        methods.append(
+            {
+                "on": on_mover,
+                "schemes": [{"scheme": scheme, "method": tag}],
+            }
+        )
+    return {"methods": methods}
 
-    - ``None`` -> ``None`` (no override).
-    - str (e.g. ``'FUES'``) -> broadcast to all METHOD_SHORTCUT targets.
-    - dict ``{(stage, target, scheme): tag, ...}`` -> passed through.
-    """
+
+def _prepare_method_slot(method_switch) -> object | None:
     if method_switch is None:
         return None
     if isinstance(method_switch, str):
-        return {target: method_switch for target in METHOD_SHORTCUT}
+        return expand_method_shortcut(method_switch, METHOD_SHORTCUT)
     if isinstance(method_switch, Mapping):
+        if any(isinstance(k, tuple) for k in method_switch):
+            raise TypeError("tuple keys in method_switch are not supported in v3")
         return dict(method_switch)
     raise TypeError(
         f"method_switch must be None, str, or dict; got {type(method_switch).__name__}"
@@ -203,6 +214,7 @@ def solve_nest(
     model=None,
     stage_ops=None,
     waves=None,
+    **more_slots,
 ):
     """Canonical retirement pipeline: spec_factory → build → solve backward.
 
@@ -229,18 +241,18 @@ def solve_nest(
         Tier-wrapped overrides for the `$draw` slot:
         `{'calibration': {...}, 'settings': {...}}`.
     method_switch : str or dict, optional
-        Upper-envelope method selection. Targets the ``$method_switch`` slot.
-
-        - String (``'FUES'``, ``'DCEGM'``, ``'RFC'``, ``'CONSAV'``) is broadcast
-          via ``METHOD_SHORTCUT`` to the standard upper-envelope targets.
-        - Dict ``{(stage, target, scheme): tag, ...}`` is passed through
-          directly for fine-grained control.
+        v3: string tags expand via ``expand_method_shortcut``; nested
+        ``{methods: [...]}`` dicts pass through. Tuple keys are not supported.
     model : RetirementModel, optional
         Reuse to skip reconstruction.
     stage_ops : dict, optional
         Reuse to skip JIT recompilation.
     waves : list[list[str]], optional
         Reuse to skip graph construction.
+    more_slots
+        Additional spec_factory slot bindings (e.g. ``**t.slots`` from kikku).
+        Reserved names for this function: do not use ``model``, ``stage_ops``,
+        ``waves`` as slot tags; they are solver kwargs.
 
     Returns
     -------
@@ -255,9 +267,6 @@ def solve_nest(
 
     registry_dir = _Path(registry_dir)
 
-    # Resolve into the $method_switch slot value.
-    slot_method_switch = _resolve_method_switch(method_switch)
-
     if not (registry_dir / spec_factory_name).exists():
         raise FileNotFoundError(
             f"No {spec_factory_name} in {registry_dir}. "
@@ -265,16 +274,19 @@ def solve_nest(
             f"migrate legacy registries by mirroring examples/retirement/syntax/."
         )
 
+    sb: dict = {k: v for k, v in more_slots.items()}
+    if draw is not None:
+        sb["draw"] = draw
+    if method_switch is not None:
+        sb["method_switch"] = _prepare_method_slot(method_switch)
+    elif sb.get("method_switch") is not None:
+        sb["method_switch"] = _prepare_method_slot(sb["method_switch"])
+
     if model is None or stage_ops is None or waves is None:
         recipe = load_spec(str(registry_dir / spec_factory_name))
-
-        slot_bindings = {}
-        if draw:
-            slot_bindings['draw'] = draw
-        if slot_method_switch:
-            slot_bindings['method_switch'] = slot_method_switch
-        spec = make_spec(recipe, registry_dir=str(registry_dir),
-                         **slot_bindings)
+        spec = make_spec(
+            recipe, registry_dir=str(registry_dir), **sb
+        )
 
         # Load sym stage sources
         stage_names = list(recipe.stages.keys())

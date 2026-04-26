@@ -97,10 +97,30 @@ def _dkey(x: float) -> float:
     return round(float(x), 10)
 
 
+def _params_settings_from_testspec(t: TestSpec) -> tuple[dict, dict]:
+    base_c, base_s = load_baseline()
+    d = t.slots.get("draw", {}) or {}
+    if d and set(d) <= {"calibration", "settings", "methods"}:
+        return (d.get("calibration") or {}), (d.get("settings") or {})
+    p, s = {}, {}
+    for k, v in d.items():
+        if k in base_c:
+            p[k] = v
+        if k in base_s:
+            s[k] = v
+    return p, s
+
+
 def _method_tag(t: TestSpec) -> str:
-    if t.methods:
-        for v in t.methods.values():
-            return str(v)
+    ms = t.slots.get("method_switch")
+    if ms and isinstance(ms, str):
+        return str(ms)
+    if ms and isinstance(ms, dict):
+        for ent in (ms or {}).get("methods", []) or []:
+            for sch in (ent or {}).get("schemes", []) or []:
+                m = sch.get("method")
+                if m is not None:
+                    return str(m)
     if t.label:
         return str(t.label)
     return "UNK"
@@ -116,15 +136,18 @@ def format_timing_sweep_for_tables(
     Returns keys ``errors``, ``ue_ms``, ``total_ms``, ``cdev``; each row is
     ``[grid_size, delta, m0, m1, m2, m3]`` in ``method_order``.
     """
+    base_c, base_s = load_baseline()
     by_key: dict[tuple[int, float, str], Any] = {}
     for sr in results:
         t = sr.point
         if not isinstance(t, TestSpec):
             raise TypeError("format_timing_sweep_for_tables expected TestSpec points")
-        if not t.settings or "grid_size" not in t.settings:
-            raise ValueError("Timing sweep rows need settings.grid_size")
-        gs = int(t.settings["grid_size"])
-        d = _dkey(t.params.get("delta", 1.0))
+        p, s = _params_settings_from_testspec(t)
+        settings_row = {**base_s, **s}
+        if "grid_size" not in settings_row:
+            raise ValueError("Timing sweep rows need draw→settings grid_size (or in base settings)")
+        gs = int(settings_row["grid_size"])
+        d = _dkey(p.get("delta", base_c.get("delta", 1.0)))
         m = _method_tag(t)
         by_key[(gs, d, m)] = sr.metrics
 
@@ -136,10 +159,13 @@ def format_timing_sweep_for_tables(
     gset: set[int] = set()
     dset: set[float] = set()
     for sr in results:
-        p = sr.point
-        if isinstance(p, TestSpec) and p.settings and "grid_size" in p.settings:
-            gset.add(int(p.settings["grid_size"]))
-            dset.add(_dkey(p.params.get("delta", 1.0)))
+        p0 = sr.point
+        if isinstance(p0, TestSpec):
+            pp, sp = _params_settings_from_testspec(p0)
+            srow = {**base_s, **sp}
+            if "grid_size" in srow:
+                gset.add(int(srow["grid_size"]))
+            dset.add(_dkey(pp.get("delta", base_c.get("delta", 1.0))))
 
     for gs in sorted(gset):
         for d in sorted(dset):

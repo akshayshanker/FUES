@@ -1,6 +1,6 @@
 # Long horizon variant (50 period model for timing benchmarks)
-# Sparse overrides — only values that differ from syntax/ defaults.
-beta: 0.96
-T: 50
-b: 1.0e-100
-padding_mbar: -0.011
+draw:
+  beta: 0.96
+  T: 50
+  b: 1.0e-100
+  padding_mbar: -0.011

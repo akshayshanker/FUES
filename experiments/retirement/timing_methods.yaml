@@ -1,6 +1,6 @@
-# Methods-range: upper_envelope scheme on the worker EGM stage (one method per row).
-# Used as: --methods-range @experiments/retirement/timing_methods.yaml
-- work_cons.cntn_to_dcsn_mover.upper_envelope: RFC
-- work_cons.cntn_to_dcsn_mover.upper_envelope: FUES
-- work_cons.cntn_to_dcsn_mover.upper_envelope: DCEGM
-- work_cons.cntn_to_dcsn_mover.upper_envelope: CONSAV
+# v3: one method_switch row per string tag (expanded in solve / solve_nest)
+# Used as: --slot-range @experiments/retirement/timing_methods.yaml
+- { method_switch: RFC }
+- { method_switch: FUES }
+- { method_switch: DCEGM }
+- { method_switch: CONSAV }

@@ -1,6 +1,7 @@
-# Baseline benchmark configuration
+# v3: slot bundle — $draw (flat; split by spec_factory to cal/settings addresses)
 # Sparse overrides — only values that differ from syntax/ defaults.
 # Canonical defaults: syntax/calibration.yaml (beta=0.98, T=20)
-beta: 0.96
-T: 50
-b: 1.0e-10
+draw:
+  beta: 0.96
+  T: 50
+  b: 1.0e-10

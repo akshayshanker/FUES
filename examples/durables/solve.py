@@ -60,18 +60,30 @@ METHOD_SHORTCUT = [
 ]
 
 
-def _resolve_method_switch(method_switch):
-    """Resolve the ``method_switch`` argument into a ``$method_switch`` slot dict.
+def expand_method_shortcut(
+    tag: str, shortcut: list[tuple[str, str, str]]
+) -> dict:
+    """Build a v3 ``$method_switch`` slot value: ``{methods: [{on, schemes: [...]}]}``."""
+    methods: list[dict] = []
+    for _stage, on_mover, scheme in shortcut:
+        methods.append(
+            {
+                "on": on_mover,
+                "schemes": [{"scheme": scheme, "method": tag}],
+            }
+        )
+    return {"methods": methods}
 
-    - ``None`` -> ``None`` (no override).
-    - str (e.g. ``'FUES'``) -> broadcast to all METHOD_SHORTCUT targets.
-    - dict ``{(stage, target, scheme): tag, ...}`` -> passed through.
-    """
+
+def _prepare_method_slot(method_switch) -> object | None:
+    """Map CLI / shortcut input to a methods-shaped slot (no tuple keys, v3)."""
     if method_switch is None:
         return None
     if isinstance(method_switch, str):
-        return {target: method_switch for target in METHOD_SHORTCUT}
+        return expand_method_shortcut(method_switch, METHOD_SHORTCUT)
     if isinstance(method_switch, Mapping):
+        if any(isinstance(k, tuple) for k in method_switch):
+            raise TypeError("tuple keys in method_switch are not supported in v3")
         return dict(method_switch)
     raise TypeError(
         f"method_switch must be None, str, or dict; got {type(method_switch).__name__}"
@@ -463,10 +475,12 @@ def solve(
     spec_factory_name="spec_factory.yaml",
     draw=None,
     method_switch=None,
+    *,
     grids=None,
     verbose=False,
     progress=None,
     strip_solved=False,
+    **extra_slot_bindings,
 ):
     """Full DDSL pipeline: spec_factory → accrete+solve.
 
@@ -480,13 +494,13 @@ def solve(
         Overrides for the `$draw` slot. Use the tier-wrapped form:
         `{'calibration': {...}, 'settings': {...}}`.
     method_switch : str or dict, optional
-        Upper-envelope method selection. Targets the ``$method_switch`` slot
-        in the spec_factory.
-
-        - String (e.g. ``'FUES'``, ``'NEGM'``) is broadcast via
-          ``METHOD_SHORTCUT`` to the standard upper-envelope targets.
-        - Dict ``{(stage, target, scheme): tag, ...}`` is passed through
-          directly for fine-grained control.
+        Upper-envelope selection for the ``$method_switch`` slot. String tags
+        are expanded via ``expand_method_shortcut`` and ``METHOD_SHORTCUT``.
+        Nested ``{methods: [{on, schemes: ...}]`` dicts are passed through (v3).
+    extra_slot_bindings
+        Any other spec_factory slot names and values (e.g. from ``**t.slots``).
+    Reserved for the solver: ``grids``, ``verbose``, ``progress``,
+    ``strip_solved``; do not use these names as slot tags.
     grids : dict, optional
         Pre-built grids. If None, built from the resolved spec.
     verbose : bool or str
@@ -520,10 +534,13 @@ def solve(
     if _mem_diag:
         _r0 = _rss()
 
-    # Resolve into the $method_switch slot value.
-    # - String: broadcast via METHOD_SHORTCUT to the standard UE targets.
-    # - Dict: use directly (tuple-keyed override form).
-    slot_method_switch = _resolve_method_switch(method_switch)
+    sb: dict = {k: v for k, v in extra_slot_bindings.items()}
+    if draw is not None:
+        sb["draw"] = draw
+    if method_switch is not None:
+        sb["method_switch"] = _prepare_method_slot(method_switch)
+    elif sb.get("method_switch") is not None:
+        sb["method_switch"] = _prepare_method_slot(sb["method_switch"])
 
     if not (registry_dir / spec_factory_name).exists():
         raise FileNotFoundError(
@@ -537,12 +554,7 @@ def solve(
     spec_recipe = load_spec(str(registry_dir / spec_factory_name))
 
     # 2. Resolve input params, settings and methods with slots
-    slot_bindings = {}
-    if draw:
-        slot_bindings['draw'] = draw
-    if slot_method_switch:
-        slot_bindings['method_switch'] = slot_method_switch
-    spec = make_spec(spec_recipe, registry_dir=str(registry_dir), **slot_bindings)
+    spec = make_spec(spec_recipe, registry_dir=str(registry_dir), **sb)
 
     if _mem_diag:
         print(f"      [solve] spec_factory: +{_rss()-_r0}MB")

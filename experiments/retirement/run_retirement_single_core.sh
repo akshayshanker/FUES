@@ -112,9 +112,9 @@ if [[ ! -f "${PARAMS_FILE}" ]]; then
 fi
 
 python3 -m examples.retirement.run \
-  --override-file "${PARAMS_FILE}" \
-  --settings-override grid_size="${GRID_SIZE}" \
-  --settings-override plot_age="${PLOT_AGE}" \
+  --slot-spec @"${PARAMS_FILE}" \
+  --slot-override "\$draw.grid_size=${GRID_SIZE}" \
+  --slot-override "\$draw.plot_age=${PLOT_AGE}" \
   --output-dir "${OUTPUT_DIR}" \
   1> >(tee -a "${LOG_FILE}") \
   2> >(tee -a "${ERR_FILE}" >&2)

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run retirement model experiments via the canonical kikku v2 pipeline."""
+"""Run retirement model experiments via the canonical kikku v3 pipeline."""
 
 from __future__ import annotations
 
@@ -19,7 +19,11 @@ from examples.retirement.outputs import (
     get_policy,
     get_timing,
 )
-from examples.retirement.solve import METHOD_SHORTCUT, solve_nest
+from examples.retirement.solve import (
+    METHOD_SHORTCUT,
+    expand_method_shortcut,
+    solve_nest,
+)
 
 UE_METHODS = ("RFC", "FUES", "DCEGM", "CONSAV")
 
@@ -36,32 +40,58 @@ def _dkey(x: float) -> float:
     return round(float(x), 10)
 
 
+def _draw_cal_settings(
+    t: TestSpec, base_c: dict, base_s: dict
+) -> tuple[dict, dict]:
+    d = t.slots.get("draw", {}) or {}
+    if d and set(d) <= {"calibration", "settings", "methods"}:
+        return (d.get("calibration") or {}), (d.get("settings") or {})
+    p: dict = {}
+    s: dict = {}
+    for k, v in d.items():
+        if k in base_c:
+            p[k] = v
+        if k in base_s:
+            s[k] = v
+    return p, s
+
+
+def _row_delta(t: TestSpec, base_c: dict) -> float:
+    p, _ = _draw_cal_settings(t, base_c, {})
+    return _dkey(p.get("delta", base_c.get("delta", 1.0)))
+
+
 def _expand_default_ue_grid(run: RunSpec) -> RunSpec:
-    """If every row leaves ``methods`` unset, sweep canonical UE × test rows (§4)."""
-    if any(t.methods is not None for t in run.test_set):
+    """If every row has no method_switch, fan out across UE_METHODS (spec §6.2)."""
+    if any(
+        "method_switch" in t.slots and t.slots.get("method_switch")
+        for t in run.test_set
+    ):
         return run
     new: list[TestSpec] = []
     for t in run.test_set:
         for m in UE_METHODS:
-            mdict = {k: m for k in METHOD_SHORTCUT}
-            new.append(
-                TestSpec(
-                    params=dict(t.params),
-                    methods=mdict,
-                    settings=dict(t.settings),
-                    label=m,
-                )
-            )
+            new_slots = {
+                **t.slots,
+                "method_switch": expand_method_shortcut(m, METHOD_SHORTCUT),
+            }
+            new.append(TestSpec(slots=new_slots, label=m))
     return replace(run, test_set=tuple(new))
 
 
 def _sweep_is_only_method_vary(test_set: tuple[TestSpec, ...]) -> bool:
-    """All rows share the same calibration/settings; only methods (or label) differ."""
+    """All rows share the same draw (except method_switch); only UE method differs."""
     if len(test_set) <= 1:
         return True
-    p0, s0 = test_set[0].params, test_set[0].settings
+
+    def _strip_ms(ts: TestSpec) -> dict:
+        s = dict(ts.slots)
+        s.pop("method_switch", None)
+        return s
+
+    s0 = _strip_ms(test_set[0])
     for t in test_set[1:]:
-        if t.params != p0 or t.settings != s0:
+        if _strip_ms(t) != s0:
             return False
     return True
 
@@ -73,19 +103,44 @@ def _latex_int_list(ex: dict, key: str) -> list[int] | None:
     return [int(x) for x in str(v).split(",") if str(x).strip()]
 
 
-def _max_grid_in_testset(test_set: tuple[TestSpec, ...]) -> int:
+def _grid_size_from_draw(
+    t: TestSpec, base_c: dict, base_s: dict
+) -> int | None:
+    d = t.slots.get("draw", {}) or {}
+    if d and set(d) <= {"calibration", "settings", "methods"}:
+        gs = (d.get("settings") or {}).get("grid_size")
+        if gs is not None:
+            return int(gs)
+        return None
+    s = {k: v for k, v in d.items() if k in base_s}
+    if s.get("grid_size") is not None:
+        return int(s["grid_size"])
+    return None
+
+
+def _max_grid_in_testset(
+    test_set: tuple[TestSpec, ...], base_c: dict, base_s: dict
+) -> int:
     g = 0
     for t in test_set:
-        if t.settings and t.settings.get("grid_size") is not None:
-            g = max(g, int(t.settings["grid_size"]))
+        gs = _grid_size_from_draw(t, base_c, base_s)
+        if gs is not None:
+            g = max(g, gs)
     return g or 3000
 
 
-def _one_delta_for_plots(test_set: tuple[TestSpec, ...], default: float) -> float:
+def _one_delta_for_plots(
+    test_set: tuple[TestSpec, ...], base_c: dict, default: float
+) -> float:
     ds: set[float] = set()
     for t in test_set:
-        if t.params and "delta" in t.params:
-            ds.add(_dkey(t.params["delta"]))
+        d = t.slots.get("draw", {}) or {}
+        if d and set(d) <= {"calibration", "settings", "methods"}:
+            c = d.get("calibration") or {}
+            if "delta" in c:
+                ds.add(_dkey(c["delta"]))
+        elif "delta" in d:
+            ds.add(_dkey(d["delta"]))
     if ds:
         return sorted(ds)[0]
     return default
@@ -180,21 +235,16 @@ def main() -> None:
     comm = _get_mpi_comm()
     is_root = comm is None or comm.Get_rank() == 0
     argv_s = " ".join(sys.argv)
-    has_range = (
-        "--params-range" in argv_s
-        or "--settings-range" in argv_s
-        or "--methods-range" in argv_s
-    )
+    has_range = "--slot-range" in argv_s
+    base_c, base_s = rbench.load_baseline()
     st0 = run.test_set[0]
-    calib0 = dict(st0.params)
-    settings0 = dict(st0.settings)
+    calib0, settings0 = _draw_cal_settings(st0, base_c, base_s)
     run = _expand_default_ue_grid(run)
-    # 4-UE "plot only": same (params, settings) on every row, methods differ only;
-    # no explicit *-range (otherwise we run timing+tables path per §21.2, incl. 1×1).
+    # 4-UE "plot only": same draw (except method_switch) on every row, UE differs only;
+    # no explicit --slot-range (otherwise timing+tables path).
     only_methods = _sweep_is_only_method_vary(run.test_set) and not has_range
     st0 = run.test_set[0]
-    calib0 = dict(st0.params)
-    settings0 = dict(st0.settings)
+    calib0, settings0 = _draw_cal_settings(st0, base_c, base_s)
 
     run_dir = str(run.output_dir)
     if is_root:
@@ -214,13 +264,7 @@ def main() -> None:
     # --- True solutions for (grid, delta) × methods sweeps; not for 4-UE only ---
     true_solutions: dict | None = None
     if not only_methods:
-        deltas = sorted(
-            {
-                _dkey(t.params.get("delta", calib0.get("delta", 1.0)))
-                for t in run.test_set
-            }
-        )
-        base_c, base_s = rbench.load_baseline()
+        deltas = sorted({_row_delta(t, base_c) for t in run.test_set})
         ocal = {**base_c, **calib0}
         oset = {**base_s, **settings0}
         true_solutions = rbench.precompute_true_solutions(
@@ -240,15 +284,11 @@ def main() -> None:
     def _solve_test_timing(t: TestSpec) -> dict:
         if true_solutions is None:
             raise RuntimeError("timing solve_test: missing true_solutions")
-        nest, model, _, _ = solve_nest(
-            wdir,
-            method_switch=t.methods,
-            draw={"calibration": t.params, "settings": t.settings},
-        )
+        nest, model, _, _ = solve_nest(wdir, **t.slots)
         c_ref = get_policy(nest, "c", stage="labour_mkt_decision")
         tim = get_timing(nest)
         err = euler(model, c_ref)
-        dk = _dkey(t.params.get("delta", calib0.get("delta", 1.0)))
+        dk = _row_delta(t, base_c)
         ts = true_solutions[dk]
         cdev = consumption_deviation(
             model, c_ref, ts["c_true"], ts["a_grid"]
@@ -260,15 +300,24 @@ def main() -> None:
             "cdev": float(cdev),
         }
 
+    def _label_from_method_slot(t: TestSpec) -> str | None:
+        ms = t.slots.get("method_switch")
+        if not ms:
+            return None
+        if isinstance(ms, str):
+            return ms
+        for ent in (ms or {}).get("methods", []) or []:
+            for sch in (ent or {}).get("schemes", []) or []:
+                m = sch.get("method")
+                if m is not None:
+                    return str(m)
+        return None
+
     def _solve_test_plots(t: TestSpec) -> dict:
         _label = t.label
-        if not _label and t.methods:
-            _label = next(iter(t.methods.values()))
-        nest, model, _, _ = solve_nest(
-            wdir,
-            method_switch=t.methods,
-            draw={"calibration": t.params, "settings": t.settings},
-        )
+        if not _label:
+            _label = _label_from_method_slot(t) or ""
+        nest, model, _, _ = solve_nest(wdir, **t.slots)
         c_ref = get_policy(nest, "c", stage="labour_mkt_decision")
         err = euler(model, c_ref)
         tim = get_timing(nest)
@@ -322,10 +371,9 @@ def main() -> None:
         return
 
     if not only_methods and is_root:
-        base_cal, base_set = rbench.load_baseline()
         bparams = {
-            **base_cal,
-            **base_set,
+            **base_c,
+            **base_s,
             **calib0,
             **settings0,
             "true_grid_size": 20000,
@@ -339,9 +387,9 @@ def main() -> None:
             latex_grids=lgx,
         )
         print("Timing / accuracy tables written to tables/")
-        max_g = _max_grid_in_testset(run.test_set)
+        max_g = _max_grid_in_testset(run.test_set, base_c, base_s)
         d0 = _one_delta_for_plots(
-            run.test_set, float(calib0.get("delta", 1.0))
+            run.test_set, base_c, float(calib0.get("delta", base_c.get("delta", 1.0)))
         )
         _post_timing_plots(
             run,

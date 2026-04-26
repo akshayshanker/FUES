@@ -1,4 +1,4 @@
 # Low work disutility variant (working is less costly)
-# Sparse overrides — only values that differ from syntax/ defaults.
-delta: 0.5
-T: 50
+draw:
+  delta: 0.5
+  T: 50

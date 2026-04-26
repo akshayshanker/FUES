@@ -1,4 +1,4 @@
-"""Run the durables DDSL pipeline via kikku v2 (``parse_cli`` + ``sweep``)."""
+"""Run the durables DDSL pipeline via kikku v3 (``parse_cli`` + ``sweep``)."""
 
 from __future__ import annotations
 
@@ -41,12 +41,39 @@ def _parse_plot_ages(raw):
     return None
 
 
+def _draw_cal_and_settings(
+    t: TestSpec, base_calib: dict, base_settings: dict
+) -> tuple[dict, dict]:
+    """Map ``$draw`` slot to calibration/settings overlays (flat or tier-wrapped)."""
+    d = t.slots.get("draw", {}) or {}
+    if d and set(d) <= {"calibration", "settings", "methods"}:
+        return (d.get("calibration") or {}), (d.get("settings") or {})
+    c: dict = {}
+    s: dict = {}
+    for k, v in d.items():
+        if k in base_calib:
+            c[k] = v
+        if k in base_settings:
+            s[k] = v
+    return c, s
+
+
 def _method_label_from_testspec(t: TestSpec) -> str | None:
-    if not t.methods:
+    ms = t.slots.get("method_switch")
+    if not ms:
         return None
-    vals = {str(v) for v in t.methods.values() if v is not None and v != ""}
-    if len(vals) == 1:
-        return next(iter(vals))
+    if isinstance(ms, str):
+        return ms
+    if isinstance(ms, dict):
+        methods = ms.get("methods") or []
+        tags: set[str] = set()
+        for ent in methods:
+            for sch in (ent or {}).get("schemes", []) or []:
+                m = sch.get("method")
+                if m is not None and m != "":
+                    tags.add(str(m))
+        if len(tags) == 1:
+            return next(iter(tags))
     return None
 
 
@@ -61,13 +88,24 @@ def _load_baseline_calib(base: Path) -> dict:
     return {}
 
 
+def _load_baseline_settings(base: Path) -> dict:
+    cands = [base / "settings.yaml", base / "settings" / "default.yaml"]
+    for p in cands:
+        if p.is_file():
+            raw = yaml.safe_load(p.read_text()) or {}
+            if "settings" in raw and isinstance(raw["settings"], dict):
+                return dict(raw["settings"])
+            return dict(raw) if raw else {}
+    return {}
+
+
 def _write_durables_latex(results: list[SweepResult], run: RunSpec) -> None:
     """Bespoke per-row LaTeX summary (sweep) — rank-0 caller only."""
     if not results:
         return
     base = Path(run.base_spec)
     base_calib = _load_baseline_calib(base)
-    base_settings = _merge_first_settings_row(run, results[0].point)
+    base_st_file = _load_baseline_settings(base)
     tdir = os.path.join(str(run.output_dir), "tables")
     os.makedirs(tdir, exist_ok=True)
     n_sim = run.sim.n_sim if run.sim is not None else 0
@@ -75,6 +113,8 @@ def _write_durables_latex(results: list[SweepResult], run: RunSpec) -> None:
     for sr in results:
         row = sr.metrics
         t = sr.point
+        p_ovl, s_ovl = _draw_cal_and_settings(t, base_calib, base_st_file)
+        t_settings = {**base_st_file, **s_ovl}
         cal_params = {
             k: base_calib[k]
             for k in (
@@ -90,7 +130,7 @@ def _write_durables_latex(results: list[SweepResult], run: RunSpec) -> None:
             )
             if k in base_calib
         }
-        cal_params = {**cal_params, **t.params}
+        cal_params = {**cal_params, **p_ovl}
         if "R" in cal_params:
             cal_params["r"] = cal_params.pop("R")
         if "R_H" in cal_params:
@@ -99,10 +139,10 @@ def _write_durables_latex(results: list[SweepResult], run: RunSpec) -> None:
         summaries.append(
             {
                 "Grid_Size": int(
-                    row.get("n_a", t.settings.get("n_a", base_settings.get("n_a", 0)))
+                    row.get("n_a", t_settings.get("n_a", 0))
                 ),
                 "Tau": float(
-                    row.get("tau", t.params.get("tau", cal_params.get("tau", 0.0)))
+                    row.get("tau", p_ovl.get("tau", cal_params.get("tau", 0.0)))
                 ),
                 "Method": row.get("method", ""),
                 "Avg_Keeper_ms": row.get("keeper_ms", 0.0),
@@ -128,22 +168,6 @@ def _write_durables_latex(results: list[SweepResult], run: RunSpec) -> None:
         f.write(preamble)
         f.write(tex)
         f.write("\n\\end{document}\n")
-
-
-def _merge_first_settings_row(run: RunSpec, t: TestSpec) -> dict:
-    base = Path(run.base_spec)
-    cands = [base / "settings.yaml", base / "settings" / "default.yaml"]
-    d: dict = {}
-    for p in cands:
-        if p.is_file():
-            raw = yaml.safe_load(p.read_text()) or {}
-            if "settings" in raw and isinstance(raw["settings"], dict):
-                d = dict(raw["settings"])
-            else:
-                d = dict(raw) if raw else {}
-            break
-    d = {**d, **t.settings}
-    return d
 
 
 def _comparison_rows_from_sweep(
@@ -174,8 +198,14 @@ def _comparison_rows_from_sweep(
             if k in m and not (isinstance(m[k], float) and m[k] != m[k]):
                 row[outk] = m[k]
         rows.append(row)
-    base_calib = _load_baseline_calib(Path(run.base_spec))
-    first = {**base_calib, **(results[0].point.params if results else {})}
+    base = Path(run.base_spec)
+    base_calib = _load_baseline_calib(base)
+    base_st = _load_baseline_settings(base)
+    t0 = results[0].point if results else None
+    p0, _s0 = (
+        _draw_cal_and_settings(t0, base_calib, base_st) if t0 is not None else ({}, {})
+    )
+    first = {**base_calib, **p0}
     return rows, first
 
 
@@ -191,13 +221,12 @@ def main() -> None:
     if is_root:
         print(f"Output directory: {run.output_dir}")
 
+    _reg_base = Path(run.base_spec)
+    _base_cal0 = _load_baseline_calib(_reg_base)
+    _base_st0 = _load_baseline_settings(_reg_base)
+
     def solve_test(t: TestSpec) -> dict:
-        nest, grids = solve(
-            str(run.base_spec),
-            draw={"calibration": t.params, "settings": t.settings},
-            method_switch=t.methods,
-            verbose=False,
-        )
+        nest, grids = solve(str(run.base_spec), **t.slots, verbose=False)
         adj0 = nest["periods"][0]["stages"]["adjuster_cons"]
         method_label = _method_label_from_testspec(
             t
@@ -216,7 +245,10 @@ def main() -> None:
             "method_label": method_label,
             "timing": timing,
         }
-        store_cntn = bool(t.settings.get("store_cntn", 0))
+        _, st_draw = _draw_cal_and_settings(t, _base_cal0, _base_st0)
+        store_cntn = bool(
+            int({**_base_st0, **st_draw}.get("store_cntn", 0))
+        )
         stage0 = nest["periods"][0]["stages"]["keeper_cons"]
         plot_ages = _parse_plot_ages(
             stage0.calibration.get("plot_ages", [])

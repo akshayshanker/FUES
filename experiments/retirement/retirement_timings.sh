@@ -121,7 +121,7 @@ echo "  Grid size: $GRID_SIZE"
 echo "  Plot age: $PLOT_AGE"
 echo "  Run timings: $RUN_TIMINGS"
 if [[ "$RUN_TIMINGS" == "true" ]]; then
-    echo "    Full timing sweep: params/settings/methods ranges (YAML @files)"
+    echo "    Full timing sweep: --slot-range axes (YAML @files)"
     echo "    Sweep runs: $SWEEP_RUNS"
 fi
 echo "  Output: $OUTPUT_DIR"
@@ -143,22 +143,22 @@ export OMPI_MCA_coll_hcoll_enable=0
 export OMPI_MCA_coll=^hcoll
 export PMIX_MCA_gds=hash
 
-# Build command (kikku v2: Cartesian product of @file ranges, single sweep in run.py)
+# v3: slot-spec @params + slot-range Cartesian product
 CMD="mpiexec -n $PBS_NCPUS python3 -u -m mpi4py -m examples.retirement.run"
-CMD="$CMD --override-file $PARAMS_FILE"
-CMD="$CMD --settings-override plot_age=$PLOT_AGE"
+CMD="$CMD --slot-spec @${PARAMS_FILE}"
+CMD="$CMD --slot-override \$draw.plot_age=$PLOT_AGE"
 CMD="$CMD --output-dir $OUTPUT_DIR"
 
 if [[ "$RUN_TIMINGS" == "true" ]]; then
     CMD="$CMD --sweep"
-    CMD="$CMD --params-range @${RANGES_DIR}/timing_deltas.yaml"
-    CMD="$CMD --settings-range @${RANGES_DIR}/timing_grids.yaml"
-    CMD="$CMD --methods-range @${RANGES_DIR}/timing_methods.yaml"
+    CMD="$CMD --slot-range @${RANGES_DIR}/timing_deltas.yaml"
+    CMD="$CMD --slot-range @${RANGES_DIR}/timing_grids.yaml"
+    CMD="$CMD --slot-range @${RANGES_DIR}/timing_methods.yaml"
     CMD="$CMD --latex-grids=$LATEX_GRIDS"
     CMD="$CMD --sweep-runs $SWEEP_RUNS"
 else
     # Single-baseline 4-UE run with plot grid; no multi-axis ranges
-    CMD="$CMD --settings-override grid_size=$GRID_SIZE"
+    CMD="$CMD --slot-override \$draw.grid_size=$GRID_SIZE"
 fi
 
 # Run
