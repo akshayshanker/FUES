@@ -26,17 +26,26 @@ equations:
     w_ret = (1 + r) * a_ret
   dcsn_to_cntn_transition: |
     b_ret = w_ret - c
-  cntn_to_dcsn_mover:
-    Bellman: |
-      V = max_c{log(c) + beta * V[>]}
+  # backward evaluation (value under a given policy c — T_sigma, no max)
+  cntn_to_dcsn:
+    value: |
+      V = log(c) + beta * V[>]
+    marginal: |
+      dV = 1/c
+
+  dcsn_to_arvl:
+    value: |
+      V[<] = V
+    marginal: |
+      dV[<] = dV
+
+  # policy construction (carries the method: !egm / !FUES upper envelope)
+  policy:
+    # Direct maximisation form (the VFI / NEGM alternative). EGM bypasses this;
+    # the InvEuler below is the !egm realisation of the same policy.
+    argmax: |
+      c = argmax_{c}(log(c) + beta * V[>])
     InvEuler: |
       c[>] = (beta * dV[>])^(-1)
     cntn_to_dcsn_transition: |
       w_ret[>] = b_ret + c[>]
-    MarginalBellman: |
-      dV = 1/c
-  dcsn_to_arvl_mover:
-    Bellman: |
-      V[<] = V
-    MarginalBellman: |
-      dV[<] = dV

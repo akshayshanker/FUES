@@ -31,9 +31,17 @@ equations:
       a[>] = a
     retire: |
       a_ret[>] = a
-  cntn_to_dcsn_mover:
-    Bellman: |
+  # backward evaluation (branch objective; the discrete selection itself is
+  # constructed in `policy`).
+  cntn_to_dcsn:
+    value: |
       V = max_{d}(V_cntn[>][work] - delta, V_cntn[>][retire])
-  dcsn_to_arvl_mover:
-    Bellman: |
+
+  dcsn_to_arvl:
+    value: |
       V[<] = V
+
+  # policy construction (the branching aggregator / discrete choice: method !max)
+  policy:
+    argmax: |
+      d = max_{d}(V_cntn[>][work] - delta, V_cntn[>][retire])

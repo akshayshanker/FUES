@@ -1,25 +1,26 @@
 stage: WorkerConsumption
 
+# Operator-slot methodization (spec 0.1d.1) under the kernel/policy schema
+# (spec 0.3): EGM policy construction on `policy`; the value-representation
+# (interpolation) on the evaluation block's `evaluate` (the Cartesian arrival
+# cash-on-hand grid); and the upper envelope on `upper_env` (feeds `evaluate`).
+# The `$method_switch` slot (spec_factory.yaml) merges onto `upper_env`.
 methods:
-  - on: cntn_to_dcsn_mover
-    schemes:
-      - scheme: bellman_backward
-        method: !egm
+  # policy construction (EGM) — the box tag claims the policy interior
+  - on: policy
+    method: !egm
 
-      - scheme: interpolation
-        method: !Linear
-        grid: endogenous
+  # value-representation handler for the evaluation block (interpolation on the
+  # Cartesian arrival cash-on-hand grid)
+  - on: evaluate
+    method: !Linear
+    grid: !Cartesian
+    settings:
+      orders: [n_a]
+      bounds: [[a_min, a_max]]
 
-      - scheme: upper_envelope
-        method: !FUES
-        settings:
-          m_bar: m_bar
-
-  - on: dcsn_to_arvl_mover
-    schemes:
-      - scheme: interpolation
-        method: !Linear
-        grid: !Cartesian
-        settings:
-          orders: [n_a]
-          bounds: [[a_min, a_max]]
+  # upper envelope -> upper_env node (feeds evaluate; method !FUES)
+  - on: upper_env
+    method: !FUES
+    settings:
+      m_bar: m_bar

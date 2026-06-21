@@ -34,7 +34,7 @@ def _default_ddu(c):
     return -1.0 / (c ** 2)
 
 # ============================================================================
-# EGM sub-equation callables (cntn_to_dcsn_mover)
+# EGM sub-equation callables (cntn_to_dcsn evaluation block + policy)
 #
 # Signature: fn(pointwise_inputs..., fixed_state) → result
 # Parameters are baked in via the factories below.
@@ -104,7 +104,7 @@ DEFAULT_CALLABLES = {
 }
 
 # ============================================================================
-# Arrival-to-decision transition callables (dcsn_to_arvl_mover)
+# Arrival-to-decision transition callables (arvl_to_dcsn_transition)
 #
 # These encode the forward transition g_{prec~sim} for each stage.
 # Manually defined for now; will be extracted from the syntax
