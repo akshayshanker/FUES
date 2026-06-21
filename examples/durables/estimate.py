@@ -488,9 +488,10 @@ def main():
         '--methods-override', nargs='*', default=[],
         dest='methods_override',
         help=(
-            'Adjuster upper-envelope scheme, e.g. '
-            'adjuster_cons.cntn_to_dcsn_mover.upper_envelope=NEGM '
-            '(same path as kikku RunSpec).'
+            'Adjuster upper-envelope method, e.g. '
+            'adjuster_cons.upper_env.upper_envelope=NEGM '
+            '(the kernel/policy node; the tag after the last `=` is what is '
+            'read).'
         ),
     )
     parser.add_argument(

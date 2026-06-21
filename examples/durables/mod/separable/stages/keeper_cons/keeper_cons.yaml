@@ -66,20 +66,24 @@ equations:
     a_nxt = w_kp - c
     h_nxt = h_kp
 
-  cntn_to_dcsn_mover:
-    Bellman: |
-      V = max_{c}(u(c, h_kp) + beta * V[>])
+  # backward evaluation (value under a given policy c — T_sigma, no max)
+  cntn_to_dcsn:
+    value: |
+      V = u(c, h_kp) + beta * V[>]
+    marginal: |
+      d_{w}V = d_{c}u(c)
+      d_{h}V = d_{h}u(h_kp) + beta * d_{h_nxt}V[>]
+
+  dcsn_to_arvl:
+    value: |
+      V[<] = V
+    marginal: |
+      d_{w}V[<] = d_{w}V
+      d_{h}V[<] = d_{h}V
+
+  # policy construction (carries the method: !egm / !FUES upper envelope)
+  policy:
     InvEuler: |
       c[>] = (alpha / (beta * d_{a_nxt}V[>]))^(1 / gamma_c)
     cntn_to_dcsn_transition: |
       w_kp[>] = a_nxt + c[>]
-    MarginalBellman: |
-      d_{w}V = d_{c}u(c)
-      d_{h}V = d_{h}u(h_kp) + beta * d_{h_nxt}V[>]
-
-  dcsn_to_arvl_mover:
-    Bellman: |
-      V[<] = V
-    ShadowBellman: |
-      d_{w}V[<] = d_{w}V
-      d_{h}V[<] = d_{h}V

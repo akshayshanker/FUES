@@ -66,10 +66,26 @@ equations:
     a_nxt = m - c - (1 + tau) * h_choice
     h_nxt = h_choice
 
-  cntn_to_dcsn_mover:
-    Bellman: |
-      V = max_{c, h_choice}(u(c, h_choice) + beta * V[>])
+  # backward evaluation (value under a given policy (c, h_choice) — T_sigma, no max)
+  cntn_to_dcsn:
+    value: |
+      V = u(c, h_choice) + beta * V[>]
+    marginal: |
+      d_{w}V = d_{c}u(c, h_choice)
 
+  dcsn_to_arvl:
+    value: |
+      V[<] = V
+    marginal: |
+      d_{w}V[<] = d_{w}V
+
+  # policy construction (carries the method: !egm / !FUES upper envelope / !golden_section)
+  policy:
+    # Direct maximisation form (the VFI / NEGM alternative); golden_section
+    # attaches to this argmax node, and the EGM inverse-Euler below is the
+    # !egm realisation of the same policy.
+    argmax: |
+      c, h_choice = argmax_{c, h_choice}(u(c, h_choice) + beta * V[>])
     # Two FOCs (from durable-cons/fues_utils.py):
     #   Asset Euler:   d_{c}u(c, h) = beta * d_{a_nxt}V[>]
     #   Durable FOC:   (1 + tau) * d_{c}u(c, h) = d_{h}u(c, h) + beta * d_{h_nxt}V[>]
@@ -81,15 +97,5 @@ equations:
     #     3. Root-find over a_nxt to satisfy both FOCs simultaneously
     InvEuler: |
       solve_{c[>], h_choice[>]}{d_{c}u(c[>], h_choice[>]) - beta * d_{a_nxt}V[>] = 0, (1 + tau) * d_{c}u(c[>], h_choice[>]) - d_{h}u(c[>], h_choice[>]) - beta * d_{h_nxt}V[>] = 0}
-
     cntn_to_dcsn_transition: |
       m[>] = a_nxt + c[>] + (1 + tau) * h_choice[>]
-
-    MarginalBellman: |
-      d_{w}V = d_{c}u(c, h_choice)
-
-  dcsn_to_arvl_mover:
-    Bellman: |
-      V[<] = V
-    ShadowBellman: |
-      d_{w}V[<] = d_{w}V

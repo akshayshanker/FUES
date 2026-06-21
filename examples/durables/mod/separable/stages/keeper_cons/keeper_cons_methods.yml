@@ -1,32 +1,29 @@
 stage: KeeperConsumption
 
+# Operator-slot methodization (spec 0.1d.1) under the kernel/policy schema
+# (spec 0.3): the backward selection (EGM) moves to the `policy` node; the
+# evaluation block carries the value-representation (interpolation) slot, and
+# the upper envelope is its own `upper_env` node that feeds `evaluate`.
 methods:
-  - on: cntn_to_dcsn_mover
-    schemes:
-      - scheme: bellman_backward
-        method: !egm
+  # policy construction (EGM) — the box tag claims the policy interior
+  - on: policy
+    method: !egm
 
-      - scheme: interpolation
-        method: !Linear
-        grid: endogenous
-        settings:
-          extrap_policy: extrap_policy
-          clamp_max_factor: clamp_max_factor
+  # value-representation handler for the evaluation block (interpolation on the
+  # Cartesian (a, h) arrival grid)
+  - on: evaluate
+    method: !Linear
+    grid: !Cartesian
+    settings:
+      orders: [n_a, n_h]
+      bounds: [[a_min, a_max], [h_min, h_max]]
+      extrap_policy: extrap_policy
+      clamp_max_factor: clamp_max_factor
 
-      - scheme: upper_envelope
-        method: !FUES
-        settings:
-          m_bar: m_bar
-          extrap_policy: extrap_policy
-          clamp_max_factor: clamp_max_factor
-
-  - on: dcsn_to_arvl_mover
-    schemes:
-      - scheme: interpolation
-        method: !Linear
-        grid: !Cartesian
-        settings:
-          orders: [n_a, n_h]
-          bounds: [[a_min, a_max], [h_min, h_max]]
-          extrap_policy: extrap_policy
-          clamp_max_factor: clamp_max_factor
+  # upper envelope -> upper_env node (feeds evaluate; method !FUES)
+  - on: upper_env
+    method: !FUES
+    settings:
+      m_bar: m_bar
+      extrap_policy: extrap_policy
+      clamp_max_factor: clamp_max_factor

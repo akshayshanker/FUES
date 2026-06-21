@@ -772,7 +772,7 @@ def _make_egm_adjuster(callables, grids, stage):
     # ================================================================
 
     def dcsn_mover(vlu_cntn, grids):
-        """cntn_to_dcsn_mover: EGM + FUES + MarginalBellman.
+        """cntn_to_dcsn backward step: EGM policy + FUES upper envelope + marginal.
 
         Parameters
         ----------

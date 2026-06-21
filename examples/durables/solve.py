@@ -55,20 +55,31 @@ from .horses.branching import make_tenure_ops
 from .horses.adjuster_egm import make_adjuster_ops
 from .horses.conditioning import make_conditioners
 
+# Under the kernel/policy schema (spec 0.3) + no-schemes methodization
+# (spec 0.1d.1), the upper-envelope method attaches to the ``upper_env`` node
+# (it feeds ``evaluate``), not the old ``cntn_to_dcsn_mover`` builder. The
+# ``$method_switch`` slot must therefore target ``upper_env`` so it merges onto
+# the base adjuster ``upper_env`` entry (keyed-list merge by ``on:``).
 METHOD_SHORTCUT = [
-    ('adjuster_cons', 'cntn_to_dcsn_mover', 'upper_envelope'),
+    ('adjuster_cons', 'upper_env', 'upper_envelope'),
 ]
 
 
 def expand_method_shortcut(
     tag: str, shortcut: list[tuple[str, str, str]]
 ) -> dict:
-    """Build a v3 ``$method_switch`` slot value: ``{methods: [{on, schemes: [...]}]}``."""
+    """Build a ``$method_switch`` slot value: ``{methods: [{on, schemes: [...]}]}``.
+
+    The slot bypasses ``load_methodization`` (it is a plain dict merged by the
+    spec_factory keyed-list merge), so it is emitted directly in the canonical
+    ``schemes:``-list shape with the legacy ``scheme:`` name, matching the
+    normalised base ``upper_env`` entry it merges onto.
+    """
     methods: list[dict] = []
-    for _stage, on_mover, scheme in shortcut:
+    for _stage, on_node, scheme in shortcut:
         methods.append(
             {
-                "on": on_mover,
+                "on": on_node,
                 "schemes": [{"scheme": scheme, "method": tag}],
             }
         )
@@ -90,18 +101,51 @@ def _prepare_method_slot(method_switch) -> object | None:
     )
 
 
-def read_scheme_method(stage, scheme_name, mover='cntn_to_dcsn_mover',
-                       default='FUES'):
-    """Read method tag for a scheme from stage.methods."""
+def read_scheme_method(stage, scheme_name, mover=None, default='FUES'):
+    """Read the method tag for a (legacy) scheme name from ``stage.methods``.
+
+    ``stage.methods`` is keyed by the methodization *node* (the ``on:`` field).
+    Under the kernel/policy schema (spec 0.3) + no-schemes methodization
+    (spec 0.1d.1) the schemes are normalised back to ``schemes:`` blocks that
+    still carry the legacy ``scheme:`` name (set from the node→scheme map), but
+    the node key itself changed (``upper_envelope`` now lives on ``upper_env``,
+    ``maximization`` on the ``max_*``/``argmax_*`` node, ``bellman_backward`` on
+    ``policy``). We therefore search *every* node's schemes for the requested
+    scheme name rather than assuming a fixed builder key.
+
+    ``mover`` is accepted for backwards compatibility; when given, only that
+    node is searched first (then a full scan as a fallback).
+    """
     if not hasattr(stage, 'methods'):
         return default
-    mover_dict = stage.methods.get(mover, {})
-    for scheme in mover_dict.get('schemes', []):
-        if scheme.get('scheme') == scheme_name:
-            tag = scheme.get('method', {})
-            if isinstance(tag, Mapping):
-                return tag.get('__yaml_tag__', default)
-            return str(tag)
+
+    def _scheme_tag(node_entry):
+        for block in node_entry.get('schemes', []):
+            if block.get('scheme') == scheme_name:
+                tag = block.get('method', {})
+                if isinstance(tag, Mapping):
+                    return tag.get('__yaml_tag__', default)
+                return str(tag)
+        return None
+
+    methods = stage.methods
+
+    # Honour an explicit node hint first (e.g. legacy callers).
+    if mover is not None:
+        hinted = methods.get(mover, {})
+        tag = _scheme_tag(hinted)
+        if tag is not None:
+            return tag
+
+    # Full scan across nodes (the kernel/policy form moves the scheme to a new
+    # node key such as `upper_env` / `argmax_c_h_choice` / `policy`).
+    for node_entry in methods.values():
+        if not isinstance(node_entry, Mapping):
+            continue
+        tag = _scheme_tag(node_entry)
+        if tag is not None:
+            return tag
+
     return default
 
 

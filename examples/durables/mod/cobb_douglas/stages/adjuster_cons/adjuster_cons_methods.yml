@@ -1,38 +1,39 @@
 stage: AdjusterConsumption
 
+# Operator-slot methodization (spec 0.1d.1) under the kernel/policy schema
+# (spec 0.3): EGM policy construction on `policy`; the value-representation
+# (interpolation) on the evaluation block's `evaluate`; the upper envelope on
+# `upper_env`; and the direct maximisation (used only when `policy` is
+# overridden to NEGM/VFI) on the `argmax_c_h_choice` node. The
+# `$method_switch` slot (spec_factory.yaml) merges onto `upper_env`.
 methods:
-  - on: cntn_to_dcsn_mover
-    schemes:
-      - scheme: bellman_backward
-        method: !egm
-        settings: {}
+  # policy construction (EGM) — the box tag claims the policy interior
+  - on: policy
+    method: !egm
+    settings: {}
 
-      - scheme: interpolation
-        method: !Linear
-        grid: endogenous
-        settings:
-          extrap_policy: extrap_policy
-          clamp_max_factor: clamp_max_factor
+  # value-representation handler for the evaluation block (interpolation on the
+  # Cartesian cash-on-hand arrival grid)
+  - on: evaluate
+    method: !Linear
+    grid: !Cartesian
+    settings:
+      orders: [n_w]
+      bounds: [[w_min, w_max]]
+      extrap_policy: extrap_policy
+      clamp_max_factor: clamp_max_factor
 
-      - scheme: upper_envelope
-        method: !FUES
-        settings:
-          m_bar: m_bar
-          extrap_policy: extrap_policy
-          clamp_max_factor: clamp_max_factor
+  # upper envelope -> upper_env node (feeds evaluate; method !FUES)
+  - on: upper_env
+    method: !FUES
+    settings:
+      m_bar: m_bar
+      extrap_policy: extrap_policy
+      clamp_max_factor: clamp_max_factor
 
-      - scheme: maximization
-        method: !golden_section
-        settings:
-          n_sections: n_sections
-
-  - on: dcsn_to_arvl_mover
-    schemes:
-      - scheme: interpolation
-        method: !Linear
-        grid: !Cartesian
-        settings:
-          orders: [n_w]
-          bounds: [[w_min, w_max]]
-          extrap_policy: extrap_policy
-          clamp_max_factor: clamp_max_factor
+  # Maximisation: only used when `policy` is overridden to NEGM (VFI). EGM
+  # bypasses maximisation entirely.
+  - on: argmax_c_h_choice
+    method: !golden_section
+    settings:
+      n_sections: n_sections

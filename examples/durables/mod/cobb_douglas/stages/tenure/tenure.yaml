@@ -70,16 +70,23 @@ equations:
       z_adj = z^rho_z * exp(sigma_z * eps[>])
       w = R * a + R_H * (1 - delta) * h + y(z_adj)
 
-  cntn_to_dcsn_mover:
-    Bellman: |
+  # backward evaluation (branch objective + envelope marginals; the discrete
+  # selection itself is constructed in `policy`).
+  cntn_to_dcsn:
+    value: |
       V = max_{d}(V[>][keep], V[>][adjust])
-    MarginalBellman: |
+    marginal: |
       d_{a}V = d * R * d_{w_adj}V[>] + (1 - d) * R * d_{w_kp}V[>]
       d_{h}V = d * R_H * (1 - delta) * d_{w_adj}V[>] + (1 - d) * (1 - delta) * d_{h_kp}V[>]
 
-  dcsn_to_arvl_mover:
-    Bellman: |
+  dcsn_to_arvl:
+    value: |
       V[<] = E_{z}(V)
-    ShadowBellman: |
+    marginal: |
       d_{a}V[<] = E_{z}(d_{a}V)
       d_{h}V[<] = E_{z}(d_{h}V)
+
+  # policy construction (the branching aggregator / discrete choice: method !max)
+  policy:
+    argmax: |
+      d = max_{d}(V[>][keep], V[>][adjust])

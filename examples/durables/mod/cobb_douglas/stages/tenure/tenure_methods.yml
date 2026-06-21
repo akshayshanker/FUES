@@ -1,7 +1,11 @@
 stage: AdjustmentDecision
 
+# Operator-slot methodization (spec 0.1d.1): one entry per named node.
+# Branching stage (agent control): the discrete-choice selection attaches to
+# the `policy` node under the kernel/policy schema (spec 0.3); the backward
+# evaluation block `cntn_to_dcsn` carries the max-aggregator and the envelope
+# marginals.
 methods:
-  - on: cntn_to_dcsn_mover
-    schemes:
-      - scheme: branching_aggregator
-        method: !max
+  # branching aggregator (discrete-choice selection) -> policy node
+  - on: policy
+    method: !max
