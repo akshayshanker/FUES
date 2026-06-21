@@ -6,7 +6,35 @@ stage: AdjustmentDecision
 # evaluation block `cntn_to_dcsn` carries the branch-conditional values Q[j]
 # and their marginals (NO max); `policy` does the argmax over j and evaluates
 # V = Q[j], dV = dQ[j].
+#
+# `handler:` pins the horse — the actual solver callable that realises each
+# node (spec 0.1d.1, the old `tool:`). Citations source-walked against this
+# app's own horses (examples/durables/horses/branching.py and conditioning.py).
+# Paths are relative to the application root examples/durables/.
 methods:
-  # discrete-choice selection (argmax over branches) -> policy node
+  # discrete-choice selection (argmax over branches) -> policy node.
+  # The argmax over {keep, adjust} (adj = 1{v_a >= v_k}) and V = Q[j],
+  # dV = dQ[j] are computed inside the tenure decision kernel built by
+  # make_tenure_ops.
   - on: policy
     method: !max
+    handler: fues-durables:make_tenure_ops      # horses/branching.py:make_tenure_ops
+
+  # PREVIOUSLY UNDECLARED: the backward evaluation block builds the
+  # branch-conditional values Q[keep], Q[adjust] and their marginals by
+  # interpolating the keeper/adjuster outputs at the branch transition points
+  # (tenure.yaml cntn_to_dcsn). The 1D keeper/adjuster lookups use the dcsmm
+  # scalar interpolator; the 2D continuation-value lookup uses the consav 2D
+  # interpolator. This evaluation node had no method entry — declared here.
+  - on: cntn_to_dcsn
+    method: !Linear
+    handler: dcsmm:interp_as_scalar             # src/dcsmm/fues/helpers/math_funcs.py:interp_as_scalar
+
+  # PREVIOUSLY UNDECLARED: the arrival evaluation block conditions the decision
+  # value down to arrival, V[<] = E_{z}(V) (tenure.yaml dcsn_to_arvl), the only
+  # non-trivial arrival node. Realised by the Markov expectation operator built
+  # in conditioning.py (matrix-multiply by the income transition matrix Pi).
+  # This expectation node had no method entry — declared here.
+  - on: dcsn_to_arvl
+    method: !markov-expectation
+    handler: fues-durables:make_conditioners    # horses/conditioning.py:make_conditioners (condition_V)

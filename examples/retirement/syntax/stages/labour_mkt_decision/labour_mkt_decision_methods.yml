@@ -10,7 +10,15 @@ stage: WorkerDecision
 # upper-envelope operator. The upper-envelope refinement lives one stage below,
 # on `work_cons`. Accordingly this stage does NOT take the `$method_switch` slot
 # (see spec_factory.yaml).
+#
+# `handler:` pins the horse — the solver callable that realises each node
+# (spec 0.1d.1, the old `tool:`). The discrete-choice argmax is realised inline
+# by this app's own labour-market mover (no external solver), which compares
+# Q[work] vs Q[retire] and selects the branch (hard indicator when
+# smooth_sigma == 0, smoothed logit otherwise).
 methods:
-  # discrete-choice selection (argmax over branches) -> policy node
+  # discrete-choice selection (argmax over branches) -> policy node.
+  # Realised inline in the app's own labour-market decision mover.
   - on: policy
     method: !max
+    handler: fues-retirement:dcsn_mover   # examples/retirement/operators.py:make_labour_mkt_decision.dcsn_mover (branch argmax: p = v_work > v_ret)

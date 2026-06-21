@@ -5,22 +5,44 @@ stage: WorkerConsumption
 # (interpolation) on the evaluation block's `evaluate` (the Cartesian arrival
 # cash-on-hand grid); and the upper envelope on `upper_env` (feeds `evaluate`).
 # The `$method_switch` slot (spec_factory.yaml) merges onto `upper_env`.
+#
+# `handler:` pins the horse — the solver callable that realises each node
+# (spec 0.1d.1, the old `tool:`). The worker EGM step is realised by kikku's
+# `make_egm_1d`, composed with this app's own closed-form EGM sub-equations
+# (make_worker_egm_fns in model.py); the upper envelope is realised by the
+# FUES engine dispatched through dcsmm's EGM_UE. The `dcsn_mover`/`arvl_mover`
+# that drive these horses live in operators.py:make_work_cons.
 methods:
-  # policy construction (EGM) — the box tag claims the policy interior
+  # policy construction (EGM) — the box tag claims the policy interior.
+  # Realised by kikku's 1-D EGM step, built from this app's worker FOC funcs.
   - on: policy
     method: !egm
+    handler: kikku:make_egm_1d          # FUES2026/kikku/kikku/asva/egm_1d.py:make_egm_1d (built in operators.py:make_work_cons via _invert_euler)
+
+  # InvEuler = the EGM control recovery (argmax realised by closed-form FOC
+  # inversion, c = 1/(βR·dv)) — PREVIOUSLY UNDECLARED. The EGM step "goes to
+  # solve" the FOC at each grid point but no method node existed for it; this is
+  # the canonical FUES InvEuler-absent case. No root-finder is invoked: the
+  # inverse is closed form for log utility.
+  - on: policy.InvEuler
+    method: !analytic-inverse
+    handler: fues-retirement:fn_inv_euler   # examples/retirement/model.py:make_worker_egm_fns.fn_inv_euler
 
   # value-representation handler for the evaluation block (interpolation on the
-  # Cartesian arrival cash-on-hand grid)
+  # Cartesian arrival cash-on-hand grid). The arrival mover composes the
+  # arvl→dcsn transition with fused 2-array linear interpolation (interp_as_2).
   - on: evaluate
     method: !Linear
     grid: !Cartesian
+    handler: dcsmm:interp_as_2          # src/dcsmm/fues/helpers/math_funcs.py:interp_as_2 (via kikku:make_compose_interp in operators.py:make_work_cons)
     settings:
       orders: [n_a]
       bounds: [[a_min, a_max]]
 
-  # upper envelope -> upper_env node (feeds evaluate; method !FUES)
+  # upper envelope -> upper_env node (feeds evaluate; method !FUES).
+  # Realised by the FUES engine, dispatched through dcsmm's EGM_UE registry.
   - on: upper_env
     method: !FUES
+    handler: dcsmm:EGM_UE               # src/dcsmm/uenvelope/upperenvelope.py:EGM_UE -> FUES engine src/dcsmm/fues/fues.py:FUES (called in operators.py:make_work_cons dcsn_mover)
     settings:
       m_bar: m_bar
