@@ -3,13 +3,17 @@
 # Source names are relative to the registry root (syntax/).
 # Extensions (.yaml/.yml) are resolved automatically.
 stages:
+  # Only `work_cons` carries an upper-envelope operator, so only it takes the
+  # `$method_switch` slot (which selects the upper-envelope method). `retire_cons`
+  # (smooth EGM, no kink) and `labour_mkt_decision` (pure discrete choice) have
+  # no `upper_env` node and so do not take the slot.
   retire_cons:
     calibration:
       all: [calibration, $draw]
     settings:
       all: [settings, $draw]
     methods:
-      all: [stages/retire_cons/retire_cons_methods, $method_switch]
+      all: [stages/retire_cons/retire_cons_methods]
 
   work_cons:
     calibration:
@@ -25,4 +29,4 @@ stages:
     settings:
       all: [settings, $draw]
     methods:
-      all: [stages/labour_mkt_decision/labour_mkt_decision_methods, $method_switch]
+      all: [stages/labour_mkt_decision/labour_mkt_decision_methods]

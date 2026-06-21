@@ -177,7 +177,15 @@ def make_labour_mkt_decision(model):
 
     @njit
     def dcsn_mover(v_work, v_ret, c_work, c_ret, da_work, da_ret):
-        """B: branching discrete choice (no arrival mover)."""
+        """B: branching cntn_to_dcsn + policy (no arrival mover).
+
+        v_work, v_ret are the branch-conditional values Q[work], Q[retire]
+        (with the -delta work offset already folded into Q[work] upstream).
+        policy.argmax selects the branch: ``p`` is the hard indicator
+        1{work selected} (smooth_sigma == 0) or its smoothed logit relaxation.
+        policy.evaluate then reads V = Q[j] (and the selected policy/marginals)
+        as the p-weighted combination — the derived max_j Q[j].
+        """
         if smooth_sigma == 0:
             p = v_work > v_ret
         else:

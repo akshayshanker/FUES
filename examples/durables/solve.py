@@ -58,32 +58,30 @@ from .horses.conditioning import make_conditioners
 # Under the kernel/policy schema (spec 0.3) + no-schemes methodization
 # (spec 0.1d.1), the upper-envelope method attaches to the ``upper_env`` node
 # (it feeds ``evaluate``), not the old ``cntn_to_dcsn_mover`` builder. The
-# ``$method_switch`` slot must therefore target ``upper_env`` so it merges onto
-# the base adjuster ``upper_env`` entry (keyed-list merge by ``on:``).
+# ``$method_switch`` slot targets ``adjuster_cons.upper_env`` (the only durables
+# stage with a real upper-envelope operator; the keeper/tenure stages have none).
 METHOD_SHORTCUT = [
-    ('adjuster_cons', 'upper_env', 'upper_envelope'),
+    ('adjuster_cons', 'upper_env'),
 ]
 
 
 def expand_method_shortcut(
-    tag: str, shortcut: list[tuple[str, str, str]]
+    tag: str, shortcut: list[tuple[str, str]]
 ) -> dict:
-    """Build a ``$method_switch`` slot value: ``{methods: [{on, schemes: [...]}]}``.
+    """Build a ``$method_switch`` slot value in the no-schemes shape.
 
-    The slot bypasses ``load_methodization`` (it is a plain dict merged by the
-    spec_factory keyed-list merge), so it is emitted directly in the canonical
-    ``schemes:``-list shape with the legacy ``scheme:`` name, matching the
-    normalised base ``upper_env`` entry it merges onto.
+    Emits the authored operator-slot surface (spec 0.1d.1) — one
+    ``{on: <node>, method: <tag>}`` entry per target node, with NO ``schemes:``
+    list and NO legacy ``scheme:`` name — then normalizes it to the internal
+    ``schemes:``-list shape via the same ``methodization._normalize_methods``
+    pass the authored ``*_methods.yml`` files go through. Normalizing here keeps
+    the slot consistent with the (already-normalized) base ``upper_env`` entry it
+    merges onto, so the keyed-list merge by ``on:`` overrides the method tag.
     """
-    methods: list[dict] = []
-    for _stage, on_node, scheme in shortcut:
-        methods.append(
-            {
-                "on": on_node,
-                "schemes": [{"scheme": scheme, "method": tag}],
-            }
-        )
-    return {"methods": methods}
+    from dolo.compiler.methodization import _normalize_methods
+
+    methods = [{"on": on_node, "method": tag} for _stage, on_node in shortcut]
+    return _normalize_methods({"methods": methods})
 
 
 def _prepare_method_slot(method_switch) -> object | None:
@@ -101,52 +99,61 @@ def _prepare_method_slot(method_switch) -> object | None:
     )
 
 
-def read_scheme_method(stage, scheme_name, mover=None, default='FUES'):
-    """Read the method tag for a (legacy) scheme name from ``stage.methods``.
+def read_node_method(stage, node, default='FUES'):
+    """Read the method tag bound to a named methodization ``node``.
 
-    ``stage.methods`` is keyed by the methodization *node* (the ``on:`` field).
-    Under the kernel/policy schema (spec 0.3) + no-schemes methodization
-    (spec 0.1d.1) the schemes are normalised back to ``schemes:`` blocks that
-    still carry the legacy ``scheme:`` name (set from the node→scheme map), but
-    the node key itself changed (``upper_envelope`` now lives on ``upper_env``,
-    ``maximization`` on the ``max_*``/``argmax_*`` node, ``bellman_backward`` on
-    ``policy``). We therefore search *every* node's schemes for the requested
-    scheme name rather than assuming a fixed builder key.
+    ``stage.methods`` is keyed by the methodization *node* (the ``on:`` field):
+    ``upper_env`` (upper envelope), ``policy`` (the EGM/VFI/max selection),
+    ``evaluate`` (interpolation), ``argmax_*`` (direct maximisation), etc. This
+    reads the method tag for one node directly — by node, not by legacy scheme
+    name (spec 0.1d.1).
 
-    ``mover`` is accepted for backwards compatibility; when given, only that
-    node is searched first (then a full scan as a fallback).
+    A legacy scheme name (``upper_envelope``, ``maximization``, …) is accepted
+    and mapped to its node via ``methodization._NODE_TO_SCHEME_*`` (inverse), so
+    existing call sites keep working. The no-schemes override surface stores the
+    tag either at the node's top level (``method:``) or inside a normalized
+    ``schemes:`` block; both are read here.
     """
     if not hasattr(stage, 'methods'):
         return default
 
-    def _scheme_tag(node_entry):
-        for block in node_entry.get('schemes', []):
-            if block.get('scheme') == scheme_name:
-                tag = block.get('method', {})
-                if isinstance(tag, Mapping):
-                    return tag.get('__yaml_tag__', default)
-                return str(tag)
-        return None
-
     methods = stage.methods
+    node_names = _nodes_for_request(node, methods)
 
-    # Honour an explicit node hint first (e.g. legacy callers).
-    if mover is not None:
-        hinted = methods.get(mover, {})
-        tag = _scheme_tag(hinted)
-        if tag is not None:
-            return tag
+    def _tag(value):
+        if isinstance(value, Mapping):
+            return value.get('__yaml_tag__', default)
+        return str(value)
 
-    # Full scan across nodes (the kernel/policy form moves the scheme to a new
-    # node key such as `upper_env` / `argmax_c_h_choice` / `policy`).
-    for node_entry in methods.values():
-        if not isinstance(node_entry, Mapping):
+    for nm in node_names:
+        entry = methods.get(nm)
+        if not isinstance(entry, Mapping):
             continue
-        tag = _scheme_tag(node_entry)
-        if tag is not None:
-            return tag
+        if 'method' in entry:
+            return _tag(entry['method'])
+        for block in entry.get('schemes', []):
+            if 'method' in block:
+                return _tag(block['method'])
 
     return default
+
+
+def _nodes_for_request(request, methods):
+    """Yield the node name(s) addressed by ``request``.
+
+    ``request`` may be a node name (used directly) or a legacy scheme name,
+    which maps to every node whose ``methodization`` scheme matches.
+    """
+    if request in methods:
+        return [request]
+    from dolo.compiler.methodization import _scheme_for_node
+    return [nm for nm in methods if _scheme_for_node(nm) == request] or [request]
+
+
+# Backwards-compatible alias: callers pass either a node name or a legacy
+# scheme name; the resolver maps a scheme name to its node internally.
+def read_scheme_method(stage, scheme_name, mover=None, default='FUES'):
+    return read_node_method(stage, scheme_name, default=default)
 
 
 def _terminal_vlu_cntn(grids, tenure_callables):

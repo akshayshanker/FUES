@@ -33,11 +33,14 @@ symbols:
       z_adj: '@in R++'    # next-period income (from AR(1) transition eq)
 
   controls:
-    d: '@in {keep, adjust}'
+    j: '@in {keep, adjust}'    # branch choice (j; `d` is reserved for differentials)
 
   values:
     V[<]: '@in R'
     V: '@in R'
+    Q[-]:                      # branch-conditional values Q[j] (Iskhakov v̄_j)
+      keep: '@in R'
+      adjust: '@in R'
     V[>]:
       keep: '@in R'
       adjust: '@in R'
@@ -45,8 +48,14 @@ symbols:
   values_marginal:
     d_{a}V[<]: '@in R'          # partial_a v at arrival
     d_{h}V[<]: '@in R'          # partial_h v at arrival
-    d_{a}V: '@in R'             # partial_a v at decision
-    d_{h}V: '@in R'             # partial_h v at decision
+    d_{a}V: '@in R'             # partial_a v at decision (selected branch)
+    d_{h}V: '@in R'             # partial_h v at decision (selected branch)
+    d_{a}Q[-]:                 # branch-conditional marginals dQ_a[j]
+      keep: '@in R'
+      adjust: '@in R'
+    d_{h}Q[-]:                 # branch-conditional marginals dQ_h[j]
+      keep: '@in R'
+      adjust: '@in R'
     d_{w_kp}V[>]: '@in R'       # keep branch: partial_{w_kp} v[>]
     d_{h_kp}V[>]: '@in R'       # keep branch: partial_{h_kp} v[>]
     d_{w_adj}V[>]: '@in R'      # adjust branch: partial_{w_adj} v[>]
@@ -70,14 +79,20 @@ equations:
       z_adj = z^rho_z * exp(sigma_z * eps[>])
       w_adj = R * a + R_H * (1 - delta) * h + y(z_adj)
 
-  # backward evaluation (branch objective + envelope marginals; the discrete
-  # selection itself is constructed in `policy`).
+  # backward evaluation (branch-conditional values Q[j] and their marginals;
+  # NO max — the discrete selection is constructed in `policy`). The decision
+  # perch tag `[-]` carries the branch index (a perch tag is required before a
+  # branch index in dolang; `Q[-][keep]` is "Q at the decision perch, branch
+  # keep", the dolang-parseable spelling of doc 09 §4.1's `Q[keep]`).
   cntn_to_dcsn:
     value: |
-      V = max_{d}(V[>][keep], V[>][adjust])
+      Q[-][keep]   = V[>][keep]
+      Q[-][adjust] = V[>][adjust]
     marginal: |
-      d_{a}V = d * R * d_{w_adj}V[>] + (1 - d) * R * d_{w_kp}V[>]
-      d_{h}V = d * R_H * (1 - delta) * d_{w_adj}V[>] + (1 - d) * (1 - delta) * d_{h_kp}V[>]
+      d_{a}Q[-][keep]   = R * d_{w_kp}V[>]
+      d_{a}Q[-][adjust] = R * d_{w_adj}V[>]
+      d_{h}Q[-][keep]   = (1 - delta) * d_{h_kp}V[>]
+      d_{h}Q[-][adjust] = R_H * (1 - delta) * d_{w_adj}V[>]
 
   dcsn_to_arvl:
     value: |
@@ -86,7 +101,13 @@ equations:
       d_{a}V[<] = E_{z}(d_{a}V)
       d_{h}V[<] = E_{z}(d_{h}V)
 
-  # policy construction (the branching aggregator / discrete choice: method !max)
+  # policy construction (discrete choice: method !max). `argmax` returns the
+  # CHOICE j; `evaluate` reads the value and marginals at that choice. The
+  # unconditional V = Q[j] = max_j Q[j] is the derived `max`.
   policy:
     argmax: |
-      d = max_{d}(V[>][keep], V[>][adjust])
+      j = argmax_{j}(Q[-][j])
+    evaluate: |
+      V = Q[-][j]
+      d_{a}V = d_{a}Q[-][j]
+      d_{h}V = d_{h}Q[-][j]

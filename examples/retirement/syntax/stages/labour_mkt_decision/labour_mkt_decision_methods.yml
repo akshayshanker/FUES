@@ -3,18 +3,14 @@ stage: WorkerDecision
 # Operator-slot methodization (spec 0.1d.1) under the kernel/policy schema
 # (spec 0.3). Branching stage (agent control): the discrete-choice selection
 # attaches to the `policy` node; the backward evaluation block `cntn_to_dcsn`
-# carries the max-aggregator over the branch values.
+# carries the branch-conditional values Q[j] (no max), and `policy` does the
+# argmax over j and evaluates V = Q[j].
 #
-# The `upper_env` entry carries no algorithmic role here (the branching horse
-# `make_labour_mkt_decision` consumes no upper-envelope method); it is retained
-# so the `$method_switch` slot — which fans out across every stage's `upper_env`
-# node (see solve.METHOD_SHORTCUT) — merges onto a pre-existing entry rather
-# than appending a stray one.
+# No `upper_env` node: this is a pure discrete-choice (max) stage with no
+# upper-envelope operator. The upper-envelope refinement lives one stage below,
+# on `work_cons`. Accordingly this stage does NOT take the `$method_switch` slot
+# (see spec_factory.yaml).
 methods:
-  # branching aggregator (discrete-choice selection) -> policy node
+  # discrete-choice selection (argmax over branches) -> policy node
   - on: policy
     method: !max
-
-  # upper envelope -> upper_env node (inert here; absorbs the method_switch merge)
-  - on: upper_env
-    method: !FUES

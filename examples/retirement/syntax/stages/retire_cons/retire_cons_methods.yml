@@ -3,8 +3,13 @@ stage: RetireeConsumption
 # Operator-slot methodization (spec 0.1d.1) under the kernel/policy schema
 # (spec 0.3): EGM policy construction on `policy`; the value-representation
 # (interpolation) on the evaluation block's `evaluate` (the Cartesian arrival
-# cash-on-hand grid); and the upper envelope on `upper_env` (feeds `evaluate`).
-# The `$method_switch` slot (spec_factory.yaml) merges onto `upper_env`.
+# cash-on-hand grid).
+#
+# No `upper_env` node: the retiree consumption stage is a smooth, globally
+# concave EGM problem (no discrete kink), so it has no upper-envelope operator.
+# Only `work_cons` carries an upper-envelope operator (it sits below the
+# work/retire branch). Accordingly this stage does NOT take the `$method_switch`
+# slot (see spec_factory.yaml).
 methods:
   # policy construction (EGM) — the box tag claims the policy interior
   - on: policy
@@ -18,9 +23,3 @@ methods:
     settings:
       orders: [n_a_ret]
       bounds: [[a_ret_min, a_ret_max]]
-
-  # upper envelope -> upper_env node (feeds evaluate; method !FUES)
-  - on: upper_env
-    method: !FUES
-    settings:
-      m_bar: m_bar

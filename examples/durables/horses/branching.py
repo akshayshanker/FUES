@@ -1,7 +1,10 @@
-"""Tenure stage: transitions + eval + max + chain rule.
+"""Tenure stage: transitions + branch-conditional eval + argmax/evaluate.
 
-dcsn_mover: interpolate keeper/adjuster at transition
-            points, max over branches, chain rule.
+dcsn_mover: interpolate keeper/adjuster at transition points to form the
+            branch-conditional values Q[keep], Q[adjust] and their marginals,
+            then select the branch (argmax over j) and evaluate V = Q[j],
+            dV = dQ[j] (the derived max). Mirrors the cntn_to_dcsn + policy
+            blocks of tenure.yaml under the kernel/policy schema.
 arvl_mover: E_z conditioning.
 """
 
@@ -112,7 +115,11 @@ def _tenure_dcsn_kernel(
                     Ev_raw,
                 )
 
+                # policy.argmax: j = argmax_{j'}(Q[j']) over {keep, adjust},
+                # encoded as the indicator adj = 1{adjust selected}. Here
+                # Q[keep] = v_k, Q[adjust] = v_a.
                 adj = 1.0 if v_a >= v_k else 0.0
+                # policy.evaluate: V = Q[j] (the derived max_j Q[j]).
                 V_out[iz, ia, ih] = adj * v_a + (1.0 - adj) * v_k
                 adj_out[iz, ia, ih] = adj
 
@@ -214,12 +221,15 @@ def make_tenure_ops(callables, grids, stage,
                    Akeeper, Ckeeper, Vkeeper,
                    dVw_keeper, phi_keeper,
                    Aadj, Cadj, Hadj, Vadj, dVw_adj):
-        """Tenure cntn_to_dcsn: transitions + eval + max.
+        """Tenure cntn_to_dcsn + policy: transitions + branch eval + select.
 
         Receives raw keeper (on asset grid per h slice)
         and adjuster (on wealth grid per z) outputs.
         Computes branch transitions, interpolates at
-        transition points, takes max, chain rule.
+        transition points to form the branch-conditional
+        values Q[keep], Q[adjust] and their marginals
+        (cntn_to_dcsn), then argmax-selects the branch and
+        evaluates V = Q[j], dV = dQ[j] (policy).
         """
         z_vals = np.asarray(grids["z"], dtype=np.float64)
         a_grid = np.asarray(grids["a"], dtype=np.float64)
