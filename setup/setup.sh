@@ -115,11 +115,16 @@ if [[ "$UPDATE" -eq 1 ]]; then
     echo "[setup] Force-reinstalling kikku"
     pip install --force-reinstall --no-deps \
         "kikku[estimation] @ git+https://github.com/bright-forest/kikku.git" --quiet
+    echo "[setup] Force-reinstalling dolang + dolo from bellman-ddsl monorepo @ cat-impl"
+    pip install --force-reinstall --no-deps \
+        "dolang @ git+https://github.com/bright-forest/bellman-ddsl.git@cat-impl#subdirectory=packages/dolang" \
+        "dolo @ git+https://github.com/bright-forest/bellman-ddsl.git@cat-impl#subdirectory=packages/dolo" --quiet
     echo "[setup] Verifying critical imports"
     python3 -c "from HARK.interpolation import LinearInterp; print('  OK: HARK')"
     python3 -c "import consav; print('  OK: consav')"
     python3 -c "from dcsmm.fues import FUES; print('  OK: dcsmm.fues')"
     python3 -c "from kikku.run.sweep import sweep; print('  OK: kikku.run.sweep')"
+    python3 -c "from dolo.compiler.methodization import _normalize_methods; print('  OK: dolo._normalize_methods')"
 fi
 
 # ---- Runtime environment ------------------------------------------------
