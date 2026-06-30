@@ -4,7 +4,7 @@
 #PBS -N hm_lgNEGM
 #PBS -l ncpus=192
 #PBS -l mem=5000GB
-#PBS -l walltime=5:00:00
+#PBS -l walltime=2:00:00
 #PBS -l jobfs=400GB
 #PBS -l storage=scratch/tp66+gdata/tp66
 #PBS -l wd
