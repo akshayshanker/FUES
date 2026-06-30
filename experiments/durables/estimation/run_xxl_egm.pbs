@@ -1,0 +1,133 @@
+#!/bin/bash
+#PBS -P tp66
+#PBS -q normalsr
+#PBS -N est_xxlEGM
+#PBS -l ncpus=4160
+#PBS -l mem=19200GB
+#PBS -l walltime=5:00:00
+#PBS -l jobfs=1600GB
+#PBS -l storage=scratch/tp66+gdata/tp66
+#PBS -l wd
+#PBS -o /g/data/tp66/logs/durables/
+#PBS -e /g/data/tp66/logs/durables/
+
+# ---------------------------------------------------------------
+# XXL EGM (FUES, 2x xlarge cores) : 600-grid, 4160 samples (= n_samples), 40 normalsr nodes
+# Estimated cost: 2.0 SU x 4160 cores x 5h = 41600 SU max
+# Runs CE-SMM in ITERS_PER_RESTART-iter checkpointed segments until the
+# optimiser converges/errors OR the 5h walltime is exhausted (as many
+# iterations as possible). Process restarted each segment to release RSS.
+# ---------------------------------------------------------------
+
+MOD="mod/separable"
+SPEC="baseline_xlarge_egm.yaml"
+SPEC_FACTORY="spec_factory.yaml"
+METHODS=""
+GRID=600
+N_SIM=10000
+
+module purge
+module load python3/3.12.1
+module load openmpi/4.1.5
+
+if [ -f "$PBS_O_WORKDIR/pyproject.toml" ]; then
+    REPO_ROOT="$PBS_O_WORKDIR"
+elif [ -f "$PBS_O_WORKDIR/../../../pyproject.toml" ]; then
+    REPO_ROOT="$(cd "$PBS_O_WORKDIR/../../.." && pwd)"
+else
+    echo "ERROR: Cannot find repo root" >&2; exit 1
+fi
+cd "$REPO_ROOT"
+echo "  Repo root: $(pwd)"
+
+source "$HOME/venvs/fues/bin/activate"
+
+export OMP_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+export NUMBA_NUM_THREADS=1
+export NUMBA_THREADING_LAYER=workqueue
+export MALLOC_MMAP_THRESHOLD_=65536
+export MALLOC_TRIM_THRESHOLD_=0
+export PYTHONMALLOC=malloc
+export OPENBLAS_NUM_THREADS=1
+export NUMBA_CACHE_DIR=$PBS_JOBFS/numba_cache
+mkdir -p $NUMBA_CACHE_DIR
+find "$HOME/venvs/fues/lib/" -name "*.nbc" -o -name "*.nbi" 2>/dev/null | xargs rm -f 2>/dev/null
+export OMPI_MCA_coll_hcoll_enable=0
+export OMPI_MCA_coll=^hcoll
+export PMIX_MCA_gds=hash
+
+echo "Starting XXL EGM (FUES, 2x xlarge cores) estimation at $(date)"
+echo "  Mod: $MOD | Spec: $SPEC | Factory: $SPEC_FACTORY | Grid: $GRID | Cores: $PBS_NCPUS"
+
+# --- Time-bounded restart loop --------------------------------------------
+ITERS_PER_RESTART=10
+WALL_SECONDS=18000              # must match #PBS -l walltime=5:00:00 (5h)
+SAFETY_BUFFER=600               # reserve 10 min for final checkpoint + log move
+START_TS=$(date +%s)
+DEADLINE=$((START_TS + WALL_SECONDS - SAFETY_BUFFER))
+RUN_ID=$(date +%Y%m%d_%H%M%S)
+
+RESTART_NUM=0
+RESUME_FLAG=""
+EXIT_CODE=0
+LAST_SEG_DUR=0
+
+while : ; do
+    NOW=$(date +%s)
+    REMAINING=$((DEADLINE - NOW))
+    if [ $REMAINING -le 0 ]; then
+        echo "=== Walltime budget exhausted after $RESTART_NUM segments; stopping. ==="
+        break
+    fi
+    if [ $RESTART_NUM -gt 0 ] && [ $REMAINING -lt $LAST_SEG_DUR ]; then
+        echo "=== ${REMAINING}s left < last segment ${LAST_SEG_DUR}s; stopping before walltime kill. ==="
+        break
+    fi
+    RESTART_NUM=$((RESTART_NUM + 1))
+    echo ""
+    echo "=== Restart segment $RESTART_NUM at $(date) (${REMAINING}s of budget left) ==="
+    SEG_START=$(date +%s)
+
+    mpiexec -n $PBS_NCPUS \
+        --map-by ppr:13:numa \
+        python3 -u -m mpi4py -m examples.durables.estimate \
+            --mod "$MOD" \
+            --spec "$SPEC" \
+            --spec-factory "$SPEC_FACTORY" \
+            --scratch /scratch/tp66/$USER/durables_est \
+            --results /g/data/tp66/results/durables/estimation \
+            --settings-override n_a=$GRID n_h=$GRID n_w=$GRID \
+            --params-override t0=20 \
+            --N-sim $N_SIM \
+            --max-iter 100000 \
+            --max-iter-this-run $ITERS_PER_RESTART \
+            --run-id $RUN_ID \
+            $METHODS \
+            $RESUME_FLAG
+
+    EXIT_CODE=$?
+    LAST_SEG_DUR=$(( $(date +%s) - SEG_START ))
+    echo "=== Segment $RESTART_NUM exit code: $EXIT_CODE (took ${LAST_SEG_DUR}s) ==="
+
+    if [ $EXIT_CODE -ne 42 ]; then
+        if [ $EXIT_CODE -ne 0 ]; then
+            echo "ERROR: mpiexec exited with code $EXIT_CODE"
+        else
+            echo "Estimation complete (converged or max-iter reached)."
+        fi
+        break
+    fi
+    RESUME_FLAG="--resume"
+done
+
+echo "Finished at $(date). Total restart segments: $RESTART_NUM"
+
+LOG_DIR=/g/data/tp66/logs/durables/$(date +%Y-%m-%d)
+mkdir -p "$LOG_DIR"
+mv /g/data/tp66/logs/durables/${PBS_JOBNAME}.o${PBS_JOBID%%.*} "$LOG_DIR/" 2>/dev/null
+mv /g/data/tp66/logs/durables/${PBS_JOBNAME}.e${PBS_JOBID%%.*} "$LOG_DIR/" 2>/dev/null
+
+if [ $EXIT_CODE -ne 0 ] && [ $EXIT_CODE -ne 42 ]; then
+    exit $EXIT_CODE
+fi
