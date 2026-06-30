@@ -16,8 +16,9 @@
 # ~104 ranks per estimation point.
 # ---------------------------------------------------------------
 
-MOD="mod/separable_males"
+MOD="mod/separable"
 SPEC="selfgen_sweep_gamma_c_egm.yaml"
+SPEC_FACTORY="spec_factory_males.yaml"   # male calibration overlay (main_males); selfgen self-generates data
 GRID=300
 N_SIM=10000
 
@@ -76,6 +77,7 @@ while [ $RESTART_NUM -lt $MAX_RESTARTS ]; do
         python3 -u -m mpi4py -m examples.durables.estimate \
             --mod "$MOD" \
             --spec "$SPEC" \
+            --spec-factory "$SPEC_FACTORY" \
             --scratch /scratch/tp66/$USER/durables_est \
             --results /g/data/tp66/results/durables/estimation \
             --settings-override n_a=$GRID n_h=$GRID n_w=$GRID \
