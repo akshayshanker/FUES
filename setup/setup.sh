@@ -75,10 +75,10 @@ if [[ ! -d "$VENV_DIR" ]]; then
     echo "[setup] Installing dcsmm[examples] (editable)"
     pip install -e ".[examples]" --quiet
 
-    echo "[setup] Installing bright-forest dolo fork @ phase1.1_0.1"
+    echo "[setup] Installing dolang + dolo from bellman-ddsl monorepo @ cat-impl"
     pip install lark multipledispatch --quiet
-    pip install --no-deps "dolang @ git+https://github.com/bright-forest/dolang.py.git@phase1.1_0.1" --quiet
-    pip install --no-deps "dolo @ git+https://github.com/bright-forest/dolo.git@phase1.1_0.1" --quiet
+    pip install --no-deps "dolang @ git+https://github.com/bright-forest/bellman-ddsl.git@cat-impl#subdirectory=packages/dolang" --quiet
+    pip install --no-deps "dolo @ git+https://github.com/bright-forest/bellman-ddsl.git@cat-impl#subdirectory=packages/dolo" --quiet
 
     if [[ "$IS_GADI" -eq 1 ]]; then
         echo "[setup] Building mpi4py from source against loaded OpenMPI"
