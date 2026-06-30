@@ -75,10 +75,10 @@ if [[ ! -d "$VENV_DIR" ]]; then
     echo "[setup] Installing dcsmm[examples] (editable)"
     pip install -e ".[examples]" --quiet
 
-    echo "[setup] Installing dolang + dolo from bellman-ddsl monorepo @ cat-impl"
+    echo "[setup] Installing dolang + dolo (public bright-forest repos, master)"
     pip install lark multipledispatch --quiet
-    pip install --no-deps "dolang @ git+https://github.com/bright-forest/bellman-ddsl.git@cat-impl#subdirectory=packages/dolang" --quiet
-    pip install --no-deps "dolo @ git+https://github.com/bright-forest/bellman-ddsl.git@cat-impl#subdirectory=packages/dolo" --quiet
+    pip install --no-deps "dolang @ git+https://github.com/bright-forest/dolang.py.git" --quiet
+    pip install --no-deps "dolo @ git+https://github.com/bright-forest/dolo.git" --quiet
 
     if [[ "$IS_GADI" -eq 1 ]]; then
         echo "[setup] Building mpi4py from source against loaded OpenMPI"
@@ -115,10 +115,10 @@ if [[ "$UPDATE" -eq 1 ]]; then
     echo "[setup] Force-reinstalling kikku"
     pip install --force-reinstall --no-deps \
         "kikku[estimation] @ git+https://github.com/bright-forest/kikku.git" --quiet
-    echo "[setup] Force-reinstalling dolang + dolo from bellman-ddsl monorepo @ cat-impl"
+    echo "[setup] Force-reinstalling dolang + dolo (public bright-forest repos, master)"
     pip install --force-reinstall --no-deps \
-        "dolang @ git+https://github.com/bright-forest/bellman-ddsl.git@cat-impl#subdirectory=packages/dolang" \
-        "dolo @ git+https://github.com/bright-forest/bellman-ddsl.git@cat-impl#subdirectory=packages/dolo" --quiet
+        "dolang @ git+https://github.com/bright-forest/dolang.py.git" \
+        "dolo @ git+https://github.com/bright-forest/dolo.git" --quiet
     echo "[setup] Verifying critical imports"
     python3 -c "from HARK.interpolation import LinearInterp; print('  OK: HARK')"
     python3 -c "import consav; print('  OK: consav')"
