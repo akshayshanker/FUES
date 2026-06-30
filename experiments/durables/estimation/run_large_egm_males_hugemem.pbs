@@ -2,8 +2,8 @@
 #PBS -P tp66
 #PBS -q hugemem
 #PBS -N hm_lgEGMm
-#PBS -l ncpus=480
-#PBS -l mem=10000GB
+#PBS -l ncpus=192
+#PBS -l mem=5000GB
 #PBS -l walltime=5:00:00
 #PBS -l jobfs=400GB
 #PBS -l storage=scratch/tp66+gdata/tp66
@@ -12,8 +12,8 @@
 #PBS -e /g/data/tp66/logs/durables/
 
 # ---------------------------------------------------------------
-# LARGE EGM (FUES) MALES : 600-grid, 480 samples (= n_samples), 10 hugemem nodes
-# Estimated cost: 3.0 SU x 480 cores x 5h = 7200 SU max
+# LARGE EGM (FUES) MALES : 600-grid, 192 samples (= n_samples), 4 hugemem nodes
+# Estimated cost: 3.0 SU x 192 cores x 5h = 2880 SU max
 # Runs CE-SMM in ITERS_PER_RESTART-iter checkpointed segments until the
 # optimiser converges/errors OR the 5h walltime is exhausted (as many
 # iterations as possible). Process restarted each segment to release RSS.
