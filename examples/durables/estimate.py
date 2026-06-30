@@ -176,6 +176,7 @@ def _run_single_estimation(
             print("  Data source: selfgen...")
             nest_data, grids_data = solve(
                 str(mod_dir),
+                spec_factory_name=args.spec_factory,
                 draw={
                     "calibration": calib_overrides,
                     "settings": setting_overrides,
@@ -217,6 +218,7 @@ def _run_single_estimation(
         merged_calib = {**calib_overrides, **theta}
         nest, grids = solve(
             str(mod_dir),
+            spec_factory_name=args.spec_factory,
             method_switch=solver_method,
             draw={
                 "calibration": merged_calib,
@@ -314,6 +316,8 @@ def _run_single_estimation(
 
     if args.max_iter_this_run is not None:
         method_options['max_iter_this_run'] = args.max_iter_this_run
+    if getattr(args, 'max_iter', None) is not None:
+        method_options['max_iter'] = args.max_iter
 
     # --- Estimate ---
     result = estimate(
@@ -468,6 +472,12 @@ def main():
         '--spec', type=str, default='baseline.yaml',
         help='Estimation spec YAML, relative to mod/estimation/ (default: baseline.yaml)')
     parser.add_argument(
+        '--spec-factory', type=str, default='spec_factory.yaml',
+        dest='spec_factory',
+        help='spec_factory YAML in the mod dir that selects the calibration chain '
+             '(default: spec_factory.yaml = female baseline; pass '
+             'spec_factory_males.yaml for the male calibration overlay).')
+    parser.add_argument(
         '--scratch', type=str, default=None,
         help='Scratch dir for intermediate outputs (overrides YAML)')
     parser.add_argument(
@@ -506,6 +516,11 @@ def main():
         dest='max_iter_this_run',
         help='Max CE iterations for this restart segment. '
              'Exits with code 42 when exhausted (not converged).')
+    parser.add_argument(
+        '--max-iter', type=int, default=None,
+        dest='max_iter',
+        help='Override the spec global max CE iterations. Set high (e.g. 100000) '
+             'so the PBS time-bounded restart loop lets walltime bind.')
     parser.add_argument(
         '--run-id', type=str, default=None,
         help='Explicit run ID (timestamp). Used by PBS restart loop to '

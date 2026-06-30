@@ -1,11 +1,5 @@
-# Estimation spec for durables
-#
-# Estimates 4 behavioral parameters against moments the model can produce.
-# Uses identity weighting (Phase A).
-#
-# Two data modes:
-#   data_source: selfgen    -> generate "data" by simulating at theta_true (recovery test)
-#   data_source: precomputed -> load from moments.csv (Eggsandbaskets format)
+# Estimation spec: LARGE EGM (FUES)   -- MALES: male calibration overlay (spec_factory_males.yaml) + male moment targets
+# 1000-grid, 1040 samples (10 normalsr nodes), FUES adjuster (default method)
 
 estimation:
   free:
@@ -19,15 +13,13 @@ estimation:
       bounds: [1.2, 6.0]
     tau:
       bounds: [0.04, 0.25]
-    theta:
-      bounds: [0.5, 3.0]        # terminal-value weight (calibrated 1.3498)
 
   method: cross-entropy
   method_options:
-    n_samples: 520
+    n_samples: 1040
     n_elite: 20
     max_iter: 200
-    tol: 1e-9
+    tol: 1e-6
     sampling_seed: 42           # RNG for CE parameter draws (which thetas to try)
     simulation_seed: 99         # RNG for model simulation shocks (CRN — same for all thetas)
     noise_fraction: 0.10        # 10% uniform draws for exploration
@@ -123,44 +115,44 @@ moments:
   # The _14_1 suffix in the CSV encodes pension/cohort conditions
   # that don't exist in durables — we pick one column per moment type.
   # --- Way 2: Explicit targets matching Eggsandbaskets CSV columns ---
-  # Suffix _0 = females, _14 = wave 14 cohort.
+  # Suffix _1 = males, _14 = wave 14 cohort.
   # Mapping: wealth_real = h (housing), fin_assets = a (financial)
   targets:
     # --- Means ---
-    - key: av_consumption2_14_0
+    - key: av_consumption2_14_1
       stat: mean
       var: c
-    - key: av_wealth_real_14_0
+    - key: av_wealth_real_14_1
       stat: mean
       var: h                           # wealth_real = housing stock
-    - key: av_a_tot_14_0
+    - key: av_a_tot_14_1
       stat: mean
       var: a                           # fin_assets = financial assets
 
     # --- Standard deviations ---
-    - key: sd_consumption2_14_0
+    - key: sd_consumption2_14_1
       stat: sd
       var: c
-    - key: sd_wealth_real_14_0
+    - key: sd_wealth_real_14_1
       stat: sd
       var: h
-    - key: sd_a_tot_14_0
+    - key: sd_a_tot_14_1
       stat: sd
       var: a
 
     # --- Correlations ---
-    - key: corr_cons_realw_14_0
+    - key: corr_cons_realw_14_1
       stat: corr
       vars: [c, h]                     # consumption vs housing (= real wealth)
 
     # --- Autocorrelations ---
-    - key: autocorr_wealth_real_0
+    - key: autocorr_wealth_real_1
       stat: autocorr
       var: h                           # housing persistence
-    - key: autocorr_wealth_fin_0
+    - key: autocorr_wealth_fin_1
       stat: autocorr
       var: a                           # financial wealth persistence
-    - key: autocorr_consumption_0
+    - key: autocorr_consumption_1
       stat: autocorr
       var: c
 
