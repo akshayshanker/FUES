@@ -59,7 +59,7 @@ export PMIX_MCA_gds=hash
 echo "Starting SELFGEN SWEEP gamma_c MALES (EGM) at $(date)"
 echo "  Mod: $MOD | Spec: $SPEC | Grid: $GRID | Nodes: $((PBS_NCPUS/104)) | Cores: $PBS_NCPUS"
 
-ITERS_PER_RESTART=10
+ITERS_PER_RESTART=3
 MAX_RESTARTS=20
 RUN_ID=$(date +%Y%m%d_%H%M%S)
 

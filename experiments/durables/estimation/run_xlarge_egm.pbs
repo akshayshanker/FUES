@@ -59,7 +59,7 @@ export PMIX_MCA_gds=hash
 echo "Starting XLARGE EGM estimation at $(date)"
 echo "  Mod: $MOD | Spec: $SPEC | Grid: $GRID | Nodes: $((PBS_NCPUS/104)) | Cores: $PBS_NCPUS"
 
-ITERS_PER_RESTART=10
+ITERS_PER_RESTART=3
 WALL_SECONDS=18000              # must match #PBS -l walltime=5:00:00 (5h)
 SAFETY_BUFFER=600               # reserve 10 min for final checkpoint + log move
 START_TS=$(date +%s)

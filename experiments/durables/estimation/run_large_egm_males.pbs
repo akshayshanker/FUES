@@ -61,7 +61,7 @@ echo "Starting LARGE EGM (FUES) MALES estimation at $(date)"
 echo "  Mod: $MOD | Spec: $SPEC | Factory: $SPEC_FACTORY | Grid: $GRID | Cores: $PBS_NCPUS"
 
 # --- Time-bounded restart loop --------------------------------------------
-ITERS_PER_RESTART=10
+ITERS_PER_RESTART=3
 WALL_SECONDS=18000              # must match #PBS -l walltime=5:00:00 (5h)
 SAFETY_BUFFER=600               # reserve 10 min for final checkpoint + log move
 START_TS=$(date +%s)
