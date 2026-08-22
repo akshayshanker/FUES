@@ -2,6 +2,30 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.6.0dev7 — 2026-08-22 — Replication-ready restructure
+
+Layout renames for the public tree: `examples/durables/mod/` → `syntax/`,
+`horses/` → `solvers/`, `examples/*/outputs/` → `postprocess/`,
+`experiments/` → `benchmarks/`, `replication/` → `paper-results/`,
+`run_pbs.sh` → `scripts/`. Standard example layout documented in
+`examples/README.md` with a copyable `_template/`.
+
+Dependencies: kikku pinned at `bright-forest/kikku` v0.2.0 (RunSpec v4
+slot CLI: axis/bundle `--slot-range`, deep-path `--slot-override`);
+dolang/dolo pinned by commit and installed `--no-deps`; `EconModel`
+added to core deps (ConSav 0.12 imports it undeclared).
+
+Documentation verified by execution: every install and run command in
+README, quickstart, running-locally, and installation passes in fresh
+virtual environments; API pages corrected against live signatures; docs
+site restyled (IBM Plex, near-black header, AA-verified palette); docs
+notebooks are symlinks into `examples/`; added
+`readme-if-you-are-an-ai.md` at the repo root.
+
+Fixes: retirement empty-label and partial-method-sweep code paths;
+`test_kikku` tag-tolerant YAML loading; durables notebooks no longer
+store progress-bar output; nothing under `AI/` is tracked.
+
 ## 0.6.0dev6 — 2026-04-26 — RunSpec v3 (slot semantics, BREAKING)
 
 Implements `kikku-runspec-v3`. CLI is slot-keyed only (`--slot-override`, `--slot-spec`, `--slot-range`, `--compare`); the v2 three-tier kikku flags are removed. `TestSpec` is `{slots, label}`; FUES `solve` / `solve_nest` accept `**t.slots` and `expand_method_shortcut` in each example `solve.py`. Estimation and `housing_renting/` unchanged.

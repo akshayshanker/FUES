@@ -5,7 +5,7 @@ hide:
 
 # FUES: Fast Upper Envelope Scan
 
-!!! warning "Pre-release (v0.6.0)"
+!!! warning "Pre-release (v0.6.0dev7)"
     Under active development. The API and documentation may change.
 
 Paper: Dobrescu, L.I. and Shanker, A. (2022, revised 2026). "A fast upper envelope scan method for discrete–continuous dynamic programming." [SSRN 4181302](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=4181302).

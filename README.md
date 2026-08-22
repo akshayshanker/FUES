@@ -18,7 +18,7 @@ FUES recovers the upper envelope of the EGM ([Carroll 2006](https://doi.org/10.1
 
 This repo ships a unified upper-envelope interface (`uenvelope`) that dispatches to FUES and three benchmark methods: MSS ([Iskhakov et al. 2017](https://doi.org/10.3982/QE643)), LTM ([Druedahl & Jørgensen 2017](https://doi.org/10.1016/j.jedc.2016.11.005)), and RFC ([Dobrescu & Shanker 2024](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=4850746)).
 
-> **Pre-release (v0.6.0)** — Under active research development. API may change.
+> **Pre-release (v0.6.0dev7)** — Under active research development. API may change.
 >
 > Dobrescu, L.I. and Shanker, A. (2022). "A fast upper envelope scan method for discrete-continuous dynamic programming." [SSRN Working Paper.](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=4181302)
 

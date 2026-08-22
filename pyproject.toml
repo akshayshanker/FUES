@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dcsmm"
-version = "0.6.0"
+version = "0.6.0dev7"
 description = "Fast Upper Envelope Scan (Dobrescu & Shanker, 2022)."
 readme = "README.md"
 requires-python = ">=3.11"
