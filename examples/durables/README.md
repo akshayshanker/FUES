@@ -9,9 +9,10 @@ Euler equations). The discrete keep/adjust choice makes the problem
 non-concave; the adjuster stage refines the raw endogenous-grid output
 with FUES (NEGM is available as a benchmark).
 
-Two parameterisations live under `syntax/`: `separable` (baseline) and
-`cobb_douglas`, each a complete registry with its own `callables.py`.
-`estimate.py` drives the simulated-moments estimation on the cluster.
+Two specifications are under `syntax/`: `separable` (baseline) and
+`cobb_douglas`. Each model spec. has its own own `callables.py`.
+
+`estimate.py` is the entry point for the simulated-moments estimation on a pbs cluster.
 
 Run a single solve from the repo root:
 
