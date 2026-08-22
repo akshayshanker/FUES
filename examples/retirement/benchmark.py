@@ -26,7 +26,7 @@ if _REPO_ROOT not in sys.path:
 
 from pathlib import Path  # noqa: E402
 
-from .outputs import (  # noqa: E402
+from .postprocess import (  # noqa: E402
     generate_accuracy_table,
     generate_timing_table_combined,
     get_policy,

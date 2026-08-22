@@ -77,7 +77,7 @@ def plot_pbs_scaling(path, ax=None):
     matplotlib.figure.Figure
     """
     import matplotlib.pyplot as plt
-    from examples.retirement.outputs.plots import (
+    from examples.retirement.postprocess.plots import (
         _method_colors, _METHOD_MARKERS, _METHOD_LABELS, _style_nb_ax,
     )
 

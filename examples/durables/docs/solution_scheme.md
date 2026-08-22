@@ -42,7 +42,8 @@ derivative keys sort together.
 
 ## Grids, exogenous, and solver data
 
-Created once by `make_grids(cp)` and shared across all periods.
+The grid dict is created once by `make_grids(calibration, settings)`
+and shared across all periods.
 
 ```python
 grids = {
@@ -52,17 +53,17 @@ grids = {
     'we':         ndarray,   # total wealth (n_w,)
     'z':          ndarray,   # exogenous shock values (n_z,)
     'Pi':         ndarray,   # Markov transition matrix (n_z, n_z)
-    'X_all':      ndarray,   # state-space index tuples (n_states, 3)
-    'UGgrid_all': tuple,     # UCGrid tuple for 2D interpolation on (a, h)
+    'UGgrid_all': tuple,     # UCGrid tuple, kept for backward compat
+                             # (NOT used for interpolation)
 }
 ```
 
-Endogenous arrays (e.g. `m_endog`) are solver output and live in
-the per-period solution dict, not in `grids`.
+Endogenous arrays (e.g. `m_endog`) are solver output and are stored
+in the per-period solution dict, not in `grids`.
 
 ### Which grid do dcsn quantities live on?
 
-Depends on the stage and the EGM scheme:
+The grid depends on the stage and on the EGM scheme:
 
 | Stage | dcsn grid | Why |
 |---|---|---|
@@ -72,8 +73,9 @@ Depends on the stage and the EGM scheme:
 
 ## Working value bundle
 
-Flat dict passed between operators during the backward solve.
-Carries value + marginal values at a single perch.
+The working value bundle is a flat dict passed between operators
+during the backward solve. It carries the value and the marginal
+values at a single perch.
 
 ```python
 vlu_cntn = {
@@ -85,10 +87,10 @@ vlu_cntn = {
 
 These keys use **tenure-state variable names** (`a`, `h`) because
 the working bundle flows from tenure's arrival perch. Consuming
-stages (keeper, adjuster) interpret `d_aV` as their `∂V[>]/∂a_nxt`
-— the conceptual rename is implicit. When `store_cntn=True`, the
-stored solution renames to poststate symbols (`d_a_nxtV`,
-`d_h_nxtV`) for clarity.
+stages (keeper, adjuster) interpret `d_aV` as their `∂V[>]/∂a_nxt`;
+the rename is conceptual, and no dict key changes. When
+`store_cntn=True`, the stored solution renames to poststate
+symbols (`d_a_nxtV`, `d_h_nxtV`) for clarity.
 
 ## What gets stored
 
@@ -102,13 +104,15 @@ The solution stores only:
 - **Endogenous grids** (`m_endog`) — when EGM creates a non-uniform
   grid not in `grids`
 - **Timing** (`solve_time`, `keeper_ms`, `adj_ms`, `discrete_ms`)
+- **Callables** (`callables`) — a reference to the shared per-period
+  callables dict (needed by simulation)
 
 Poststates like `a_nxt` are the exogenous grid for EGM and are
 not stored.
 
 ## Stored solution (per period)
 
-Three-level dict: **stage → perch → quantity**.
+The stored solution is a three-level dict: **stage → perch → quantity**.
 
 The `store_cntn` flag (from `settings.yaml`) controls whether
 continuation-perch data is stored. When `False` (default), only
@@ -123,8 +127,8 @@ sol_h = {
     'keeper_cons': {
         'dcsn': {
             'V':    ndarray,       # (n_z, n_a, n_h) value on asset grid
-            'd_wV': ndarray,       # (n_z, n_a, n_h) ∂V/∂w_keep = d_c u(c)
-            'd_hV': ndarray,       # (n_z, n_a, n_h) ∂V/∂h_keep (= phi_keep)
+            'd_wV': ndarray,       # (n_z, n_a, n_h) ∂V/∂w_kp = d_c u(c)
+            'd_hV': ndarray,       # (n_z, n_a, n_h) ∂V/∂h_kp (= phi_keep)
             'c':    ndarray,       # (n_z, n_a, n_h) consumption
         },
         # cntn: present only when store_cntn=True
@@ -132,6 +136,8 @@ sol_h = {
             'V':        ndarray,               # (n_z, n_a, n_h) continuation value
             'd_a_nxtV': ndarray,               # (n_z, n_a, n_h) renamed from d_aV
             'd_h_nxtV': ndarray,               # (n_z, n_a, n_h) renamed from d_hV
+            # c, m_endog: generic keeper path only (the FUES fast path
+            # stores no per-slice EGM diagnostics)
             'c':        dict[(iz,ih), ndarray], # FUES-refined c per (z,h) slice
             'm_endog':  dict[(iz,ih), ndarray], # FUES-refined endogenous grid
         },
@@ -148,6 +154,7 @@ sol_h = {
         'cntn': {
             'c':          ndarray,   # (n_z, n_he, egm_n) raw EGM consumption
             'm_endog':    ndarray,   # (n_z, n_he, egm_n) raw endogenous wealth
+            'v_endog':    ndarray,   # (n_z, n_he, egm_n) raw EGM value
             'a_nxt_eval': ndarray,   # (n_z, n_he, egm_n) poststate a at EGM points
             'h_nxt_eval': ndarray,   # (n_z, n_he, egm_n) poststate h at EGM points
             '_refined':   dict,      # per-z FUES-refined arrays (see below)
@@ -172,13 +179,15 @@ sol_h = {
     'keeper_ms':    float,     # keeper stage time (ms)
     'adj_ms':       float,     # adjuster stage time (ms)
     'discrete_ms':  float,     # tenure branching time (ms)
+    'callables':    dict,      # per-period callables (shared object,
+                               # age-invariant across periods)
 }
 ```
 
 ### Notes on specific fields
 
 **`keeper_cons.dcsn.d_hV`** is the composite housing marginal
-`phi_keep = d_h u(h_keep) + beta · ∂V[>]/∂h_nxt`. It combines the
+`phi_keep = d_h u(h_kp) + beta · ∂V[>]/∂h_nxt`. It combines the
 within-period marginal utility of housing with the discounted
 shadow value of housing carried forward. In the code this variable
 is named `phi_keep`.
@@ -186,7 +195,10 @@ is named `phi_keep`.
 **`keeper_cons.cntn.c` and `m_endog`** are tuple-keyed dicts
 `{(iz, ih): ndarray}`, one 1D array per (z, h) slice. This is
 because the keeper EGM + FUES operates per-slice; the arrays have
-variable length after FUES pruning.
+variable length after FUES pruning. They are produced only by the
+generic keeper path (`EGM_UE` dispatch); the FUES fast path returns
+no per-slice EGM diagnostics, so `cntn` then holds only `V`,
+`d_a_nxtV`, `d_h_nxtV`.
 
 **`adjuster_cons.cntn._refined`** is a solver-diagnostic dict keyed
 by shock index `iz`. Each entry contains post-FUES arrays:
@@ -194,8 +206,8 @@ by shock index `iz`. Each entry contains post-FUES arrays:
 
 **`dcsn_derived`** (planned, not yet implemented): tenure would
 assemble branch-selected policies (`c`, `h` from the chosen branch)
-into a `dcsn_derived` sub-dict. Currently not produced by the
-backward solve.
+into a `dcsn_derived` sub-dict. The backward solve does not
+currently produce it.
 
 ## Naming rules
 
@@ -223,7 +235,7 @@ Each stage uses its own YAML variable names:
 | tenure | `d_{a}V[<]` | `'d_aV'` | arvl |
 | tenure | `d_{h}V[<]` | `'d_hV'` | arvl |
 
-Rule: `d_{x}V` → `d_xV`. Drop braces, keep prefix.
+The rule is `d_{x}V` → `d_xV`: drop the braces and keep the prefix.
 
 **Working bundle vs stored**: the working bundle uses `d_aV`/`d_hV`
 (tenure-state names). When stored at keeper's `cntn` perch, these
@@ -236,21 +248,21 @@ are renamed to `d_a_nxtV`/`d_h_nxtV` (poststate names) for clarity.
 | keeper_cons | `c` | `'c'` | dcsn |
 | adjuster_cons | `c` | `'c'` | dcsn |
 | adjuster_cons | `h_choice` | `'h_choice'` | dcsn |
-| tenure | `adj` | `'adj'` | dcsn |
+| tenure | `j` (branch choice) | `'adj'` (indicator 1{adjust}) | dcsn |
 
 ### Poststates (NOT stored — they are the grid)
 
 | Stage | YAML name | Grid |
 |---|---|---|
 | keeper_cons | `a_nxt` | `grids['a']` |
-| keeper_cons | `h_nxt` | `grids['h']` (= h_keep, pass-through) |
+| keeper_cons | `h_nxt` | `grids['h']` (= h_kp, pass-through) |
 | adjuster_cons | `a_nxt` | `grids['a']` |
 | adjuster_cons | `h_nxt` | `grids['h_choice']` (= h_choice) |
 
 ### Evaluation domain convention
 
 Every solver stores at `cntn` the **evaluation domain** on which
-its raw outputs are defined. The test:
+its raw outputs are defined. The test is:
 
 > *Can the domain be recovered from `grids` alone?*
 > If yes → omit. If no → store.
@@ -275,11 +287,11 @@ This is the solver-constructed submanifold of `grids['a']` ×
 
 ## Mover I/O contracts
 
-### keeper_cons.cntn_to_dcsn_mover
+### keeper_cons.cntn_to_dcsn
 
-Inverts the Euler equation on the continuation grid, constructs
-the endogenous cash-on-hand grid, applies the FUES upper envelope,
-and interpolates to the scheme grid.
+This mover inverts the Euler equation on the continuation grid,
+constructs the endogenous cash-on-hand grid, applies the FUES upper
+envelope, and interpolates to the scheme grid.
 
 ```
 INPUT:  vlu_cntn = {V, d_aV, d_hV}     shape (n_z, n_a, n_h)
@@ -287,16 +299,16 @@ OUTPUT: (A_keep, C_keep, V_keep, dVw_keep, phi_keep, cntn_data)
         → stored as dcsn: {V, d_wV, d_hV, c}
 ```
 
-Keeper does not have a separate `dcsn_to_arvl_mover` — the YAML
-defines it as identity (pass-through). The keeper's dcsn arrays
-are passed directly to the tenure branching mover.
+The keeper stage has no separate `dcsn_to_arvl` operator in the
+code — the YAML defines it as identity (pass-through). The keeper's
+dcsn arrays are passed directly to the tenure branching mover.
 
-### adjuster_cons.cntn_to_dcsn_mover
+### adjuster_cons.cntn_to_dcsn
 
-Solves the dual InvEuler (consumption and housing FOCs
-simultaneously), root-finds along the housing Euler residual for
-each h_choice grid point, constructs a 1D endogenous wealth grid,
-applies FUES, and interpolates to the wealth grid.
+This mover solves the dual InvEuler (the consumption and housing
+FOCs simultaneously), root-finds along the housing Euler residual
+for each h_choice grid point, constructs a 1D endogenous wealth
+grid, applies FUES, and interpolates to the wealth grid.
 
 ```
 INPUT:  vlu_cntn = {V, d_aV, d_hV}     shape (n_z, n_a, n_h)
@@ -304,29 +316,30 @@ OUTPUT: (A_adj, C_adj, H_adj, V_adj, dVw_adj, cntn_data)
         → stored as dcsn: {V, d_wV, c, h_choice}
 ```
 
-Like keeper, the adjuster's `dcsn_to_arvl_mover` is identity
-and implicit in the code.
+As with the keeper, the adjuster's `dcsn_to_arvl` is the identity
+and is implicit in the code.
 
-### tenure.cntn_to_dcsn_mover (branching)
+### tenure.cntn_to_dcsn (branching)
 
-Computes branch transitions (keep: w_keep = R·a + y(z),
-h_keep = (1−δ)·h; adjust: w_adj = R·a + R_H·(1−δ)·h + y(z)),
-evaluates keeper and adjuster values at transition points by
+This mover computes the branch transitions (keep: w_kp = R·a + y(z),
+h_kp = (1−δ)·h; adjust: w_adj = R·a + R_H·(1−δ)·h + y(z)),
+evaluates keeper and adjuster values at the transition points by
 interpolation, takes the pointwise max, and applies the
 MarginalBellman chain rule.
 
 ```
-INPUT:  vlu_cntn, grids,
+INPUT:  vlu_cntn, grids, age,
         keeper arrays  (A_keep, C_keep, V_keep, dVw_keep, phi_keep),
         adjuster arrays (A_adj, C_adj, H_adj, V_adj, dVw_adj)
 OUTPUT: ({V, d_aV, d_hV}, {adj})
         → stored as dcsn: {V, d_aV, d_hV, adj}
 ```
 
-### tenure.dcsn_to_arvl_mover (E_z)
+### tenure.dcsn_to_arvl (E_z)
 
-Conditions on the current shock z by computing expectations over
-tomorrow's shock z' using the Markov transition matrix Pi.
+This mover conditions on the current shock z by computing
+expectations over tomorrow's shock z' using the Markov transition
+matrix Pi.
 
 ```
 INPUT:  {V, d_aV, d_hV}            shape (n_z, n_a, n_h)
@@ -339,11 +352,11 @@ OUTPUT: {V, d_aV, d_hV}            shape (n_z, n_a, n_h)
 EGM inverts the Euler equation on the continuation grid. The raw
 outputs are **continuation-measurable** and belong in `cntn`.
 
-`c[>]` denotes "an endogenous-grid representation of the policy,
-not a semantic claim that the decision is chosen at cntn."
+The notation `c[>]` denotes an endogenous-grid representation of
+the policy; it does not claim that the decision is chosen at `cntn`.
 
 ```
-cntn_to_dcsn_mover (EGM + FUES)
+cntn_to_dcsn (EGM + FUES)
 ├── INPUT:  d_aV[>] at cntn       ← continuation marginal
 ├── STEP 1: InvEuler → ĉ(a') = c[>]  ← continuation-measurable
 ├── STEP 2: Reverse transition → m̂   ← continuation-measurable
@@ -351,22 +364,23 @@ cntn_to_dcsn_mover (EGM + FUES)
 └── OUTPUT: c*(w), V(w) at dcsn       ← decision-measurable
 ```
 
-In standard 1D EGM (keeper) the exogenous grid is `grids['a']`
-— no need to store it.
+In standard 1D EGM (the keeper), the exogenous grid is `grids['a']`,
+so there is no need to store it.
 
-In partial EGM (adjuster), the exogenous grid is a chosen subset
-of the poststate space. Store the evaluation points in `cntn` as
-`a_nxt_eval`, `h_nxt_eval`.
+In partial EGM (the adjuster), the exogenous grid is a chosen
+subset of the poststate space, so the evaluation points are stored
+in `cntn` as `a_nxt_eval` and `h_nxt_eval`.
 
 ## Inter-period wiring (twister)
 
 The twister maps tenure's `arvl` to the next period's working
 bundle. In this model, the state space `(a, h)` is period-invariant,
-so the twister is a **pure identity pass-through**:
+so the twister is a **pure identity pass-through** — the backward
+loop in `accrete_and_solve` reads the previous period's arrival
+bundle directly:
 
 ```python
-def _apply_twister(prev_sol, twister):
-    return prev_sol['tenure']['arvl']
+vlu_cntn = nest["solutions"][h - 1]["tenure"]["arvl"]
 ```
 
 The working bundle retains tenure-state names (`d_aV`, `d_hV`)
@@ -379,8 +393,7 @@ key rename.
 ```python
 from examples.durables.solve import solve
 
-nest, cp, grids, callables, settings = solve(
-    'examples/durables/syntax')
+nest, grids = solve('examples/durables/syntax/separable')
 
 sol = nest['solutions'][5]
 

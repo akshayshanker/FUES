@@ -20,8 +20,8 @@ from kikku.run import parse_cli, sweep
 from kikku.run.types import RunSpec, TestSpec
 
 from examples._mpi import get_mpi_comm as _get_mpi_comm
-from .horses.simulate import simulate_one
-from .outputs import (
+from .solvers.simulate import simulate_one
+from .postprocess import (
     derive_savings,
     get_timing,
     write_outputs,
@@ -89,7 +89,7 @@ def render_plots(run: RunSpec, nest, grids, result: dict) -> None:
     tau = float(stage0.calibration["tau"])
     savings = derive_savings(nest, grids, tau)
 
-    from .outputs.plots import plot_grids, plot_policies
+    from .postprocess.plots import plot_grids, plot_policies
 
     for age in plot_ages:
         if age not in all_t:
@@ -99,10 +99,10 @@ def render_plots(run: RunSpec, nest, grids, result: dict) -> None:
             plot_grids(nest, grids, output_dir=plots_dir, plot_t=age)
 
     if run.sim is not None and run.sim.plots and "sim_data" in result:
-        from .outputs.plots import plot_lifecycle
+        from .postprocess.plots import plot_lifecycle
 
         # plot_lifecycle wants the consumption-Euler array; re-derive from sim_data.
-        from .horses.simulate import evaluate_euler_c
+        from .solvers.simulate import evaluate_euler_c
 
         euler_c = evaluate_euler_c(result["sim_data"], nest, grids)
         plot_lifecycle(result["sim_data"], euler_c, nest, output_dir=plots_dir)
@@ -165,7 +165,7 @@ def make_metric_fns(with_sim: bool) -> dict:
 def main() -> None:
     run = parse_cli(
         name="durables",
-        base_spec="examples/durables/mod/separable",
+        base_spec="examples/durables/syntax/separable",
         modes=["compare", "sweep", "simulate"],
         output="results/durables",
     )

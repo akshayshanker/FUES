@@ -45,7 +45,7 @@ def create_argument_parser() -> argparse.ArgumentParser:
     p.add_argument("--config-id", default="HR",
                    help="Identifier for config directory (config_HR/{config-id}/)")
     p.add_argument("--experiment-set", default="default",
-                   help="Experiment set name from experiments/housing_renting/experiment_sets/")
+                   help="Experiment set name from benchmarks/housing_renting/experiment_sets/")
     p.add_argument("--RUN-ID", default="",
                    help="Optional run identifier suffix")
     

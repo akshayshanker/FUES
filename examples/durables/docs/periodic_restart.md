@@ -2,34 +2,38 @@
 
 ## Problem
 
-Each CE iteration grows rank RSS by ~70 MB due to transient Python
-object lifetimes overlapping with the next solve's peak (high-water
-mark ratcheting). At 1040 ranks × 70 MB × 30 iters = 2.2 TB growth,
-jobs exceed the PBS memory allocation.
+Each CE iteration increases each rank's resident memory (RSS) by
+roughly 70 MB, because transient Python objects overlap with the
+next solve's peak allocation and ratchet the high-water mark upward.
+At 1040 ranks × 70 MB × 30 iterations = 2.2 TB of growth, jobs
+exceed the PBS memory allocation.
 
 ## Solution
 
 The PBS script runs a bash loop around `mpiexec`. Every K iterations
-(default K=10), Python exits cleanly, the OS reclaims all memory, and
-a new `mpiexec` resumes from the last checkpoint.
+(K=3 in the standard PBS scripts, 25 in the hugemem variants),
+Python exits cleanly, the OS reclaims all memory, and a new
+`mpiexec` resumes from the last checkpoint. The loop is
+time-bounded: it stops before the PBS walltime is exhausted rather
+than after a fixed number of restarts.
 
 ```
 PBS job starts
 │
-├─ Segment 1: mpiexec ... --max-iter-this-run 10 --run-id $RUN_ID
-│   ├─ CE iters 0-9
+├─ Segment 1: mpiexec ... --max-iter-this-run K --run-id $RUN_ID
+│   ├─ CE iters 0..K-1
 │   ├─ Checkpoint saved (state.pkl)
 │   ├─ All ranks exit with code 42
 │   └─ RSS reset to 0
 │
-├─ Segment 2: mpiexec ... --max-iter-this-run 10 --run-id $RUN_ID --resume
-│   ├─ Load state.pkl → resume from iter 10
-│   ├─ CE iters 10-19
+├─ Segment 2: mpiexec ... --max-iter-this-run K --run-id $RUN_ID --resume
+│   ├─ Load state.pkl → resume from iter K
+│   ├─ CE iters K..2K-1
 │   ├─ Checkpoint saved
 │   ├─ All ranks exit with code 42
 │   └─ RSS reset to 0
 │
-├─ ... (repeat until converged or max_iter reached)
+├─ ... (repeat until converged, error, or walltime budget nearly spent)
 │
 └─ Final segment: converged → exit code 0 → write results
 ```
@@ -37,22 +41,35 @@ PBS job starts
 ## PBS script structure
 
 ```bash
-ITERS_PER_RESTART=10
-MAX_RESTARTS=20
+ITERS_PER_RESTART=3             # 25 in the hugemem variants
+WALL_SECONDS=18000              # must match #PBS -l walltime
+SAFETY_BUFFER=600               # reserve 10 min for checkpoint + log move
+DEADLINE=$(( $(date +%s) + WALL_SECONDS - SAFETY_BUFFER ))
 RUN_ID=$(date +%Y%m%d_%H%M%S)
 
 RESTART_NUM=0
 RESUME_FLAG=""
+LAST_SEG_DUR=0
 
-while [ $RESTART_NUM -lt $MAX_RESTARTS ]; do
+while : ; do
+    REMAINING=$(( DEADLINE - $(date +%s) ))
+    if [ $REMAINING -le 0 ]; then
+        break               # walltime budget exhausted
+    fi
+    if [ $RESTART_NUM -gt 0 ] && [ $REMAINING -lt $LAST_SEG_DUR ]; then
+        break               # not enough time left for another segment
+    fi
     RESTART_NUM=$((RESTART_NUM + 1))
+    SEG_START=$(date +%s)
 
     mpiexec -n $PBS_NCPUS ... \
+        --max-iter 100000 \
         --max-iter-this-run $ITERS_PER_RESTART \
         --run-id $RUN_ID \
         $RESUME_FLAG
 
     EXIT_CODE=$?
+    LAST_SEG_DUR=$(( $(date +%s) - SEG_START ))
 
     if [ $EXIT_CODE -ne 42 ]; then
         break               # converged or error
@@ -76,15 +93,18 @@ done
 
 All ranks participate in one CE loop. The CE optimizer broadcasts
 convergence status after each iteration via `bcast_item`. When the
-iter budget is exhausted:
+iteration budget is exhausted:
 
-1. Root computes `is_final` (converged? max_iter reached?)
+1. The root rank computes `is_final` (has the run converged, or has
+   max_iter been reached?)
 2. `is_final` is broadcast to all ranks
-3. If not final: all ranks hit `Barrier()` then `sys.exit(42)` together
-4. If final: root writes results, all ranks exit 0
+3. If not final, all ranks call `Barrier()` and then `sys.exit(42)`
+   together
+4. If final, the root rank writes results and all ranks exit with
+   code 0
 
-The `Barrier()` ensures no rank exits before others — prevents
-`MPI_ABORT` from rank disagreement.
+The `Barrier()` ensures that no rank exits before the others, which
+prevents an `MPI_ABORT` caused by rank disagreement.
 
 ### Sweep estimation (communicator splitting)
 
@@ -92,21 +112,23 @@ The world communicator is split into sub-communicators, one per sweep
 point. Each sub-comm runs an independent CE loop with its own
 checkpoint.
 
-When the iter budget is exhausted:
+When the iteration budget is exhausted:
 
 1. Each rank computes `is_final` for its sub-comm
 2. `is_final` is broadcast within each sub-comm (so all ranks in a
    sub-comm agree)
-3. `allreduce(MIN)` across the world communicator: if ANY sub-comm
-   is not final, `all_final = False`
-4. If not all final: all ranks hit `Barrier()` then `sys.exit(42)`
-5. If all final: gather results, write sweep summary, exit 0
+3. An `allreduce(MIN)` across the world communicator sets
+   `all_final = False` if any sub-comm is not final
+4. If not all final, all ranks call `Barrier()` and then
+   `sys.exit(42)`
+5. If all final, the ranks gather results, write the sweep summary,
+   and exit with code 0
 
-This means: if 9 of 10 sweep points converged but 1 didn't, ALL 10
+If 9 of 10 sweep points have converged but 1 has not, all 10
 restart. The 9 converged points re-converge immediately on the next
-segment (tol check passes on iter 1). This wastes ~1 solve per
-converged point per restart but avoids complex partial-communicator
-management.
+segment, because the tolerance check passes on the first iteration.
+Each restart therefore wastes roughly one solve per converged point,
+but this avoids the complexity of partial-communicator management.
 
 **Idle ranks**: within a restart segment, fast-converging sub-comms
 finish their K iterations before slow ones. Those ranks sit idle in
@@ -117,7 +139,7 @@ end of the segment.
 
 ## Checkpoint contract
 
-`state.pkl` contains everything needed for seamless resume:
+`state.pkl` contains everything needed to resume the run:
 
 | Field | Purpose |
 |-------|---------|
@@ -130,14 +152,14 @@ end of the segment.
 | `elite_mean_loss_prev` | For tol convergence check across restart boundary |
 | `rng_state` | Numpy RNG state for reproducible sampling |
 
-The checkpoint is written atomically (temp file + rename) to prevent
-corruption if the job is killed mid-write.
+The checkpoint is written atomically (to a temporary file that is
+then renamed) to prevent corruption if the job is killed mid-write.
 
 ## Run ID
 
 The `--run-id` flag ensures all restart segments use the same results
 directory. Without it, each segment generates a new timestamp and
-creates a new directory — the resume can't find the previous
+creates a new directory, and the resume cannot find the previous
 segment's checkpoint.
 
 The PBS script generates `RUN_ID` once before the loop and passes it
@@ -146,7 +168,9 @@ otherwise falls back to `datetime.now()`.
 
 ## Memory budget
 
-With K=10 iters per restart:
+The table below is illustrative and assumes K=10 iterations per
+restart; the deployed scripts use K=3 (or K=25 on hugemem), so the
+per-segment growth is smaller:
 
 | | Base RSS | Growth (10 iters) | Peak | Allocation |
 |---|----------|-------------------|------|------------|
@@ -154,16 +178,19 @@ With K=10 iters per restart:
 | XLarge (2080 ranks) | ~5.2 TB | 1.4 TB | ~6.6 TB | 9.6 TB |
 | Sweep (5200 ranks) | ~13 TB | 3.5 TB | ~16.5 TB | 24 TB |
 
-All well within PBS allocations. Without restart, the large jobs
-would OOM at ~30 iterations.
+All of these peaks sit well within the PBS allocations. Without the
+restart loop, the large jobs would run out of memory at roughly 30
+iterations.
 
 ## Configuring
 
 | Parameter | Where | Default | Description |
 |-----------|-------|---------|-------------|
-| `ITERS_PER_RESTART` | PBS script | 10 | CE iterations per restart segment |
-| `MAX_RESTARTS` | PBS script | 20 | Max restart segments (failsafe) |
+| `ITERS_PER_RESTART` | PBS script | 3 (25 in hugemem scripts) | CE iterations per restart segment |
+| `WALL_SECONDS` | PBS script | matches `#PBS -l walltime` | Walltime budget for the restart loop |
+| `SAFETY_BUFFER` | PBS script | 600 | Seconds reserved for final checkpoint + log move |
 | `max_iter` | estimation YAML | 200 | Global iteration limit |
+| `--max-iter` | CLI (from PBS) | None | Overrides YAML `max_iter`; PBS scripts pass 100000 so walltime binds |
 | `--max-iter-this-run` | CLI (from PBS) | None | Per-segment limit |
 | `--run-id` | CLI (from PBS) | auto | Shared run ID across segments |
 | `--resume` | CLI (from PBS) | False | Resume from checkpoint |

@@ -13,7 +13,7 @@ def make_lazy_plot_getter(names, plots_module):
         raises ``AttributeError`` unchanged.
     plots_module : str
         Absolute import path of the plots submodule, e.g.
-        ``"examples.durables.outputs.plots"``. Typically
+        ``"examples.durables.postprocess.plots"``. Typically
         ``__name__ + ".plots"`` from the calling ``__init__.py``.
     """
     def __getattr__(name):

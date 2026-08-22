@@ -2,10 +2,10 @@
 set -euo pipefail
 
 # Move housing_renting logs from the repo to scratch.
-# Source: experiments/housing_renting/logs
+# Source: benchmarks/housing_renting/logs
 # Destination: /scratch/tp66/$USER/FUES/solutions/housing_renting/logs
 
-SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../experiments/housing_renting/logs" && pwd)"
+SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../benchmarks/housing_renting/logs" && pwd)"
 DEST_DIR="/scratch/tp66/${USER}/FUES/solutions/housing_renting/logs"
 
 echo "Source:      $SRC_DIR"

@@ -1,6 +1,6 @@
 # Application 2: Continuous Housing Investment with Frictions
 
-*Source: Dobrescu and Shanker (2026), Section 2.2. The paper is the canonical reference for the economic model; this page records the notation and staged Bellman representation used in the codebase.*
+*Source: Dobrescu and Shanker (2026), Section 2.2. The paper is the canonical reference for the economic model; this page writes out the notation and modular Bellman notation used in the codebase.*
 
 ## Notation
 
@@ -123,13 +123,13 @@ with $c$, $c'$, and $H''$ defined as above.
 
 The formulation above is the standard one: one Bellman equation with a discrete choice embedded in the budget constraint. We now rewrite the same model in staged Bellman form. In the code, each period is split into linked subproblems with their own state spaces and Bellman operators.
 
-> **Timing notation.** We use the multi-stage Bellman notation of [Carroll (2026)](https://llorracc.github.io/SolvingMicroDSOPs/) and [Carroll and Shanker (2026)](https://bright-forest.github.io/bellman-ddsl/theory/MDP-foundations/). Each stage has three information sets:
+> **Timing notation.** We use the multi-stage Bellman notation of [Carroll (2026)](https://llorracc.github.io/SolvingMicroDSOPs/) and [Carroll and Shanker (2026)](https://bright-forest.github.io/bellman-ddsl/bellman-calculus/). Each stage has three information sets:
 >
 > - **Arrival** ($\prec$): the state on entering the stage.
 > - **Decision** (unmarked): the information set on which the agent chooses.
 > - **Continuation** ($\succ$): the outgoing state after the within-stage choice and transition.
 >
-> To keep the notation readable, when a consumption-stage formula is written only in $w$, $H$, or $m$, it should be read pointwise in a fixed income state $z$. In the implementation, the corresponding value and policy arrays still carry a full $z$ index.
+> To keep the notation readable, when a consumption-stage formula is written only in $w$, $H$, or $m$, it should be read pointwise in a fixed income state $z$. In the implementation, the corresponding value and policy arrays retain a full $z$ index.
 
 A household lives for $T$ periods, holding financial assets $a \ge 0$ and housing $H \ge 0$. Each period it draws an i.i.d. innovation $\varepsilon_{\succ} \sim N(0,1)$, updates persistent income via $\log z_{\succ} = \rho_z \log z + \sigma_z \varepsilon_{\succ}$, earns income $\mathrm{y}(z_{\succ})$, and makes a discrete tenure choice $d \in \{0, 1\}$ — keep or adjust housing — followed by a non-durable consumption choice (plus a durable choice under the adjuster branch). Financial assets earn gross return $R = 1+r$; adjusting housing costs $\tau H_{\succ}$. The stage equations below keep $\delta$ (housing depreciation) and $R_H$ (housing gross return) as free parameters; the simplest case of the main text sets $\delta = 0$ and $R_H = 1$.
 

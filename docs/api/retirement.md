@@ -12,140 +12,125 @@ usage and model description, see
 ### `solve_nest`
 
 ```python
-solve_nest(registry_dir, spec_factory_name="spec_factory.yaml", draw=None, ue_method=None, model=None, stage_ops=None, waves=None)
+solve_nest(registry_dir, spec_factory_name="spec_factory.yaml", draw=None, method_switch=None, model=None, stage_ops=None, waves=None, **more_slots)
 ```
 
 Canonical pipeline: load syntax, build the stage graph, and solve backward.
 
-Three-functor pipeline:
+Composition:
 
-1. Load ``calibration.yaml`` (economic params) and
-   ``settings.yaml`` (numerical/structural settings).
-2. Apply overrides at the correct abstraction level.
-3. Build and solve the nest via
-   :func:`_accrete_nest`.
+1. `spec_factory.load` / `spec_factory.make` bind slot values
+   (`draw`, `method_switch`, `**more_slots`) into a `SpecGraph`.
+2. `period_factory.make` builds the calibrated period;
+   `period_to_graph` + `backward_paths` derive the wave ordering.
+3. `RetirementModel(period)` and the three stage-operator
+   factories feed :func:`solve_backward`.
 
-The `ue_method` parameter selects the upper-envelope algorithm
-(`FUES`, `DCEGM`, `RFC`, or `CONSAV`). The `draw` argument carries
-tiered overrides of the form `{"calibration": {...}, "settings": {...}}`.
+The `method_switch` parameter selects the upper-envelope algorithm
+(`FUES`, `DCEGM`, `RFC`, or `CONSAV`); a string tag expands via
+`expand_method_shortcut` onto the `work_cons.upper_env` node. The
+`draw` argument takes tiered overrides of the form
+`{"calibration": {...}, "settings": {...}}`.
 
 Parameters
 ----------
 registry_dir : str or Path
-    Root syntax directory containing ``calibration.yaml``,
-    ``settings.yaml``, ``period.yaml``, and ``stages/``.
+    Root syntax directory containing ``spec_factory.yaml``,
+    ``calibration.yaml``, ``settings.yaml``, ``period.yaml``,
+    and ``stages/``.
 draw : dict, optional
     Tiered overrides, e.g.
     ``{"calibration": {"beta": 0.96}, "settings": {"grid_size": 5000}}``.
-ue_method : str or dict, optional
-    Upper-envelope method selection.
+method_switch : str or dict, optional
+    Upper-envelope method selection. String tags expand via
+    ``expand_method_shortcut``; nested ``{methods: [...]}`` dicts
+    pass through.
+model, stage_ops, waves : optional
+    Pass back the previous call's returns to skip pipeline
+    reconstruction and JIT recompilation.
+more_slots
+    Additional spec_factory slot bindings (e.g. ``**t.slots``
+    from kikku).
 
 Returns
 -------
 nest : dict
-    The solved nest.
+    ``{"solutions": [...]}`` — one solution dict per period.
 model : RetirementModel
     The model instance used for solving.
 stage_ops : dict
     The stage operators used for solving.
+waves : list[list[str]]
+    Kikku-derived wave ordering of the stage graph.
 
-### `instantiate_period`
+### `solve_backward`
 
 ```python
-instantiate_period(params, syntax_dir)
+solve_backward(T, model, stage_ops, waves)
 ```
 
-Build one period via the dolo-plus three-functor pipeline.
+Run backward induction over T periods.
 
-For every stage declared in the period template,
-applies: parse -> methodize -> configure -> calibrate.
-
-Parameters
-----------
-params : dict
-    Merged calibration parameters. Only params declared
-    in each stage's ``parameters:`` list are consumed by
-    ``calibrate_stage``; extra keys are ignored.
-syntax_dir : str or Path
-    Root syntax directory containing ``period.yaml``,
-    ``settings.yaml``, and ``stages/``.
+Pure combinator: no I/O, no pipeline, just the loop. Wires
+terminal-period continuations at ``h = 0``, then threads each
+period's solution into the next call of :func:`solve_period`.
 
 Returns
 -------
-dict
-    ``{<stage_name>: <calibrated SymbolicModel>, ...}``.
+list[dict]
+    One solution dict per period (``h = 0`` is the last
+    calendar period ``t = T-1``).
 
-### `build_period_callables`
+### `expand_method_shortcut`
 
 ```python
-build_period_callables(period)
+expand_method_shortcut(tag: str, shortcut: list[tuple[str, str]]) -> dict
 ```
 
-Return equation callables for a calibrated period.
+Build a ``$method_switch`` slot value in the no-schemes shape.
 
-For the retirement model (log utility) the callables are
-the module-level defaults.  A future whisperer would
-compile these from the YAML equation strings instead.
+Emits one ``{on: <node>, method: <tag>}`` entry per target node
+(``METHOD_SHORTCUT`` targets ``work_cons.upper_env`` alone), then
+normalizes it via ``methodization._normalize_methods``.
 
-Parameters
-----------
-period : dict
-    Calibrated period from :func:`instantiate_period`
-    (unused; reserved for future whisperer).
+### `read_node_method`
 
-Returns
--------
-dict
-    ``{u, du, uc_inv, ddu}`` -- each an ``@njit``
-    callable.
+```python
+read_node_method(stage, node, default='FUES')
+```
+
+Read the method tag bound to a named methodization ``node``
+(``upper_env``, ``policy``, ``evaluate``, ...). A legacy scheme
+name (``upper_envelope``, ``maximization``, ...) is accepted and
+mapped to its node. ``read_scheme_method(stage, scheme_name,
+mover=None, default='FUES')`` is the backwards-compatible alias.
 
 
 ## Model (`model.py`)
 
 ### `RetirementModel`
 
-Calibration and grids for the retirement choice model.
+Numerical resources (rho output) for the retirement model.
 
-Stores calibrated parameters, the asset grid, and
-equation callables (utility and its derivatives).
-
-All parameters are required — canonical values live in
-``syntax/calibration.yaml`` and ``syntax/settings.yaml``.
-Use :meth:`from_period` or :meth:`with_test_defaults` to
-construct instances.
+Holds a reference to the calibrated period dict, constructs
+the asset grid, and stores ``@njit`` equation callables.
+Scalar parameters (``beta``, ``delta``, ``y``, etc.) are
+**not** stored — ``__getattr__`` delegates to the ``work_cons``
+stage's ``.calibration`` and ``.settings``. Canonical values
+live in ``syntax/calibration.yaml`` and ``syntax/settings.yaml``.
 
 Parameters
 ----------
-r : float
-    Interest rate.
-beta : float
-    Discount factor (not rate).
-delta : float
-    Fixed utility cost of working.
-smooth_sigma : float
-    Logit smoothing parameter (0 = hard max).
-y : float
-    Wage income for workers.
-b : float
-    Lower bound for asset grid.
-grid_max_A : float
-    Upper bound for asset grid.
-grid_size : int
-    Number of asset grid points.
-T : int
-    Number of periods (horizon).
-m_bar : float
-    FUES jump detection threshold.
-padding_mbar : float
-    Padding for m_bar.
-equations : dict, optional
+period : dict
+    Canonical period dict with ``"stages"`` key.
+callables : dict, optional
     Override equation callables (keys: ``u``, ``du``,
     ``uc_inv``, ``ddu``).  Defaults to log utility.
 
 Attributes
 ----------
 R : float
-    Gross return ``1 + r``.
+    Gross return ``1 + r`` (property, from calibration).
 asset_grid_A : ndarray
     Asset grid of size *grid_size*.
 eulerK : int
@@ -156,36 +141,11 @@ u, du, uc_inv, ddu : callable
 #### `RetirementModel.__init__`
 
 ```python
-__init__(self, r, beta, delta, smooth_sigma, y, b, grid_max_A, grid_size, T, m_bar, padding_mbar=0, equations=None)
+__init__(self, period, callables=None)
 ```
 
-Initialize self.  See help(type(self)) for accurate signature.
-
-#### `RetirementModel.from_period`
-
-```python
-from_period(period, equations=None)
-```
-
-Construct from a dolo-plus calibrated period dict.
-
-Reads calibration and settings from the ``work_cons``
-stage's ``.calibration`` and ``.settings`` attributes.
-These are populated by the calibrate and configure
-functors during :func:`build_period`.
-
-Parameters
-----------
-period : dict
-    ``{<stage_name>: <calibrated SymbolicModel>}``.
-    Must contain a ``'work_cons'`` key whose value
-    has ``.calibration`` and ``.settings`` dicts.
-equations : dict, optional
-    Override equation callables.
-
-Returns
--------
-RetirementModel
+Construct from a calibrated period dict (as built inside
+:func:`solve_nest`).
 
 #### `RetirementModel.with_test_defaults`
 
@@ -193,7 +153,8 @@ RetirementModel
 with_test_defaults(**overrides)
 ```
 
-Construct with test defaults (for unit tests only).
+Construct with test defaults (no dolo-plus needed; for unit
+tests only).
 
 Canonical values match ``syntax/calibration.yaml``
 and ``syntax/settings.yaml``.
@@ -207,49 +168,61 @@ Returns
 -------
 RetirementModel
 
-### `Operator_Factory`
+### `make_worker_egm_fns` / `make_retiree_egm_fns`
 
 ```python
-Operator_Factory(cp, equations=None)
+make_worker_egm_fns(beta, R, delta, _y)
+make_retiree_egm_fns(beta, R, _delta, _y)
 ```
 
-Build stage operators for the retirement model.
+EGM recipe dicts (``@njit`` closures) for the ``work_cons`` and
+``retire_cons`` stages: ``{'inv_euler', 'bellman_rhs',
+'cntn_to_dcsn', 'concavity'}``.
 
-Returns three operators corresponding to the three
-stages in the period template:
 
-- ``retire_cons``: retiree EGM (no upper envelope).
-- ``work_cons``: worker EGM + upper envelope (FUES/
-  DCEGM/RFC/CONSAV).
-- ``labour_mkt_decision``: branching max/logit
-  aggregator over work and retire branches.
+## Operators (`solvers/operators.py`)
 
-All operators are closures over the calibrated
-parameters and equation callables.
+Stage operator factories. Each stage has its own factory
+returning ``dcsn_mover`` (B) and, where the stage has one,
+``arvl_mover`` (I); the composition T = I ∘ B happens inline
+in ``solve_period``. All operators are closures over the
+calibrated parameters and equation callables.
 
-Parameters
-----------
-cp : RetirementModel
-    Model instance with calibrated parameters and
-    grids.
-equations : dict, optional
-    Override equation callables.  Keys: ``u``, ``du``,
-    ``uc_inv``, ``ddu``.  Each must be ``@njit``.
-    When *None*, uses the callables on *cp* (which
-    default to log-utility).
+### `make_retire_cons`
 
-Returns
--------
-dict
-    ``{'retire_cons':  solver_retiree_stage,
-       'work_cons':    solver_worker_stage,
-       'labour_mkt_decision': lab_mkt_choice_stage}``
+```python
+make_retire_cons(model, callables)
+```
+
+Retiree EGM (no upper envelope). ``callables`` is the EGM recipe
+dict from ``make_retiree_egm_fns``. Returns
+``{'dcsn_mover', 'arvl_mover'}``.
+
+### `make_work_cons`
+
+```python
+make_work_cons(model, callables, ue_method='FUES')
+```
+
+Worker EGM + upper envelope (`FUES`/`DCEGM`/`RFC`/`CONSAV`).
+``callables`` is the EGM recipe dict from ``make_worker_egm_fns``.
+Returns ``{'dcsn_mover', 'arvl_mover'}``.
+
+### `make_labour_mkt_decision`
+
+```python
+make_labour_mkt_decision(model)
+```
+
+Branching max/logit aggregator over work and retire branches
+(hard argmax when ``smooth_sigma == 0``, logit otherwise).
+Returns ``{'dcsn_mover'}`` — no arrival mover.
 
 
 ## Benchmark (`benchmark.py`)
 
-Helpers used by the canonical kikku path in `run.py`: the Cartesian product of
-`--params-range`, `--settings-range`, and `--methods-range` is `run.test_set`;
+Helpers used by the canonical kikku path in `run.py`: kikku's slot CLI
+(`--slot-override`, `--slot-spec`, `--slot-range`) builds `run.test_set`;
 `sweep` produces `list[SweepResult]`, and these functions precompute reference
 policies and format tables.
 
@@ -288,30 +261,53 @@ write_timing_sweep_tables(results, results_dir, *, benchmark_params, latex_grids
 ```
 
 Call `format_timing_sweep_for_tables` and write markdown/LaTeX via
-`outputs` table generators. ``latex_grids`` selects which grid sizes appear in
-LaTeX output; markdown includes all completed rows.
+`postprocess` table generators. ``latex_grids`` selects which grid sizes appear
+in LaTeX output; markdown includes all completed rows.
 
 
 ## CLI (`run.py`)
 
-### `parse_overrides`
+Argument parsing is delegated to `kikku.run.parse_cli` (the v4 slot
+surface: `--slot-override`, `--slot-spec`, `--slot-range`, plus
+`--sweep-runs`, `--warmup`, `--output-dir`, ...). `run.py` adds one
+extra flag, `--latex-grids` (comma list of grid sizes for LaTeX
+timing/accuracy table output).
+
+### `main`
 
 ```python
-parse_overrides(raw_list)
+main() -> None
 ```
 
-Parse 'key=value' strings into a dict, coercing types.
+Entry point. Builds `run.test_set` via `parse_cli`; when no row
+includes a `method_switch` slot, fans each row out across the four
+upper-envelope methods (`RFC`, `FUES`, `DCEGM`, `CONSAV`). Method-only
+sweeps take the plot path (`make_solve_test_plots`); sweeps that vary
+grids or calibration take the timing path (`make_solve_test_timing`,
+with a 20k-grid DCEGM reference from
+`benchmark.precompute_true_solutions`).
 
-### `load_override_file`
+### `make_solve_test_timing`
 
 ```python
-load_override_file(path)
+make_solve_test_timing(wdir, true_solutions, base_c)
 ```
 
-Load overrides from a YAML file (flat key-value format).
+Timing kernel factory: solve → policy + Euler + consumption deviation
+vs. high-grid truth → pack metrics (`ue_time`, `total_time`, `error`,
+`cdev`).
+
+### `make_solve_test_plots`
+
+```python
+make_solve_test_plots(wdir)
+```
+
+Plot kernel factory: solve → unpack stage policies/grids/value
+function for figures.
 
 
-## Diagnostics (`outputs/diagnostics.py`)
+## Diagnostics (`postprocess/diagnostics.py`)
 
 ### `get_policy`
 
@@ -324,7 +320,7 @@ Get T x n array from nest solutions, indexed by age t.
 Parameters
 ----------
 nest : dict
-    Solved nest from :func:`build_and_solve_nest`.
+    Solved nest from :func:`solve_nest`.
 key : str
     Field name within the stage solution dict
     (e.g. ``"c"``, ``"v"``, ``"dv"``).

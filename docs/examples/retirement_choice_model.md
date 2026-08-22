@@ -127,7 +127,7 @@ The sequence of events within a period is:
 
 ### Stage decomposition
 
-Each period can be translated to a directed graph of self-contained modular *stages*, following [Carroll (2026)](https://llorracc.github.io/SolvingMicroDSOPs/) and [Carroll and Shanker (2026)](https://bright-forest.github.io/bellman-ddsl/theory/MDP-foundations/). The retirement model has three stages:
+Each period can be translated to a directed graph of self-contained modular *stages*, following [Carroll (2026)](https://llorracc.github.io/SolvingMicroDSOPs/) and [Carroll and Shanker (2026)](https://bright-forest.github.io/bellman-ddsl/bellman-calculus/). The retirement model has three stages:
 
 1. **`labour_mkt_decision`** (branching) — discrete choice: $\max(\mathrm{v}_{\succ}^{\text{work}} - \tau,\; \mathrm{v}_{\succ}^{\text{retire}})$. Assets $a$ pass through unchanged.
 2. **`work_cons`** (continuous, EGM + FUES) — worker consumption: $a \to w \to b$. The continuation value $\mathrm{v}_{\succ}$ is non-concave; FUES recovers the correct envelope.
@@ -210,7 +210,7 @@ The primary entry point is `solve_nest` in `solve.py`. It loads the YAML declara
 
 ```python
 from examples.retirement.solve import solve_nest
-from examples.retirement.outputs import euler, get_policy
+from examples.retirement.postprocess import euler, get_policy
 
 nest, model, stage_ops, waves = solve_nest(
     "examples/retirement/syntax",
@@ -271,8 +271,8 @@ All overrides go through a single CLI family that binds slots declared in
 `spec_factory.yaml`:
 
 - **`--slot-override '$draw.key=value'`** overrides any economic parameter (e.g. `beta`, `delta`, `y` from `calibration.yaml`) or numerical setting (e.g. `grid_size`, `T`, `plot_age` from `settings.yaml`). In the retirement model both calibration and settings route through the `$draw` slot; `spec_factory` dispatches each key to its declared address. The code name `delta` corresponds to $\tau$ in the paper notation used above.
-- **`--slot-spec @path.yml`** loads a sparse slot-bundle YAML (top-level slot keys, e.g. `draw:`); see `experiments/retirement/params/baseline.yml`.
-- **`--slot-spec='{"method_switch":"NEGM"}'`** selects an upper-envelope method by tag; `expand_method_shortcut` in `solve.py` turns the tag into the full method-block payload.
+- **`--slot-spec @path.yml`** loads a sparse slot-bundle YAML (top-level slot keys, e.g. `draw:`); see `benchmarks/retirement/params/baseline.yml`.
+- **`--slot-spec='{"method_switch":"RFC"}'`** selects an upper-envelope method by tag (`FUES`, `RFC`, `DCEGM`, or `CONSAV`); `expand_method_shortcut` in `solve.py` turns the tag into the full method-block payload.
 - **`--latex-grids=…`** (runner extra) gives the subset of grid sizes included in **LaTeX** timing/accuracy tables (markdown tables list all sweep rows).
 
 Each stage in `syntax/stages/` declares which parameters it consumes. The pipeline binds only the relevant settings and calibration entries to each stage, so unrelated keys are ignored.
@@ -293,13 +293,13 @@ python -m examples.retirement.run \
     --slot-override '$draw.T=50'
 
 # Full timing sweep: Cartesian product across delta × grid_size × method axes
-# (YAML @files in experiments/retirement/, each a slot-bundle list — top-level
+# (YAML @files in benchmarks/retirement/, each a slot-bundle list — top-level
 # `draw:` for delta and grid_size, `method_switch:` for methods). Post-solve
 # policy plots use the largest grid_size in the test set.
 python -m examples.retirement.run --sweep \
-    --slot-range @experiments/retirement/timing_deltas.yaml \
-    --slot-range @experiments/retirement/timing_grids.yaml \
-    --slot-range @experiments/retirement/timing_methods.yaml \
+    --slot-range @benchmarks/retirement/timing_deltas.yaml \
+    --slot-range @benchmarks/retirement/timing_grids.yaml \
+    --slot-range @benchmarks/retirement/timing_methods.yaml \
     --latex-grids=1000,2000,3000,6000,10000 \
     --sweep-runs 3 \
     --output-dir results/retirement
@@ -313,7 +313,7 @@ The paper's timing and accuracy tables (Tables 1--2) were produced on NCI Gadi (
 # On Gadi: submit the PBS batch job
 cd FUES
 source setup/setup.sh
-qsub experiments/retirement/retirement_timings.sh
+qsub benchmarks/retirement/retirement_timings.sh
 ```
 
 This runs the full sweep (15 grid sizes × 4 work-cost values × 4 methods × 3 repetitions) and produces:
@@ -326,18 +326,23 @@ By default the PBS script writes results to `OUTPUT_DIR` (on Gadi this defaults 
 
 ### PBS settings
 
-Edit `experiments/retirement/retirement_timings.sh` to change:
+Edit `benchmarks/retirement/retirement_timings.sh` to change:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `SWEEP_GRIDS` | 1k--15k (1k steps) | Grid sizes for the sweep |
-| `SWEEP_DELTAS` | 0.25, 0.5, 1, 2 | Utility cost values |
+| `PARAMS_FILE` | `params/baseline.yml` | Slot-bundle YAML with the baseline overrides |
 | `LATEX_GRIDS` | 1k, 2k, 3k, 6k, 10k | Subset for LaTeX tables |
 | `SWEEP_RUNS` | 3 | Best-of-n repetitions |
 
+The grid-size axis (1k--15k in 1k steps) and the work-cost axis (0.25, 0.5,
+1, 2) are not script variables: they are the `--slot-range` files
+`benchmarks/retirement/timing_grids.yaml` and
+`benchmarks/retirement/timing_deltas.yaml`. Edit those files to change the
+sweep axes.
+
 ### Override files
 
-Instead of entering parameters manually, sparse slot-bundle YAML files in `experiments/retirement/params/` specify only the values that differ from the `syntax/` defaults. Each file has a top-level `draw:` key wrapping the calibration and settings overrides; `spec_factory` dispatches each entry to its declared address.
+Instead of entering parameters manually, sparse slot-bundle YAML files in `benchmarks/retirement/params/` specify only the values that differ from the `syntax/` defaults. Each file has a top-level `draw:` key wrapping the calibration and settings overrides; `spec_factory` dispatches each entry to its declared address.
 
 | File               | Key changes          |
 | ------------------ | -------------------- |
@@ -347,7 +352,7 @@ Instead of entering parameters manually, sparse slot-bundle YAML files in `exper
 | `long_horizon.yml` | $\beta=0.96$, $T=50$, tighter lower-bound settings |
 
 ```bash
-python -m examples.retirement.run --slot-spec @experiments/retirement/params/long_horizon.yml
+python -m examples.retirement.run --slot-spec @benchmarks/retirement/params/long_horizon.yml
 ```
 
 ## Benchmark results
@@ -388,21 +393,23 @@ examples/retirement/
 │   ├── nest.yaml               # Inter-period connectors
 │   ├── calibration.yaml        # r, beta, delta, y, b, smooth_sigma
 │   ├── settings.yaml           # grid_size, grid_max_A, T, m_bar
+│   ├── spec_factory.yaml       # Slot declarations ($draw, $method_switch)
 │   └── stages/
 │       ├── labour_mkt_decision/  # Branching (max)
 │       ├── work_cons/            # Worker EGM + FUES
 │       └── retire_cons/          # Retiree EGM
 ├── model.py                    # RetirementModel (grids, callables)
-├── operators.py                # Stage operator factories
+├── solvers/operators.py        # Stage operator factories
 ├── solve.py                    # Canonical pipeline (solve_nest)
 ├── benchmark.py                # Timing sweeps (via solve_nest)
 ├── notebooks/
 │   ├── retirement_fues.ipynb   # Interactive walkthrough
 │   └── model.md                # Notebook model description
-└── outputs/
+└── postprocess/
     ├── diagnostics.py          # Nest accessors, euler, deviation
     ├── plots.py                # Paper + notebook plot functions
-    └── tables.py               # LaTeX + Markdown tables
+    ├── tables.py               # LaTeX + Markdown tables
+    └── writer.py               # Output-writing dispatch
 ```
 
 See [API Reference](../api/retirement.md) for detailed function signatures.

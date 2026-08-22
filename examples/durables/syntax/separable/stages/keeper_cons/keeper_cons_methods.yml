@@ -1,0 +1,53 @@
+stage: KeeperConsumption
+
+# Operator-slot methodization (spec 0.1d.1) under the kernel/policy schema
+# (spec 0.3): the backward selection (EGM) moves to the `policy` node; the
+# evaluation block carries the value-representation (interpolation) slot, and
+# the upper envelope is its own `upper_env` node that feeds `evaluate`.
+#
+# `handler:` pins the horse — the actual solver callable that realises each
+# node (spec 0.1d.1, the old `tool:`). Citations source-walked against this
+# app's own horses (examples/durables/solvers/keeper_egm.py) and the formal
+# toolkits it calls (kikku, dcsmm/fues, consav). Paths are relative to the
+# application root examples/durables/.
+methods:
+  # policy construction (EGM) — the box tag claims the policy interior.
+  # The EGM step (constrained branch + inverse-Euler unconstrained branch) is
+  # composed in make_keeper_ops from the kikku 1D-EGM primitive make_egm_1d,
+  # fed the keeper InvEuler / bellman-rhs callables.
+  - on: policy
+    method: !egm
+    handler: fues-durables:make_keeper_ops    # solvers/keeper_egm.py:make_keeper_ops
+
+  # value-representation handler for the evaluation block (interpolation on the
+  # Cartesian (a, h) arrival grid). The refined endogenous policy/value is
+  # interpolated back to the exogenous asset grid with interp_as.
+  - on: evaluate
+    method: !Linear
+    grid: !Cartesian
+    handler: dcsmm:interp_as                   # src/dcsmm/fues/helpers/math_funcs.py:interp_as
+    settings:
+      orders: [n_a, n_h]
+      bounds: [[a_min, a_max], [h_min, h_max]]
+      extrap_policy: extrap_policy
+      clamp_max_factor: clamp_max_factor
+
+  # upper envelope -> upper_env node (feeds evaluate; method !FUES).
+  # FUES fast path calls FUES_jit directly; the generic path dispatches via
+  # EGM_UE (DCEGM / RFC / CONSAV / FUES) — both in dcsmm.
+  - on: upper_env
+    method: !FUES
+    handler: dcsmm:FUES_jit                    # src/dcsmm/fues/fues_v0_2dev.py:FUES_jit
+    settings:
+      m_bar: m_bar
+      extrap_policy: extrap_policy
+      clamp_max_factor: clamp_max_factor
+
+  # PREVIOUSLY UNDECLARED: the keeper EGM inverts the consumption Euler
+  # equation in closed form, c[>] = (alpha / (beta * d_{a_nxt}V[>]))^(1/gamma_c)
+  # (keeper_cons.yaml policy.InvEuler). This FOC inversion "goes to solve" but
+  # had no method node — declared here. It is realised by a baked closure, not
+  # a generic root-finder (separable CRRA has the analytic inverse).
+  - on: policy.InvEuler
+    method: !analytic-inverse
+    handler: fues-durables:keeper_inv_euler    # syntax/separable/callables.py:make_callables.keeper_inv_euler

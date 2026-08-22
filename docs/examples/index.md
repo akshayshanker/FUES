@@ -11,9 +11,9 @@ associated notebook and command-line workflow.
 | [Continuous housing](continuous_housing_model.md) | 2.2 | **Non-monotone housing policy** — MSS and LTM do not apply | NEGM · FUES |
 | [Housing-renting](housing-renting.md) | 2.3 | Inaction regions from kinked tax schedule — draft | NEGM · FUES |
 
-## Headline numbers
+## Benchmark summary
 
-On the retirement benchmark, FUES delivers the upper envelope in $O(n^{1/2})$
+On the retirement benchmark, FUES computes the upper envelope in $O(n^{1/2})$
 time. With $10{,}000$ grid points it completes in roughly $0.8$ ms against
 roughly $800$ ms for LTM and $8$ ms for MSS (Intel Xeon, single-core). See
 the [retirement notebook](../notebooks/retirement_fues.ipynb) for the full
@@ -37,9 +37,9 @@ python -m examples.durables.run
 For the full set of command-line options see
 [running locally](../running-locally.md). For the batch and cluster workflow —
 sweeps, MPI estimation, paper tables — see
-[running on PBS / Gadi](../running-on-gadi.md).
+[running on a PBS cluster](../running-on-gadi.md).
 
 Committed paper outputs (tables and figures in the form reproduced in the
 paper) live under
-[`replication/`](https://github.com/akshayshanker/FUES/tree/main/replication)
+[`paper-results/`](https://github.com/akshayshanker/FUES/tree/main/paper-results)
 in the repository.

@@ -94,8 +94,8 @@ extra_javascript:
   - https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js
 
 copyright: >-
-  Copyright &copy; 2022–2026 Akshay Shanker.
-  Documentation built with Material for MkDocs.
+  &copy; 2022–2026 Akshay Shanker &mdash;
+  Logo font: TNG Title by Ukraine Fonts
 
 extra:
   generator: false
@@ -109,6 +109,7 @@ extra:
 
 nav:
   - Home: index.md
+  - Quickstart: start-here/quickstart.md
 
   - Method:
     - The FUES algorithm: algorithm/fues-algorithm.md
@@ -122,15 +123,14 @@ nav:
   - Notebooks:
     - Overview: tutorials/index.md
     - EGM / FUES walkthrough: notebooks/egm_fues_transparent.ipynb
-    - Retirement benchmarks: notebooks/retirement_fues.ipynb
+    - Retirement choice: notebooks/retirement_fues.ipynb
     - Durables (Cobb–Douglas): notebooks/durables_fues.ipynb
     - Durables (separable): notebooks/durables_fues_separable.ipynb
 
   - Reproducibility:
     - Overview: reproducibility/index.md
-    - Quickstart: start-here/quickstart.md
     - Running locally: running-locally.md
-    - Running on PBS / Gadi: running-on-gadi.md
+    - Running on a PBS cluster: running-on-gadi.md
 
   - Reference:
     - Installation: getting-started/installation.md

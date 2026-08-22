@@ -5,6 +5,18 @@ Altair PBS) for job scheduling. Cluster-specific details — queue names,
 filesystem paths, project codes, module versions — are exposed as shell
 variables so you can adapt them to your site.
 
+> **Scope.** The examples install (README, Option 2)
+> runs the models locally with no MPI and no PBS: single solves, method
+> comparisons, and the retirement timing/accuracy sweep all work
+> serially via the documented `python -m examples.<model>.run` commands
+> (reported wall-times are hardware-specific by nature). This page is
+> for the results that need a cluster and cannot be reproduced
+> on an ordinary machine: the durables estimation (multi-node MPI, with
+> memory requests in the terabytes), the extra-large-grid solves
+> (hugemem queues), and the housing-renting benchmarks (CUDA GPUs). The
+> `benchmarks/` scripts additionally require `mpi4py` with an MPI
+> runtime, installed by `setup/setup.sh` on Gadi only.
+
 ## Site-specific variables
 
 Set these once (e.g. in `~/.bashrc` or a `site.env` file you source at
@@ -45,7 +57,8 @@ source setup/setup.sh
 - First run: creates `$FUES_VENV` (default `$HOME/venvs/fues`), installs
   the scientific stack (numpy, numba, scipy), `dcsmm[examples]` (FUES +
   HARK + ConSav + kikku + matplotlib + seaborn + …) in editable mode, the
-  `bright-forest/dolo` fork at the pinned `phase1.1_0.1` branch (for
+  pinned `bright-forest` dolang and dolo commits (dolang `92b63c4`,
+  dolo `c899b01`, installed `--no-deps`; they provide
   `dolo.compiler.spec_factory`), and `mpi4py` built from source against
   the loaded MPI. Runs verification imports that exit non-zero if
   anything is missing.
@@ -82,7 +95,7 @@ qsub -I -q expresssr -P "$PROJECT" -l ncpus=1,mem=5GB,walltime=01:00:00,storage=
 
 ## PBS script structure
 
-Every script in `experiments/<model>/` follows this pattern:
+Every script in `benchmarks/<model>/` follows this pattern:
 
 ```bash
 #!/bin/bash
@@ -185,29 +198,29 @@ or Grafana dashboards. Check `which`-style commands or your site docs.
 
 ## Examples
 
-All scripts are in `experiments/<model>/`.
+All scripts are in `benchmarks/<model>/`.
 
 ### Durables
 
 ```bash
 # Compare FUES vs NEGM
-qsub experiments/durables/run_durables.pbs
+qsub benchmarks/durables/run_durables.pbs
 
 # Paper table: grid × tau × method sweep
-qsub experiments/durables/run_durables_tests.pbs
+qsub benchmarks/durables/run_durables_tests.pbs
 
 # Estimation (MPI)
-qsub experiments/durables/estimation/run_large_egm.pbs
+qsub benchmarks/durables/estimation/run_large_egm.pbs
 ```
 
 ### Retirement
 
 ```bash
 # Timing benchmark
-qsub experiments/retirement/retirement_timings.sh
+qsub benchmarks/retirement/retirement_timings.sh
 
 # Single solve + plots
-qsub experiments/retirement/run_retirement_single_core.sh
+qsub benchmarks/retirement/run_retirement_single_core.sh
 ```
 
 Before submitting a large job, do a 2-rank smoke test on a login node

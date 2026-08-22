@@ -61,7 +61,16 @@ cd FUES
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[examples]"
+pip install lark multipledispatch
+pip install --no-deps \
+  "dolang @ git+https://github.com/bright-forest/dolang.py.git@92b63c44f44394d511b101cc3ea687505721f97f" \
+  "dolo @ git+https://github.com/bright-forest/dolo.git@c899b0176d51f6354b5739a28e61ba45cd286a8b"
 ```
+
+The last two lines install the pinned dolo-plus compiler that the example
+models import. They are deliberately `--no-deps` — the forks' packaging
+metadata conflicts with this repo's pins — which is why `[examples]` cannot
+pull them in; `setup/setup.sh` runs the same lines for you.
 
 To add the developer extras:
 
@@ -85,5 +94,5 @@ from dcsmm.uenvelope import EGM_UE
 print("FUES and EGM_UE imported successfully")
 ```
 
-For batch runs and HPC setup, continue to [Running on PBS / Gadi](../running-on-gadi.md).
+For batch runs and HPC setup, continue to [Running on a PBS cluster](../running-on-gadi.md).
 

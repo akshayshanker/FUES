@@ -7,7 +7,5 @@
     MSS and LTM do not apply; NEGM does but at lower accuracy.
 
 !!! note "Draft"
-    The page is in preparation. In the interim, see Section 2.3 of the
-    paper and the `examples/housing-renting/` source. The model code,
-    solver, and replication scripts are committed; the prose description
-    has not yet been written up in the documentation.
+    This page is a stub. See Section 2.3 of the paper and the
+    `examples/housing_renting/` source.

@@ -27,7 +27,7 @@ from dolo.compiler.nest_factory import backward_paths
 from dolo.compiler.spec_factory import load as load_spec, make as make_spec
 
 from .model import RetirementModel
-from .operators import make_retire_cons, make_work_cons, make_labour_mkt_decision
+from .solvers.operators import make_retire_cons, make_work_cons, make_labour_mkt_decision
 from .model import make_worker_egm_fns, make_retiree_egm_fns
 
 

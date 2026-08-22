@@ -2,12 +2,14 @@
 
 ## Directory structure
 
-Results are organised by mod (gender/utility) and spec (estimation config):
+Results are organised by mod (the utility specification) and spec
+(the estimation configuration); gender variants are separate specs
+combined with spec_factory overlays:
 
 ```
 /g/data/tp66/results/durables/estimation/
-  <mod_name>/                          e.g. separable, separable_males
-    <spec_name>/                       e.g. baseline_large_egm
+  <mod_name>/                          e.g. separable, cobb_douglas
+    <spec_name>/                       e.g. baseline_large_egm, baseline_large_egm_males
       est_<timestamp>/                 single estimation run
         theta_best.json
         theta_mean.json
@@ -51,7 +53,8 @@ Scratch mirrors this structure with checkpoints:
 
 ### theta_best.json
 
-The parameter vector with the lowest SMM loss across all CE iterations.
+This file records the parameter vector with the lowest SMM loss
+across all CE iterations.
 
 ```json
 {
@@ -65,18 +68,21 @@ The parameter vector with the lowest SMM loss across all CE iterations.
 
 ### theta_mean.json
 
-The elite-weighted mean parameter vector at convergence. Typically
-close to `theta_best` but smoother (averaged over the top-N candidates).
+This file records the elite-weighted mean parameter vector at
+convergence. It is typically close to `theta_best` but smoother,
+because it averages over the top-N candidates.
 
 ### theta_se.json
 
-Standard errors from the diagonal of the elite covariance matrix at
-convergence. Measures the dispersion of the elite set, not classical
-standard errors — interpret as CE uncertainty, not asymptotic SE.
+This file records standard errors from the diagonal of the elite
+covariance matrix at convergence. They measure the dispersion of the
+elite set, not classical sampling variation, and should be read as
+CE uncertainty rather than asymptotic standard errors.
 
 ### summary.json
 
-All of the above plus convergence info:
+This file collects all of the above together with convergence
+information:
 
 ```json
 {
@@ -93,7 +99,9 @@ All of the above plus convergence info:
 
 ### fit_table.csv
 
-Per-moment fit comparison at `theta_best`:
+This table compares data and simulated moments at (approximately)
+`theta_best`; the simulated moments are the root rank's cached
+evaluation from the last CE trial, not a re-solve at `theta_best`:
 
 | Column | Description |
 |--------|-------------|
@@ -106,7 +114,7 @@ Per-moment fit comparison at `theta_best`:
 
 ### convergence.csv
 
-CE iteration trace:
+This file records the CE iteration trace:
 
 | Column | Description |
 |--------|-------------|
@@ -116,19 +124,24 @@ CE iteration trace:
 
 ### best.nst
 
-Pickled nest object at `theta_best`. Contains the solved model:
+This is the pickled nest object from the root rank's last CE trial
+evaluation — a final-iteration candidate near `theta_best`, while
+the metadata records `theta_best` itself. It contains the solved
+model:
 
-- `periods`: list of calibrated dolo+ stage objects (one per age)
+- `periods`: list of period dicts (`{stages, connectors}` with
+  calibrated dolo+ stage objects; one per age)
 - `solutions`: list of solution dicts per period (stripped — policies only)
 - `inter_conn`: state renaming across periods
 - `metadata`: `{theta_best, objective, n_iter}`
 
-**Stripped** means value functions (`V`) and most marginal values are
-removed. Kept: `keeper_cons/dcsn/c`, `adjuster_cons/dcsn/{c, h_choice}`,
-`tenure/dcsn/adj`, `tenure/arvl/d_hV`. Sufficient for simulation and
-moment computation. Not sufficient for value function plots.
+**Stripped** means that value functions (`V`) and most marginal
+values are removed; the arrays kept are `keeper_cons/dcsn/c`,
+`adjuster_cons/dcsn/{c, h_choice}`, `tenure/dcsn/adj`, and
+`tenure/arvl/d_hV`. These are sufficient for simulation and moment
+computation, but not for value function plots.
 
-Load with:
+Load it with:
 ```python
 from kikku.run.nest_io import load_nest
 nest = load_nest('path/to/best.nst')
@@ -136,14 +149,16 @@ nest = load_nest('path/to/best.nst')
 
 ### true.nst (selfgen only)
 
-Pickled nest at the YAML calibration defaults (the "true" parameters
-used to generate the selfgen data). **Full** (unstripped) — includes
-all value functions and marginal values. Use for comparing estimated
-vs true policies and value functions.
+This is the pickled nest at the YAML calibration defaults plus any
+`--params-override` or sweep-point values — the "true" parameters
+used to generate the selfgen data. The file is **full** (unstripped),
+so it includes all value functions and marginal values; use it to
+compare estimated against true policies and value functions.
 
 ### state.pkl (scratch only)
 
-CE optimizer checkpoint, updated each iteration. Contains:
+This is the CE optimizer checkpoint, updated each iteration. It
+contains:
 
 | Field | Description |
 |-------|-------------|
@@ -156,11 +171,12 @@ CE optimizer checkpoint, updated each iteration. Contains:
 | `elite_mean_loss_prev` | Previous iteration's elite mean (for tol check) |
 | `rng_state` | RNG state for reproducible sampling on resume |
 
-Used by `--resume` to continue estimation after a restart.
+The `--resume` flag reads this file to continue an estimation after
+a restart.
 
 ### sweep_summary_<timestamp>.csv
 
-One row per sweep point. Columns include:
+The table has one row per sweep point. Its columns include:
 
 - `true_<param>`: the sweep grid value used for data generation
 - `<param>`: the estimated value
@@ -175,11 +191,11 @@ true_t0, true_gamma_c, alpha, beta, gamma_c, gamma_h, tau, objective, converged,
 
 ### manifest.json (scratch only)
 
-Run metadata recorded at job start:
+This file records run metadata at job start:
 
 ```json
 {
-  "mod": "/path/to/mod/separable",
+  "mod": "/path/to/syntax/separable",
   "spec": "/path/to/baseline_large_egm.yaml",
   "run_id": "20260328_165846",
   "n_samples": 1040,
@@ -196,6 +212,8 @@ Run metadata recorded at job start:
 ```python
 import json, os
 from kikku.run.nest_io import load_nest
+from dolo.compiler.period_factory import period_to_graph
+from examples.durables.model import make_grids
 
 GADI = os.path.expanduser('~/gadi/g/data/tp66/results/durables/estimation')
 run = os.path.join(GADI, 'separable', 'baseline_large_egm', 'est_20260328_165846')
@@ -207,19 +225,28 @@ with open(os.path.join(run, 'summary.json')) as f:
 # Load solved model
 nest = load_nest(os.path.join(run, 'best.nst'))
 
-# Simulate at theta_best
-from examples.durables.horses.simulate import simulate_lifecycle
+# Rebuild what load_nest does not carry: grids and graph
+stage0 = nest['periods'][0]['stages']['keeper_cons']
+grids = make_grids(stage0.calibration, stage0.settings)
+nest['graph'] = period_to_graph(nest['periods'][0])
+
+# Simulate the loaded policies
+from examples.durables.solvers.simulate import simulate_lifecycle
 sim_data = simulate_lifecycle(nest, grids, N=10000, seed=99)
 ```
 
 ## Periodic restart
 
 Long-running estimations use a PBS restart loop that kills and restarts
-`mpiexec` every 10 CE iterations to reset memory. The restart is
-transparent:
+`mpiexec` every K CE iterations to reset memory (K=3 in the standard
+PBS scripts, 25 in the hugemem variants). The restart is
+transparent to the estimation:
 
-- `state.pkl` is checkpointed each iteration
-- `--resume` + `--run-id` ensure all segments use the same directory
+- `state.pkl` is checkpointed at each iteration
+- `--resume` and `--run-id` together ensure that all segments use
+  the same directory
 - Iteration numbering is continuous across restarts
-- Final results are written only when converged or max_iter reached
-- `best.nst` and `true.nst` are saved on the final segment only
+- Final results are written only when the run converges or reaches
+  max_iter
+- `best.nst` is saved on the final segment only; `true.nst` (selfgen)
+  is re-generated and re-saved at the start of every segment

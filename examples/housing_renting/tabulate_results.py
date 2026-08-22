@@ -95,7 +95,7 @@ def main():
         try:
             import yaml
             exp_set_path = (
-                REPO_ROOT / "experiments" / "housing_renting" / 
+                REPO_ROOT / "benchmarks" / "housing_renting" / 
                 "experiment_sets" / f"{args.experiment_set}.yml"
             )
             if exp_set_path.exists():

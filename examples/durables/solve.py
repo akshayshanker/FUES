@@ -50,10 +50,10 @@ def _load_callables_from_syntax(syntax_dir):
     fn = mod.make_callables
     _callables_cache[key] = fn
     return fn
-from .horses.keeper_egm import make_keeper_ops
-from .horses.branching import make_tenure_ops
-from .horses.adjuster_egm import make_adjuster_ops
-from .horses.conditioning import make_conditioners
+from .solvers.keeper_egm import make_keeper_ops
+from .solvers.branching import make_tenure_ops
+from .solvers.adjuster_egm import make_adjuster_ops
+from .solvers.conditioning import make_conditioners
 
 # Under the kernel/policy schema (spec 0.3) + no-schemes methodization
 # (spec 0.1d.1), the upper-envelope method attaches to the ``upper_env`` node
@@ -509,7 +509,7 @@ def accrete_and_solve(
     return nest
 
 
-def precompile(registry_dir='examples/durables/mod/separable', method=None):
+def precompile(registry_dir='examples/durables/syntax/separable', method=None):
     """Warm Numba JIT caches with a tiny solve (small grids, 2 periods).
 
     Call once before timed solves to avoid JIT compilation overhead
@@ -538,7 +538,7 @@ def solve(
     Parameters
     ----------
     registry_dir : str or Path
-        Path to the model registry (e.g. 'examples/durables/mod/separable').
+        Path to the model registry (e.g. 'examples/durables/syntax/separable').
     spec_factory_name : str
         Name of the spec_factory YAML file in the registry.
     draw : dict, optional
@@ -597,8 +597,8 @@ def solve(
         raise FileNotFoundError(
             f"No {spec_factory_name} in {registry_dir}. "
             f"Every durables registry must provide a spec_factory YAML; "
-            f"migrate legacy registries by mirroring mod/separable/ or "
-            f"mod/cobb_douglas/."
+            f"migrate legacy registries by mirroring syntax/separable/ or "
+            f"syntax/cobb_douglas/."
         )
 
     # 1. Load spec_factory spec_recipe

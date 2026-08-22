@@ -5,41 +5,12 @@ hide:
 
 # FUES: Fast Upper Envelope Scan
 
-!!! warning "Pre-release (v0.6.0dev1)"
+!!! warning "Pre-release (v0.6.0)"
     Under active development. The API and documentation may change.
 
-<div class="paper-card" markdown>
-<p class="citation">Working paper · SSRN 4181302 · 2022, revised 2026</p>
-<p class="title">A fast upper envelope scan method for discrete–continuous dynamic programming</p>
-<p class="authors">Loretti I. Dobrescu &nbsp;·&nbsp; Akshay Shanker</p>
+Paper: Dobrescu, L.I. and Shanker, A. (2022, revised 2026). "A fast upper envelope scan method for discrete–continuous dynamic programming." [SSRN 4181302](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=4181302).
 
-<p class="abstract">
-We develop a general <em>fast upper envelope scan</em> (FUES) method for solving
-stochastic dynamic programs with discrete–continuous choices. Existing
-endogenous grid method (EGM) implementations rely on monotonicity of the optimal
-policy — an assumption frequently violated in economic applications — which
-forces researchers to impose restrictive structure or revert to slower
-value-function iteration. FUES provides an upper-envelope operator that
-accommodates arbitrary policy mappings while retaining the computational
-advantages of EGM. Under standard conditions we prove that the method recovers
-the correct upper envelope. On benchmark applications we document substantial
-speed and accuracy gains relative to MSS, LTM, RFC, and NEGM.
-</p>
-
-<p class="keywords">
-<strong>Keywords.</strong> Discrete–continuous choice · non-convex optimisation ·
-Euler equation · endogenous grid method · stochastic dynamic programming.
-&nbsp;<strong>JEL.</strong> C13, C63, D91.
-</p>
-</div>
-
-FUES recovers the upper envelope of the EGM ([Carroll 2006](https://doi.org/10.1016/j.econlet.2005.09.013)) value correspondence in discrete–continuous problems. It scans the endogenous grid in a single $O(n^{1/2})$ pass, and identifies sub-optimal points as the conjunction of a discontinuous jump in the continuation policy and a concave right turn in the value correspondence. It imposes no monotonicity on the optimal policy and requires no numerical optimisation. See [How FUES works](algorithm/fues-algorithm.md) for the derivation.
-
-## Documentation guide
-
-- **Library use.** Start with [Installation](getting-started/installation.md), then the [Core API](api/fues.md).
-- **Algorithm.** Read [How FUES works](algorithm/fues-algorithm.md), then the [transparent EGM / FUES notebook](notebooks/egm_fues_transparent.ipynb).
-- **Benchmarks and replication.** Start with the [Quickstart](start-here/quickstart.md), then see [Applications](examples/index.md), [Running locally](running-locally.md), and [Running on PBS / Gadi](running-on-gadi.md).
+FUES recovers the upper envelope of the EGM ([Carroll 2006](https://doi.org/10.1016/j.econlet.2005.09.013)) value correspondence in discrete–continuous problems. It scans the endogenous grid in a single sub-linear pass, and identifies sub-optimal points as the conjunction of a discontinuous jump in the continuation policy and a concave right turn in the value correspondence. It imposes no monotonicity on the optimal policy and requires no numerical optimisation. See [How FUES works](algorithm/fues-algorithm.md) for the derivation.
 
 ## Minimal use
 
@@ -59,11 +30,9 @@ x_dcsn_ref, v_ref, kappa_ref, x_cntn_ref, _ = FUES(
 )
 ```
 
-The returned arrays contain only the upper-envelope points. Convention: `*_hat` for raw correspondence, `*_ref` for refined upper-envelope objects.
+The returned arrays contain only the upper-envelope points. Convention: `*_hat` for raw correspondence, `*_ref` for refined upper-envelope objects. For a cell-by-cell walkthrough of exactly these calls on a small worked problem, see the [EGM / FUES walkthrough notebook](notebooks/egm_fues_transparent.ipynb).
 
-**Setting `m_bar`.** Use the maximum marginal propensity to consume in your model. For log utility with $\beta R < 1$, values in the range $1.0$–$1.2$ work well. Setting `endog_mbar=True` lets FUES compute a grid-local threshold from `del_x_cntn`.
-
-## Upper-envelope registry
+**Setting `m_bar`.** Use the maximum marginal propensity to save in your model. For log utility with $\beta R < 1$, values in the range $1.0$–$1.2$ work well. Setting `endog_mbar=True` lets FUES compute a grid-local threshold from `del_x_cntn`.
 
 To compare FUES against MSS, RFC, and LTM on the same problem, use the unified `EGM_UE` interface:
 
@@ -77,7 +46,7 @@ refined, raw, interpolated = EGM_UE(
     kappa_hat=kappa_hat,
     x_cntn_hat=x_cntn_hat,
     X_dcsn=X_dcsn,
-    uc_func_partial=uc_func,    # u'(c); only used by "CONSAV"
+    uc_func_partial=uc_func,    # u'(c); used to compute lambda_ref
     u_func=u_func,
     method_switch="FUES",         # or "DCEGM", "RFC", "CONSAV"
     m_bar=1.2,

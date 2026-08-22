@@ -3,8 +3,8 @@
 Callers should import directly from submodules:
     from examples.retirement.solve import solve_nest
     from examples.retirement.benchmark import load_baseline, write_timing_sweep_tables
-    from examples.retirement.outputs import euler, get_policy
-    from examples.retirement.outputs import plot_egrids, plot_cons_pol, plot_dcegm_cf
+    from examples.retirement.postprocess import euler, get_policy
+    from examples.retirement.postprocess import plot_egrids, plot_cons_pol, plot_dcegm_cf
 
 The package used to re-export these names at the top level, but that forced
 `import examples.retirement` to eagerly pull seaborn + HARK via outputs/plots.py.

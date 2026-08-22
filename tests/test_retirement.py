@@ -12,7 +12,7 @@ sys.path.insert(0, SRC_ROOT)
 
 from pathlib import Path
 from examples.retirement.solve import solve_nest
-from examples.retirement.outputs import euler, get_policy, get_timing
+from examples.retirement.postprocess import euler, get_policy, get_timing
 
 SYNTAX_DIR = Path(REPO_ROOT) / "examples" / "retirement" / "syntax"
 UE_METHODS = ("FUES", "RFC", "DCEGM", "CONSAV")

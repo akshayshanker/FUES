@@ -12,7 +12,7 @@ from kikku.run.types import RunSpec, TestSpec
 
 from examples._mpi import get_mpi_comm as _get_mpi_comm
 from examples.retirement import benchmark as rbench
-from examples.retirement.outputs import (
+from examples.retirement.postprocess import (
     consumption_deviation,
     euler,
     get_policy,
@@ -181,9 +181,10 @@ def make_solve_test_plots(wdir: str) -> "Callable[[TestSpec], dict]":
     """Plot kernel: solve → unpack stage policies/grids/value-fn for figures."""
     def solve_test(t: TestSpec) -> dict:
         nest, model, _, _ = solve_nest(wdir, **t.slots)
-        label = t.label or read_scheme_method(
-            nest["periods"][0]["stages"]["work_cons"], "upper_envelope"
-        )
+        # Empty label (e.g. a label-less --slot-spec row): fall back to the
+        # work stage's upper-envelope method. The stage lives on the model —
+        # solve_nest's nest dict has no "periods" key.
+        label = t.label or read_scheme_method(model._work, "upper_envelope")
         c_ref = get_policy(nest, "c", stage="labour_mkt_decision")
         return {
             "nest":           nest,
@@ -237,8 +238,20 @@ def main() -> None:
     calib0, settings0 = _draw_cal_settings(st0, base_c, base_s)
     run = _expand_default_ue_grid(run)
     # 4-UE "plot only": same draw (except method_switch) on every row, UE differs only;
-    # no explicit --slot-range (otherwise timing+tables path).
-    only_methods = _sweep_is_only_method_vary(run.test_set) and not has_range
+    # no explicit --slot-range (otherwise timing+tables path). Exception: a
+    # --slot-range that varies ONLY method tags (e.g. the documented two-row
+    # '[{"method_switch":"FUES"},{"method_switch":"RFC"}]') also takes this
+    # path — the timing-tables path drops any (grid, delta) cell that lacks
+    # all four methods, which would leave such a sweep with empty tables.
+    method_only_range = (
+        has_range
+        and len(run.test_set) > 1
+        and _sweep_is_only_method_vary(run.test_set)
+        and all(t.slots.get("method_switch") for t in run.test_set)
+    )
+    only_methods = (
+        _sweep_is_only_method_vary(run.test_set) and not has_range
+    ) or method_only_range
     st0 = run.test_set[0]
     calib0, settings0 = _draw_cal_settings(st0, base_c, base_s)
 

@@ -77,8 +77,8 @@ if [[ ! -d "$VENV_DIR" ]]; then
 
     echo "[setup] Installing dolang + dolo (public bright-forest repos, master)"
     pip install lark multipledispatch --quiet
-    pip install --no-deps "dolang @ git+https://github.com/bright-forest/dolang.py.git" --quiet
-    pip install --no-deps "dolo @ git+https://github.com/bright-forest/dolo.git" --quiet
+    pip install --no-deps "dolang @ git+https://github.com/bright-forest/dolang.py.git@92b63c44f44394d511b101cc3ea687505721f97f" --quiet
+    pip install --no-deps "dolo @ git+https://github.com/bright-forest/dolo.git@c899b0176d51f6354b5739a28e61ba45cd286a8b" --quiet
 
     if [[ "$IS_GADI" -eq 1 ]]; then
         echo "[setup] Building mpi4py from source against loaded OpenMPI"
@@ -114,11 +114,11 @@ if [[ "$UPDATE" -eq 1 ]]; then
     pip install -e ".[examples]" --quiet
     echo "[setup] Force-reinstalling kikku"
     pip install --force-reinstall --no-deps \
-        "kikku[estimation] @ git+https://github.com/bright-forest/kikku.git" --quiet
+        "kikku[estimation] @ git+https://github.com/bright-forest/kikku.git@v0.2.0" --quiet
     echo "[setup] Force-reinstalling dolang + dolo (public bright-forest repos, master)"
     pip install --force-reinstall --no-deps \
-        "dolang @ git+https://github.com/bright-forest/dolang.py.git" \
-        "dolo @ git+https://github.com/bright-forest/dolo.git" --quiet
+        "dolang @ git+https://github.com/bright-forest/dolang.py.git@92b63c44f44394d511b101cc3ea687505721f97f" \
+        "dolo @ git+https://github.com/bright-forest/dolo.git@c899b0176d51f6354b5739a28e61ba45cd286a8b" --quiet
     echo "[setup] Verifying critical imports"
     python3 -c "from HARK.interpolation import LinearInterp; print('  OK: HARK')"
     python3 -c "import consav; print('  OK: consav')"

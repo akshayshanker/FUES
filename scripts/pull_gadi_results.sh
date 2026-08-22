@@ -1,11 +1,11 @@
 #!/bin/bash
 # ==========================================================================
-#  Pull latest durables results from Gadi and snapshot into replication/
+#  Pull latest durables results from Gadi and snapshot into paper-results/
 #
 #  What it does:
 #    1. rsync latest results from scratch/tp66/$USER/FUES/durables/ on Gadi
 #    2. rsync the PBS scripts and mod/ settings as-is from Gadi home
-#    3. Create a dated snapshot in replication/durables/YYYY-MM-DD/NNN/
+#    3. Create a dated snapshot in paper-results/durables/YYYY-MM-DD/NNN/
 #    4. Copy tables, settings snapshot, and PBS snapshot into the snapshot dir
 #
 #  Usage (from repo root, locally):
@@ -27,7 +27,7 @@ GADI_REPO="/home/141/${GADI_USER}/dev/fues.dev/FUES"
 GADI_SCRATCH="/scratch/tp66/${GADI_USER}/FUES/durables"
 
 LOCAL_STAGING="${REPO_ROOT}/_gadi_staging"
-REPLICATION_BASE="${REPO_ROOT}/replication/durables"
+REPLICATION_BASE="${REPO_ROOT}/paper-results/durables"
 
 # --- Step 1: Pull latest results from scratch ---
 echo "=== Step 1: Pull results from Gadi scratch ==="
@@ -51,7 +51,7 @@ echo ""
 echo "=== Step 2: Snapshot PBS scripts from Gadi ==="
 mkdir -p "${LOCAL_STAGING}/pbs"
 rsync -avz --progress \
-    "${GADI_HOST}:${GADI_REPO}/experiments/durables/" \
+    "${GADI_HOST}:${GADI_REPO}/benchmarks/durables/" \
     "${LOCAL_STAGING}/pbs/" \
     --include='*.pbs' \
     --include='*.sh' \
@@ -63,7 +63,7 @@ echo ""
 echo "=== Step 3: Snapshot settings from Gadi ==="
 mkdir -p "${LOCAL_STAGING}/mod"
 rsync -avz --progress \
-    "${GADI_HOST}:${GADI_REPO}/examples/durables/mod/" \
+    "${GADI_HOST}:${GADI_REPO}/examples/durables/syntax/" \
     "${LOCAL_STAGING}/mod/" \
     --include='*.yaml' \
     --include='*.yml' \
@@ -121,8 +121,8 @@ cat > "${SNAP_DIR}/README.md" << HEREDOC
 Pulled from Gadi at $(date).
 
 - **Results**: \`${GADI_SCRATCH}/\`
-- **PBS scripts**: \`${GADI_REPO}/experiments/durables/\`
-- **Settings**: \`${GADI_REPO}/examples/durables/mod/\`
+- **PBS scripts**: \`${GADI_REPO}/benchmarks/durables/\`
+- **Settings**: \`${GADI_REPO}/examples/durables/syntax/\`
 - **Git branch**: $(git -C "${REPO_ROOT}" rev-parse --abbrev-ref HEAD 2>/dev/null || echo 'unknown')
 - **Git commit**: $(git -C "${REPO_ROOT}" rev-parse --short HEAD 2>/dev/null || echo 'unknown')
 HEREDOC

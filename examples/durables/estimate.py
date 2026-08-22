@@ -5,15 +5,15 @@ from the mod directory, and runs the cross-entropy loop.
 
 Usage:
     # Serial
-    python3 -m examples.durables.estimate --mod mod/separable --spec baseline.yaml
+    python3 -m examples.durables.estimate --mod syntax/separable --spec baseline.yaml
 
     # MPI
     mpirun -np 48 python3 -u -m mpi4py -m examples.durables.estimate \
-        --mod mod/separable --spec baseline.yaml
+        --mod syntax/separable --spec baseline.yaml
 
     # With overrides
     python3 -m examples.durables.estimate \
-        --mod mod/cobb_douglas \
+        --mod syntax/cobb_douglas \
         --spec baseline.yaml \
         --scratch /scratch/tp66/$USER/est \
         --results results/durables \
@@ -42,7 +42,7 @@ from kikku.run.moments import make_moment_fn, moment_names as get_moment_names
 from kikku.run.mpi import get_comm, is_root, bcast_item
 
 from .solve import solve
-from .horses.simulate import simulate_lifecycle
+from .solvers.simulate import simulate_lifecycle
 
 
 def _parse_key_value_list(items):
@@ -417,14 +417,14 @@ def _run_single_estimation(
         for n in sorted(param_spec.keys()):
             print(f"{n:12s} {result.theta[n]:10.4f} {theta_mean[n]:10.4f} {theta_se[n]:10.6f}")
 
-        # Local copy — default: experiments/durables/estimation/results/
+        # Local copy — default: benchmarks/durables/estimation/results/
         if args.local_results and args.local_results.lower() == 'none':
             local_root = None
         elif args.local_results:
             local_root = Path(args.local_results)
         else:
             repo_root = Path(__file__).parent.parent.parent
-            local_root = repo_root / 'experiments' / 'durables' / 'estimation' / 'results'
+            local_root = repo_root / 'benchmarks' / 'durables' / 'estimation' / 'results'
 
         if local_root is not None:
             lp = [str(local_root), mod_name, spec_name]
@@ -467,7 +467,7 @@ def main():
 
     parser.add_argument(
         '--mod', type=str, required=True,
-        help='Path to mod directory (e.g. mod/separable, mod/cobb_douglas)')
+        help='Path to mod directory (e.g. syntax/separable, syntax/cobb_douglas)')
     parser.add_argument(
         '--spec', type=str, default='baseline.yaml',
         help='Estimation spec YAML, relative to mod/estimation/ (default: baseline.yaml)')
@@ -506,7 +506,7 @@ def main():
     )
     parser.add_argument(
         '--local-results', type=str, default=None,
-        help='Local results dir (default: experiments/durables/estimation/results/). '
+        help='Local results dir (default: benchmarks/durables/estimation/results/). '
              'Set to "none" to disable local copy.')
     parser.add_argument(
         '--resume', action='store_true',
@@ -659,7 +659,7 @@ def main():
                     local_root = Path(args.local_results)
                 else:
                     repo_root = Path(__file__).parent.parent.parent
-                    local_root = repo_root / 'experiments' / 'durables' / 'estimation' / 'results'
+                    local_root = repo_root / 'benchmarks' / 'durables' / 'estimation' / 'results'
                 if local_root is not None:
                     local_sweep = local_root / mod_name / spec_name
                     try:

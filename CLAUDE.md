@@ -28,6 +28,10 @@ attribute:
 | `run.syntax_dir` | `run.model_dir` | kikku `RunSpec` | kikku reversed course — `syntax_dir` is now the deprecated alias |
 | `examples/durables/syntax` | `examples/durables/mod/separable` | directory path | Tests and precompile had stale refs |
 | `examples.durables.simulate` | `examples.durables.horses.simulate` | import path | Test file had stale import |
+| `examples/durables/mod` | `examples/durables/syntax` | directory path | 21 Aug 2026: reversed the earlier move; registries now `syntax/{separable,cobb_douglas}` |
+| `examples/durables/horses` | `examples/durables/solvers` | directory + import path | 21 Aug 2026: `examples.durables.solvers.simulate` etc. |
+| `experiments/` | `benchmarks/` | directory path | 21 Aug 2026: Gadi checkout must `git pull` before running `scripts/pull_gadi_results.sh` |
+| `replication/` | `paper-results/` | directory path | 21 Aug 2026: committed paper outputs |
 
 ## Settings vs Calibration
 
@@ -81,5 +85,5 @@ referenced in the methods YAML `settings:` block.
   git operations via sshfs — they create lock files.
 - After pulling on Gadi, the venv may need `pip install -e .` to pick up
   new dependencies (e.g. `consav`, `quantecon` added to core deps).
-- PBS scripts live in `experiments/durables/` but are NOT tracked in git.
-  Use `scripts/pull_gadi_results.sh` to snapshot them into replication/.
+- PBS scripts live in `benchmarks/durables/` but are NOT tracked in git.
+  Use `scripts/pull_gadi_results.sh` to snapshot them into paper-results/.
