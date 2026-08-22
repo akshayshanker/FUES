@@ -1,20 +1,44 @@
 stage: RetireeConsumption
 
+# Operator-slot methodization (spec 0.1d.1) under the kernel/policy schema
+# (spec 0.3): EGM policy construction on `policy`; the value-representation
+# (interpolation) on the evaluation block's `evaluate` (the Cartesian arrival
+# cash-on-hand grid).
+#
+# No `upper_env` node: the retiree consumption stage is a smooth, globally
+# concave EGM problem (no discrete kink), so it has no upper-envelope operator.
+# Only `work_cons` carries an upper-envelope operator (it sits below the
+# work/retire branch). Accordingly this stage does NOT take the `$method_switch`
+# slot (see spec_factory.yaml).
+#
+# `handler:` pins the horse — the solver callable that realises each node
+# (spec 0.1d.1, the old `tool:`). The retiree EGM step is realised by kikku's
+# `make_egm_1d`, composed with this app's own closed-form EGM sub-equations
+# (make_retiree_egm_fns in model.py). The `dcsn_mover`/`arvl_mover` that drive
+# these horses live in operators.py:make_retire_cons.
 methods:
-  - on: cntn_to_dcsn_mover
-    schemes:
-      - scheme: bellman_backward
-        method: !egm
+  # policy construction (EGM) — the box tag claims the policy interior.
+  # Realised by kikku's 1-D EGM step, built from this app's retiree FOC funcs.
+  - on: policy
+    method: !egm
+    handler: kikku:make_egm_1d          # FUES2026/kikku/kikku/asva/egm_1d.py:make_egm_1d (built in operators.py:make_retire_cons via _egm_retire)
 
-      - scheme: interpolation
-        method: !Linear
-        grid: endogenous
+  # InvEuler = the EGM control recovery (argmax realised by closed-form FOC
+  # inversion, c = 1/(βR·dv)) — PREVIOUSLY UNDECLARED. The EGM step "goes to
+  # solve" the FOC at each grid point but no method node existed for it; this is
+  # the canonical FUES InvEuler-absent case. No root-finder is invoked: the
+  # inverse is closed form for log utility.
+  - on: policy.InvEuler
+    method: !analytic-inverse
+    handler: fues-retirement:fn_inv_euler   # examples/retirement/model.py:make_retiree_egm_fns.fn_inv_euler
 
-  - on: dcsn_to_arvl_mover
-    schemes:
-      - scheme: interpolation
-        method: !Linear
-        grid: !Cartesian
-        settings:
-          orders: [n_a_ret]
-          bounds: [[a_ret_min, a_ret_max]]
+  # value-representation handler for the evaluation block (interpolation on the
+  # Cartesian arrival cash-on-hand grid). The arrival mover composes the
+  # arvl→dcsn transition with fused 3-array linear interpolation (interp_as_3).
+  - on: evaluate
+    method: !Linear
+    grid: !Cartesian
+    handler: dcsmm:interp_as_3          # src/dcsmm/fues/helpers/math_funcs.py:interp_as_3 (via kikku:make_compose_interp in operators.py:make_retire_cons)
+    settings:
+      orders: [n_a_ret]
+      bounds: [[a_ret_min, a_ret_max]]

@@ -1,0 +1,26 @@
+# spec_factory_males.yaml — male calibration variant
+# Only difference from baseline: calibration chain includes main_males overlay.
+stages:
+  tenure:
+    calibration:
+      all: [calibration/main, calibration/main_males, $draw]
+    settings:
+      all: [settings/default, $draw]
+    methods:
+      all: [stages/tenure/tenure_methods]
+
+  keeper_cons:
+    calibration:
+      all: [calibration/main, calibration/main_males, $draw]
+    settings:
+      all: [settings/default, $draw]
+    methods:
+      all: [stages/keeper_cons/keeper_cons_methods]
+
+  adjuster_cons:
+    calibration:
+      all: [calibration/main, calibration/main_males, $draw]
+    settings:
+      all: [settings/default, $draw]
+    methods:
+      all: [stages/adjuster_cons/adjuster_cons_methods, $method_switch]

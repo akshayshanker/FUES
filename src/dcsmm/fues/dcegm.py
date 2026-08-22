@@ -3,12 +3,18 @@ import os
 import numpy as np
 from numba import jit
 import time
-import dill as pickle
+try:
+    import dill as pickle
+except ImportError:
+    import pickle
 from numba import njit, prange
 
-# LinearInterp import removed - was unused
-#from HARK.dcegm import calc_segments, calc_multiline_envelope, calc_cross_points
-from HARK.dcegm import calc_nondecreasing_segments, upper_envelope, calc_linear_crossing
+# HARK is optional — only needed if DCEGM method is selected
+try:
+    from HARK.dcegm import calc_nondecreasing_segments, upper_envelope, calc_linear_crossing
+    _HAS_HARK = True
+except ImportError:
+    _HAS_HARK = False
 from interpolation import interp
 
 # Control verbose output with environment variable

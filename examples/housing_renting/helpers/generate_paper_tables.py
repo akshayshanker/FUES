@@ -649,7 +649,7 @@ def main():
         # Try to read from experiment YAML
         try:
             import yaml
-            exp_set_path = Path(__file__).parent.parent.parent.parent / "experiments" / "housing_renting" / "experiment_sets" / f"{args.experiment_set}.yml"
+            exp_set_path = Path(__file__).parent.parent.parent.parent / "benchmarks" / "housing_renting" / "experiment_sets" / f"{args.experiment_set}.yml"
             if exp_set_path.exists():
                 with open(exp_set_path) as f:
                     exp_config = yaml.safe_load(f)

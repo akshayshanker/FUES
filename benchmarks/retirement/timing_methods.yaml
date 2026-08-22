@@ -1,0 +1,6 @@
+# v3: one method_switch row per string tag (expanded in solve / solve_nest)
+# Used as: --slot-range @benchmarks/retirement/timing_methods.yaml
+- { method_switch: RFC }
+- { method_switch: FUES }
+- { method_switch: DCEGM }
+- { method_switch: CONSAV }

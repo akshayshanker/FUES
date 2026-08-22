@@ -1,0 +1,45 @@
+\documentclass[11pt]{article}
+\usepackage{booktabs}
+\usepackage[margin=1in]{geometry}
+\begin{document}
+\pagestyle{empty}
+% Requires: \usepackage{booktabs}
+\begin{table}[htbp]
+\centering
+\begingroup
+\small
+\setlength{\tabcolsep}{3pt}
+\renewcommand{\arraystretch}{1.05}
+\caption{Durables Model: Per-Period Timing and Accuracy}
+\label{table:housing1}
+\begin{tabular}{@{}rr rrrrr rrrrr@{}}
+\toprule
+& & \multicolumn{5}{c}{FUES} & \multicolumn{5}{c}{NEGM} \\
+\cmidrule(lr){3-7} \cmidrule(lr){8-12}
+& & \multicolumn{2}{c}{Time} & \multicolumn{3}{c}{Euler} & \multicolumn{2}{c}{Time} & \multicolumn{3}{c}{Euler} \\
+\cmidrule(lr){3-4} \cmidrule(lr){5-7} \cmidrule(lr){8-9} \cmidrule(lr){10-12}
+$N_A$ & $\tau$ & NA & Adj & Comb & NA & Adj & NA & Adj & Comb & NA & Adj \\
+\midrule
+250 & 0.05 & 143 & 12 & -4.57 & -4.44 & -3.66 & 142 & 47 & -4.32 & -4.22 & -2.46 \\
+ & 0.07 & 143 & 12 & -4.75 & -4.59 & -3.57 & 142 & 44 & -4.57 & -4.45 & -2.60 \\
+ & 0.12 & 144 & 12 & -5.14 & -4.99 & -3.46 & 143 & 44 & -5.03 & -4.88 & -2.53 \\
+\midrule
+500 & 0.05 & 385 & 23 & -5.66 & -5.46 & -4.17 & 380 & 45 & -5.44 & -5.27 & -2.77 \\
+ & 0.07 & 380 & 23 & -5.88 & -5.66 & -4.08 & 378 & 45 & -5.67 & -5.48 & -2.89 \\
+ & 0.12 & 383 & 22 & -6.17 & -6.01 & -4.05 & 383 & 45 & -6.12 & -5.94 & -2.67 \\
+\midrule
+750 & 0.05 & 724 & 32 & -6.11 & -5.90 & -4.33 & 718 & 45 & -5.87 & -5.68 & -2.84 \\
+ & 0.07 & 715 & 34 & -6.26 & -6.04 & -4.60 & 723 & 45 & -6.06 & -5.87 & -2.80 \\
+ & 0.12 & 721 & 32 & -6.53 & -6.37 & -4.24 & 715 & 45 & -6.47 & -6.30 & -2.77 \\
+\midrule
+1,000 & 0.05 & 1089 & 40 & -6.31 & -6.10 & -4.39 & 1089 & 41 & -6.13 & -5.93 & -2.75 \\
+ & 0.07 & 1124 & 40 & -6.49 & -6.28 & -4.52 & 1118 & 41 & -6.28 & -6.08 & -2.84 \\
+ & 0.12 & 1116 & 40 & -6.72 & -6.57 & -4.45 & 1121 & 41 & -6.67 & -6.52 & -2.75 \\
+\bottomrule
+\end{tabular}
+\vspace{0.3em}
+\par\small \textit{Notes:} Time in ms; Euler errors in $\log_{10}$ scale. \textbf{Comb}: combined mean. \textbf{NA}: non-adjusters. \textbf{Adj}: adjusters. Parameters: $\beta=0.94$, $\gamma_c=3.5$, $\gamma_h=1.5$, $\alpha=0.70$, $\delta=0.00$, $r=1.04$, $r_H=1.00$, $\rho_w=0.82$, $\sigma_w=0.11$, $N_{sim}=10,000$.
+\endgroup
+\end{table}
+
+\end{document}

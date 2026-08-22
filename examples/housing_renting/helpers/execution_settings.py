@@ -28,8 +28,8 @@ def load_experiment_set(experiment_set_name: str = "default") -> dict:
     dict
         Experiment set configuration
     """
-    # Look for experiment set in experiments/housing_renting/experiment_sets/
-    experiment_sets_dir = Path(__file__).parent.parent.parent.parent / "experiments" / "housing_renting" / "experiment_sets"
+    # Look for experiment set in benchmarks/housing_renting/experiment_sets/
+    experiment_sets_dir = Path(__file__).parent.parent.parent.parent / "benchmarks" / "housing_renting" / "experiment_sets"
     config_path = experiment_sets_dir / f"{experiment_set_name}.yml"
     
     if not config_path.exists():

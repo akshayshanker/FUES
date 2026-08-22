@@ -1,0 +1,13 @@
+# Sparse override: male wage process.
+# All other parameters inherit from calibration/main.yaml via merge.
+calibration:
+  phi_w: 0.9044149
+  sigma_w: 0.0921957
+  lambdas:
+    - 9.3727655
+    - 0.1090508
+    - -0.00293958
+    - 0.00004127
+    - -0.0000002334
+    - 0.01516798
+    - -0.00012572

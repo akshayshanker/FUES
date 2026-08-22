@@ -1,0 +1,4 @@
+# Low work disutility variant (working is less costly)
+draw:
+  delta: 0.5
+  T: 50

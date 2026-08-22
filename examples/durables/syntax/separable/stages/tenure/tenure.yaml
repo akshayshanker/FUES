@@ -1,0 +1,113 @@
+name: AdjustmentDecision
+kind: branching
+branch_control: agent
+
+symbols:
+  spaces:
+    Xa: '@def R+'          # financial assets domain
+    Xh: '@def R+'          # housing stock domain
+    Xw: '@def R+'          # total wealth / cash-on-hand domain
+
+  prestate:
+    a: '@in Xa'            # financial assets
+    h: '@in Xh'            # housing stock
+    z: '@in R++'           # previous income realisation
+
+  states:
+    a: '@in Xa'            # identity a = a[<] -> tag = {<, ~}
+    h: '@in Xh'            # identity h = h[<] -> tag = {<, ~}
+    z: '@in R++'           # identity z = z[<] -> tag = {<, ~}
+
+  exogenous:
+    eps[>]:
+      - '@in R'
+      - '@dist Normal(0, 1)'    # IID innovation at continuation
+
+  poststates:
+    keep:
+      w_kp: '@in Xw'      # keeper cash-on-hand = R * a + y(z_kp)
+      h_kp: '@in Xh'      # housing stock passed to keeper
+      z_kp: '@in R++'     # next-period income (from AR(1) transition eq)
+    adjust:
+      w_adj: '@in Xw'     # total wealth = R * a + R_H * (1 - delta) * h + y(z_adj)
+      z_adj: '@in R++'    # next-period income (from AR(1) transition eq)
+
+  controls:
+    j: '@in {keep, adjust}'    # branch choice (j; `d` is reserved for differentials)
+
+  values:
+    V[<]: '@in R'
+    V: '@in R'
+    Q[-]:                      # branch-conditional values Q[j] (Iskhakov v̄_j)
+      keep: '@in R'
+      adjust: '@in R'
+    V[>]:
+      keep: '@in R'
+      adjust: '@in R'
+
+  values_marginal:
+    d_{a}V[<]: '@in R'          # partial_a v at arrival
+    d_{h}V[<]: '@in R'          # partial_h v at arrival
+    d_{a}V: '@in R'             # partial_a v at decision (selected branch)
+    d_{h}V: '@in R'             # partial_h v at decision (selected branch)
+    d_{a}Q[-]:                 # branch-conditional marginals dQ_a[j]
+      keep: '@in R'
+      adjust: '@in R'
+    d_{h}Q[-]:                 # branch-conditional marginals dQ_h[j]
+      keep: '@in R'
+      adjust: '@in R'
+    d_{w_kp}V[>]: '@in R'       # keep branch: partial_{w_kp} v[>]
+    d_{h_kp}V[>]: '@in R'       # keep branch: partial_{h_kp} v[>]
+    d_{w_adj}V[>]: '@in R'      # adjust branch: partial_{w_adj} v[>]
+
+  parameters:
+    R: '@in R+'            # gross financial return (1 + r)
+    R_H: '@in R+'          # gross housing return (1 + r_H)
+    delta: '@in [0,1]'     # housing depreciation rate
+    rho_z: '@in (0,1)'     # AR(1) persistence (phi_w in calibration)
+    sigma_z: '@in R+'      # AR(1) innovation std dev (sigma_w in calibration)
+
+equations:
+  arvl_to_dcsn_transition: identity    # a, h, z all in prestate & states -> Rule 3
+
+  dcsn_to_cntn_transition:
+    keep: |
+      z_kp = z^rho_z * exp(sigma_z * eps[>])
+      w_kp = R * a + y(z_kp)
+      h_kp = (1 - delta) * h
+    adjust: |
+      z_adj = z^rho_z * exp(sigma_z * eps[>])
+      w_adj = R * a + R_H * (1 - delta) * h + y(z_adj)
+
+  # backward evaluation (branch-conditional values Q[j] and their marginals;
+  # NO max — the discrete selection is constructed in `policy`). The decision
+  # perch tag `[-]` carries the branch index (a perch tag is required before a
+  # branch index in dolang; `Q[-][keep]` is "Q at the decision perch, branch
+  # keep", the dolang-parseable spelling of doc 09 §4.1's `Q[keep]`).
+  cntn_to_dcsn:
+    value: |
+      Q[-][keep]   = V[>][keep]
+      Q[-][adjust] = V[>][adjust]
+    marginal: |
+      d_{a}Q[-][keep]   = R * d_{w_kp}V[>]
+      d_{a}Q[-][adjust] = R * d_{w_adj}V[>]
+      d_{h}Q[-][keep]   = (1 - delta) * d_{h_kp}V[>]
+      d_{h}Q[-][adjust] = R_H * (1 - delta) * d_{w_adj}V[>]
+
+  dcsn_to_arvl:
+    value: |
+      V[<] = E_{z}(V)
+    marginal: |
+      d_{a}V[<] = E_{z}(d_{a}V)
+      d_{h}V[<] = E_{z}(d_{h}V)
+
+  # policy construction (discrete choice: method !max). `argmax` returns the
+  # CHOICE j; `evaluate` reads the value and marginals at that choice. The
+  # unconditional V = Q[j] = max_j Q[j] is the derived `max`.
+  policy:
+    argmax: |
+      j = argmax_{j}(Q[-][j])
+    evaluate: |
+      V = Q[-][j]
+      d_{a}V = d_{a}Q[-][j]
+      d_{h}V = d_{h}Q[-][j]

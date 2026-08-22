@@ -223,11 +223,17 @@ def interp_as(xp, yp, x, extrap=False):
 
     x_lo, x_hi = xp[0], xp[-1]
 
-    # Extrapolation slopes
+    # Extrapolation slopes (capped to avoid wild extrapolation
+    # from steep edge intervals after FUES cleaning)
+    _MAX_EXTRAP_SLOPE = 1e8
     dx_left = xp[1] - xp[0]
     slope_left = (yp[1] - yp[0]) / dx_left if dx_left != 0.0 else 0.0
+    if abs(slope_left) > _MAX_EXTRAP_SLOPE:
+        slope_left = _MAX_EXTRAP_SLOPE if slope_left > 0 else -_MAX_EXTRAP_SLOPE
     dx_right = xp[-1] - xp[-2]
     slope_right = (yp[-1] - yp[-2]) / dx_right if dx_right != 0.0 else 0.0
+    if abs(slope_right) > _MAX_EXTRAP_SLOPE:
+        slope_right = _MAX_EXTRAP_SLOPE if slope_right > 0 else -_MAX_EXTRAP_SLOPE
 
     # Detect whether x is sorted (check first few + last)
     x_sorted = True
@@ -313,11 +319,15 @@ def interp_as_scalar(xp, yp, x, extrap=False):
     x_lo, x_hi = xp[0], xp[-1]
 
     # Left boundary/extrapolation
+    _MAX_EXTRAP_SLOPE = 1e8
     if x <= x_lo:
         if extrap:
             dx = xp[1] - xp[0]
             if dx != 0.0:
-                return float(yp[0] + (x - x_lo) * (yp[1] - yp[0]) / dx)
+                slope = (yp[1] - yp[0]) / dx
+                if abs(slope) > _MAX_EXTRAP_SLOPE:
+                    slope = _MAX_EXTRAP_SLOPE if slope > 0 else -_MAX_EXTRAP_SLOPE
+                return float(yp[0] + (x - x_lo) * slope)
         return float(yp[0])
 
     # Right boundary/extrapolation
@@ -325,7 +335,10 @@ def interp_as_scalar(xp, yp, x, extrap=False):
         if extrap:
             dx = xp[-1] - xp[-2]
             if dx != 0.0:
-                return float(yp[-1] + (x - x_hi) * (yp[-1] - yp[-2]) / dx)
+                slope = (yp[-1] - yp[-2]) / dx
+                if abs(slope) > _MAX_EXTRAP_SLOPE:
+                    slope = _MAX_EXTRAP_SLOPE if slope > 0 else -_MAX_EXTRAP_SLOPE
+                return float(yp[-1] + (x - x_hi) * slope)
         return float(yp[-1])
 
     # Binary search for interval: find j such that xp[j] <= x < xp[j+1]
@@ -343,6 +356,229 @@ def interp_as_scalar(xp, yp, x, extrap=False):
         t = (x - xp[lo]) / dx
         return float(yp[lo] + t * (yp[hi] - yp[lo]))
     return float(yp[lo])
+
+
+@njit(cache=True)
+def _interp_1d_binary(xp, yp, x, extrap):
+    """Core 1D interp (binary search, no slope cap). Internal helper."""
+    n = len(xp)
+    if n == 0:
+        return 0.0
+    if n == 1:
+        return float(yp[0])
+    if x <= xp[0]:
+        if extrap:
+            dx = xp[1] - xp[0]
+            if dx != 0.0:
+                return float(yp[0] + (x - xp[0]) * (yp[1] - yp[0]) / dx)
+        return float(yp[0])
+    if x >= xp[-1]:
+        if extrap:
+            dx = xp[-1] - xp[-2]
+            if dx != 0.0:
+                return float(yp[-1] + (x - xp[-1]) * (yp[-1] - yp[-2]) / dx)
+        return float(yp[-1])
+    lo, hi = 0, n - 1
+    while hi - lo > 1:
+        mid = (lo + hi) >> 1
+        if xp[mid] <= x:
+            lo = mid
+        else:
+            hi = mid
+    dx = xp[hi] - xp[lo]
+    if dx != 0.0:
+        t = (x - xp[lo]) / dx
+        return float(yp[lo] + t * (yp[hi] - yp[lo]))
+    return float(yp[lo])
+
+
+@njit(cache=True)
+def interp_as_3(xp, y1, y2, y3, x, extrap=False):
+    """Fused 3-output 1D interpolation with single linear walk.
+
+    Interpolates three y-arrays at the same x-points using one pass
+    over the sorted xp grid. O(n + m) instead of 3 * O(n + m).
+
+    Parameters
+    ----------
+    xp : 1D array  – data x-coordinates (must be increasing)
+    y1, y2, y3 : 1D arrays – three data y-arrays
+    x : 1D array – query points (should be sorted for linear walk)
+    extrap : bool – linearly extrapolate outside xp bounds
+
+    Returns
+    -------
+    out1, out2, out3 : 1D arrays
+    """
+    n_x = len(x)
+    n_xp = len(xp)
+    out1 = np.empty(n_x)
+    out2 = np.empty(n_x)
+    out3 = np.empty(n_x)
+
+    if n_xp == 0:
+        for i in range(n_x):
+            out1[i] = out2[i] = out3[i] = 0.0
+        return out1, out2, out3
+
+    if n_xp == 1:
+        for i in range(n_x):
+            out1[i] = y1[0]
+            out2[i] = y2[0]
+            out3[i] = y3[0]
+        return out1, out2, out3
+
+    x_lo, x_hi = xp[0], xp[-1]
+    _MAX_SLOPE = 1e8
+
+    dx_left = xp[1] - xp[0]
+    sl1 = (y1[1] - y1[0]) / dx_left if dx_left != 0.0 else 0.0
+    sl2 = (y2[1] - y2[0]) / dx_left if dx_left != 0.0 else 0.0
+    sl3 = (y3[1] - y3[0]) / dx_left if dx_left != 0.0 else 0.0
+
+    dx_right = xp[-1] - xp[-2]
+    sr1 = (y1[-1] - y1[-2]) / dx_right if dx_right != 0.0 else 0.0
+    sr2 = (y2[-1] - y2[-2]) / dx_right if dx_right != 0.0 else 0.0
+    sr3 = (y3[-1] - y3[-2]) / dx_right if dx_right != 0.0 else 0.0
+
+    for s in [sl1, sl2, sl3, sr1, sr2, sr3]:
+        pass  # slope capping applied inline below
+
+    j = 0
+    for i in range(n_x):
+        xi = x[i]
+        if xi <= x_lo:
+            if extrap:
+                d = xi - x_lo
+                out1[i] = y1[0] + d * (sl1 if abs(sl1) <= _MAX_SLOPE else (_MAX_SLOPE if sl1 > 0 else -_MAX_SLOPE))
+                out2[i] = y2[0] + d * (sl2 if abs(sl2) <= _MAX_SLOPE else (_MAX_SLOPE if sl2 > 0 else -_MAX_SLOPE))
+                out3[i] = y3[0] + d * (sl3 if abs(sl3) <= _MAX_SLOPE else (_MAX_SLOPE if sl3 > 0 else -_MAX_SLOPE))
+            else:
+                out1[i] = y1[0]
+                out2[i] = y2[0]
+                out3[i] = y3[0]
+        elif xi >= x_hi:
+            if extrap:
+                d = xi - x_hi
+                out1[i] = y1[-1] + d * (sr1 if abs(sr1) <= _MAX_SLOPE else (_MAX_SLOPE if sr1 > 0 else -_MAX_SLOPE))
+                out2[i] = y2[-1] + d * (sr2 if abs(sr2) <= _MAX_SLOPE else (_MAX_SLOPE if sr2 > 0 else -_MAX_SLOPE))
+                out3[i] = y3[-1] + d * (sr3 if abs(sr3) <= _MAX_SLOPE else (_MAX_SLOPE if sr3 > 0 else -_MAX_SLOPE))
+            else:
+                out1[i] = y1[-1]
+                out2[i] = y2[-1]
+                out3[i] = y3[-1]
+        else:
+            while j < n_xp - 2 and xp[j + 1] <= xi:
+                j += 1
+            dx = xp[j + 1] - xp[j]
+            if dx != 0.0:
+                t = (xi - xp[j]) / dx
+                out1[i] = y1[j] + t * (y1[j + 1] - y1[j])
+                out2[i] = y2[j] + t * (y2[j + 1] - y2[j])
+                out3[i] = y3[j] + t * (y3[j + 1] - y3[j])
+            else:
+                out1[i] = y1[j]
+                out2[i] = y2[j]
+                out3[i] = y3[j]
+
+    return out1, out2, out3
+
+
+@njit(cache=True)
+def _bsearch(grid, x):
+    """Binary search: return (lo, t) where grid[lo] <= x < grid[lo+1], t in [0,1]."""
+    n = len(grid)
+    if x <= grid[0]:
+        return 0, 0.0
+    if x >= grid[-1]:
+        return n - 2, 1.0
+    lo, hi = 0, n - 1
+    while hi - lo > 1:
+        mid = (lo + hi) >> 1
+        if grid[mid] <= x:
+            lo = mid
+        else:
+            hi = mid
+    dx = grid[hi] - grid[lo]
+    t = (x - grid[lo]) / dx if dx != 0.0 else 0.0
+    return lo, t
+
+
+@njit(cache=True)
+def interp2d_nonuniform(a_grid, h_grid, Z, a_q, h_q, extrap=False):
+    """Bilinear interpolation on non-uniform rectilinear grid.
+
+    Two binary searches + four-corner bilinear.  O(log n_a + log n_h).
+
+    Parameters
+    ----------
+    a_grid : 1D array (n_a,)
+        First-axis grid (must be increasing).
+    h_grid : 1D array (n_h,)
+        Second-axis grid (must be increasing).
+    Z : 2D array (n_a, n_h)
+        Data on the grid.
+    a_q, h_q : float
+        Query point.
+    extrap : bool
+        If True, linearly extrapolate outside domain.
+        If False, clamp to boundary values.
+
+    Returns
+    -------
+    float
+        Interpolated value at (a_q, h_q).
+    """
+    n_a = len(a_grid)
+    n_h = len(h_grid)
+
+    if not extrap:
+        a_q = min(max(a_q, a_grid[0]), a_grid[-1])
+        h_q = min(max(h_q, h_grid[0]), h_grid[-1])
+
+    ia, ta = _bsearch(a_grid, a_q)
+    ih, th = _bsearch(h_grid, h_q)
+
+    # Clamp indices for safety
+    ia = min(ia, n_a - 2)
+    ih = min(ih, n_h - 2)
+
+    # Four-corner bilinear
+    z00 = Z[ia, ih]
+    z10 = Z[ia + 1, ih]
+    z01 = Z[ia, ih + 1]
+    z11 = Z[ia + 1, ih + 1]
+
+    val = (z00 * (1.0 - ta) * (1.0 - th)
+         + z10 * ta * (1.0 - th)
+         + z01 * (1.0 - ta) * th
+         + z11 * ta * th)
+
+    return val
+
+
+@njit(cache=True)
+def interp2d_nonuniform_vec(a_grid, h_grid, Z, pts, extrap=False):
+    """Vectorised bilinear interpolation on non-uniform rectilinear grid.
+
+    Parameters
+    ----------
+    a_grid : 1D array (n_a,)
+    h_grid : 1D array (n_h,)
+    Z : 2D array (n_a, n_h)
+    pts : 2D array (N, 2)
+        Query points, each row is (a, h).
+    extrap : bool
+
+    Returns
+    -------
+    1D array (N,)
+    """
+    N = pts.shape[0]
+    out = np.empty(N)
+    for i in range(N):
+        out[i] = interp2d_nonuniform(a_grid, h_grid, Z, pts[i, 0], pts[i, 1], extrap)
+    return out
 
 
 def upper_envelope(segments,  calc_crossings=False):
@@ -938,7 +1174,8 @@ def _forced_intersection_twopoint(
         intr_x = mid
         intr_y = 0.5 * (yL + yR)
 
-        print(f"SCAN DEBUG: intr_x is NaN at i={dbg_i}, j={dbg_j}. Falling back to midpoint.")
+        # NaN intersection fallback — silent in production
+        pass
 
     interval_length = e_hi - e_lo
     if np.abs(interval_length) < eps_d:
@@ -1136,65 +1373,6 @@ def correct_jumps1d_arr(data, x, gradient_jump_threshold, v_arr, d_arr, a_arr):
 # ============== Fused Multi-Array Interpolation ==============
 
 
-@njit(cache=True)
-def interp_as_3(xp, yp1, yp2, yp3, x):
-    """Interpolate three y-arrays on the same (xp, x) grids in one walk.
-
-    Both xp and x must be sorted ascending. Avoids tripling the walk
-    cost when interpolating multiple policies on the same grid.
-
-    Returns
-    -------
-    out1, out2, out3 : 1D arrays
-    """
-    n_x = len(x)
-    n_xp = len(xp)
-    out1 = np.empty(n_x)
-    out2 = np.empty(n_x)
-    out3 = np.empty(n_x)
-
-    if n_xp == 0:
-        for i in range(n_x):
-            out1[i] = 0.0
-            out2[i] = 0.0
-            out3[i] = 0.0
-        return out1, out2, out3
-
-    if n_xp == 1:
-        for i in range(n_x):
-            out1[i] = yp1[0]
-            out2[i] = yp2[0]
-            out3[i] = yp3[0]
-        return out1, out2, out3
-
-    x_lo, x_hi = xp[0], xp[-1]
-
-    j = 0
-    for i in range(n_x):
-        xi = x[i]
-        if xi <= x_lo:
-            out1[i] = yp1[0]
-            out2[i] = yp2[0]
-            out3[i] = yp3[0]
-        elif xi >= x_hi:
-            out1[i] = yp1[-1]
-            out2[i] = yp2[-1]
-            out3[i] = yp3[-1]
-        else:
-            while j < n_xp - 2 and xp[j + 1] <= xi:
-                j += 1
-            dx = xp[j + 1] - xp[j]
-            if dx != 0.0:
-                t = (xi - xp[j]) / dx
-                out1[i] = yp1[j] + t * (yp1[j + 1] - yp1[j])
-                out2[i] = yp2[j] + t * (yp2[j + 1] - yp2[j])
-                out3[i] = yp3[j] + t * (yp3[j + 1] - yp3[j])
-            else:
-                out1[i] = yp1[j]
-                out2[i] = yp2[j]
-                out3[i] = yp3[j]
-
-    return out1, out2, out3
 
 
 @njit(cache=True)
@@ -1334,3 +1512,243 @@ def postclean_double_jump_mask(e_grid, a_prime, m_bar, skip_mask, eps_d=EPS_D):
             keep[i] = False
 
     return keep
+
+
+@njit(cache=True)
+def calculate_gradient_1d(data, x):
+    """Finite-difference gradient of data with respect to x.
+
+    Returns an array of length len(data)+1 representing the slope
+    between consecutive points (element i is the slope from i-1 to i).
+    Element 0 is set to 0.
+    """
+    n = len(data)
+    grad = np.empty(n + 1)
+    grad[0] = 0.0
+    for i in range(1, n):
+        dx = x[i] - x[i - 1]
+        if dx == 0.0:
+            grad[i] = 0.0
+        else:
+            grad[i] = (data[i] - data[i - 1]) / dx
+    grad[n] = 0.0
+    return grad
+
+
+@njit(cache=True)
+def correct_jumps1d_arr(data, x, gradient_jump_threshold,
+                        v_arr, d_arr, a_arr):
+    """Remove isolated jumps in 1D interpolated policy arrays (two-pass).
+
+    A point is flagged when both the left and right gradients exceed
+    *gradient_jump_threshold*.  Pass 1 corrects using the original
+    neighbours; pass 2 recomputes gradients on the corrected arrays
+    and catches clusters that pass 1 could not fix.
+
+    Parameters
+    ----------
+    data : np.ndarray
+        1D array of interpolated values to correct.
+    x : np.ndarray
+        x-coordinates corresponding to *data*.
+    gradient_jump_threshold : float
+        Threshold for detecting jumps.
+    v_arr, d_arr, a_arr : np.ndarray
+        Companion arrays (value, durable choice, asset choice) corrected
+        in lockstep with *data*.
+
+    Returns
+    -------
+    corrected_data, corrected_v, corrected_d, corrected_a : np.ndarray
+    """
+    n = len(data)
+    corrected_data = np.copy(data)
+    corrected_v = np.copy(v_arr)
+    corrected_d = np.copy(d_arr)
+    corrected_a = np.copy(a_arr)
+
+    # --- Pass 1: correct using original neighbours ---
+    gradients = calculate_gradient_1d(data, x)
+    for i in range(1, n - 1):
+        if (np.abs(gradients[i]) > gradient_jump_threshold
+                and np.abs(gradients[i + 1]) > gradient_jump_threshold):
+            corrected_data[i] = 0.5 * (data[i - 1] + data[i + 1])
+            corrected_v[i] = 0.5 * (v_arr[i - 1] + v_arr[i + 1])
+            corrected_d[i] = 0.5 * (d_arr[i - 1] + d_arr[i + 1])
+            corrected_a[i] = 0.5 * (a_arr[i - 1] + a_arr[i + 1])
+
+    # --- Pass 2: recompute gradients on corrected arrays ---
+    gradients2 = calculate_gradient_1d(corrected_data, x)
+    for i in range(1, n - 1):
+        if (np.abs(gradients2[i]) > gradient_jump_threshold
+                and np.abs(gradients2[i + 1]) > gradient_jump_threshold):
+            corrected_data[i] = 0.5 * (corrected_data[i - 1]
+                                       + corrected_data[i + 1])
+            corrected_v[i] = 0.5 * (corrected_v[i - 1]
+                                     + corrected_v[i + 1])
+            corrected_d[i] = 0.5 * (corrected_d[i - 1]
+                                     + corrected_d[i + 1])
+            corrected_a[i] = 0.5 * (corrected_a[i - 1]
+                                     + corrected_a[i + 1])
+
+    return corrected_data, corrected_v, corrected_d, corrected_a
+
+
+@njit(cache=True)
+def interp_as_4(xp, yp1, yp2, yp3, yp4, x, extrap=False):
+    """Fused interpolation of 4 y-arrays on the same xp/x grids.
+
+    Single index walk (O(n+m)) shared across all 4 y-arrays,
+    eliminating 3 redundant walks compared to 4 separate interp_as calls.
+
+    Parameters
+    ----------
+    xp : 1D array  – sorted data x-coordinates
+    yp1, yp2, yp3, yp4 : 1D arrays – y data to interpolate
+    x  : 1D array  – query points (sorted ascending for linear walk)
+    extrap : bool   – linearly extrapolate beyond xp bounds
+
+    Returns
+    -------
+    out1, out2, out3, out4 : 1D arrays
+    """
+    n_x = len(x)
+    n_xp = len(xp)
+    out1 = np.empty(n_x)
+    out2 = np.empty(n_x)
+    out3 = np.empty(n_x)
+    out4 = np.empty(n_x)
+
+    if n_xp == 0:
+        for i in range(n_x):
+            out1[i] = 0.0
+            out2[i] = 0.0
+            out3[i] = 0.0
+            out4[i] = 0.0
+        return out1, out2, out3, out4
+
+    if n_xp == 1:
+        for i in range(n_x):
+            out1[i] = yp1[0]
+            out2[i] = yp2[0]
+            out3[i] = yp3[0]
+            out4[i] = yp4[0]
+        return out1, out2, out3, out4
+
+    x_lo, x_hi = xp[0], xp[-1]
+
+    dx_left = xp[1] - xp[0]
+    dx_right = xp[-1] - xp[-2]
+    inv_left = 1.0 / dx_left if dx_left != 0.0 else 0.0
+    inv_right = 1.0 / dx_right if dx_right != 0.0 else 0.0
+    sl1 = (yp1[1] - yp1[0]) * inv_left
+    sl2 = (yp2[1] - yp2[0]) * inv_left
+    sl3 = (yp3[1] - yp3[0]) * inv_left
+    sl4 = (yp4[1] - yp4[0]) * inv_left
+    sr1 = (yp1[-1] - yp1[-2]) * inv_right
+    sr2 = (yp2[-1] - yp2[-2]) * inv_right
+    sr3 = (yp3[-1] - yp3[-2]) * inv_right
+    sr4 = (yp4[-1] - yp4[-2]) * inv_right
+
+    # Detect sorted (same heuristic as interp_as)
+    x_sorted = True
+    check_n = min(n_x, 8)
+    for i in range(1, check_n):
+        if x[i] < x[i - 1]:
+            x_sorted = False
+            break
+    if x_sorted and n_x > check_n and x[-1] < x[-2]:
+        x_sorted = False
+
+    if x_sorted:
+        j = 0
+        for i in range(n_x):
+            xi = x[i]
+            if xi <= x_lo:
+                if extrap:
+                    d = xi - x_lo
+                    out1[i] = yp1[0] + d * sl1
+                    out2[i] = yp2[0] + d * sl2
+                    out3[i] = yp3[0] + d * sl3
+                    out4[i] = yp4[0] + d * sl4
+                else:
+                    out1[i] = yp1[0]
+                    out2[i] = yp2[0]
+                    out3[i] = yp3[0]
+                    out4[i] = yp4[0]
+            elif xi >= x_hi:
+                if extrap:
+                    d = xi - x_hi
+                    out1[i] = yp1[-1] + d * sr1
+                    out2[i] = yp2[-1] + d * sr2
+                    out3[i] = yp3[-1] + d * sr3
+                    out4[i] = yp4[-1] + d * sr4
+                else:
+                    out1[i] = yp1[-1]
+                    out2[i] = yp2[-1]
+                    out3[i] = yp3[-1]
+                    out4[i] = yp4[-1]
+            else:
+                while j < n_xp - 2 and xp[j + 1] <= xi:
+                    j += 1
+                dx = xp[j + 1] - xp[j]
+                if dx != 0.0:
+                    t = (xi - xp[j]) / dx
+                    out1[i] = yp1[j] + t * (yp1[j + 1] - yp1[j])
+                    out2[i] = yp2[j] + t * (yp2[j + 1] - yp2[j])
+                    out3[i] = yp3[j] + t * (yp3[j + 1] - yp3[j])
+                    out4[i] = yp4[j] + t * (yp4[j + 1] - yp4[j])
+                else:
+                    out1[i] = yp1[j]
+                    out2[i] = yp2[j]
+                    out3[i] = yp3[j]
+                    out4[i] = yp4[j]
+    else:
+        for i in range(n_x):
+            xi = x[i]
+            if xi <= x_lo:
+                if extrap:
+                    d = xi - x_lo
+                    out1[i] = yp1[0] + d * sl1
+                    out2[i] = yp2[0] + d * sl2
+                    out3[i] = yp3[0] + d * sl3
+                    out4[i] = yp4[0] + d * sl4
+                else:
+                    out1[i] = yp1[0]
+                    out2[i] = yp2[0]
+                    out3[i] = yp3[0]
+                    out4[i] = yp4[0]
+            elif xi >= x_hi:
+                if extrap:
+                    d = xi - x_hi
+                    out1[i] = yp1[-1] + d * sr1
+                    out2[i] = yp2[-1] + d * sr2
+                    out3[i] = yp3[-1] + d * sr3
+                    out4[i] = yp4[-1] + d * sr4
+                else:
+                    out1[i] = yp1[-1]
+                    out2[i] = yp2[-1]
+                    out3[i] = yp3[-1]
+                    out4[i] = yp4[-1]
+            else:
+                lo, hi = 0, n_xp - 1
+                while hi - lo > 1:
+                    mid = (lo + hi) >> 1
+                    if xp[mid] <= xi:
+                        lo = mid
+                    else:
+                        hi = mid
+                dx = xp[hi] - xp[lo]
+                if dx != 0.0:
+                    t = (xi - xp[lo]) / dx
+                    out1[i] = yp1[lo] + t * (yp1[hi] - yp1[lo])
+                    out2[i] = yp2[lo] + t * (yp2[hi] - yp2[lo])
+                    out3[i] = yp3[lo] + t * (yp3[hi] - yp3[lo])
+                    out4[i] = yp4[lo] + t * (yp4[hi] - yp4[lo])
+                else:
+                    out1[i] = yp1[lo]
+                    out2[i] = yp2[lo]
+                    out3[i] = yp3[lo]
+                    out4[i] = yp4[lo]
+
+    return out1, out2, out3, out4

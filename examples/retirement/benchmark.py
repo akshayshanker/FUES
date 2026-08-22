@@ -1,17 +1,21 @@
-"""Benchmarking functions for retirement model - timing sweeps and comparisons.
+"""Benchmarking helpers: true-solution precompute and timing-table layout.
 
-Compares FUES vs DC-EGM vs RFC vs CONSAV across grid sizes and delta values.
-Uses the canonical pipeline (solve_nest) for all runs.
-
-Author: Akshay Shanker, University of New South Wales, akshay.shanker@me.com
+The retirement ``run.py`` path uses the canonical kikku ``sweep`` over
+``run.test_set``; this module holds the cross-tab post-processing and
+the reference-solution precompute for consumption-deviation metrics.
 """
 
-import numpy as np
+from __future__ import annotations
+
 import os
 import sys
-import yaml
+from typing import Any
 
-# Ensure `dcsmm` is importable when running from a repo checkout.
+import yaml
+from kikku.run.mpi import bcast_item, is_root
+from kikku.run.sweep import SweepResult
+from kikku.run.types import TestSpec
+
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 _REPO_ROOT = os.path.dirname(os.path.dirname(_THIS_DIR))
 _SRC_ROOT = os.path.join(_REPO_ROOT, "src")
@@ -20,238 +24,198 @@ if _SRC_ROOT not in sys.path:
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
-from pathlib import Path
-from .solve import solve_nest
-from .outputs import (
-    generate_timing_table_combined, generate_accuracy_table,
-    plot_egrids, plot_cons_pol, plot_dcegm_cf,
-    get_policy, get_timing, get_solution_at_age,
-    euler, consumption_deviation,
+from pathlib import Path  # noqa: E402
+
+from .postprocess import (  # noqa: E402
+    generate_accuracy_table,
+    generate_timing_table_combined,
+    get_policy,
 )
+from .solve import solve_nest  # noqa: E402
 
 SYNTAX_DIR = Path(__file__).resolve().parent / "syntax"
-
-# Load baseline calibration + settings from syntax dir (cached).
 _cal_path = SYNTAX_DIR / "calibration.yaml"
 _set_path = SYNTAX_DIR / "settings.yaml"
 
+# Data row layout MUST match outputs/tables expectations:
+#   "Data rows arrive as [grid, delta, RFC, FUES, DCEGM, CONSAV] = indices 2,3,4,5"
+# tables._COL_ORDER = (3, 4, 5, 2) remaps to display order (FUES, MSS=DCEGM, LTM=CONSAV, RFC).
+METHODS = ("RFC", "FUES", "DCEGM", "CONSAV")
 
-def _load_baseline():
-    """Load baseline calibration and settings from syntax dir."""
+
+def load_baseline() -> tuple[dict, dict]:
     with open(_cal_path) as f:
-        cal = yaml.safe_load(f)['calibration']
+        cal = yaml.safe_load(f)["calibration"]
     with open(_set_path) as f:
-        settings = yaml.safe_load(f)['settings']
+        settings = yaml.safe_load(f)["settings"]
     return cal, settings
 
 
-def test_Timings(grid_sizes, delta_values, n=3, results_dir="results",
-                 true_grid_size=20000, true_method='DCEGM',
-                 calib_overrides=None, config_overrides=None,
-                 latex_grids=None):
-    """Run timing benchmarks across grid sizes and delta values.
+def precompute_true_solutions(
+    deltas: list[float],
+    true_grid_size: int,
+    true_method: str,
+    base_params: dict,
+    base_settings: dict,
+    *,
+    comm,
+) -> dict[float, dict]:
+    """High-grid reference policy per *delta*; rank 0 only then broadcast.
 
-    All runs go through the canonical pipeline (solve_nest).
-
-    Parameters
-    ----------
-    grid_sizes : list
-        List of grid sizes to test.
-    delta_values : list
-        List of delta values to test.
-    n : int
-        Number of runs per configuration (best of n). Default is 3.
-    results_dir : str
-        Directory to save results. Default is "results".
-    true_grid_size : int
-        Grid size for computing "true" reference solution. Default is 20000.
-    true_method : str
-        Method used for "true" reference solution. Default is 'DCEGM'.
-    calib_overrides : dict, optional
-        Extra calibration overrides (e.g. from --override-file).
-        ``delta`` is always overridden per sweep row.
-    config_overrides : dict, optional
-        Extra config overrides (e.g. from --override-file).
-        ``grid_size`` and ``padding_mbar`` are always overridden per sweep row.
-    latex_grids : list of int, optional
-        Subset of grid_sizes to include in LaTeX tables.
-        Markdown tables always include all grid sizes.
+    Each value is ``{'c_true': ..., 'a_grid': ...}`` for ``consumption_deviation``.
     """
-    extra_calib = dict(calib_overrides or {})
-    extra_config = dict(config_overrides or {})
-    base_cal, base_settings = _load_baseline()
-    # Merge CLI overrides into baseline for metadata
-    base_cal.update(extra_calib)
-    base_settings.update(extra_config)
-
-    # Build a benchmark params dict for table metadata
-    benchmark_params = {**base_cal, **base_settings,
-                        'true_grid_size': true_grid_size,
-                        'true_method': true_method}
-
-    latex_errors_data = []
-    latex_timings_data = []
-    latex_total_timing_data = []
-    latex_cdev_data = []
-
-    # Pre-compute "true" solutions for each delta value
-    true_solutions = {}
-    for delta in delta_values:
-        print(f"\nComputing true solution for delta={delta} "
-              f"with {true_grid_size} grid points using {true_method}...")
-
-        cal_ov = {**extra_calib, 'delta': delta}
-        cfg_ov = {**extra_config, 'grid_size': true_grid_size,
-                  'padding_mbar': -0.011}
-        # Warmup
-        _, _, _, _ = solve_nest(
-            SYNTAX_DIR, method=true_method,
-            calib_overrides=cal_ov,
-            config_overrides=cfg_ov,
-        )
-        # Actual run
-        nest_true, model_true, _, _ = solve_nest(
-            SYNTAX_DIR, method=true_method,
-            calib_overrides=cal_ov,
-            config_overrides=cfg_ov,
-        )
-        c_true = get_policy(nest_true, 'c')
-        true_solutions[delta] = {
-            'c_true': c_true,
-            'a_grid': model_true.asset_grid_A,
-        }
-        print(f"  True solution computed.")
-
-    for g_size in grid_sizes:
-        for delta in delta_values:
-            print(f"\nTesting with grid size: {g_size} and delta: {delta}")
-
-            c_true = true_solutions[delta]['c_true']
-            a_grid_true = true_solutions[delta]['a_grid']
-
-            best = {m: {'time': float('inf'), 'total': float('inf'),
-                        'error': float('inf'), 'cdev': float('inf')}
-                    for m in ('RFC', 'FUES', 'DCEGM', 'CONSAV')}
-
-            for _ in range(n):
-                for method in ('RFC', 'FUES', 'DCEGM', 'CONSAV'):
-                    nest, model, _, _ = solve_nest(
-                        SYNTAX_DIR, method=method,
-                        calib_overrides={**extra_calib, 'delta': delta},
-                        config_overrides={**extra_config, 'grid_size': g_size,
-                                          'padding_mbar': -0.011},
-                    )
-                    c_refined = get_policy(nest, 'c')
-                    timing = get_timing(nest)
-                    err = euler(model, c_refined)
-                    cdev = consumption_deviation(
-                        model, c_refined, c_true, a_grid_true,
-                    )
-
-                    best[method]['time'] = min(
-                        best[method]['time'], timing[0])
-                    best[method]['total'] = min(
-                        best[method]['total'], timing[1])
-                    best[method]['error'] = min(
-                        best[method]['error'], err)
-                    best[method]['cdev'] = min(
-                        best[method]['cdev'], cdev)
-
-            methods = ('RFC', 'FUES', 'DCEGM', 'CONSAV')
-            latex_errors_data.append([
-                g_size, delta,
-                *[best[m]['error'] for m in methods],
-            ])
-            latex_timings_data.append([
-                g_size, delta,
-                *[best[m]['time'] * 1000 for m in methods],
-            ])
-            latex_total_timing_data.append([
-                g_size, delta,
-                *[best[m]['total'] * 1000 for m in methods],
-            ])
-            latex_cdev_data.append([
-                g_size, delta,
-                *[best[m]['cdev'] for m in methods],
-            ])
-
-            print(
-                f'Euler errors: '
-                + ', '.join(f'{m}: {best[m]["error"]:.6f}'
-                            for m in methods)
+    trues: dict | None
+    if is_root(comm):
+        out: dict[float, dict] = {}
+        for d in deltas:
+            dk = _dkey(d)
+            cal_ov = {**base_params, "delta": d}
+            cfg_ov = {
+                **base_settings,
+                "grid_size": int(true_grid_size),
+                "padding_mbar": -0.011,
+            }
+            nest, model, _, _ = solve_nest(
+                SYNTAX_DIR,
+                method_switch=true_method,
+                draw={"calibration": cal_ov, "settings": cfg_ov},
             )
-            print(
-                f'Cons. dev (log10): '
-                + ', '.join(f'{m}: {best[m]["cdev"]:.6f}'
-                            for m in methods)
-            )
-            print(
-                f'Timings (s): '
-                + ', '.join(f'{m}: {best[m]["time"]:.6f}'
-                            for m in methods)
-            )
+            out[dk] = {
+                "c_true": get_policy(nest, "c"),
+                "a_grid": model.asset_grid_A,
+            }
+        trues = out
+    else:
+        trues = None
+    b = bcast_item(trues, comm, root=0)
+    if b is None:
+        raise RuntimeError("precompute_true_solutions: broadcast failed")
+    return b
 
-    # Generate tables
+
+def _dkey(x: float) -> float:
+    return round(float(x), 10)
+
+
+def _params_settings_from_testspec(t: TestSpec) -> tuple[dict, dict]:
+    base_c, base_s = load_baseline()
+    d = t.slots.get("draw", {}) or {}
+    if d and set(d) <= {"calibration", "settings", "methods"}:
+        return (d.get("calibration") or {}), (d.get("settings") or {})
+    p, s = {}, {}
+    for k, v in d.items():
+        if k in base_c:
+            p[k] = v
+        if k in base_s:
+            s[k] = v
+    return p, s
+
+
+def _method_tag(t: TestSpec) -> str:
+    ms = t.slots.get("method_switch")
+    if ms and isinstance(ms, str):
+        return str(ms)
+    if ms and isinstance(ms, dict):
+        for ent in (ms or {}).get("methods", []) or []:
+            for sch in (ent or {}).get("schemes", []) or []:
+                m = sch.get("method")
+                if m is not None:
+                    return str(m)
+    if t.label:
+        return str(t.label)
+    return "UNK"
+
+
+def format_timing_sweep_for_tables(
+    results: list[SweepResult],
+    *,
+    method_order: tuple[str, ...] = METHODS,
+) -> dict[str, list]:
+    """Turn flat ``SweepResult`` rows into the row-lists the LaTeX writers expect.
+
+    Returns keys ``errors``, ``ue_ms``, ``total_ms``, ``cdev``; each row is
+    ``[grid_size, delta, m0, m1, m2, m3]`` in ``method_order``.
+    """
+    base_c, base_s = load_baseline()
+    by_key: dict[tuple[int, float, str], Any] = {}
+    for sr in results:
+        t = sr.point
+        if not isinstance(t, TestSpec):
+            raise TypeError("format_timing_sweep_for_tables expected TestSpec points")
+        p, s = _params_settings_from_testspec(t)
+        settings_row = {**base_s, **s}
+        if "grid_size" not in settings_row:
+            raise ValueError("Timing sweep rows need draw→settings grid_size (or in base settings)")
+        gs = int(settings_row["grid_size"])
+        d = _dkey(p.get("delta", base_c.get("delta", 1.0)))
+        m = _method_tag(t)
+        by_key[(gs, d, m)] = sr.metrics
+
+    latex_errors: list = []
+    latex_ue: list = []
+    latex_tot: list = []
+    latex_cdev: list = []
+
+    gset: set[int] = set()
+    dset: set[float] = set()
+    for sr in results:
+        p0 = sr.point
+        if isinstance(p0, TestSpec):
+            pp, sp = _params_settings_from_testspec(p0)
+            srow = {**base_s, **sp}
+            if "grid_size" in srow:
+                gset.add(int(srow["grid_size"]))
+            dset.add(_dkey(pp.get("delta", base_c.get("delta", 1.0))))
+
+    for gs in sorted(gset):
+        for d in sorted(dset):
+            if not all((gs, d, m) in by_key for m in method_order):
+                continue
+            e_row, ue_row, tot_row, cd_row = [], [], [], []
+            for meth in method_order:
+                m = by_key[(gs, d, meth)]
+                e_row.append(m.get("error", float("nan")))
+                ue_row.append(m.get("ue_time", float("nan")) * 1000.0)
+                tot_row.append(m.get("total_time", float("nan")) * 1000.0)
+                cd_row.append(m.get("cdev", float("nan")))
+            latex_errors.append([gs, d, *e_row])
+            latex_ue.append([gs, d, *ue_row])
+            latex_tot.append([gs, d, *tot_row])
+            latex_cdev.append([gs, d, *cd_row])
+
+    return {
+        "errors": latex_errors,
+        "ue_ms": latex_ue,
+        "total_ms": latex_tot,
+        "cdev": latex_cdev,
+    }
+
+
+def write_timing_sweep_tables(
+    results: list[SweepResult],
+    results_dir: str,
+    *,
+    benchmark_params: dict,
+    latex_grids: list[int] | None,
+) -> None:
+    """Reshape + write markdown/LaTeX timing and accuracy tables."""
+    shaped = format_timing_sweep_for_tables(results)
+    os.makedirs(results_dir, exist_ok=True)
     generate_timing_table_combined(
-        latex_timings_data, latex_total_timing_data,
-        "timing", "Retirement model", results_dir,
-        params=benchmark_params, latex_grids=latex_grids,
+        shaped["ue_ms"],
+        shaped["total_ms"],
+        "timing",
+        "Retirement model",
+        results_dir,
+        params=benchmark_params,
+        latex_grids=latex_grids,
     )
     generate_accuracy_table(
-        latex_errors_data, latex_cdev_data,
-        "accuracy", "Retirement model", results_dir,
-        params=benchmark_params, latex_grids=latex_grids,
-    )
-
-
-if __name__ == "__main__":
-    grid_sizes = [500, 1000, 2000, 3000, 10000]
-    delta_values = [0.25, 0.5, 1, 2]
-    egrid_plot_age = 17
-
-    save_path = os.path.join('results', 'plots', 'retirement')
-    os.makedirs(save_path, exist_ok=True)
-
-    test_Timings(grid_sizes, delta_values)
-
-    # Generate baseline solution and plots via canonical pipeline
-    nest, model, _, _ = solve_nest(SYNTAX_DIR, method='RFC')
-
-    results = {}
-    for method in ['RFC', 'FUES', 'DCEGM', 'CONSAV']:
-        nest, model, _, _ = solve_nest(SYNTAX_DIR, method=method)
-        results[method] = {
-            'nest': nest,
-            'c': get_policy(nest, 'c'),
-            'timing': get_timing(nest),
-            'euler': euler(model, get_policy(nest, 'c')),
-        }
-
-    print()
-    print("| Method | Euler Error    | Avg UE time(ms) | Total time(ms) |")
-    print("|--------|----------------|-----------------|----------------|")
-    for method in ['RFC', 'FUES', 'DCEGM', 'CONSAV']:
-        r = results[method]
-        print(
-            f"| {method:<6} | {r['euler']:<14.6f} "
-            f"| {r['timing'][0]*1000:<15.3f} | {r['timing'][1]*1000:<14.3f} |"
-        )
-    print()
-
-    # Generate plots
-    nest_rfc = results['RFC']['nest']
-    e_grid = get_policy(nest_rfc, 'x_dcsn_hat', stage='work_cons')
-    vf_work = get_policy(nest_rfc, 'v_dcsn_hat', stage='work_cons')
-    c_worker = get_policy(nest_rfc, 'c_dcsn_hat', stage='work_cons')
-    dela = get_policy(nest_rfc, 'dela_dcsn_hat', stage='work_cons')
-
-    plot_egrids(
-        egrid_plot_age, e_grid, vf_work, c_worker, dela,
-        3000, model, save_path, tag='sigma0',
-    )
-    plot_cons_pol(results['FUES']['c'], model, save_path)
-    plot_dcegm_cf(
-        egrid_plot_age, 3000, e_grid, vf_work, c_worker,
-        dela, model.asset_grid_A, model, save_path,
-        tag='sigma0', plot=True,
+        shaped["errors"],
+        shaped["cdev"],
+        "accuracy",
+        "Retirement model",
+        results_dir,
+        params=benchmark_params,
+        latex_grids=latex_grids,
     )

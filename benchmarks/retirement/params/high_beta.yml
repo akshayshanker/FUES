@@ -1,0 +1,3 @@
+# High discount factor variant (more patient agents)
+draw:
+  beta: 0.99

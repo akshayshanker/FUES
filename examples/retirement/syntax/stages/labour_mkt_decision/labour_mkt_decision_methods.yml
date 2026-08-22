@@ -1,7 +1,24 @@
 stage: WorkerDecision
 
+# Operator-slot methodization (spec 0.1d.1) under the kernel/policy schema
+# (spec 0.3). Branching stage (agent control): the discrete-choice selection
+# attaches to the `policy` node; the backward evaluation block `cntn_to_dcsn`
+# carries the branch-conditional values Q[j] (no max), and `policy` does the
+# argmax over j and evaluates V = Q[j].
+#
+# No `upper_env` node: this is a pure discrete-choice (max) stage with no
+# upper-envelope operator. The upper-envelope refinement lives one stage below,
+# on `work_cons`. Accordingly this stage does NOT take the `$method_switch` slot
+# (see spec_factory.yaml).
+#
+# `handler:` pins the horse — the solver callable that realises each node
+# (spec 0.1d.1, the old `tool:`). The discrete-choice argmax is realised inline
+# by this app's own labour-market mover (no external solver), which compares
+# Q[work] vs Q[retire] and selects the branch (hard indicator when
+# smooth_sigma == 0, smoothed logit otherwise).
 methods:
-  - on: cntn_to_dcsn_mover
-    schemes:
-      - scheme: branching_aggregator
-        method: !max
+  # discrete-choice selection (argmax over branches) -> policy node.
+  # Realised inline in the app's own labour-market decision mover.
+  - on: policy
+    method: !max
+    handler: fues-retirement:dcsn_mover   # examples/retirement/operators.py:make_labour_mkt_decision.dcsn_mover (branch argmax: p = v_work > v_ret)

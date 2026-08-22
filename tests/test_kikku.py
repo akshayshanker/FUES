@@ -10,6 +10,7 @@ sys.path.insert(0, REPO_ROOT)
 sys.path.insert(0, SRC_ROOT)
 
 import yaml
+from dolo.compiler.tag_tolerant_yaml import load_yaml_tag_tolerant
 from pathlib import Path
 from dolo.compiler.model import SymbolicModel
 from kikku.dynx import period_to_graph, backward_paths, forward_order
@@ -21,8 +22,9 @@ SYNTAX_DIR = Path(REPO_ROOT) / "examples" / "retirement" / "syntax"
 def _build_period_dict():
     """Build a minimal period dict from the retirement syntax."""
     stages_dir = SYNTAX_DIR / "stages"
-    with open(SYNTAX_DIR / "period.yaml") as f:
-        raw = yaml.safe_load(f)
+    # period.yaml opens with the !period head mark (16 Jul 2026 ruling);
+    # plain safe_load rejects unknown tags, so use the tag-tolerant loader.
+    raw = load_yaml_tag_tolerant(SYNTAX_DIR / "period.yaml")
 
     stage_names = []
     for entry in raw.get("stages", []):

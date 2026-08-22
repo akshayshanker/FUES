@@ -18,7 +18,7 @@ FUES recovers the upper envelope of the EGM ([Carroll 2006](https://doi.org/10.1
 
 This repo ships a unified upper-envelope interface (`uenvelope`) that dispatches to FUES and three benchmark methods: MSS ([Iskhakov et al. 2017](https://doi.org/10.3982/QE643)), LTM ([Druedahl & Jørgensen 2017](https://doi.org/10.1016/j.jedc.2016.11.005)), and RFC ([Dobrescu & Shanker 2024](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=4850746)).
 
-> **Pre-release (v0.6.0dev1)** — Under active development. API may change.
+> **Pre-release (v0.6.0)** — Under active research development. API may change.
 >
 > Dobrescu, L.I. and Shanker, A. (2022). "A fast upper envelope scan method for discrete-continuous dynamic programming." [SSRN Working Paper.](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=4181302)
 
@@ -37,8 +37,8 @@ pip install git+https://github.com/akshayshanker/FUES.git
 ```
 
 ```python
-from dcsmm.fues import FUES
-from dcsmm.uenvelope import EGM_UE
+from dcsmm.fues import FUES  #stand alone FUES  
+from dcsmm.uenvelope import EGM_UE # upper envelope interface
 ```
 
 Runtime dependencies (numba, numpy, scipy, [HARK](https://github.com/econ-ark/HARK), [ConSav](https://github.com/NumEconCopenhagen/ConsumptionSaving)) are installed automatically. See `pyproject.toml` for the full list and version pins.
@@ -51,17 +51,29 @@ Clone the repo and install with example dependencies (`matplotlib`, `pyyaml`, `s
 git clone https://github.com/akshayshanker/FUES.git
 cd FUES
 pip install ".[examples]"
+pip install lark multipledispatch
+pip install --no-deps \
+  "dolang @ git+https://github.com/bright-forest/dolang.py.git@92b63c44f44394d511b101cc3ea687505721f97f" \
+  "dolo @ git+https://github.com/bright-forest/dolo.git@c899b0176d51f6354b5739a28e61ba45cd286a8b"
 ```
 
-Each example can be run as a simple single solve via `run.py`:
+The last two lines install the dolo-plus compiler that the example models
+use, pinned to the tested commits. They are installed `--no-deps`
+deliberately: the forks' packaging metadata targets a different dependency
+set than this repo's pins, and their runtime needs are already covered by
+`[examples]` (the same discipline `setup/setup.sh` uses).
+
+The retirement and durables examples run as a single solve via their `run`
+modules (from the repo root — the examples live in the checkout, not the
+installed package); parameters are overridden through slot paths:
 
 ```bash
-python examples/retirement/run.py --grid-size 3000
+python -m examples.retirement.run --slot-override '$draw.settings.grid_size=3000'
 ```
 
-See the [retirement example docs](https://akshayshanker.github.io/FUES/examples/retirement/) for CLI arguments, parameter overrides, and outputs. The [interactive notebook](examples/retirement/notebooks/retirement_fues.ipynb) walks through the model step by step.
+See the [retirement example docs](https://akshayshanker.github.io/FUES/examples/retirement_choice_model/) for CLI arguments, parameter overrides, and outputs. The [interactive notebook](examples/retirement/notebooks/retirement_fues.ipynb) walks through the model step by step.
 
-Formal benchmarking and parameter sweeps are run on an HPC cluster using the PBS scripts in [`experiments/retirement/`](experiments/retirement/). Pre-computed paper results (tables and figures) are in [`replication/`](replication/).
+Formal benchmarking and parameter sweeps are run on an HPC cluster using the PBS scripts in [`benchmarks/retirement/`](benchmarks/retirement/). Pre-computed paper results (tables and figures) are in [`paper-results/`](paper-results/).
 
 ### Option 3 — Developer (editable)
 
@@ -70,16 +82,26 @@ Full setup with editable install, examples, and all dependencies including the d
 ```bash
 git clone https://github.com/akshayshanker/FUES.git
 cd FUES
-bash setup/setup_venv.sh
-source .venv/bin/activate
+source setup/setup.sh
 ```
 
-This creates a local `.venv`, installs `dcsmm` in editable mode, and verifies the install.
+First source creates `.venv` (or `$HOME/venvs/fues` on Gadi), installs `dcsmm[examples]` in editable mode, and verifies the install. Re-source any time to activate; pass `--update` to `git pull` + reinstall.
 
-Run the full timing sweep:
+To contribute, add pytest and autopep8 on top:
 
 ```bash
-python examples/retirement/run.py --run-timings
+pip install pytest autopep8
+```
+
+Run a timing sweep (Cartesian product of slot-range axes; see
+`benchmarks/retirement/retirement_timings.sh`):
+
+```bash
+python -m examples.retirement.run --sweep \
+  --slot-range @benchmarks/retirement/timing_deltas.yaml \
+  --slot-range @benchmarks/retirement/timing_grids.yaml \
+  --slot-range @benchmarks/retirement/timing_methods.yaml \
+  --sweep-runs 3
 ```
 
 ---
@@ -110,9 +132,9 @@ FUES/
 │   ├── retirement/       # retirement choice (+ notebooks/)
 │   ├── durables/         # durables with adjustment frictions
 │   └── housing_renting/  # discrete housing + capital tax
-├── experiments/          # PBS/HPC scripts with param overrides
-├── replication/          # paper tables + figures (committed outputs)
-├── setup/                # setup_venv.sh, load_env.sh
+├── benchmarks/          # PBS/HPC scripts that reproduce paper results
+├── paper-results/        # paper tables + figures (committed outputs)
+├── setup/                # setup.sh (install + activate + env, one script)
 └── docs/                 # mkdocs site
 ```
 

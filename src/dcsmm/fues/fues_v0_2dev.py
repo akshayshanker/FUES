@@ -559,6 +559,77 @@ def FUES(
 
 
 @njit(cache=True)
+def FUES_jit(
+    x_dcsn_hat, v_hat, kappa_hat, x_cntn_hat, del_a,
+    m_bar, LB,
+    endog_mbar, padding_mbar,
+    include_intersections,
+    no_double_jumps,
+    single_intersection,
+    disable_jump_checks,
+    eps_d, eps_sep, eps_fwd_back, parallel_guard,
+):
+    """Numba-jittable FUES entry point.
+
+    All parameters are explicit (no None defaults, no Python-only
+    operations).  Input arrays must be float64 and sorted by
+    ``x_dcsn_hat``.
+
+    Returns
+    -------
+    tuple of (x_dcsn_ref, v_ref, kappa_ref, x_cntn_ref, del_a_ref)
+        Refined arrays after upper-envelope scan, intersection
+        insertion, and post-clean.
+    """
+    e_out, keep_scan, intersections = _scan(
+        x_dcsn_hat, v_hat, kappa_hat, x_cntn_hat, del_a,
+        m_bar, LB, endog_mbar, padding_mbar,
+        include_intersections, no_double_jumps, single_intersection,
+        disable_jump_checks,
+        eps_d, eps_sep, eps_fwd_back, parallel_guard,
+    )
+
+    n = len(keep_scan)
+    n_kept = 0
+    for i in range(n):
+        if keep_scan[i]:
+            n_kept += 1
+
+    x_dcsn_ref = np.empty(n_kept)
+    v_ref = np.empty(n_kept)
+    kappa_ref = np.empty(n_kept)
+    x_cntn_ref = np.empty(n_kept)
+    del_a_ref = np.empty(n_kept)
+    idx = 0
+    for i in range(n):
+        if keep_scan[i]:
+            x_dcsn_ref[idx] = e_out[i]
+            v_ref[idx] = v_hat[i]
+            kappa_ref[idx] = kappa_hat[i]
+            x_cntn_ref[idx] = x_cntn_hat[i]
+            del_a_ref[idx] = del_a[i]
+            idx += 1
+
+    if include_intersections and intersections.shape[0] > 0:
+        (all_e, all_v, all_p1,
+         all_p2, all_d, is_inter) = _merge_sorted_with_few(
+            x_dcsn_ref, v_ref, kappa_ref, x_cntn_ref, del_a_ref,
+            intersections[:, 0], intersections[:, 1], intersections[:, 2],
+            intersections[:, 3], intersections[:, 4],
+        )
+        post_mask = _postclean_double_jump_mask(
+            all_e, all_p2, m_bar, is_inter, eps_d)
+        return (all_e[post_mask], all_v[post_mask],
+                all_p1[post_mask], all_p2[post_mask], all_d[post_mask])
+
+    is_inter = np.zeros(n_kept, dtype=np.bool_)
+    post_mask = _postclean_double_jump_mask(
+        x_dcsn_ref, x_cntn_ref, m_bar, is_inter, eps_d)
+    return (x_dcsn_ref[post_mask], v_ref[post_mask],
+            kappa_ref[post_mask], x_cntn_ref[post_mask], del_a_ref[post_mask])
+
+
+@njit(cache=True)
 def _scan(
     x_dcsn_hat,
     v_hat,

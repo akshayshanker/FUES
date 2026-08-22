@@ -1,249 +1,347 @@
 #!/usr/bin/env python3
-"""Run retirement model experiments via the canonical pipeline.
+"""Run retirement model experiments via the canonical kikku v3 pipeline."""
 
-Usage:
-    python run.py --output-dir results/retirement
-    python run.py --config-override grid_size=5000
-    python run.py --calib-override beta=0.96 --method DCEGM
-    python run.py --override-file ../../experiments/retirement/params/high_beta.yml
-    python run.py --run-timings
-"""
+from __future__ import annotations
 
-import argparse
 import os
 import sys
-import yaml
-from pathlib import Path
+from dataclasses import replace
 
-# Add repo root + src/ to path so `dcsmm` imports work without installation
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-REPO_ROOT = os.path.dirname(os.path.dirname(SCRIPT_DIR))
-SRC_ROOT = os.path.join(REPO_ROOT, "src")
-sys.path.insert(0, REPO_ROOT)
-sys.path.insert(0, SRC_ROOT)
+from kikku.run import parse_cli, sweep
+from kikku.run.types import RunSpec, TestSpec
 
-from examples.retirement.solve import solve_nest
-from examples.retirement.outputs import (
-    plot_egrids, plot_cons_pol, plot_dcegm_cf,
-    euler, get_policy, get_timing,
+from examples._mpi import get_mpi_comm as _get_mpi_comm
+from examples.retirement import benchmark as rbench
+from examples.retirement.postprocess import (
+    consumption_deviation,
+    euler,
+    get_policy,
+    get_timing,
+    write_plot_outputs,
+    write_timing_outputs,
 )
-from examples.retirement.benchmark import test_Timings
+from examples.retirement.solve import (
+    METHOD_SHORTCUT,
+    expand_method_shortcut,
+    read_scheme_method,
+    solve_nest,
+)
 
-SYNTAX_DIR = Path(__file__).resolve().parent / "syntax"
+UE_METHODS = ("RFC", "FUES", "DCEGM", "CONSAV")
 
-UE_METHODS = ('RFC', 'FUES', 'DCEGM', 'CONSAV')
-
-
-def parse_overrides(raw_list):
-    """Parse 'key=value' strings into a dict, coercing types."""
-    result = {}
-    for item in (raw_list or []):
-        if '=' not in item:
-            raise ValueError(f"Override must be key=value, got: {item}")
-        key, val = item.split('=', 1)
-        result[key.strip()] = yaml.safe_load(val.strip())
-    return result
-
-
-def load_override_file(path):
-    """Load overrides from a YAML file (flat key-value format)."""
-    if not os.path.isabs(path):
-        path = os.path.join(SCRIPT_DIR, path)
-    with open(path) as f:
-        raw = yaml.safe_load(f)
-    # Support both flat format and nested 'overrides:' wrapper
-    if isinstance(raw, dict) and 'overrides' in raw:
-        return raw['overrides']
-    return raw or {}
+RE_EXTRA = {
+    "--latex-grids": {
+        "type": str,
+        "default": None,
+        "help": "Comma list of grid sizes for LaTeX timing/accuracy table output.",
+    },
+}
 
 
-def parse_cli():
-    """Parse command-line arguments."""
-    parser = argparse.ArgumentParser(
-        description='Run retirement model via canonical pipeline',
-    )
-
-    # Override mechanism (three-functor)
-    parser.add_argument(
-        '--calib-override', action='append', default=[],
-        help='Economic param override: key=value (repeatable)',
-    )
-    parser.add_argument(
-        '--config-override', action='append', default=[],
-        help='Numerical setting override: key=value (repeatable)',
-    )
-    parser.add_argument(
-        '--override-file', type=str, default=None,
-        help='YAML file with sparse overrides',
-    )
-    parser.add_argument(
-        '--method', type=str, default='FUES',
-        choices=['RFC', 'FUES', 'DCEGM', 'CONSAV'],
-        help='Upper-envelope method (default: FUES)',
-    )
-
-    # Convenience flags
-    parser.add_argument(
-        '--grid-size', type=int, default=None,
-        help='Grid size (shorthand for --config-override grid_size=N)',
-    )
-    parser.add_argument(
-        '--plot-age', type=int, default=5,
-        help='Age to plot EGM grids (default: 5)',
-    )
-    parser.add_argument(
-        '--output-dir', type=str, default='results/retirement',
-        help='Output directory (default: results/retirement)',
-    )
-
-    # Timing sweep
-    parser.add_argument(
-        '--run-timings', action='store_true',
-        help='Run full timing comparison sweep',
-    )
-    parser.add_argument(
-        '--sweep-grids', type=str, default='500,1000,2000,3000,10000',
-        help='Comma-separated grid sizes for sweep',
-    )
-    parser.add_argument(
-        '--sweep-deltas', type=str, default='0.25,0.5,1,2',
-        help='Comma-separated delta values for sweep',
-    )
-    parser.add_argument(
-        '--sweep-runs', type=int, default=3,
-        help='Number of runs per config (best of n)',
-    )
-    parser.add_argument(
-        '--latex-grids', type=str, default=None,
-        help='Comma-separated grid sizes for LaTeX tables (subset of sweep-grids)',
-    )
-
-    return parser.parse_args()
+def _dkey(x: float) -> float:
+    return round(float(x), 10)
 
 
-def main():
-    args = parse_cli()
+def _draw_cal_settings(
+    t: TestSpec, base_c: dict, base_s: dict
+) -> tuple[dict, dict]:
+    d = t.slots.get("draw", {}) or {}
+    if d and set(d) <= {"calibration", "settings", "methods"}:
+        return (d.get("calibration") or {}), (d.get("settings") or {})
+    p: dict = {}
+    s: dict = {}
+    for k, v in d.items():
+        if k in base_c:
+            p[k] = v
+        if k in base_s:
+            s[k] = v
+    return p, s
 
-    # ── Build override dicts ──
-    calib_overrides = parse_overrides(args.calib_override)
-    config_overrides = parse_overrides(args.config_override)
 
-    # Override file: split keys into calib vs config based on settings.yaml keys
-    if args.override_file:
-        file_overrides = load_override_file(args.override_file)
-        settings_path = SYNTAX_DIR / 'settings.yaml'
-        with open(settings_path) as f:
-            settings_keys = set(yaml.safe_load(f).get('settings', {}).keys())
-        for k, v in file_overrides.items():
-            if k in settings_keys:
-                config_overrides[k] = v
-            else:
-                calib_overrides[k] = v
+def _row_delta(t: TestSpec, base_c: dict) -> float:
+    p, _ = _draw_cal_settings(t, base_c, {})
+    return _dkey(p.get("delta", base_c.get("delta", 1.0)))
 
-    # Convenience: --grid-size N -> config override
-    if args.grid_size is not None:
-        config_overrides['grid_size'] = args.grid_size
 
-    print(f'Syntax dir: {SYNTAX_DIR}')
-    if calib_overrides:
-        print(f'Calib overrides: {calib_overrides}')
-    if config_overrides:
-        print(f'Config overrides: {config_overrides}')
+def _expand_default_ue_grid(run: RunSpec) -> RunSpec:
+    """If every row has no method_switch, fan out across UE_METHODS (spec §6.2)."""
+    if any(
+        "method_switch" in t.slots and t.slots.get("method_switch")
+        for t in run.test_set
+    ):
+        return run
+    new: list[TestSpec] = []
+    for t in run.test_set:
+        for m in UE_METHODS:
+            new_slots = {
+                **t.slots,
+                "method_switch": expand_method_shortcut(m, METHOD_SHORTCUT),
+            }
+            new.append(TestSpec(slots=new_slots, label=m))
+    return replace(run, test_set=tuple(new))
 
-    # ── Setup output dirs ──
-    save_path = os.path.join(args.output_dir, 'plots')
-    os.makedirs(save_path, exist_ok=True)
-    os.makedirs(os.path.join(args.output_dir, 'tables'), exist_ok=True)
 
-    # ── (Optional) Timing sweep ──
-    if args.run_timings:
-        grid_sizes = [int(x) for x in args.sweep_grids.split(',')]
-        delta_values = [float(x) for x in args.sweep_deltas.split(',')]
-        print(f'\nRunning timing comparison...')
-        print(f'  Grid sizes: {grid_sizes}')
-        print(f'  Delta values: {delta_values}')
-        print(f'  Runs per config: {args.sweep_runs}')
-        latex_grids = [int(x) for x in args.latex_grids.split(',')] \
-            if args.latex_grids else None
-        test_Timings(
-            grid_sizes, delta_values, n=args.sweep_runs,
-            results_dir=args.output_dir,
-            calib_overrides=calib_overrides,
-            config_overrides=config_overrides,
-            latex_grids=latex_grids,
-        )
+def _sweep_is_only_method_vary(test_set: tuple[TestSpec, ...]) -> bool:
+    """All rows share the same draw (except method_switch); only UE method differs."""
+    if len(test_set) <= 1:
+        return True
 
-    # ── Solve via canonical pipeline (compare 4 UE methods) ──
-    print('\nSolving via canonical pipeline...')
-    solutions = {}
-    for method in UE_METHODS:
-        # Warmup (JIT compile)
-        _, m_, ops_, w_ = solve_nest(
-            SYNTAX_DIR, method=method,
-            calib_overrides=calib_overrides,
-            config_overrides=config_overrides,
-        )
-        # Timed run (reuse model + ops)
-        nest, model, _, _ = solve_nest(
-            SYNTAX_DIR, method=method,
-            calib_overrides=calib_overrides,
-            config_overrides=config_overrides,
-            model=m_, stage_ops=ops_, waves=w_,
-        )
-        solutions[method] = {
-            'nest': nest,
-            'model': model,
-            'endog_grid': get_policy(nest, 'x_dcsn_hat', stage='work_cons'),
-            'vf_unrefined': get_policy(nest, 'v_dcsn_hat', stage='work_cons'),
-            'c_unrefined': get_policy(nest, 'c_dcsn_hat', stage='work_cons'),
-            'dela_unrefined': get_policy(nest, 'dela_dcsn_hat', stage='work_cons'),
-            'c_refined': get_policy(nest, 'c', stage='labour_mkt_decision'),
-            'c_worker': get_policy(nest, 'c', stage='work_cons'),
-            'timing': get_timing(nest),
+    def _strip_ms(ts: TestSpec) -> dict:
+        s = dict(ts.slots)
+        s.pop("method_switch", None)
+        return s
+
+    s0 = _strip_ms(test_set[0])
+    for t in test_set[1:]:
+        if _strip_ms(t) != s0:
+            return False
+    return True
+
+
+def _latex_int_list(ex: dict, key: str) -> list[int] | None:
+    v = (ex or {}).get(key)
+    if v is None or v == "":
+        return None
+    return [int(x) for x in str(v).split(",") if str(x).strip()]
+
+
+def _grid_size_from_draw(
+    t: TestSpec, base_c: dict, base_s: dict
+) -> int | None:
+    d = t.slots.get("draw", {}) or {}
+    if d and set(d) <= {"calibration", "settings", "methods"}:
+        gs = (d.get("settings") or {}).get("grid_size")
+        if gs is not None:
+            return int(gs)
+        return None
+    s = {k: v for k, v in d.items() if k in base_s}
+    if s.get("grid_size") is not None:
+        return int(s["grid_size"])
+    return None
+
+
+def _max_grid_in_testset(
+    test_set: tuple[TestSpec, ...], base_c: dict, base_s: dict
+) -> int:
+    g = 0
+    for t in test_set:
+        gs = _grid_size_from_draw(t, base_c, base_s)
+        if gs is not None:
+            g = max(g, gs)
+    return g or 3000
+
+
+def _one_delta_for_plots(
+    test_set: tuple[TestSpec, ...], base_c: dict, default: float
+) -> float:
+    ds: set[float] = set()
+    for t in test_set:
+        d = t.slots.get("draw", {}) or {}
+        if d and set(d) <= {"calibration", "settings", "methods"}:
+            c = d.get("calibration") or {}
+            if "delta" in c:
+                ds.add(_dkey(c["delta"]))
+        elif "delta" in d:
+            ds.add(_dkey(d["delta"]))
+    if ds:
+        return sorted(ds)[0]
+    return default
+
+
+# ---------------------------------------------------------------------------
+# Per-θ kernels (module-level factories)
+# ---------------------------------------------------------------------------
+
+
+def make_solve_test_timing(
+    wdir: str, true_solutions: dict | None, base_c: dict
+) -> "Callable[[TestSpec], dict]":
+    """Timing kernel: solve → policy + Euler + cdev vs. high-grid truth → pack."""
+    if true_solutions is None:
+        raise RuntimeError("make_solve_test_timing: missing true_solutions")
+
+    def solve_test(t: TestSpec) -> dict:
+        nest, model, _, _ = solve_nest(wdir, **t.slots)
+        c_ref = get_policy(nest, "c", stage="labour_mkt_decision")
+        tim   = get_timing(nest)
+        ts    = true_solutions[_row_delta(t, base_c)]
+        return {
+            "ue_time":    float(tim[0]),
+            "total_time": float(tim[1]),
+            "error":      float(euler(model, c_ref)),
+            "cdev":       float(consumption_deviation(
+                model, c_ref, ts["c_true"], ts["a_grid"]
+            )),
         }
 
-    # Use model from first solve for euler errors
-    model = solutions[UE_METHODS[0]]['model']
-    grid_size = model.grid_size
-    smooth_sigma = model.smooth_sigma
-    sigma_tag = "sigma0" if abs(smooth_sigma) < 1e-12 \
-        else f"sigma{int(round(smooth_sigma * 100)):02d}"
+    return solve_test
 
-    # ── Evaluate (Euler errors) ──
-    errors = {}
-    for method in UE_METHODS:
-        errors[method] = euler(model, solutions[method]['c_refined'])
 
-    # ── Report ──
-    print()
-    print('| Method | Euler Error    | Avg UE time(ms) | Total time(ms) |')
-    print('|--------|----------------|-----------------|----------------|')
-    for method in UE_METHODS:
-        t = solutions[method]['timing']
-        print(
-            f'| {method:<6s} | {errors[method]:<14.6f} '
-            f'| {t[0]*1000:<15.3f} | {t[1]*1000:<14.3f} |'
+def make_solve_test_plots(wdir: str) -> "Callable[[TestSpec], dict]":
+    """Plot kernel: solve → unpack stage policies/grids/value-fn for figures."""
+    def solve_test(t: TestSpec) -> dict:
+        nest, model, _, _ = solve_nest(wdir, **t.slots)
+        # Empty label (e.g. a label-less --slot-spec row): fall back to the
+        # work stage's upper-envelope method. The stage lives on the model —
+        # solve_nest's nest dict has no "periods" key.
+        label = t.label or read_scheme_method(model._work, "upper_envelope")
+        c_ref = get_policy(nest, "c", stage="labour_mkt_decision")
+        return {
+            "nest":           nest,
+            "model":          model,
+            "endog_grid":     get_policy(nest, "x_dcsn_hat", stage="work_cons"),
+            "vf_unrefined":   get_policy(nest, "v_dcsn_hat", stage="work_cons"),
+            "c_unrefined":    get_policy(nest, "c_dcsn_hat", stage="work_cons"),
+            "dela_unrefined": get_policy(nest, "dela_dcsn_hat", stage="work_cons"),
+            "c_refined":      c_ref,
+            "c_worker":       get_policy(nest, "c", stage="work_cons"),
+            "timing":         get_timing(nest),
+            "euler_error":    float(euler(model, c_ref)),
+            "label":          label,
+        }
+
+    return solve_test
+
+
+_TIMING_METRIC_FNS = {
+    "error":      lambda r: r["error"],
+    "ue_time":    lambda r: r["ue_time"],
+    "total_time": lambda r: r["total_time"],
+    "cdev":       lambda r: r["cdev"],
+}
+
+_PLOT_METRIC_FNS = {
+    "euler_error": lambda r: r["euler_error"],
+    "ue_ms":       lambda r: r["timing"][0] * 1000,
+    "tot_ms":      lambda r: r["timing"][1] * 1000,
+}
+
+
+def main() -> None:
+    run = parse_cli(
+        name="retirement",
+        base_spec="examples/retirement/syntax",
+        modes=["compare", "sweep", "simulate"],
+        output="results/retirement",
+        extra_args=RE_EXTRA,
+    )
+    ex = run.extra_args or {}
+    if run.test_set is None or len(run.test_set) < 1:
+        raise SystemExit("parse_cli did not return a test_set (internal error)")
+
+    comm = _get_mpi_comm()
+    is_root = comm is None or comm.Get_rank() == 0
+    argv_s = " ".join(sys.argv)
+    has_range = "--slot-range" in argv_s
+    base_c, base_s = rbench.load_baseline()
+    st0 = run.test_set[0]
+    calib0, settings0 = _draw_cal_settings(st0, base_c, base_s)
+    run = _expand_default_ue_grid(run)
+    # 4-UE "plot only": same draw (except method_switch) on every row, UE differs only;
+    # no explicit --slot-range (otherwise timing+tables path). Exception: a
+    # --slot-range that varies ONLY method tags (e.g. the documented two-row
+    # '[{"method_switch":"FUES"},{"method_switch":"RFC"}]') also takes this
+    # path — the timing-tables path drops any (grid, delta) cell that lacks
+    # all four methods, which would leave such a sweep with empty tables.
+    method_only_range = (
+        has_range
+        and len(run.test_set) > 1
+        and _sweep_is_only_method_vary(run.test_set)
+        and all(t.slots.get("method_switch") for t in run.test_set)
+    )
+    only_methods = (
+        _sweep_is_only_method_vary(run.test_set) and not has_range
+    ) or method_only_range
+    st0 = run.test_set[0]
+    calib0, settings0 = _draw_cal_settings(st0, base_c, base_s)
+
+    run_dir = str(run.output_dir)
+    if is_root:
+        print(f"Model dir: {run.base_spec}")
+        print(f"Output directory: {run_dir}")
+        if calib0:
+            print(f"Params: {calib0}")
+        if settings0:
+            print(f"Settings: {settings0}")
+
+    if is_root:
+        os.makedirs(os.path.join(run_dir, "tables"), exist_ok=True)
+    save_path = os.path.join(run_dir, "plots")
+    if is_root:
+        os.makedirs(save_path, exist_ok=True)
+
+    # --- True solutions for (grid, delta) × methods sweeps; not for 4-UE only ---
+    true_solutions: dict | None = None
+    if not only_methods:
+        deltas = sorted({_row_delta(t, base_c) for t in run.test_set})
+        ocal = {**base_c, **calib0}
+        oset = {**base_s, **settings0}
+        true_solutions = rbench.precompute_true_solutions(
+            deltas,
+            20000,
+            "DCEGM",
+            ocal,
+            oset,
+            comm=comm,
         )
-    print()
 
-    # ── Plot ──
-    print(f'Generating plots to {save_path}...')
-    rfc = solutions['RFC']
-    plot_egrids(
-        args.plot_age, rfc['endog_grid'], rfc['vf_unrefined'],
-        rfc['c_unrefined'], rfc['dela_unrefined'],
-        grid_size, model, save_path, tag=sigma_tag,
+    # --- build solve_test ---
+    n_reps = 1 if only_methods else run.sweep_runs
+    use_comm = None if only_methods else comm
+    wdir = str(run.base_spec).replace("\\", "/")
+
+    if only_methods:
+        solve_test = make_solve_test_plots(wdir)
+        metric_fns = _PLOT_METRIC_FNS
+    else:
+        solve_test = make_solve_test_timing(wdir, true_solutions, base_c)
+        metric_fns = _TIMING_METRIC_FNS
+
+    if only_methods and comm is not None and not is_root:
+        return
+
+    results = sweep(
+        solve_test,
+        list(run.test_set),
+        metric_fns,
+        n_reps=n_reps,
+        warmup=run.warmup,
+        best="min",
+        on_error="raise",
+        comm=use_comm,
+        verbose=run.verbose,
     )
-    plot_cons_pol(solutions['FUES']['c_worker'], model, save_path)
-    plot_dcegm_cf(
-        args.plot_age, grid_size, rfc['endog_grid'],
-        rfc['vf_unrefined'], rfc['c_unrefined'],
-        rfc['dela_unrefined'], model.asset_grid_A,
-        model, save_path, tag=sigma_tag,
-    )
+    if not results or not is_root:
+        return
 
-    print('Done!')
+    if not only_methods:
+        bparams = {
+            **base_c, **base_s, **calib0, **settings0,
+            "true_grid_size": 20000,
+            "true_method": "DCEGM",
+        }
+        max_g = _max_grid_in_testset(run.test_set, base_c, base_s)
+        d0 = _one_delta_for_plots(
+            run.test_set, base_c,
+            float(calib0.get("delta", base_c.get("delta", 1.0))),
+        )
+        write_timing_outputs(
+            results, run,
+            benchmark_params=bparams,
+            latex_grids=_latex_int_list(ex, "latex_grids"),
+            save_path=save_path,
+            max_grid=max_g,
+            ref_delta=d0,
+            calib0=calib0,
+            settings0=settings0,
+        )
+    else:
+        write_plot_outputs(
+            results,
+            settings0=settings0,
+            save_path=save_path,
+        )
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

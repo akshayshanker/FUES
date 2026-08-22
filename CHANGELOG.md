@@ -2,6 +2,121 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.6.0dev6 — 2026-04-26 — RunSpec v3 (slot semantics, BREAKING)
+
+Implements `kikku-runspec-v3`. CLI is slot-keyed only (`--slot-override`, `--slot-spec`, `--slot-range`, `--compare`); the v2 three-tier kikku flags are removed. `TestSpec` is `{slots, label}`; FUES `solve` / `solve_nest` accept `**t.slots` and `expand_method_shortcut` in each example `solve.py`. Estimation and `housing_renting/` unchanged.
+
+## 0.6.0dev5 — 2026-04-25 — RunSpec v2 (BREAKING)
+
+Implements `kikku-runspec-v2`. See `bellman-ddsl/AI/dev-specs/kikku/kikku-runspec-v2.md`.
+
+### Breaking changes
+
+- Solver kwarg renamed: `ue_method` → `method_switch` (including `EGM_UE`, `solve_nest`, `solve`)
+- CLI flag set rewritten: `--config-override`, `--calib-override`, `--sweep-grids`, `--sweep-params`, `--method`, `--setting-override` (singular) all removed from kikku runners
+- New flags: `--params-override`, `--settings-override`, `--methods-override`, `--params-range`, `--settings-range`, `--methods-range`, `--params-spec`, `--settings-spec`, `--methods-spec`, `--compare`
+- `RunSpec` field set restructured around `test_set: tuple[TestSpec, ...]`
+- `sweep()` now returns `list[SweepResult]` instead of merged dicts
+
+### Migration
+
+- All PBS scripts under `experiments/` migrated to v2 vocabulary
+- `examples.durables.estimate` uses `--settings-override`, `--params-override`, `--methods-override` (replaces `--method`)
+- Notebooks and `docs/` updated
+- `examples/durables/run.py`, `examples/retirement/run.py`, `examples/retirement/benchmark.py` rewritten (earlier in this dev cycle)
+
+### Pre-existing fix
+
+- `examples/durables/solve.py:precompile()` now correctly passes `method_switch=method` (was passing `method=method` which `solve` does not accept)
+
+## [0.6.0dev4] - 2026-04-15 — Single-script setup, unified install, examples polish
+
+Merges `durables-ddsl-phase2` into `main`. Most of the work is in the
+example models, install, and docs; FUES core has three small additions.
+
+### Install
+
+Three tiers:
+
+| Command | What you get |
+|---|---|
+| `pip install -e .` | FUES + the upper-envelope benchmarks (DCEGM/MSS, LTM, RFC) |
+| `pip install -e ".[examples]"` | Above + everything to run the shipped models and notebooks |
+| `pip install -e ".[dev]"` | Above + `pytest` + `autopep8` |
+
+HARK and ConSav are now in the core install (they're what we benchmark
+against). Four previous setup scripts consolidated into one:
+
+```bash
+source setup/setup.sh            # install if needed, then activate
+source setup/setup.sh --update   # git pull, refresh install, activate
+```
+
+### Durables
+
+- Terminal utility added to the NPV used in welfare comparisons
+  (previously silently dropped).
+- 2D interpolation switched to a library routine that handles
+  non-uniform grids; `grid_phi` setting controls grid packing.
+- `ce_burn_in` skips initial periods when computing
+  certainty-equivalent welfare, to remove starting-distribution
+  artefacts.
+- `init_dispersion` optionally draws initial wealth and housing
+  log-normally instead of from point masses.
+- FUES guard parameters (tolerances, extrapolation, clamp factors)
+  moved from source to `settings.yaml`.
+- Parameter sweeps are MPI-aware (`--sweep-params`, `--sweep-grids`)
+  and fall back to serial.
+- Plot functions are loaded lazily, so the sweep path doesn't need
+  matplotlib/seaborn.
+
+### Retirement
+
+- On clusters, the post-sweep solve-and-plot block runs on rank 0
+  only (previously every rank redid the work and raced on plot
+  writes).
+- Plot functions loaded lazily, same as durables.
+- Paper-faithful model doc added at `docs/examples/retirement_choice_model.md`.
+
+### FUES algorithm
+
+- `FUES_jit` — new Numba-compatible entry point for use inside
+  `@njit` solver loops. Existing `FUES` is unchanged.
+- Two new helpers in `dcsmm.fues.helpers`: `interp_as_3` (fused
+  three-output interpolation) and `interp2d_nonuniform` (2D bilinear
+  on uneven grids).
+- `interp_as` / `interp_as_scalar` now cap extrapolation slope at
+  `1e8` to avoid wild values from steep edge intervals. Interpolation
+  inside the grid is unchanged.
+- `uenvelope` recognises `"MSS"` as an alias for `"DCEGM"` — same
+  method, two names in the literature.
+- HARK / ConSav / pykdtree are now optional at import time: their
+  methods fail with a clear message if the backend is missing,
+  rather than breaking the whole package.
+
+### Docs
+
+- Install sections rewritten around the three tiers and the single
+  setup script (`README.md`, installation and Gadi docs).
+- Paper-faithful docs for the retirement and continuous-housing
+  models.
+- Notebook cohort tables render cleanly.
+
+### Under the hood
+
+Only relevant if you write new examples.
+
+- Model building migrated to `dolo.compiler.spec_factory`. Every
+  example registry ships a `spec_factory.yaml` alongside its
+  calibration and settings files.
+- `solve()` / `solve_nest()`: single `ue_method=` keyword replaces
+  the old `method=` / `method_switch=` pair.
+- Durables: `mod/separable_males/` is now a 14-line overlay of
+  `mod/separable/` rather than a near-duplicate.
+- Kikku upgraded to a version exposing `comm` and `on_error`
+  keywords on its sweep helper.
+- `CLAUDE.md` at the repo root records rename history and gotchas.
+
 ## [0.6.0dev3] - 2026-03-15 – Kikku package, solver refactor, generic EGM operators
 
 ### Architecture

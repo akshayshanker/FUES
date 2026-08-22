@@ -1,6 +1,0 @@
-# Baseline benchmark configuration
-# Sparse overrides — only values that differ from syntax/ defaults.
-# Canonical defaults: syntax/calibration.yaml (beta=0.98, T=20)
-beta: 0.96
-T: 50
-b: 1.0e-10

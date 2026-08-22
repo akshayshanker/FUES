@@ -12,7 +12,7 @@ sys.path.insert(0, SRC_ROOT)
 
 from pathlib import Path
 from examples.retirement.solve import solve_nest
-from examples.retirement.outputs import euler, get_policy, get_timing
+from examples.retirement.postprocess import euler, get_policy, get_timing
 
 SYNTAX_DIR = Path(REPO_ROOT) / "examples" / "retirement" / "syntax"
 UE_METHODS = ("FUES", "RFC", "DCEGM", "CONSAV")
@@ -33,13 +33,13 @@ class TestRetirementModel(unittest.TestCase):
         for method in UE_METHODS:
             # Warmup (JIT compile)
             _, m_, ops_, w_ = solve_nest(
-                SYNTAX_DIR, method=method,
-                config_overrides={"grid_size": GRID_SIZE},
+                SYNTAX_DIR, method_switch=method,
+                draw={"settings": {"grid_size": GRID_SIZE}},
             )
             # Timed run (reuse model + ops)
             nest, model, _, _ = solve_nest(
-                SYNTAX_DIR, method=method,
-                config_overrides={"grid_size": GRID_SIZE},
+                SYNTAX_DIR, method_switch=method,
+                draw={"settings": {"grid_size": GRID_SIZE}},
                 model=m_, stage_ops=ops_, waves=w_,
             )
             cls.solutions[method] = nest

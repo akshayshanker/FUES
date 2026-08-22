@@ -1,14 +1,16 @@
-# How FUES Works
+# The FUES algorithm
 
-## The problem in one picture
+## Discrete-continuous problems and the EGM
 
-In discrete-continuous problems, the Euler equation generates a value correspondence rather than the optimal solution.
-
-After EGM inverts the Euler equation, some candidate points lie on the upper envelope and others satisfy only local first-order conditions. FUES recovers the upper envelope by scanning the ordered endogenous grid from left to right.
+In discrete–continuous problems the Euler equation generates a value
+correspondence rather than the optimal policy. After EGM inverts the Euler
+equation, some candidate points lie on the upper envelope while others satisfy
+only local first-order conditions. FUES recovers the upper envelope by
+scanning the ordered endogenous grid from left to right.
 
 ![FUES scan diagram](../images/fues-scan.svg)
 
-## Why EGM produces sub-optimal points
+### Why EGM produces sub-optimal points
 
 !!! abstract "Setup"
     Consider Bellman equation with a discrete choice \(d \in \{0, 1\}\) and a continuous choice \(c\):
@@ -21,13 +23,13 @@ After EGM inverts the Euler equation, some candidate points lie on the upper env
 
 When we invert the Euler equation via EGM, we obtain raw correspondence points \((\hat{x}_i, \hat{v}_i)\) together with an associated **post-decision asset / next-period asset choice** \(\hat{x}'_i\). Economically, each smooth branch corresponds to a continuation value associated with a particular future sequence of discrete choices. A jump across branches causes secondary kinks, coinciding with a switch in discrete choices at some point/stochastic state in the future. The true decision value is the supremum of these concave branch-specific values.
 
-!!! tip "The key insight"
+!!! tip "Optimal jumps imply a left turn"
     Along a single branch, the continuation policy is smooth and the value correspondence is concave. A discontinuous policy jump can therefore only lie on the upper envelope if the associated branch-specific value overtakes the upper envelope from below. Thus, an optimal jump must imply a left turn on the value correspondence. Geometrically, that means:
 
     - a **jump plus a concave right turn** signals a sub-optimal point
     - a **jump plus a convex left turn** signals that the scan has passed a crossing point between branches on the upper envelope and the point should be retained
 
-## The basic scan
+## FUES 
 
 Order the EGM outputs by the endogenous grid \(\hat{x}_i\). FUES then walks through the sorted candidate points and compares the secant slopes around a local triple:
 
@@ -50,9 +52,9 @@ These secants tell us whether moving from \((\hat{x}_{i-1},\hat{v}_{i-1})\) to \
 
     If \(g_{i+1} > g_i\) (a convex left turn) at a policy jump, the point is **tentatively retained** as a post-crossing candidate. In finite grids, however, a left turn is not by itself enough to classify the point with certainty; this is why FUES adds forward and backward scans near crossings.
 
-## Jump detection
+### Jump detection
 
-!!! info "What is a jump?"
+!!! info "Definition of a jump"
     A "jump" occurs when the continuation-policy gradient between adjacent points exceeds a threshold \(\bar{M}\):
 
     \[
@@ -80,7 +82,7 @@ A jump is detected when adjacent candidate points differ too much in the post-de
 
 ### Forward and backward scans
 
-These scans are not cosmetic refinements; they handle the two main finite-grid failure modes of the basic three-point rule near crossings.
+These scans handle the two main finite-grid failure modes of the basic three-point rule near crossings.
 
 The simple left-turn/right-turn rule is the core of FUES, but crossings can occur very close to sampled grid points. In such cases, a purely local three-point test may misclassify the first point after a crossing or fail to detect that a previously retained point has become dominated.
 

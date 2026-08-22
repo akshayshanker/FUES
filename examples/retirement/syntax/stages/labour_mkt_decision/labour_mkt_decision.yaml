@@ -14,14 +14,17 @@ symbols:
     retire:
       a_ret: "@in Xa"     # pass assets to retire consumption (distinct namespace)
   controls:
-    d: "@in {work, retire}"
+    j: "@in {work, retire}"          # branch choice (j; `d` is reserved for differentials)
   exogenous: {}
   values:
     V[<]: "@in [-inf, inf)"
     V: "@in [-inf, inf)"
+    Q[-]:
+      work: "@in [-inf, inf)"        # branch-conditional value Q[work] (Iskhakov v̄_work)
+      retire: "@in [-inf, inf)"      # branch-conditional value Q[retire]
     V_cntn:
-      work: "@in [-inf, inf)"       # Q^work(a) from worker consumption stage
-      retire: "@in [-inf, inf)"     # Q^retire(a) from retiree consumption stage
+      work: "@in [-inf, inf)"        # continuation value from worker consumption stage
+      retire: "@in [-inf, inf)"      # continuation value from retiree consumption stage
   parameters: [delta]
 equations:
   arvl_to_dcsn_transition: |
@@ -31,9 +34,25 @@ equations:
       a[>] = a
     retire: |
       a_ret[>] = a
-  cntn_to_dcsn_mover:
-    Bellman: |
-      V = max_{d}(V_cntn[>][work] - delta, V_cntn[>][retire])
-  dcsn_to_arvl_mover:
-    Bellman: |
+  # backward evaluation (branch-conditional values Q[j]; NO max — the discrete
+  # selection is constructed in `policy`). The work branch carries the disutility
+  # of work offset -delta inside its branch value. The decision perch tag `[-]`
+  # carries the branch index (a perch tag is required before a branch index in
+  # dolang; `Q[-][work]` is the parseable spelling of doc 09 §4.1's `Q[work]`).
+  cntn_to_dcsn:
+    value: |
+      Q[-][work]   = V_cntn[>][work] - delta
+      Q[-][retire] = V_cntn[>][retire]
+
+  dcsn_to_arvl:
+    value: |
       V[<] = V
+
+  # policy construction (discrete choice: method !max). `argmax` returns the
+  # CHOICE j; `evaluate` reads the value at that choice. The unconditional
+  # V = Q[j] = max_j Q[j] is the derived `max`.
+  policy:
+    argmax: |
+      j = argmax_{j}(Q[-][j])
+    evaluate: |
+      V = Q[-][j]

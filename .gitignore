@@ -82,3 +82,14 @@ site/
 fues-claude.sh
 AI/
 results/
+kikku/
+.obsidian/
+.claude/
+
+# LaTeX build droppings (never commit; paper-results holds PDFs/tables only)
+*.aux
+*.fdb_latexmk
+*.fls
+*.synctex.gz
+*.bbl
+*.blg
