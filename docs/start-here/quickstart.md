@@ -16,12 +16,6 @@ Install the library alone:
 pip install git+https://github.com/akshayshanker/FUES.git
 ```
 
-Since this is a research project under active development, we strongly
-recommend installing inside a virtual environment
-(`python3 -m venv .venv && source .venv/bin/activate` first). The plain
-`pip install` route here does not create one; the setup script in
-section 2 creates its own automatically.
-
 After your EGM step produces arrays for the raw endogenous-grid
 correspondence, pass them to `FUES`:
 
@@ -115,7 +109,7 @@ The applications run three ways: through their notebooks, from the command
 line, and as PBS cluster jobs. The notebooks, in `examples/*/notebooks/` and
 rendered on the [docs site](https://akshayshanker.github.io/FUES/), are the
 easiest way to experiment once you have cloned the repo; the sections below
-cover the command line.
+cover the command line. Start with the simple EGM/FUES walkthrough notebook: [egm_fues_transparent.ipynb](../notebooks/egm_fues_transparent.ipynb).
 
 ## 3. CLI runs of applications
 
