@@ -64,56 +64,10 @@ install. See `pyproject.toml` for the full list and version pins.
 
 ### Option 2 — With examples
 
-Clone the repo and install with the dependencies needed for the applications
-to run (`matplotlib`, `pyyaml`, `seaborn`,
-[`kikku`](https://github.com/bright-forest/kikku)). Includes everything in
-Option 1 plus the example models in the repo checkout.
-
-```bash
-git clone https://github.com/akshayshanker/FUES.git
-cd FUES
-pip install ".[examples]"
-pip install lark multipledispatch
-pip install --no-deps \
-  "dolang @ git+https://github.com/bright-forest/dolang.py.git@92b63c44f44394d511b101cc3ea687505721f97f" \
-  "dolo @ git+https://github.com/bright-forest/dolo.git@c899b0176d51f6354b5739a28e61ba45cd286a8b"
-```
-
-The last two lines install the dolo-plus (a research fork of `dolo`) compiler
-that the example models use. For the moment, they are installed `--no-deps`
-deliberately: the forks' packaging metadata targets a different dependency set
-than this repo's pins, and their runtime needs are already covered by
-`[examples]` (the same discipline `setup/setup.sh` uses).
-
-
-The examples are best first explored through their notebooks, in
-`examples/retirement/notebooks/` and `examples/durables/notebooks/`, rendered
-on the [docs site](https://akshayshanker.github.io/FUES/).
-
-**Running from the command line and on a PBS cluster.** The retirement and
-durables examples each solve with one command through their `run` modules. Run
-them from the repo root: the examples live in the checkout, not in the
-installed package. Parameters are overridden on the command line through slot
-paths:
-
-```bash
-python -m examples.retirement.run --slot-override '$draw.settings.grid_size=3000'
-```
-
-See the [retirement example
-docs](https://akshayshanker.github.io/FUES/examples/retirement_choice_model/)
-for CLI arguments, parameter overrides, and outputs. The [interactive
-notebook](examples/retirement/notebooks/retirement_fues.ipynb) walks through
-the model step by step.
-
-Formal benchmarking and parameter sweeps used in the paper are run on an HPC
-cluster using the PBS scripts in [`benchmarks/`](benchmarks/retirement/).
-Pre-computed paper results (tables and figures) are in
-[`paper-results/`](paper-results/).
-
-### Option 3 — Developer (editable)
-
-Full setup with editable install if you want to modify.
+Clone the repository and run the setup script; it creates the project
+virtual environment (`.venv`), installs `dcsmm` (editable) with the
+application dependencies (`kikku`, the pinned dolo-plus compiler,
+plotting), verifies the install, and activates the environment:
 
 ```bash
 git clone https://github.com/akshayshanker/FUES.git
@@ -121,19 +75,33 @@ cd FUES
 source setup/setup.sh
 ```
 
-First source creates `.venv` (or `$HOME/venvs/fues` on Gadi), installs
-`dcsmm[examples]` in editable mode, and verifies the install. Re-source any
-time to activate; pass `--update` to `git pull` + reinstall.
+Re-source any time to activate; pass `--update` to `git pull` and
+reinstall. The equivalent manual pip sequence, including the exact
+dolo-plus pins, is in the
+[Installation docs](https://akshayshanker.github.io/FUES/getting-started/installation/).
 
+The examples are best first explored through their notebooks, in
+`examples/retirement/notebooks/` and `examples/durables/notebooks/`, rendered
+on the [docs site](https://akshayshanker.github.io/FUES/).
+
+**Running from the command line and on a PBS cluster.** The retirement and
+durables examples each solve with one command through
+their `run` modules. Run them from the repo root: the examples live in the
+checkout, not in the installed package. Parameters are overridden on the
+command line through slot paths:
+
+```bash
+python -m examples.retirement.run --slot-override '$draw.settings.grid_size=3000'
+```
+
+The paper's timing sweeps and their driver scripts live in
+`benchmarks/<model>/`; the commands are documented in
+[Running locally](https://akshayshanker.github.io/FUES/running-locally/).
 To contribute, add pytest and autopep8 on top:
 
 ```bash
 pip install pytest autopep8
 ```
-
-The paper's timing sweeps and their driver scripts live in
-`benchmarks/<model>/`; the commands are documented in [Running
-locally](https://akshayshanker.github.io/FUES/running-locally/).
 
 ---
 

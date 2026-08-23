@@ -91,8 +91,9 @@ dispatches to them (the DCEGM/MSS, CONSAV, and RFC engines) — the rule is
 that a bare install covers every registered `EGM_UE` method; `EconModel` is
 pinned because ConSav 0.12 imports it without declaring it. And `dolo`/`dolang` are deliberately
 absent from the `[examples]` extra: they must be installed with
-`pip install --no-deps` from pinned fork commits (exact lines: README
-"Option 2", `setup/setup.sh`) because the forks' metadata declares `numpy>=2`
+`pip install --no-deps` from pinned fork commits (exact lines:
+`setup/setup.sh`, or the manual option in
+`docs/getting-started/installation.md`) because the forks' metadata declares `numpy>=2`
 and the PyPI `dolang`, both conflicting with this repo's pins, and pip extras
 cannot express `--no-deps`. Vanilla EconForge dolo lacks the factory modules.
 
@@ -140,7 +141,7 @@ cannot express `--no-deps`. Vanilla EconForge dolo lacks the factory modules.
 The install and run commands in README.md, `docs/start-here/quickstart.md`,
 `docs/running-locally.md`, and `docs/getting-started/installation.md` were
 executed and passed in fresh virtual environments: the three install options
-including the pinned `--no-deps` lines (README Option 2's
+including the pinned `--no-deps` lines (the manual route's
 `pip install lark multipledispatch` is load-bearing — without it the examples
 fail on import), both library snippets, the running-locally walkthrough
 (sweeps confirmed to vary the grid by reading sizes back from solved stages),
@@ -166,7 +167,7 @@ solves, and the housing GPU benchmarks — cluster jobs under `benchmarks/`.
 
 ```bash
 pip install -e ".[dev]" && pip install lark multipledispatch
-# then the two pinned --no-deps lines (dolang, dolo) from README Option 2
+# then the two pinned --no-deps lines (dolang, dolo) from the Installation page
 pytest tests/test_imports.py tests/test_kikku.py -q   # sanity, about one second
 pytest tests/ -q                 # full tracked suite; solves both examples, a few minutes
 python -m examples.retirement.run --slot-override '$draw.settings.grid_size=500'

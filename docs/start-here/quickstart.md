@@ -19,8 +19,8 @@ pip install git+https://github.com/akshayshanker/FUES.git
 Since this is a research project under active development, we strongly
 recommend installing inside a virtual environment
 (`python3 -m venv .venv && source .venv/bin/activate` first). The plain
-`pip install` routes on this page do not create one; section 2 below
-creates one explicitly.
+`pip install` route here does not create one; the setup script in
+section 2 creates its own automatically.
 
 After your EGM step produces arrays for the raw endogenous-grid
 correspondence, pass them to `FUES`:
@@ -95,26 +95,20 @@ main non-monotone benchmark.
 
 ## 2. Clone and install to run applications 
 
-To run the benchmark examples, clone the repository and install the
-examples profile into a fresh virtual environment:
+To run the benchmark examples, clone the repository and run the setup
+script:
 
 ```bash
 git clone https://github.com/akshayshanker/FUES.git
 cd FUES
-python3 -m venv .venv && source .venv/bin/activate
-pip install ".[examples]"
-pip install lark multipledispatch
-pip install --no-deps \
-  "dolang @ git+https://github.com/bright-forest/dolang.py.git@92b63c44f44394d511b101cc3ea687505721f97f" \
-  "dolo @ git+https://github.com/bright-forest/dolo.git@c899b0176d51f6354b5739a28e61ba45cd286a8b"
+source setup/setup.sh
 ```
 
-The `[examples]` extra installs the application dependencies (kikku,
-matplotlib, quantecon, and friends); the last two lines install the pinned
-dolo-plus compiler the model files require, `--no-deps` for the reasons
-given in the README. Developers who intend to modify the source should
-instead use the editable setup script, `source setup/setup.sh`, which
-creates its own `.venv` and installs all of the above automatically — see
+On the first run this creates the project virtual environment (`.venv`),
+installs `dcsmm` (editable) with the application dependencies and the
+pinned dolo-plus compiler, verifies the install, and activates the
+environment; on later runs it only activates (`--update` refreshes). The
+equivalent manual pip sequence is in
 [Installation](../getting-started/installation.md).
 
 The applications run three ways: through their notebooks, from the command
