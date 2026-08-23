@@ -92,7 +92,7 @@ that a bare install covers every registered `EGM_UE` method; `EconModel` is
 pinned because ConSav 0.12 imports it without declaring it. And `dolo`/`dolang` are deliberately
 absent from the `[examples]` extra: they must be installed with
 `pip install --no-deps` from pinned fork commits (exact lines:
-`setup/setup.sh`, or the manual option in
+`setup/setup.sh`, or the manual sequence in
 `docs/getting-started/installation.md`) because the forks' metadata declares `numpy>=2`
 and the PyPI `dolang`, both conflicting with this repo's pins, and pip extras
 cannot express `--no-deps`. Vanilla EconForge dolo lacks the factory modules.
