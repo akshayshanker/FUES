@@ -10,40 +10,63 @@
 
 ---
 
-FUES recovers the upper envelope of the EGM ([Carroll 2006](https://doi.org/10.1016/j.econlet.2005.09.013)) value correspondence in discrete-continuous problems without requiring monotonicity of the optimal policy or numerical optimisation. FUES can also perform orders of magnitude faster than existing upper-envelope method
+FUES recovers the upper envelope of the EGM ([Carroll
+2006](https://doi.org/10.1016/j.econlet.2005.09.013)) value correspondence in
+discrete-continuous problems without requiring monotonicity of the optimal
+policy or numerical optimisation. FUES can also perform orders of magnitude
+faster than existing upper-envelope methods.
+
 <p align="center">
   <img src="docs/images/pbs-scaling.png" alt="Upper-envelope scaling: FUES vs MSS, RFC, LTM" width="640">
 </p>
 
-This repo ships the FUES algorithm described in the paper and a unified upper-envelope interface (`uenvelope`) that dispatches to FUES and other upper envelope methods: MSS ([Iskhakov et al. 2017](https://doi.org/10.3982/QE643)), LTM ([Druedahl & Jørgensen 2017](https://doi.org/10.1016/j.jedc.2016.11.005)), and RFC ([Dobrescu & Shanker 2024](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=4850746)). 
+This repo ships the FUES algorithm described in the paper and a unified
+upper-envelope interface (`uenvelope`) that dispatches to FUES and other upper
+envelope methods: MSS ([Iskhakov et al. 2017](https://doi.org/10.3982/QE643)),
+LTM ([Druedahl & Jørgensen 2017](https://doi.org/10.1016/j.jedc.2016.11.005)),
+and RFC ([Dobrescu & Shanker
+2024](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=4850746)).
 
-> **Pre-release (v0.6.0dev7)** — Under active research development. API may change.
+> **Pre-release (v0.6.0dev7)** — Under active research development. API may
+> change.
 >
-> Dobrescu, L.I. and Shanker, A. (2022). "A fast upper envelope scan method for discrete-continuous dynamic programming." [SSRN Working Paper.](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=4181302)
+> Dobrescu, L.I. and Shanker, A. (2022). "A fast upper envelope scan method
+> for discrete-continuous dynamic programming." [SSRN Working
+> Paper.](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=4181302)
 
 
 ## Install
 
-The installable package is `dcsmm` (contains `fues` and `uenvelope`). Requires Python 3.11+.
+The installable package is `dcsmm` (contains `fues` and `uenvelope`). Requires
+Python 3.11+.
 
 ### Option 1 — Library only
 
-Simplest way to use FUES on your projects, install FUES and the upper-envelope interface without cloning the repo. This will let you use `fues` and all other benchmark upper-envelope methods in your own applications.
+Simplest way to use FUES on your projects, install FUES and the upper-envelope
+interface without cloning the repo. This will let you use `fues` and all other
+benchmark upper-envelope methods in your own applications.
 
 ```bash
 pip install git+https://github.com/akshayshanker/FUES.git
 ```
 
 ```python
-from dcsmm.fues import FUES  #stand alone FUES  
+from dcsmm.fues import FUES  # stand-alone FUES
 from dcsmm.uenvelope import EGM_UE # upper envelope interface
 ```
 
-Runtime dependencies (numba, numpy, scipy, [HARK](https://github.com/econ-ark/HARK), [ConSav](https://github.com/NumEconCopenhagen/ConsumptionSaving)) are installed automatically. See `pyproject.toml` for the full list and version pins.
+Runtime dependencies (numba, numpy, scipy,
+[HARK](https://github.com/econ-ark/HARK),
+[ConSav](https://github.com/NumEconCopenhagen/ConsumptionSaving)) are
+installed automatically. See `pyproject.toml` for the full list and version
+pins.
 
 ### Option 2 — With examples
 
-Clone the repo and install with dependencies need for the applications to run (`matplotlib`, `pyyaml`, `seaborn`, [`kikku`](https://github.com/bright-forest/kikku)). Includes everything in Option 1 plus the example models in the repo checkout.
+Clone the repo and install with the dependencies needed for the applications
+to run (`matplotlib`, `pyyaml`, `seaborn`,
+[`kikku`](https://github.com/bright-forest/kikku)). Includes everything in
+Option 1 plus the example models in the repo checkout.
 
 ```bash
 git clone https://github.com/akshayshanker/FUES.git
@@ -55,10 +78,10 @@ pip install --no-deps \
   "dolo @ git+https://github.com/bright-forest/dolo.git@c899b0176d51f6354b5739a28e61ba45cd286a8b"
 ```
 
-The last two lines install the dolo-plus (a reserach fork of `dolo`) compiler that the example models
-use. For the moment, they are installed `--no-deps`
-deliberately: the forks' packaging metadata targets a different dependency
-set than this repo's pins, and their runtime needs are already covered by
+The last two lines install the dolo-plus (a research fork of `dolo`) compiler
+that the example models use. For the moment, they are installed `--no-deps`
+deliberately: the forks' packaging metadata targets a different dependency set
+than this repo's pins, and their runtime needs are already covered by
 `[examples]` (the same discipline `setup/setup.sh` uses).
 
 
@@ -67,18 +90,25 @@ The examples are best first explored through their notebooks, in
 on the [docs site](https://akshayshanker.github.io/FUES/).
 
 **Running from the command line and on a PBS cluster.** The retirement and
-durables examples each solve with one command through
-their `run` modules. Run them from the repo root: the examples live in the
-checkout, not in the installed package. Parameters are overridden on the
-command line through slot paths:
+durables examples each solve with one command through their `run` modules. Run
+them from the repo root: the examples live in the checkout, not in the
+installed package. Parameters are overridden on the command line through slot
+paths:
 
 ```bash
 python -m examples.retirement.run --slot-override '$draw.settings.grid_size=3000'
 ```
 
-See the [retirement example docs](https://akshayshanker.github.io/FUES/examples/retirement_choice_model/) for CLI arguments, parameter overrides, and outputs. The [interactive notebook](examples/retirement/notebooks/retirement_fues.ipynb) walks through the model step by step.
+See the [retirement example
+docs](https://akshayshanker.github.io/FUES/examples/retirement_choice_model/)
+for CLI arguments, parameter overrides, and outputs. The [interactive
+notebook](examples/retirement/notebooks/retirement_fues.ipynb) walks through
+the model step by step.
 
-Formal benchmarking and parameter sweeps used in the paper are run on an HPC cluster using the PBS scripts in [`benchmarks/`](benchmarks/retirement/). Pre-computed paper results (tables and figures) are in [`paper-results/`](paper-results/).
+Formal benchmarking and parameter sweeps used in the paper are run on an HPC
+cluster using the PBS scripts in [`benchmarks/`](benchmarks/retirement/).
+Pre-computed paper results (tables and figures) are in
+[`paper-results/`](paper-results/).
 
 ### Option 3 — Developer (editable)
 
@@ -90,7 +120,9 @@ cd FUES
 source setup/setup.sh
 ```
 
-First source creates `.venv` (or `$HOME/venvs/fues` on Gadi), installs `dcsmm[examples]` in editable mode, and verifies the install. Re-source any time to activate; pass `--update` to `git pull` + reinstall.
+First source creates `.venv` (or `$HOME/venvs/fues` on Gadi), installs
+`dcsmm[examples]` in editable mode, and verifies the install. Re-source any
+time to activate; pass `--update` to `git pull` + reinstall.
 
 To contribute, add pytest and autopep8 on top:
 
@@ -99,8 +131,8 @@ pip install pytest autopep8
 ```
 
 The paper's timing sweeps and their driver scripts live in
-`benchmarks/<model>/`; the commands are documented in
-[Running locally](https://akshayshanker.github.io/FUES/running-locally/).
+`benchmarks/<model>/`; the commands are documented in [Running
+locally](https://akshayshanker.github.io/FUES/running-locally/).
 
 ---
 
@@ -140,10 +172,22 @@ FUES/
 
 ## References
 
-- Carroll, C.D. (2006). "The method of endogenous gridpoints for solving dynamic stochastic optimization problems." *Economics Letters*, 91(3), 312–320.
-- Dobrescu, L.I. and Shanker, A. (2022). "A fast upper envelope scan method for discrete-continuous dynamic programming." *SSRN Working Paper No. 4181302*.
-- Dobrescu, L.I. and Shanker, A. (2024). "Using Inverse Euler Equations to Solve Multidimensional Discrete-Continuous Dynamic Models." *SSRN Working Paper No. 4850746*.
-- Druedahl, J. and Jørgensen, T.H. (2017). "A general endogenous grid method for multi-dimensional models with non-convexities and constraints." *JEDC*, 74, 87–107.
-- Druedahl, J. (2021). "A guide on solving non-convex consumption-saving models." *Computational Economics*, 58, 747–775.
-- Fella, G. (2014). "A generalized endogenous grid method for non-smooth and non-concave problems." *Review of Economic Dynamics*, 17(2), 329–344.
-- Iskhakov, F., Jørgensen, T.H., Rust, J. and Schjerning, B. (2017). "The endogenous grid method for discrete-continuous dynamic choice models with (or without) taste shocks." *Quantitative Economics*, 8(2), 317–365.
+- Carroll, C.D. (2006). "The method of endogenous gridpoints for solving
+  dynamic stochastic optimization problems." *Economics Letters*, 91(3),
+  312–320.
+- Dobrescu, L.I. and Shanker, A. (2022). "A fast upper envelope scan method
+  for discrete-continuous dynamic programming." *SSRN Working Paper No.
+  4181302*.
+- Dobrescu, L.I. and Shanker, A. (2024). "Using Inverse Euler Equations to
+  Solve Multidimensional Discrete-Continuous Dynamic Models." *SSRN Working
+  Paper No. 4850746*.
+- Druedahl, J. and Jørgensen, T.H. (2017). "A general endogenous grid method
+  for multi-dimensional models with non-convexities and constraints." *JEDC*,
+  74, 87–107.
+- Druedahl, J. (2021). "A guide on solving non-convex consumption-saving
+  models." *Computational Economics*, 58, 747–775.
+- Fella, G. (2014). "A generalized endogenous grid method for non-smooth and
+  non-concave problems." *Review of Economic Dynamics*, 17(2), 329–344.
+- Iskhakov, F., Jørgensen, T.H., Rust, J. and Schjerning, B. (2017). "The
+  endogenous grid method for discrete-continuous dynamic choice models with
+  (or without) taste shocks." *Quantitative Economics*, 8(2), 317–365.
