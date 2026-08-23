@@ -23,6 +23,6 @@ requires no numerical optimisation. See [How FUES
 works](algorithm/fues-algorithm.md) for the derivation.
 
 To use `FUES` or `EGM_UE` in your own model, start with the
-[Quickstart](start-here/quickstart.md): a plain `pip install`, the minimal
-`FUES` call, and the `EGM_UE` interface for comparing upper-envelope methods
-on the same problem. The [Core API](api/fues.md) documents all parameters.
+[Quickstart](start-here/quickstart.md) and a plain `pip install`. You can
+then call `FUES` directly on your EGM output, or use the `EGM_UE` interface
+to run the alternative upper-envelope methods on the same problem.
