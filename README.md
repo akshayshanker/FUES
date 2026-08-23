@@ -61,7 +61,13 @@ deliberately: the forks' packaging metadata targets a different dependency
 set than this repo's pins, and their runtime needs are already covered by
 `[examples]` (the same discipline `setup/setup.sh` uses).
 
-The retirement and durables examples each solve with one command through
+
+The examples are best explored through their notebooks, in
+`examples/retirement/notebooks/` and `examples/durables/notebooks/`, rendered
+on the [docs site](https://akshayshanker.github.io/FUES/).
+
+**Running from the command line and on a PBS cluster.** The retirement and
+durables examples each solve with one command through
 their `run` modules. Run them from the repo root: the examples live in the
 checkout, not in the installed package. Parameters are overridden on the
 command line through slot paths:
@@ -72,7 +78,7 @@ python -m examples.retirement.run --slot-override '$draw.settings.grid_size=3000
 
 See the [retirement example docs](https://akshayshanker.github.io/FUES/examples/retirement_choice_model/) for CLI arguments, parameter overrides, and outputs. The [interactive notebook](examples/retirement/notebooks/retirement_fues.ipynb) walks through the model step by step.
 
-Formal benchmarking and parameter sweeps are run on an HPC cluster using the PBS scripts in [`benchmarks/retirement/`](benchmarks/retirement/). Pre-computed paper results (tables and figures) are in [`paper-results/`](paper-results/).
+Formal benchmarking and parameter sweeps used in the paper are run on an HPC cluster using the PBS scripts in [`benchmarks/retirement/`](benchmarks/retirement/). Pre-computed paper results (tables and figures) are in [`paper-results/`](paper-results/).
 
 ### Option 3 — Developer (editable)
 
