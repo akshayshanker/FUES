@@ -6,9 +6,9 @@ and the upper envelop wrapper `EGM_UE` as a single `pip install`. Without any
 additional dependencies required  by the applications. 
 
 To run the applications, jump to
-[running the applications](#3-clone-and-set-up-the-environment).
+[running the applications](#2-clone-and-set-up-the-environment).
 
-## 1. Minimal use
+## 1. Installing FUES and EGM_UE only 
 
 Install the library alone:
 
@@ -19,8 +19,8 @@ pip install git+https://github.com/akshayshanker/FUES.git
 Since this is a research project under active development, we strongly
 recommend installing inside a virtual environment
 (`python3 -m venv .venv && source .venv/bin/activate` first). The plain
-`pip install` routes on this page do not create one; the project setup
-script in section 3 creates its own automatically.
+`pip install` routes on this page do not create one; section 2 below
+creates one explicitly.
 
 After your EGM step produces arrays for the raw endogenous-grid
 correspondence, pass them to `FUES`:
@@ -94,17 +94,27 @@ main non-monotone benchmark.
 
 ## 2. Clone and set up the environment
 
-To run the benchmark examples, clone the repository and use the project setup script from a fresh
-checkout:
+To run the benchmark examples, clone the repository and install the
+examples profile into a fresh virtual environment:
 
 ```bash
 git clone https://github.com/akshayshanker/FUES.git
 cd FUES
-source setup/setup.sh
+python3 -m venv .venv && source .venv/bin/activate
+pip install ".[examples]"
+pip install lark multipledispatch
+pip install --no-deps \
+  "dolang @ git+https://github.com/bright-forest/dolang.py.git@92b63c44f44394d511b101cc3ea687505721f97f" \
+  "dolo @ git+https://github.com/bright-forest/dolo.git@c899b0176d51f6354b5739a28e61ba45cd286a8b"
 ```
 
-This creates or reuses the project virtual environment, installs the example
-dependencies, and activates the environment in your current shell.
+The `[examples]` extra installs the application dependencies (kikku,
+matplotlib, quantecon, and friends); the last two lines install the pinned
+dolo-plus compiler the model files require, `--no-deps` for the reasons
+given in the README. Developers who intend to modify the source should
+instead use the editable setup script, `source setup/setup.sh`, which
+creates its own `.venv` and installs all of the above automatically — see
+[Installation](../getting-started/installation.md).
 
 The applications run three ways: through their notebooks, from the command
 line, and as PBS cluster jobs. The notebooks, in `examples/*/notebooks/` and
@@ -112,7 +122,7 @@ rendered on the [docs site](https://akshayshanker.github.io/FUES/), are the
 easiest way to experiment once you have cloned the repo; the sections below
 cover the command line.
 
-## 4. Run one example solve
+## 3. Run one example solve
 
 The retirement model is the smaller benchmark and is convenient for a first
 run:
@@ -130,7 +140,7 @@ python -m examples.durables.run \
     --output-dir results/durables
 ```
 
-## 5. Output locations
+## 4. Output locations
 
 Runs write dated output folders under the model-specific results directory, for
 example:
@@ -142,7 +152,7 @@ results/durables/YYYY-MM-DD/NNN/
 
 These folders contain the run's plots and tables. The durables runner writes `tables/sweep.md` (and `comparison.md` in compare mode); the retirement runner prints its method table to the console and writes plots, filling `tables/` only for timing sweeps.
 
-## 6. Related pages
+## 5. Related pages
 
 - [How FUES Works](../algorithm/fues-algorithm.md) for the algorithm.
 - [Applications](../examples/index.md) for the benchmark model pages.
