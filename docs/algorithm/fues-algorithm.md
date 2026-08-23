@@ -1,5 +1,10 @@
 # The FUES algorithm
 
+This page states the algorithm and its logic. For the same material worked
+hands-on, with every EGM step written out in raw NumPy on a small model,
+see the
+[EGM / FUES walkthrough notebook](../notebooks/egm_fues_transparent.ipynb).
+
 ## Discrete-continuous problems and the EGM
 
 In discrete–continuous problems the Euler equation generates a value
