@@ -16,6 +16,12 @@ Install the library alone:
 pip install git+https://github.com/akshayshanker/FUES.git
 ```
 
+Since this is a research project under active development, we strongly
+recommend installing inside a virtual environment
+(`python3 -m venv .venv && source .venv/bin/activate` first). The plain
+`pip install` routes on this page do not create one; the project setup
+script in section 3 creates its own automatically.
+
 After your EGM step produces arrays for the raw endogenous-grid
 correspondence, pass them to `FUES`:
 
