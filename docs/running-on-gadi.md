@@ -1,8 +1,8 @@
 # Running on a PBS cluster
 
-This guide applies to any cluster that uses PBS (OpenPBS, PBS Pro, or
-Altair PBS) for job scheduling. Cluster-specific details — queue names,
-filesystem paths, project codes, module versions — are exposed as shell
+This guide applies to any cluster that uses PBS (OpenPBS, PBS Pro, or Altair
+PBS) for job scheduling. Cluster-specific details — queue names, filesystem
+paths, project codes, and module versions — are exposed as shell
 variables so you can adapt them to your site.
 
 > **Scope.** The examples install (README, Option 2)
@@ -19,28 +19,27 @@ variables so you can adapt them to your site.
 
 ## Site-specific variables
 
-Set these once (e.g. in `~/.bashrc` or a `site.env` file you source at
-the top of each PBS script):
+Set these once (e.g. in `~/.bashrc` or a `site.env` file you source at the top
+of each PBS script):
 
 ```bash
-export PROJECT=your_project_code             # allocation / project id for #PBS -P
-export SCRATCH_DIR=/scratch/$PROJECT/$USER   # fast, ephemeral (purged periodically)
-export STORAGE_DIR=/storage/$PROJECT         # persistent (logs, estimation outputs)
-export FUES_VENV=$HOME/venvs/fues            # venv location (on a filesystem that
-                                             # handles concurrent MPI reads — often NFS)
+export PROJECT=your_project_code          # PBS project / allocation id
+export SCRATCH_DIR=/scratch/$PROJECT/$USER  # fast, ephemeral scratch
+export STORAGE_DIR=/storage/$PROJECT      # persistent project storage
+export FUES_VENV=$HOME/venvs/fues         # venv (NFS/home, not scratch)
 ```
 
 Rule of thumb:
 
 | Filesystem | Use for | Why |
 |---|---|---|
-| Home (`$HOME`) | Venv, code | Persistent, small quota; no concurrent-read pressure |
-| Scratch (`$SCRATCH_DIR`) | Run outputs, numba cache | Fast, ephemeral, large |
-| Project storage (`$STORAGE_DIR`) | Logs, final results you want to keep | Persistent, tracked against project quota |
+| Home (`$HOME`) | Venv, code | Small quota; persistent |
+| Scratch (`$SCRATCH_DIR`) | Outputs, numba cache | Fast; purged |
+| Storage (`$STORAGE_DIR`) | Logs, kept results | Persistent project quota |
 
 **Do not write large outputs to `$HOME`** — home quotas are typically small
-(~10 GiB). Outputs go to scratch; things you want to keep are archived
-from scratch to project storage.
+(~10 GiB). Outputs go to scratch; things you want to keep are archived from
+scratch to project storage.
 
 ## Environment
 
@@ -55,13 +54,12 @@ source setup/setup.sh
 `setup/setup.sh` is the only script. Behaviour:
 
 - First run: creates `$FUES_VENV` (default `$HOME/venvs/fues`), installs
-  the numerical packages (numpy, numba, scipy), `dcsmm[examples]` (FUES +
-  HARK + ConSav + kikku + matplotlib + seaborn + …) in editable mode, the
-  pinned `bright-forest` dolang and dolo commits (dolang `92b63c4`,
-  dolo `c899b01`, installed `--no-deps`; they provide
-  `dolo.compiler.spec_factory`), and `mpi4py` built from source against
-  the loaded MPI. Runs verification imports that exit non-zero if
-  anything is missing.
+  the numerical packages (numpy, numba, scipy), `dcsmm[examples]` (FUES + HARK
+  + ConSav + kikku + matplotlib + seaborn + …) in editable mode, the pinned
+  `bright-forest` dolang and dolo commits (dolang `92b63c4`, dolo `c899b01`,
+  installed `--no-deps`; they provide `dolo.compiler.spec_factory`), and
+  `mpi4py` built from source against the loaded MPI. Runs verification imports
+  that exit non-zero if anything is missing.
 - Subsequent runs: just activates the venv and sets runtime env vars
   (`NUMBA_NUM_THREADS=1`, `NUMBA_CACHE_DIR=…`, `MPLBACKEND=Agg`).
 - `source setup/setup.sh --update`: `git pull` + reinstall
@@ -79,16 +77,17 @@ Interactive PBS session on Gadi (so you can run a `source setup/setup.sh`
 inside a compute node before submitting MPI jobs):
 
 ```bash
-qsub -I -q expresssr -P "$PROJECT" -l ncpus=1,mem=5GB,walltime=01:00:00,storage=scratch/"$PROJECT",wd
+qsub -I -q expresssr -P "$PROJECT" \
+  -l ncpus=1,mem=5GB,walltime=01:00:00,storage=scratch/"$PROJECT",wd
 ```
 
 ## Storage layout
 
 | What | Where | Purge? |
 |---|---|---|
-| Run outputs (plots, tables) | `$SCRATCH_DIR/FUES/<model>/YYYY-MM-DD/NNN/` | Yes (cluster policy) |
+| Run outputs | `$SCRATCH_DIR/FUES/<model>/YYYY-MM-DD/NNN/` | Yes |
 | PBS logs | `$STORAGE_DIR/logs/<model>/` | No |
-| Estimation results (kept) | `$STORAGE_DIR/results/<model>/estimation/` | No |
+| Estimation (kept) | `$STORAGE_DIR/results/<model>/estimation/` | No |
 | Numba cache | `$SCRATCH_DIR/numba_cache/` or `$PBS_JOBFS` | Job-scoped |
 | Code checkout | `$HOME/.../FUES/` | No |
 | Venv | `$FUES_VENV` | No |
@@ -131,17 +130,16 @@ Key points:
 - `#PBS -l storage=...` must list every filesystem the job touches. Sites
   that isolate filesystems per project will refuse access otherwise.
 - `#PBS -l wd` means the job starts in the directory where it was
-  submitted (`$PBS_O_WORKDIR`); relative paths in your command work as
-  they do interactively.
+  submitted (`$PBS_O_WORKDIR`); relative paths in your command work as they do
+  interactively.
 - Pin threads (`OMP_NUM_THREADS=1`, `NUMBA_NUM_THREADS=1`) when you run
-  MPI — otherwise each rank's BLAS will oversubscribe the cores your
-  MPI process is already using, and throughput drops sharply.
+  MPI — otherwise each rank's BLAS will oversubscribe the cores your MPI
+  process is already using, and throughput drops sharply.
 
 ## MPI jobs
 
-For MPI runs (estimation sweeps, large parameter sweeps), use
-NUMA-aware placement so each rank sits on its own core within a NUMA
-domain:
+For MPI runs (estimation sweeps, large parameter sweeps), use NUMA-aware
+placement so each rank sits on its own core within a NUMA domain:
 
 ```bash
 #PBS -q <large-parallel-queue>
@@ -156,12 +154,12 @@ mpiexec -n "$PBS_NCPUS" \
     <flags>
 ```
 
-To figure out your cluster's NUMA layout, run `lscpu` or `numactl -H`
-on a compute node (usually from an interactive job). Example: 8 NUMA
-domains × 13 cores = 104 cores per node → `ppr:13:numa`.
+To figure out your cluster's NUMA layout, run `lscpu` or `numactl -H` on a
+compute node (usually from an interactive job). Example: 8 NUMA domains × 13
+cores = 104 cores per node → `ppr:13:numa`.
 
-`python3 -m mpi4py` ensures uncaught exceptions on any rank abort the
-whole job cleanly instead of leaking into a hang.
+`python3 -m mpi4py` ensures uncaught exceptions on any rank abort the whole
+job cleanly instead of leaking into a hang.
 
 ## Queues
 
@@ -178,11 +176,12 @@ General guidance (adapt to your site's naming):
 |---|---|
 | Express / short | Quick correctness tests; single-core runs |
 | Normal / standard | Long batch runs, estimation, large sweeps |
-| Fat / high-memory | Jobs whose working set exceeds a standard node's memory |
+| Fat / high-memory | Jobs whose working set exceeds a standard node's |
+|  | memory |
 | GPU | Only if you've rewritten an operator for CUDA (not the case here) |
 
-Pick the queue whose walltime and core count match your job — you're
-billed for the full allocation regardless of whether you use it.
+Pick the queue whose walltime and core count match your job — you're billed
+for the full allocation regardless of whether you use it.
 
 ## Monitoring
 
@@ -193,8 +192,8 @@ tail -f <log-dir>/*.o<jobid>      # stdout as it streams
 tail -f <log-dir>/*.e<jobid>      # stderr as it streams
 ```
 
-Some sites ship extra tools: `nqstat_anu` (Gadi), `squeue`-like aliases,
-or Grafana dashboards. Check `which`-style commands or your site docs.
+Some sites ship extra tools: `nqstat_anu` (Gadi), `squeue`-like aliases, or
+Grafana dashboards. Check `which`-style commands or your site docs.
 
 ## Examples
 
@@ -223,8 +222,8 @@ qsub benchmarks/retirement/retirement_timings.sh
 qsub benchmarks/retirement/run_retirement_single_core.sh
 ```
 
-Before submitting a large job, do a 2-rank trial run on a login node
-or an interactive job:
+Before submitting a large job, do a 2-rank trial run on a login node or an
+interactive job:
 
 ```bash
 source "$FUES_VENV/bin/activate"
@@ -239,20 +238,24 @@ mpiexec -n 2 python3 -m mpi4py -m examples.durables.run \
 ```
 
 The `$draw.n_a=[…]` axis form (v4) is terser than the v3 bundle-list
-equivalent for one-subkey sweeps; `tau` and `t0` go through
-`--slot-override` because they are constant across the rows. The
-`method_switch` axis stays as a bundle-list because each row is a
-distinct whole-slot payload (string tag expanded in `solve.py`).
+equivalent for one-subkey sweeps; `tau` and `t0` go through `--slot-override`
+because they are constant across the rows. The `method_switch` axis stays as a
+bundle-list because each row is a distinct whole-slot payload (string tag
+expanded in `solve.py`).
 
 ## Common issues
 
 | Problem | Fix |
 |---|---|
-| `ModuleNotFoundError: No module named 'dolo.compiler.spec_factory'` | Venv has vanilla PyPI dolo. `rm -rf "$FUES_VENV"; source setup/setup.sh` to rebuild. |
-| `ModuleNotFoundError: No module named 'seaborn'` (or similar) | `pip install -e ".[examples]"` in the venv. |
-| `make_egm_1d() missing argument` (or other kikku API mismatch) | Reinstall kikku: `pip install --force-reinstall --no-deps "kikku @ git+https://github.com/bright-forest/kikku.git"`. |
-| PBS log says permission denied on a filesystem | That filesystem isn't listed in `#PBS -l storage=...`. Add it. |
-| `$HOME` quota full | Delete unused venvs and caches: `rm -rf ~/venvs/old_*`, `rm -rf ~/.cache/pip`. |
-| Numba `ReferenceError: underlying object has vanished` | Stale cache. `rm -rf "$NUMBA_CACHE_DIR"/*` and resubmit. |
-| MPI job hangs at startup | Often a filesystem-isolation issue on Lustre. Put the venv on NFS (home) rather than scratch; Lustre struggles with hundreds of concurrent `import` reads. |
-| Ranks silently produce different results | Check that the driver seeds every per-rank RNG. For `--simulate`, `--seed N` is deterministic across ranks; other randomness needs per-rank care. |
+| `dolo.compiler.spec_factory` missing | `rm -rf "$FUES_VENV"; source |
+|  | setup/setup.sh` |
+| `ModuleNotFoundError: seaborn` | `pip install -e ".[examples]"` in the |
+|  | venv. |
+| kikku API mismatch (`make_egm_1d`) | Reinstall kikku from bright-forest |
+|  | git |
+|  | (`pip install --force-reinstall --no-deps …`). |
+| PBS permission denied | Add filesystem to `#PBS -l storage=...`. |
+| `$HOME` quota full | `rm -rf ~/venvs/old_* ~/.cache/pip`. |
+| Numba `ReferenceError` | `rm -rf "$NUMBA_CACHE_DIR"/*`; resubmit. |
+| MPI hang at startup | Keep venv on home/NFS, not scratch. |
+| Ranks differ | Seed per-rank RNG (`--simulate --seed N`). |

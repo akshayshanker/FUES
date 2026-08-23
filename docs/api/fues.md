@@ -27,25 +27,47 @@ FUES(
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `x_dcsn_hat` | ndarray (N,) | — | Endogenous decision grid. Internally sorted ascending. |
+| `x_dcsn_hat` | ndarray (N,) | — | Endogenous decision grid. Internally |
+|  |  |  | sorted ascending. |
 | `v_hat` | ndarray (N,) | — | Value at each grid point. |
 | `kappa_hat` | ndarray (N,) | — | Primary policy (e.g. consumption). |
-| `x_cntn_hat` | ndarray (N,) | — | Secondary policy (e.g. next-period assets). Used in the double-jump post-clean and carried through intersections; the scan itself classifies jumps on `kappa_hat`. |
-| `del_kappa_hat` | ndarray (N,) | None | Derivative of the control `kappa` along the endogenous grid (d kappa / d x_dcsn); supplies the grid-local jump threshold. Required when `endog_mbar=True`. |
-| `m_bar` | float | 1.0 | Jump detection threshold on the `kappa_hat` difference quotient. Set to the maximum slope of the control along a branch (the maximum marginal propensity to consume in consumption applications), or slightly above. |
-| `LB` | int | 4 | Look-back/forward buffer length for forward and backward scans. |
-| `endog_mbar` | bool | False | If True, compute endogenous jump threshold using `del_kappa_hat`. |
-| `padding_mbar` | float | 0.0 | Additional padding for the endogenous threshold. |
-| `include_intersections` | bool | True | Interpolate crossing points at retained jumps. |
-| `return_intersections_separately` | bool | False | Return intersections as a separate tuple. |
-| `single_intersection` | bool | False | Create only one intersection per crossing. |
-| `no_double_jumps` | bool | True | Suppress consecutive double jumps in the scan. |
+| `x_cntn_hat` | ndarray (N,) | — | Secondary policy (e.g. next-period |
+|  |  |  | assets). Used in the double-jump |
+|  |  |  | post-clean and carried through |
+|  |  |  | intersections; the scan itself |
+|  |  |  | classifies jumps on `kappa_hat`. |
+| `del_kappa_hat` | ndarray (N,) | None | Derivative of the control `kappa` |
+|  |  |  | along the endogenous grid (d kappa |
+|  |  |  | / d x_dcsn); supplies the |
+|  |  |  | grid-local jump threshold. |
+|  |  |  | Required when `endog_mbar=True`. |
+| `m_bar` | float | 1.0 | Jump threshold on `kappa_hat` difference |
+|  |  |  | quotient. Set to max control slope along a branch |
+|  |  |  | (max MPC in consumption models), or slightly above. |
+| `LB` | int | 4 | Look-back/forward scan buffer length |
+| `endog_mbar` | bool | False | If True, compute endogenous jump threshold |
+|  |  |  | using `del_kappa_hat`. |
+| `padding_mbar` | float | 0.0 | Additional padding for the endogenous |
+|  |  |  | threshold. |
+| `include_intersections` | bool | True | Interpolate crossing points at |
+|  |  |  | retained jumps. |
+| `return_intersections_separately` | bool | False | Return intersections as |
+|  |  |  | a separate tuple. |
+| `single_intersection` | bool | False | Create only one intersection per |
+|  |  |  | crossing. |
+| `no_double_jumps` | bool | True | Suppress consecutive double jumps in the |
+|  |  |  | scan. |
 | `disable_jump_checks` | bool | False | Override jump validity checks. |
-| `assume_sorted` | bool | False | Skip the internal ascending sort of the input arrays. |
-| `eps_d` | float | None | Minimum grid-point separation (None uses the module default). |
-| `eps_sep` | float | None | Minimum separation for intersections (None uses the module default). |
-| `eps_fwd_back` | float | None | Proximity threshold for forward/backward scans (None uses the module default). |
-| `parallel_guard` | float | None | Guard against near-parallel segments (None uses the module default). |
+| `assume_sorted` | bool | False | Skip the internal ascending sort of the |
+|  |  |  | input arrays. |
+| `eps_d` | float | None | Minimum grid-point separation (None uses the |
+|  |  |  | module default). |
+| `eps_sep` | float | None | Min separation for intersections (None → |
+|  |  |  | default) |
+| `eps_fwd_back` | float | None | Proximity threshold for forward/backward |
+|  |  |  | scans (None uses the module default). |
+| `parallel_guard` | float | None | Guard against near-parallel segments |
+|  |  |  | (None uses the module default). |
 
 ### Returns
 
@@ -71,16 +93,22 @@ The current implementation uses the recommended parameter names directly
 | `x_dcsn_hat` | `e_grid` | `\hat{x}` or `\hat{x}_v` |
 | `v_hat` | `vlu` | `\hat{v}` or `\hat{v}_v` |
 | `kappa_hat` | `policy_1` | `\hat{c}` in consumption-saving applications |
-| `x_cntn_hat` | `policy_2` | `\hat{x}_e`, with `\hat{x}_e \equiv \hat{x}'` as the transition from the paper's current notation |
-| `del_kappa_hat` | `del_a` | `d\hat{\kappa}/d\hat{x}` — derivative of the control along the endogenous grid, used for the endogenous jump threshold |
+| `x_cntn_hat` | `policy_2` | `\hat{x}_e`, with `\hat{x}_e \equiv \hat{x}'` |
+|  |  | as the transition from the paper's current |
+|  |  | notation |
+| `del_kappa_hat` | `del_a` | `d\hat{\kappa}/d\hat{x}` — derivative of the |
+|  |  | control along the endogenous grid, used for |
+|  |  | the endogenous jump threshold |
 | `*_ref` outputs | — | refined counterparts of the above |
 
-This keeps the docs close to the current paper while making the continuation / post-decision object easier to read from a Bellman-DDSL perspective.
+This keeps the docs close to the current paper while making the continuation /
+post-decision object easier to read from a Bellman-DDSL perspective.
 
 ### Implementation notes
 
 - Core scan is `@njit` (Numba JIT-compiled)
-- Input arrays sorted internally — no pre-sorting required (skip the sort with `assume_sorted=True`)
+- Input arrays sorted internally — no pre-sorting required (use
+  `assume_sorted=True` to skip the sort)
 - \(O(N)\) time with fixed look-back window of size `LB`
 - Sub-optimal = policy jump **and** concave right turn
 - Crossing points computed via two-point linear interpolation
@@ -91,7 +119,8 @@ This keeps the docs close to the current paper while making the continuation / p
 from dcsmm.uenvelope import EGM_UE
 ```
 
-Unified entry point for all upper envelope algorithms. Wraps FUES, MSS, RFC, and LTM behind a common interface.
+Unified entry point for all upper envelope algorithms. Wraps FUES, MSS, RFC,
+and LTM behind a common interface.
 
 ### Signature
 
@@ -106,8 +135,8 @@ EGM_UE(
 )
 ```
 
-When `method_switch` is omitted (None) the engine defaults to `"FUES"`.
-The deprecated keyword ``ue_method`` is still accepted as an alias of
+When `method_switch` is omitted (None) the engine defaults to `"FUES"`. The
+deprecated keyword ``ue_method`` is still accepted as an alias of
 ``method_switch`` (not both at once).
 
 ### Returns
@@ -116,7 +145,8 @@ The deprecated keyword ``ue_method`` is still accepted as an alias of
 (refined, raw, interpolated)
 ```
 
-- `refined` — dict: `x_dcsn_ref`, `v_dcsn_ref`, `kappa_ref`, `x_cntn_ref`, `lambda_ref`, `ue_time`
+- `refined` — dict: `x_dcsn_ref`, `v_dcsn_ref`, `kappa_ref`, `x_cntn_ref`,
+  `lambda_ref`, `ue_time`
 - `raw` — dict: original inputs
 - `interpolated` — dict: values on `X_dcsn` (if `interpolate=True`)
 
@@ -129,9 +159,12 @@ The deprecated keyword ``ue_method`` is still accepted as an alias of
 | `method_switch` | Algorithm | Source |
 |-------------|-----------|--------|
 | `"FUES"` | Fast Upper-Envelope Scan | Dobrescu & Shanker (2022) |
-| `"DCEGM"` (alias `"MSS"`) | Monotone segment selection (MSS) | Iskhakov et al. (2017), via [HARK](https://github.com/econ-ark/HARK) |
+| `"DCEGM"` (alias `"MSS"`) | Monotone segment selection | Iskhakov et al. |
+|  | (MSS) |  |
+|  |  | (2017), via [HARK](https://github.com/econ-ark/HARK) |
 | `"RFC"` | Rooftop-cut | Dobrescu & Shanker (2024) |
-| `"CONSAV"` | Local triangulation (LTM) | Druedahl (2021), via [ConSav](https://github.com/NumEconCopenhagen/ConsumptionSaving) |
+| `"CONSAV"` | Local triangulation (LTM) | Druedahl (2021), via |
+|  |  | [ConSav](https://github.com/NumEconCopenhagen/ConsumptionSaving) |
 | `"FUES_V0DEV"` | Original paper FUES | — |
 | `"FUES_V0_1DEV"` | FUES v0.1dev baseline | — |
 | `"FUES_V0_2DEV"` | FUES v0.2dev (same engine as `"FUES"`) | — |
@@ -187,9 +220,14 @@ Same as `interp_as` for a single float `x`. Numba JIT-compiled.
 correct_jumps1d(data, x, gradient_jump_threshold, policy_value_funcs)
 ```
 
-Detects and corrects spurious jumps in interpolated functions by checking gradient against threshold and re-interpolating. `policy_value_funcs` is a dict of aligned 1D arrays corrected the same way (pass a `numba.typed.Dict` — the function is Numba JIT-compiled). Returns `(corrected_data, corrected_policy_value_funcs)`.
+Detects and corrects spurious jumps in interpolated functions by checking
+gradient against threshold and re-interpolating. `policy_value_funcs` is a
+dict of aligned 1D arrays corrected the same way (pass a `numba.typed.Dict`
+— the function is Numba JIT-compiled). Returns `(corrected_data,
+corrected_policy_value_funcs)`.
 
 ### Convention
 
-All 1D interpolation in `dcsmm` uses `interp_as` / `interp_as_scalar`. Do not use `np.interp` directly.
+All 1D interpolation in `dcsmm` uses `interp_as` / `interp_as_scalar`. Do not
+use `np.interp` directly.
 

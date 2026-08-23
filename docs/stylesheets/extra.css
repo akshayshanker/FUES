@@ -255,8 +255,13 @@
 }
 
 .md-typeset p,
-.md-typeset li {
+.md-typeset li,
+.md-typeset blockquote,
+.md-typeset .admonition,
+.md-typeset .paper-card .abstract {
   hyphens: auto;
+  text-align: justify;
+  text-justify: inter-word;
 }
 
 /* ══════════════════════════════════════════════════════════════════════

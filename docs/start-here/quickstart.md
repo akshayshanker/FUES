@@ -2,11 +2,11 @@
 
 To use the upper envelope in your own model, start with the minimal-use
 sections below: a single `pip install` provides the FUES algorithm and the
-upper-envelope interface `EGM_UE`, without any of the additional
-dependencies the applications require.
+upper-envelope interface `EGM_UE`, without any of the additional dependencies
+the applications require.
 
-To run the applications, jump to
-[running the applications](#2-clone-and-set-up-the-environment).
+To run the applications, jump to [running the
+applications](#2-clone-and-set-up-the-environment).
 
 ## 1. Installing FUES and EGM_UE only
 
@@ -37,23 +37,24 @@ The returned arrays contain only the upper-envelope points. Convention:
 `*_hat` for raw correspondence, `*_ref` for refined upper-envelope objects.
 For a cell-by-cell walkthrough of exactly these calls on a small worked
 problem — every EGM step written out in raw NumPy — see the
-[transparent EGM / FUES notebook](../notebooks/egm_fues_transparent.ipynb).
+[transparent EGM / FUES
+notebook](../notebooks/egm_fues_transparent.ipynb).
 
-**Setting `m_bar`.** Use the maximum marginal propensity to consume in
-your model. For instance, in a consumption-saving model with log utility
-and $\beta R < 1$, set `m_bar` to $1.0 + 10^{-2}$. Higher values also work
-and remove fewer points on coarser grids; in the limit, as the grid size
-grows, **any `m_bar` above the maximum MPC is guaranteed to recover the
-true upper envelope.** Setting `endog_mbar=True` instead lets FUES compute
-a grid-local threshold, in which case the derivative of the control must
-be supplied as `del_kappa_hat`.
+**Setting `m_bar`.** Use the maximum marginal propensity to consume in your
+model. For instance, in a consumption-saving model with log utility and $\beta
+R < 1$, set `m_bar` to $1.0 + 10^{-2}$. Higher values also work and remove
+fewer points on coarser grids; in the limit, as the grid size grows, **any
+`m_bar` above the maximum MPC is guaranteed to recover the true upper
+envelope.** Setting `endog_mbar=True` instead lets FUES compute a grid-local
+threshold, in which case the derivative of the control must be supplied as
+`del_kappa_hat`.
 
 > FUES detects jumps in the control variable `kappa_hat`, not in the
 > continuation state `x_cntn_hat`; the continuation series is only
 > cleaned, and a refined set of continuation points is returned.
 
-For the full documentation of the `FUES` function, see the
-[Core API](../api/fues.md).
+For the full documentation of the `FUES` function, see the [Core
+API](../api/fues.md).
 
 ### 1.1 The upper-envelope registry
 
@@ -66,7 +67,7 @@ from dcsmm.uenvelope import EGM_UE
 refined, raw, interpolated = EGM_UE(
     x_dcsn_hat=x_dcsn_hat,
     v_hat=v_hat,
-    v_cntn_hat=v_cntn,          # raw continuation value; only used by "CONSAV"
+    v_cntn_hat=v_cntn,          # continuation value; CONSAV only
     kappa_hat=kappa_hat,
     x_cntn_hat=x_cntn_hat,
     X_dcsn=X_dcsn,
@@ -78,19 +79,16 @@ refined, raw, interpolated = EGM_UE(
 ```
 
 All methods return the same dict schema. `DCEGM` (MSS in the paper) and
-`CONSAV` (LTM in the paper) require a strictly monotone optimal policy;
-`FUES` and `RFC` do not. All methods work on a bare install: every
-`EGM_UE` engine's dependencies, including `pykdtree` for `RFC`, are core
-dependencies.
+`CONSAV` (LTM in the paper) require a strictly monotone optimal policy; `FUES`
+and `RFC` do not. All methods work on a bare install: every `EGM_UE` engine's
+dependencies, including `pykdtree` for `RFC`, are core dependencies.
 
-See the
-[durables application](../examples/continuous_housing_model.md) for the
-main non-monotone benchmark.
+See the [durables application](../examples/continuous_housing_model.md) for
+the main non-monotone benchmark.
 
 ## 2. Clone and install to run applications and edit source
 
-To run the benchmark examples, clone the repository and run the setup
-script:
+To run the benchmark examples, clone the repository and run the setup script:
 
 ```bash
 git clone https://github.com/akshayshanker/FUES.git
@@ -99,17 +97,17 @@ source setup/setup.sh
 ```
 
 On the first run this creates the project virtual environment (`.venv`),
-installs `dcsmm` (editable) with the application dependencies and the
-pinned dolo-plus compiler, verifies the install, and activates the
-environment; on later runs it only activates (`--update` refreshes). The
-equivalent manual pip sequence is in
-[Installation](../getting-started/installation.md).
+installs `dcsmm` (editable) with the application dependencies and the pinned
+dolo-plus compiler, verifies the install, and activates the environment; on
+later runs it only activates (`--update` refreshes). The equivalent manual pip
+sequence is in [Installation](../getting-started/installation.md).
 
 The applications run three ways: through their notebooks, from the command
 line, and as PBS cluster jobs. The notebooks, in `examples/*/notebooks/` and
 rendered on the [docs site](https://akshayshanker.github.io/FUES/), are the
 easiest way to experiment once you have cloned the repo; the sections below
-cover the command line. Start with the simple EGM/FUES walkthrough notebook: [egm_fues_transparent.ipynb](../notebooks/egm_fues_transparent.ipynb).
+cover the command line. Start with the simple EGM/FUES walkthrough notebook:
+[egm_fues_transparent.ipynb](../notebooks/egm_fues_transparent.ipynb).
 
 ## 3. CLI runs of applications
 
@@ -129,17 +127,17 @@ python -m examples.durables.run \
     --output-dir results/durables
 ```
 
-Each run creates a dated, auto-numbered folder inside the directory passed
-to `--output-dir` — so the two commands above write to:
+Each run creates a dated, auto-numbered folder inside the directory passed to
+`--output-dir` — so the two commands above write to:
 
 ```text
 results/retirement/YYYY-MM-DD/NNN/
 results/durables/YYYY-MM-DD/NNN/
 ```
 
-Omitting `--output-dir` gives the same locations, since `results/<model>/`
-is each runner's default.
+Omitting `--output-dir` gives the same locations, since `results/<model>/` is
+each runner's default.
 
-Details of how to run PBS cluster jobs are in the
-[Running on a PBS cluster](../running-on-gadi.md) page.
+Details of how to run PBS cluster jobs are in the [Running on a PBS
+cluster](../running-on-gadi.md) page.
 
