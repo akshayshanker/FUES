@@ -53,6 +53,8 @@ through the derivative of the control variable `del_kappa_hat`.
 > is simply cleaned, and a refined continuation-state set of points is
 > returned.
 
+For the full documentation of the `FUES` function, see the [Core API](../api/fues.md).
+
 ### 1.1 The upper-envelope registry
 
 To run FUES against MSS, RFC, and LTM on the same raw EGM output, use the
@@ -78,14 +80,15 @@ refined, raw, interpolated = EGM_UE(
 All methods return the same dict schema. `DCEGM` (MSS in the paper) and
 `CONSAV` (LTM in the paper) require a strictly monotone optimal policy;
 `FUES` and `RFC` do not. `RFC` needs the optional `pykdtree` package
-(`pip install pykdtree`; included in the `[examples]` extra). See the
+(`pip install pykdtree`; included in the `[examples]` extra). 
+
+See the
 [durables application](../examples/continuous_housing_model.md) for the
-main non-monotone benchmark, and the [Core API](../api/fues.md) for full
-parameter documentation.
+main non-monotone benchmark. 
 
-## 3. Clone and set up the environment
+## 2. Clone and set up the environment
 
-To run the benchmark examples, use the project setup script from a fresh
+To run the benchmark examples, clone the repository and use the project setup script from a fresh
 checkout:
 
 ```bash
@@ -96,6 +99,12 @@ source setup/setup.sh
 
 This creates or reuses the project virtual environment, installs the example
 dependencies, and activates the environment in your current shell.
+
+The applications run three ways: through their notebooks, from the command
+line, and as PBS cluster jobs. The notebooks, in `examples/*/notebooks/` and
+rendered on the [docs site](https://akshayshanker.github.io/FUES/), are the
+easiest way to experiment once you have cloned the repo; the sections below
+cover the command line.
 
 ## 4. Run one example solve
 
