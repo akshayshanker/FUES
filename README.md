@@ -27,7 +27,7 @@ LTM ([Druedahl & Jørgensen 2017](https://doi.org/10.1016/j.jedc.2016.11.005)),
 and RFC ([Dobrescu & Shanker
 2024](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=4850746)).
 
-> **Pre-release (v0.6.0dev7)** — Under active research development. API may
+> **Pre-release (v0.6.0dev8)** — Under active research development. API may
 > change.
 >
 > Dobrescu, L.I. and Shanker, A. (2022). "A fast upper envelope scan method
@@ -57,9 +57,10 @@ from dcsmm.uenvelope import EGM_UE # upper envelope interface
 
 Runtime dependencies (numba, numpy, scipy,
 [HARK](https://github.com/econ-ark/HARK),
-[ConSav](https://github.com/NumEconCopenhagen/ConsumptionSaving)) are
-installed automatically. See `pyproject.toml` for the full list and version
-pins.
+[ConSav](https://github.com/NumEconCopenhagen/ConsumptionSaving), and
+[pykdtree](https://github.com/storpipfugl/pykdtree)) are installed
+automatically — every `EGM_UE` method, including `RFC`, runs on this
+install. See `pyproject.toml` for the full list and version pins.
 
 ### Option 2 — With examples
 

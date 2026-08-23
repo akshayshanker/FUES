@@ -19,8 +19,9 @@ from dcsmm.uenvelope import EGM_UE
 ```
 
 Runtime dependencies, including `numba`, `numpy`, `scipy`,
-[`HARK`](https://github.com/econ-ark/HARK), and
-[`ConSav`](https://github.com/NumEconCopenhagen/ConsumptionSaving), are
+[`HARK`](https://github.com/econ-ark/HARK),
+[`ConSav`](https://github.com/NumEconCopenhagen/ConsumptionSaving), and
+`pykdtree`, are
 installed automatically. See `pyproject.toml` for the full list and version
 pins.
 

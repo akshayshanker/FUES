@@ -5,7 +5,7 @@ hide:
 
 # FUES: Fast Upper Envelope Scan
 
-!!! warning "Pre-release (v0.6.0dev7)"
+!!! warning "Pre-release (v0.6.0dev8)"
     Under active development. The API and documentation may change.
 
 Paper: Dobrescu, L.I. and Shanker, A. (2022, revised 2026). "A fast upper

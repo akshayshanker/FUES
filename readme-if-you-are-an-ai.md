@@ -85,10 +85,11 @@ which provide the compiler modules `dolo.compiler.{spec,period,nest}_factory`
 that the examples import; and `bellman-ddsl`, the design and theory layer
 where the stage/perch/builder calculus is developed — nothing here imports it.
 
-Two dependency choices look like mistakes and are not. HARK (`econ-ark`) and
-ConSav sit in the core dependencies because `EGM_UE` dispatches to their upper
-envelopes for the benchmark comparison; `EconModel` is pinned because ConSav
-0.12 imports it without declaring it. And `dolo`/`dolang` are deliberately
+Two dependency choices look like mistakes and are not. HARK (`econ-ark`),
+ConSav, and `pykdtree` sit in the core dependencies because `EGM_UE`
+dispatches to them (the DCEGM/MSS, CONSAV, and RFC engines) — the rule is
+that a bare install covers every registered `EGM_UE` method; `EconModel` is
+pinned because ConSav 0.12 imports it without declaring it. And `dolo`/`dolang` are deliberately
 absent from the `[examples]` extra: they must be installed with
 `pip install --no-deps` from pinned fork commits (exact lines: README
 "Option 2", `setup/setup.sh`) because the forks' metadata declares `numpy>=2`

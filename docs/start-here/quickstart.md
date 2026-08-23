@@ -85,14 +85,15 @@ refined, raw, interpolated = EGM_UE(
 
 All methods return the same dict schema. `DCEGM` (MSS in the paper) and
 `CONSAV` (LTM in the paper) require a strictly monotone optimal policy;
-`FUES` and `RFC` do not. `RFC` needs the optional `pykdtree` package
-(`pip install pykdtree`; included in the `[examples]` extra). 
+`FUES` and `RFC` do not. All methods work on a bare install: every
+`EGM_UE` engine's dependencies, including `pykdtree` for `RFC`, are core
+dependencies. 
 
 See the
 [durables application](../examples/continuous_housing_model.md) for the
 main non-monotone benchmark. 
 
-## 2. Clone and set up the environment
+## 2. Clone and install to run applications 
 
 To run the benchmark examples, clone the repository and install the
 examples profile into a fresh virtual environment:

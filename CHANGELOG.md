@@ -26,6 +26,11 @@ grid, `d kappa / d x_dcsn`. The `x_cntn_hat` docstrings previously said
 logic only through the double-jump post-clean and the intersection
 payload, and the docstrings now say so.
 
+`pykdtree` moved from the `[examples]` extra into core dependencies so
+`EGM_UE(method_switch="RFC")` works on a bare install; previously it
+failed with a delayed TypeError. Core now covers every registered
+`EGM_UE` engine.
+
 ## 0.6.0dev7 — 2026-08-22 — Replication-ready restructure
 
 Layout renames for the public tree: `examples/durables/mod/` → `syntax/`,
