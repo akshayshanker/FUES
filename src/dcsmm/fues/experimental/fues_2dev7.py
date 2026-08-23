@@ -33,7 +33,7 @@ def uniqueEG(egrid, vf):
 # ---------------------------------------------------------------------
 
 @njit
-def FUES(e_grid, vf, policy_1, policy_2, del_a,
+def FUES(e_grid, vf, policy_1, policy_2, del_kappa_hat,
          b=1e-10, m_bar=2.0, LB=4,
          endog_mbar=False, padding_mbar=0.0,
          include_intersections=False):
@@ -45,20 +45,20 @@ def FUES(e_grid, vf, policy_1, policy_2, del_a,
     vf_s = vf[idx]
     policy_1_s = policy_1[idx]
     policy_2_s = policy_2[idx]
-    del_a_s = del_a[idx]
+    del_kappa_s = del_kappa_hat[idx]
 
     # Call optimized scan
     e_out, vf_out = _scan_fast(
-        e_grid_s, vf_s, policy_1_s, policy_2_s, del_a_s,
+        e_grid_s, vf_s, policy_1_s, policy_2_s, del_kappa_s,
         m_bar, LB, True, endog_mbar, padding_mbar)
 
     # Extract kept points
     keep = ~np.isnan(vf_out)
     return (e_grid_s[keep], vf_s[keep], policy_1_s[keep], 
-            policy_2_s[keep], del_a_s[keep])
+            policy_2_s[keep], del_kappa_s[keep])
 
 @njit
-def _scan_fast(e_grid, vf, a_prime, policy_2, del_a,
+def _scan_fast(e_grid, vf, a_prime, policy_2, del_kappa_hat,
                m_bar, LB, fwd_scan_do, endog_mbar, padding_mbar):
     """Core scan optimized for speed."""
     
@@ -104,7 +104,7 @@ def _scan_fast(e_grid, vf, a_prime, policy_2, del_a,
         
         # M threshold
         if endog_mbar:
-            M_max = max(np.abs(del_a[j]), np.abs(del_a[i+1])) + padding_mbar
+            M_max = max(np.abs(del_kappa_hat[j]), np.abs(del_kappa_hat[i+1])) + padding_mbar
         else:
             M_max = m_bar
         
@@ -196,7 +196,7 @@ def _scan_fast(e_grid, vf, a_prime, policy_2, del_a,
 # Compatibility wrapper for intersection tracking ---------------------
 # ---------------------------------------------------------------------
 
-def FUES_sep_intersect(e_grid, vf, policy_1, policy_2, del_a,
+def FUES_sep_intersect(e_grid, vf, policy_1, policy_2, del_kappa_hat,
                        b=1e-10, m_bar=2.0, LB=4,
                        endog_mbar=False, padding_mbar=0.0):
     """
@@ -204,7 +204,7 @@ def FUES_sep_intersect(e_grid, vf, policy_1, policy_2, del_a,
     Full intersection tracking would need the complete implementation.
     """
     # Get FUES result
-    fues_result = FUES(e_grid, vf, policy_1, policy_2, del_a,
+    fues_result = FUES(e_grid, vf, policy_1, policy_2, del_kappa_hat,
                       b, m_bar, LB, endog_mbar, padding_mbar, False)
     
     # Return empty intersections

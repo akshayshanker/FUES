@@ -162,14 +162,14 @@ def _make_keeper_fast(callables, grids, stage):
             vf_s = vf_u[sidx]
             c_s = c_u[sidx]
             ac_s = ac_u[sidx]
-            del_a = np.zeros(len(eg_s))
+            del_kappa_hat = np.zeros(len(eg_s))
 
             eg_ref, vf_ref, c_ref, ac_ref, _ = FUES_jit(
                 eg_s,
                 vf_s,
                 c_s,
                 ac_s,
-                del_a,
+                del_kappa_hat,
                 m_bar_in,
                 LB,
                 False,               # endog_mbar

@@ -103,9 +103,15 @@ cannot express `--no-deps`. Vanilla EconForge dolo lacks the factory modules.
   "NEGM" is ConSav's nested EGM. Grep for DCEGM, not MSS.
 - Naming conventions: `*_hat` marks the raw EGM correspondence (unsorted,
   possibly multi-valued), `*_ref` the refined envelope. The fifth positional
-  parameter of `FUES` is `del_a` (some docs prose calls it `del_x_cntn`). For
-  `m_bar`, the intended guidance is the maximum marginal propensity to save;
-  the quickstart line saying "consume" is a typo.
+  parameter of `FUES` is `del_kappa_hat`, the derivative of the control
+  `kappa` along the endogenous grid; with `endog_mbar=True` it supplies the
+  grid-local jump threshold, and the fifth return is `del_kappa_ref` (both
+  renamed from `del_a` / `del_a_ref` in 0.6.0dev8; older docs prose also
+  called the input `del_x_cntn`). The scan computes its jump quotient on
+  `kappa_hat` (the control), while the paper describes jump detection on the
+  continuation policy and some docs state `m_bar` as the maximum marginal
+  propensity to save; in the consumption-saving examples both quotients are
+  bounded near one, so either reading of `m_bar` gives the same guidance.
 - Results directories: `results/` is gitignored per-run output and absent from
   a clone; `paper-results/` holds committed cluster-run snapshots — tables and
   stray LaTeX intermediates, no figures: repo-wide `*.png`/`*.pdf` ignore

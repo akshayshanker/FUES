@@ -65,7 +65,7 @@ def seg_intersect(a1, a2, b1, b2):
 
 @njit
 def add_intersection(inter_e, inter_v, inter_p1, inter_p2, inter_d, n_inter, max_inter,
-                    intr_point, e_grid, a_prime, policy_2, del_a, idx1, idx2, idx3, idx4):
+                    intr_point, e_grid, a_prime, policy_2, del_kappa_hat, idx1, idx2, idx3, idx4):
     """Add two intersection points to the arrays - one for each policy branch.
     
     idx1, idx2: indices for the left branch (new branch)
@@ -86,7 +86,7 @@ def add_intersection(inter_e, inter_v, inter_p1, inter_p2, inter_d, n_inter, max
             
         inter_p1[n_inter] = a_prime[idx1] + t * (a_prime[idx2] - a_prime[idx1])
         inter_p2[n_inter] = policy_2[idx1] + t * (policy_2[idx2] - policy_2[idx1])
-        inter_d[n_inter] = del_a[idx1] + t * (del_a[idx2] - del_a[idx1])
+        inter_d[n_inter] = del_kappa_hat[idx1] + t * (del_kappa_hat[idx2] - del_kappa_hat[idx1])
         
         # Add right branch point (slightly after intersection)
         inter_e[n_inter + 1] = intr_point[0] + 1e-50
@@ -100,7 +100,7 @@ def add_intersection(inter_e, inter_v, inter_p1, inter_p2, inter_d, n_inter, max
             
         inter_p1[n_inter + 1] = a_prime[idx3] + t * (a_prime[idx4] - a_prime[idx3])
         inter_p2[n_inter + 1] = policy_2[idx3] + t * (policy_2[idx4] - policy_2[idx3])
-        inter_d[n_inter + 1] = del_a[idx3] + t * (del_a[idx4] - del_a[idx3])
+        inter_d[n_inter + 1] = del_kappa_hat[idx3] + t * (del_kappa_hat[idx4] - del_kappa_hat[idx3])
         
         return n_inter + 2, intr_point[0], intr_point[1], inter_p1[n_inter], inter_d[n_inter]
     
@@ -142,7 +142,7 @@ def find_forward_same_branch(e_grid, a_prime, start_idx, j_idx, N, LB, m_bar):
 # ---------------------------------------------------------------------
 
 @njit
-def FUES(e_grid, vf, policy_1, policy_2, del_a,
+def FUES(e_grid, vf, policy_1, policy_2, del_kappa_hat,
          b=1e-10, m_bar=2.0, LB=4,
          endog_mbar=False, padding_mbar=0.0,
          include_intersections=True):
@@ -160,10 +160,10 @@ def FUES(e_grid, vf, policy_1, policy_2, del_a,
     vf = vf[idx]
     policy_1 = policy_1[idx]
     policy_2 = policy_2[idx]
-    del_a = del_a[idx]
+    del_kappa_hat = del_kappa_hat[idx]
 
     e_grid_out, vf_marked, intersections = _scan(
-        e_grid, vf, policy_1, policy_2, del_a,
+        e_grid, vf, policy_1, policy_2, del_kappa_hat,
         m_bar, LB, True, endog_mbar, padding_mbar, include_intersections)
 
     # Extract kept points
@@ -172,7 +172,7 @@ def FUES(e_grid, vf, policy_1, policy_2, del_a,
     v_kept = vf[keep]
     p1_kept = policy_1[keep]
     p2_kept = policy_2[keep]
-    d_kept = del_a[keep]
+    d_kept = del_kappa_hat[keep]
     
     if include_intersections:
         #print(intersections)
@@ -200,7 +200,7 @@ def FUES(e_grid, vf, policy_1, policy_2, del_a,
 # Non-jitted wrapper for getting intersections separately ---------------
 # ---------------------------------------------------------------------
 
-def FUES_sep_intersect(e_grid, vf, policy_1, policy_2, del_a,
+def FUES_sep_intersect(e_grid, vf, policy_1, policy_2, del_kappa_hat,
                        b=1e-10, m_bar=2.0, LB=4,
                        endog_mbar=False, padding_mbar=0.0):
     """
@@ -210,7 +210,7 @@ def FUES_sep_intersect(e_grid, vf, policy_1, policy_2, del_a,
     Returns
     -------
     fues_result : tuple
-        Standard FUES output (e_grid, vf, policy_1, policy_2, del_a)
+        Standard FUES output (e_grid, vf, policy_1, policy_2, del_kappa_hat)
     intersections : tuple
         Intersection points (inter_e, inter_v, inter_p1, inter_p2, inter_d)
     """
@@ -220,18 +220,18 @@ def FUES_sep_intersect(e_grid, vf, policy_1, policy_2, del_a,
     vf_sorted = vf[idx]
     policy_1_sorted = policy_1[idx]
     policy_2_sorted = policy_2[idx]
-    del_a_sorted = del_a[idx]
+    del_kappa_sorted = del_kappa_hat[idx]
     
     # Call scan WITH intersection tracking to get both FUES result and intersections
     e_grid_out, vf_marked, intersections = _scan(
-        e_grid_sorted, vf_sorted, policy_1_sorted, policy_2_sorted, del_a_sorted,
+        e_grid_sorted, vf_sorted, policy_1_sorted, policy_2_sorted, del_kappa_sorted,
         m_bar, LB, True, endog_mbar, padding_mbar, True)
     
     # Extract kept points for FUES result
     print(intersections)
     keep = ~np.isnan(vf_marked)
     fues_result = (e_grid_out[keep], vf_sorted[keep],
-                   policy_1_sorted[keep], policy_2_sorted[keep], del_a_sorted[keep])
+                   policy_1_sorted[keep], policy_2_sorted[keep], del_kappa_sorted[keep])
     
 
     
@@ -242,7 +242,7 @@ def FUES_sep_intersect(e_grid, vf, policy_1, policy_2, del_a,
 # ---------------------------------------------------------------------
 
 @njit
-def _scan(e_grid, vf, a_prime, policy_2, del_a,
+def _scan(e_grid, vf, a_prime, policy_2, del_kappa_hat,
           m_bar, LB, fwd_scan_do,
           endog_mbar, padding_mbar, ID_NM = True, include_intersections = True):
     """FUES single‑pass scan (no consecutive left turns).
@@ -306,7 +306,7 @@ def _scan(e_grid, vf, a_prime, policy_2, del_a,
             k_e = e_grid[k] if k >= 0 else e_grid[0]
             k_v = vf_full[k] if k >= 0 else vf_full[0]
             k_a = a_prime[k] if k >= 0 else a_prime[0]
-            k_d = del_a[k] if k >= 0 else del_a[0]
+            k_d = del_kappa_hat[k] if k >= 0 else del_kappa_hat[0]
         
         de_prev = max(1e-200, e_grid[j] - k_e)
         g_jm1 = (vf_full[j] - k_v) / de_prev
@@ -314,7 +314,7 @@ def _scan(e_grid, vf, a_prime, policy_2, del_a,
         de_lead = max(1e-200, e_grid[i+1] - e_grid[j])
         g_1 = (vf_full[i+1] - vf_full[j]) / de_lead
 
-        M_max = max(np.abs(del_a[j]), np.abs(del_a[i+1])) + padding_mbar
+        M_max = max(np.abs(del_kappa_hat[j]), np.abs(del_kappa_hat[i+1])) + padding_mbar
         if not endog_mbar:
             M_max = m_bar
 
@@ -382,7 +382,7 @@ def _scan(e_grid, vf, a_prime, policy_2, del_a,
                         # Right branch: old branch (j to idx_f)
                         new_n_inter, inter_e_val, inter_v_val, inter_a_val, inter_d_val = add_intersection(
                             inter_e, inter_v, inter_p1, inter_p2, inter_d, n_inter, max_inter,
-                            intr, e_grid, a_prime, policy_2, del_a, idx_b, i+1, j, idx_f)
+                            intr, e_grid, a_prime, policy_2, del_kappa_hat, idx_b, i+1, j, idx_f)
                         
                         if new_n_inter > n_inter:  # Intersection was added
                             n_inter = new_n_inter
@@ -461,7 +461,7 @@ def _scan(e_grid, vf, a_prime, policy_2, del_a,
                 # Right branch: old branch (k to j)
                 new_n_inter, inter_e_val, inter_v_val, inter_a_val, inter_d_val = add_intersection(
                     inter_e, inter_v, inter_p1, inter_p2, inter_d, n_inter, max_inter,
-                    intr, e_grid, a_prime, policy_2, del_a, m_ind, i+1, k, j)
+                    intr, e_grid, a_prime, policy_2, del_kappa_hat, m_ind, i+1, k, j)
                 
                 if new_n_inter > n_inter:  # Intersection was added
                     n_inter = new_n_inter
@@ -520,7 +520,7 @@ def _scan(e_grid, vf, a_prime, policy_2, del_a,
                         # Right branch: old branch (j to idx_fwd)
                         new_n_inter, inter_e_val, inter_v_val, inter_a_val, inter_d_val = add_intersection(
                             inter_e, inter_v, inter_p1, inter_p2, inter_d, n_inter, max_inter,
-                            intr, e_grid, a_prime, policy_2, del_a, idx_back, i+1, j, idx_fwd)
+                            intr, e_grid, a_prime, policy_2, del_kappa_hat, idx_back, i+1, j, idx_fwd)
                         
                         if new_n_inter > n_inter:  # Intersection was added
                             n_inter = new_n_inter

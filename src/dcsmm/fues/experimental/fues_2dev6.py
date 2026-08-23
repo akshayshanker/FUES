@@ -51,7 +51,7 @@ def seg_intersect(a1, a2, b1, b2):
 # ---------------------------------------------------------------------
 
 @njit
-def FUES(e_grid, vf, policy_1, policy_2, del_a,
+def FUES(e_grid, vf, policy_1, policy_2, del_kappa_hat,
          b=1e-10, m_bar=2.0, LB=4,
          endog_mbar=False, padding_mbar=0.0,
          include_intersections=True):
@@ -62,15 +62,15 @@ def FUES(e_grid, vf, policy_1, policy_2, del_a,
     vf = vf[idx]
     policy_1 = policy_1[idx]
     policy_2 = policy_2[idx]
-    del_a = del_a[idx]
+    del_kappa_hat = del_kappa_hat[idx]
 
     if include_intersections:
         return _scan_with_intersections(
-            e_grid, vf, policy_1, policy_2, del_a,
+            e_grid, vf, policy_1, policy_2, del_kappa_hat,
             m_bar, LB, True, endog_mbar, padding_mbar)
     else:
         return _scan_no_intersections(
-            e_grid, vf, policy_1, policy_2, del_a,
+            e_grid, vf, policy_1, policy_2, del_kappa_hat,
             m_bar, LB, True, endog_mbar, padding_mbar)
 
 # ---------------------------------------------------------------------
@@ -78,7 +78,7 @@ def FUES(e_grid, vf, policy_1, policy_2, del_a,
 # ---------------------------------------------------------------------
 
 @njit
-def _scan_no_intersections(e_grid, vf, a_prime, policy_2, del_a,
+def _scan_no_intersections(e_grid, vf, a_prime, policy_2, del_kappa_hat,
                           m_bar, LB, fwd_scan_do,
                           endog_mbar, padding_mbar):
     """Ultra-fast scan when intersection tracking is not needed."""
@@ -115,7 +115,7 @@ def _scan_no_intersections(e_grid, vf, a_prime, policy_2, del_a,
 
         # Compute M_max
         if endog_mbar:
-            M_max = max(np.abs(del_a[j]), np.abs(del_a[i+1])) + padding_mbar
+            M_max = max(np.abs(del_kappa_hat[j]), np.abs(del_kappa_hat[i+1])) + padding_mbar
         else:
             M_max = m_bar
 
@@ -196,7 +196,7 @@ def _scan_no_intersections(e_grid, vf, a_prime, policy_2, del_a,
     # Extract kept points
     keep = ~np.isnan(vf)
     return (e_grid[keep], vf_full[keep], a_prime[keep], 
-            policy_2[keep], del_a[keep])
+            policy_2[keep], del_kappa_hat[keep])
 
 # ---------------------------------------------------------------------
 # Original scan WITH intersections (from dev4) ------------------------
@@ -211,7 +211,7 @@ def linear_interp(x, x1, x2, y1, y2):
 
 @njit
 def add_intersection(inter_e, inter_v, inter_p1, inter_p2, inter_d, n_inter, max_inter,
-                    intr_point, e_grid, a_prime, policy_2, del_a, idx1, idx2, idx3, idx4):
+                    intr_point, e_grid, a_prime, policy_2, del_kappa_hat, idx1, idx2, idx3, idx4):
     """Add two intersection points to the arrays."""
     if not np.isnan(intr_point[0]) and n_inter + 1 < max_inter:
         # Add left branch point
@@ -225,7 +225,7 @@ def add_intersection(inter_e, inter_v, inter_p1, inter_p2, inter_d, n_inter, max
             
         inter_p1[n_inter] = a_prime[idx1] + t * (a_prime[idx2] - a_prime[idx1])
         inter_p2[n_inter] = policy_2[idx1] + t * (policy_2[idx2] - policy_2[idx1])
-        inter_d[n_inter] = del_a[idx1] + t * (del_a[idx2] - del_a[idx1])
+        inter_d[n_inter] = del_kappa_hat[idx1] + t * (del_kappa_hat[idx2] - del_kappa_hat[idx1])
         
         # Add right branch point
         inter_e[n_inter + 1] = intr_point[0] + 1e-8
@@ -238,14 +238,14 @@ def add_intersection(inter_e, inter_v, inter_p1, inter_p2, inter_d, n_inter, max
             
         inter_p1[n_inter + 1] = a_prime[idx3] + t * (a_prime[idx4] - a_prime[idx3])
         inter_p2[n_inter + 1] = policy_2[idx3] + t * (policy_2[idx4] - policy_2[idx3])
-        inter_d[n_inter + 1] = del_a[idx3] + t * (del_a[idx4] - del_a[idx3])
+        inter_d[n_inter + 1] = del_kappa_hat[idx3] + t * (del_kappa_hat[idx4] - del_kappa_hat[idx3])
         
         return n_inter + 2, intr_point[0], intr_point[1], inter_p1[n_inter], inter_d[n_inter]
     
     return n_inter, 0.0, 0.0, 0.0, 0.0
 
 @njit
-def _scan_with_intersections(e_grid, vf, a_prime, policy_2, del_a,
+def _scan_with_intersections(e_grid, vf, a_prime, policy_2, del_kappa_hat,
                             m_bar, LB, fwd_scan_do,
                             endog_mbar, padding_mbar):
     """Full scan with intersection tracking - copy from dev4."""
@@ -284,13 +284,13 @@ def _scan_with_intersections(e_grid, vf, a_prime, policy_2, del_a,
     
     # For now, let me just return the wrapper to the dev5 implementation
     from dcsmm.fues.fues import _scan
-    return _scan(e_grid, vf, a_prime, policy_2, del_a,
+    return _scan(e_grid, vf, a_prime, policy_2, del_kappa_hat,
                  m_bar, LB, fwd_scan_do, endog_mbar, padding_mbar, True, True)
 
 # Non-jitted wrapper
-def FUES_sep_intersect(e_grid, vf, policy_1, policy_2, del_a,
+def FUES_sep_intersect(e_grid, vf, policy_1, policy_2, del_kappa_hat,
                        b=1e-10, m_bar=2.0, LB=4,
                        endog_mbar=False, padding_mbar=0.0):
     """Wrapper for separate intersection tracking."""
     from dcsmm.fues.fues import FUES_sep_intersect as sep_int
-    return sep_int(e_grid, vf, policy_1, policy_2, del_a, b, m_bar, LB, endog_mbar, padding_mbar)
+    return sep_int(e_grid, vf, policy_1, policy_2, del_kappa_hat, b, m_bar, LB, endog_mbar, padding_mbar)

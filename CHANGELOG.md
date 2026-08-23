@@ -2,6 +2,30 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.6.0dev8 — 2026-08-23 — del_kappa_hat rename (BREAKING for keyword callers)
+
+The FUES jump-threshold series is renamed to say what it is: the fifth
+positional parameter of `FUES` / `FUES_jit` is now `del_kappa_hat` (was
+`del_a`), and the fifth element of the return tuple is `del_kappa_ref`
+(was `del_a_ref`). The rename covers `fues_v0_2dev` (the exported
+default), `fues_v0_1dev`, `fues_v0dev` (docstring outputs now
+`del_kappa_clean`), the `experimental/fues_2dev*` variants, and all
+docs, examples, and helper docstrings. Callers that passed the argument
+by keyword (`del_a=...`) must switch to `del_kappa_hat=...`; positional
+callers are unaffected. No in-repo caller and no kikku (pinned v0.2.0)
+code path passes it by keyword; no compatibility alias is provided.
+
+Semantic clarification recorded in the docstrings: every scan computes
+its jump quotient on the third positional array — the control
+`kappa_hat` (`policy_1` in the older signatures) — and `endog_mbar=True`
+thresholds that quotient by the grid-local
+`max(|del_kappa_hat[j]|, |del_kappa_hat[i+1]|) + padding_mbar`. The
+series is therefore the derivative of the control along the endogenous
+grid, `d kappa / d x_dcsn`. The `x_cntn_hat` docstrings previously said
+"used for jump classification"; in the code that series enters jump
+logic only through the double-jump post-clean and the intersection
+payload, and the docstrings now say so.
+
 ## 0.6.0dev7 — 2026-08-22 — Replication-ready restructure
 
 Layout renames for the public tree: `examples/durables/mod/` → `syntax/`,

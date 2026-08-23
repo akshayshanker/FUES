@@ -177,14 +177,14 @@ def _insert_jump_kinks(Ec, Vc, P1c, P2c, DAc,
 # Public wrapper
 # --------------------------------------------------------------------
 @njit
-def FUES(e_grid, vf, policy_1, policy_2, del_a,
+def FUES(e_grid, vf, policy_1, policy_2, del_kappa_hat,
          b=1e-10, m_bar=2.0, LB=4,
          endog_mbar=False, padding_mbar=0.0):
     """Fast upper-envelope scan + exact kink augmentation (API unchanged)."""
     order0 = np.argsort(e_grid)
     E0, V0 = e_grid[order0], vf[order0]
     P10, P20 = policy_1[order0], policy_2[order0]
-    DA0 = del_a[order0]
+    DA0 = del_kappa_hat[order0]
 
     E_cl, V_cl, P1_cl, DA_cl, nan_m = _scan(
         E0, V0, P10, DA0, m_bar, LB)

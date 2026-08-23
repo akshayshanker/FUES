@@ -10,7 +10,7 @@ from dcsmm.fues import FUES
 
 ```python
 FUES(
-    x_dcsn_hat, v_hat, kappa_hat, x_cntn_hat, del_a=None,
+    x_dcsn_hat, v_hat, kappa_hat, x_cntn_hat, del_kappa_hat=None,
     m_bar=1.0, LB=4,
     endog_mbar=False, padding_mbar=0.0,
     include_intersections=True,
@@ -30,11 +30,11 @@ FUES(
 | `x_dcsn_hat` | ndarray (N,) | — | Endogenous decision grid. Internally sorted ascending. |
 | `v_hat` | ndarray (N,) | — | Value at each grid point. |
 | `kappa_hat` | ndarray (N,) | — | Primary policy (e.g. consumption). |
-| `x_cntn_hat` | ndarray (N,) | — | Secondary policy (e.g. next-period assets). Used for jump classification. |
-| `del_a` | ndarray (N,) | None | Policy gradient series for endogenous jump thresholds. Required when `endog_mbar=True`. |
-| `m_bar` | float | 1.0 | Jump detection threshold. Set to the maximum marginal propensity to save, or slightly above. |
+| `x_cntn_hat` | ndarray (N,) | — | Secondary policy (e.g. next-period assets). Used in the double-jump post-clean and carried through intersections; the scan itself classifies jumps on `kappa_hat`. |
+| `del_kappa_hat` | ndarray (N,) | None | Derivative of the control `kappa` along the endogenous grid (d kappa / d x_dcsn); supplies the grid-local jump threshold. Required when `endog_mbar=True`. |
+| `m_bar` | float | 1.0 | Jump detection threshold on the `kappa_hat` difference quotient. Set to the maximum slope of the control along a branch (the maximum marginal propensity to consume in consumption applications), or slightly above. |
 | `LB` | int | 4 | Look-back/forward buffer length for forward and backward scans. |
-| `endog_mbar` | bool | False | If True, compute endogenous jump threshold using `del_a`. |
+| `endog_mbar` | bool | False | If True, compute endogenous jump threshold using `del_kappa_hat`. |
 | `padding_mbar` | float | 0.0 | Additional padding for the endogenous threshold. |
 | `include_intersections` | bool | True | Interpolate crossing points at retained jumps. |
 | `return_intersections_separately` | bool | False | Return intersections as a separate tuple. |
@@ -52,7 +52,7 @@ FUES(
 **Default** (`return_intersections_separately=False`):
 
 ```python
-(x_dcsn_ref, v_ref, kappa_ref, x_cntn_ref, del_a_ref)
+(x_dcsn_ref, v_ref, kappa_ref, x_cntn_ref, del_kappa_ref)
 ```
 
 **With** `return_intersections_separately=True`:
@@ -72,6 +72,7 @@ The current implementation uses the recommended parameter names directly
 | `v_hat` | `vlu` | `\hat{v}` or `\hat{v}_v` |
 | `kappa_hat` | `policy_1` | `\hat{c}` in consumption-saving applications |
 | `x_cntn_hat` | `policy_2` | `\hat{x}_e`, with `\hat{x}_e \equiv \hat{x}'` as the transition from the paper's current notation |
+| `del_kappa_hat` | `del_a` | `d\hat{\kappa}/d\hat{x}` — derivative of the control along the endogenous grid, used for the endogenous jump threshold |
 | `*_ref` outputs | — | refined counterparts of the above |
 
 This keeps the docs close to the current paper while making the continuation / post-decision object easier to read from a Bellman-DDSL perspective.

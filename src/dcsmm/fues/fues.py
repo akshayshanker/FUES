@@ -27,7 +27,7 @@ Version history
     - Linear O(K+J) merge for intersection points via
       ``_merge_sorted_with_few``, replacing O(N log N) ``argsort``.
     - ``cache=True`` on all scan helpers for faster Numba cold starts.
-    - Pre-computed ``abs(del_a)`` array to avoid per-iteration
+    - Pre-computed ``abs(del_kappa_hat)`` array to avoid per-iteration
       ``np.abs`` calls.
 
 Usage::

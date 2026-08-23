@@ -399,7 +399,7 @@ def _postclean_double_jump_mask(
 
 
 def FUES(
-    x_dcsn_hat, v_hat, kappa_hat, x_cntn_hat, del_a=None,
+    x_dcsn_hat, v_hat, kappa_hat, x_cntn_hat, del_kappa_hat=None,
     m_bar=1.0, LB=4, endog_mbar=False, padding_mbar=0.0,
     include_intersections=True,
     return_intersections_separately=False,
@@ -425,16 +425,22 @@ def FUES(
         Unrefined primary control (e.g. consumption).
     x_cntn_hat : ndarray (N,)
         Continuation / exogenous grid (e.g. next-period
-        assets). Used for jump classification.
-    del_a : ndarray (N,), optional
-        Policy-gradient series for endogenous thresholds.
+        assets). Used in the double-jump post-clean and
+        carried as intersection payload; the main scan
+        classifies jumps on ``kappa_hat``.
+    del_kappa_hat : ndarray (N,), optional
+        Derivative of the control ``kappa`` along the
+        endogenous grid (d kappa / d x_dcsn).  With
+        ``endog_mbar=True`` the scan thresholds the
+        ``kappa_hat`` difference quotient by the local
+        ``max(|del_kappa_hat|)`` at the two points tested.
         Required when ``endog_mbar=True``.
     m_bar : float, default 1.0
         Jump threshold for same-branch tests.
     LB : int, default 4
         Look-back/forward buffer length.
     endog_mbar : bool, default False
-        Use endogenous jump threshold from `del_a`.
+        Use endogenous jump threshold from `del_kappa_hat`.
     padding_mbar : float, default 0.0
         Extra padding for endogenous threshold.
     include_intersections : bool, default True
@@ -458,7 +464,7 @@ def FUES(
     -------
     tuple
         ``(x_dcsn_ref, v_ref, kappa_ref,
-        x_cntn_ref, del_a_ref)``
+        x_cntn_ref, del_kappa_ref)``
         or ``(fues_result, inter_tuple)`` when
         ``return_intersections_separately=True``.
     """
@@ -478,12 +484,12 @@ def FUES(
     kappa_hat = np.asarray(kappa_hat, dtype=np.float64)
     x_cntn_hat = np.asarray(x_cntn_hat, dtype=np.float64)
 
-    if del_a is None:
+    if del_kappa_hat is None:
         if endog_mbar:
-            raise ValueError("del_a is required when endog_mbar=True")
-        del_a = np.zeros_like(x_dcsn_hat)
+            raise ValueError("del_kappa_hat is required when endog_mbar=True")
+        del_kappa_hat = np.zeros_like(x_dcsn_hat)
     else:
-        del_a = np.asarray(del_a, dtype=np.float64)
+        del_kappa_hat = np.asarray(del_kappa_hat, dtype=np.float64)
 
     if not assume_sorted and not np.all(np.diff(x_dcsn_hat) >= 0):
         idx = np.argsort(x_dcsn_hat)
@@ -491,10 +497,10 @@ def FUES(
         v_hat = v_hat[idx]
         kappa_hat = kappa_hat[idx]
         x_cntn_hat = x_cntn_hat[idx]
-        del_a = del_a[idx]
+        del_kappa_hat = del_kappa_hat[idx]
 
     e_out, keep_scan, intersections = _scan(
-        x_dcsn_hat, v_hat, kappa_hat, x_cntn_hat, del_a,
+        x_dcsn_hat, v_hat, kappa_hat, x_cntn_hat, del_kappa_hat,
         m_bar, LB, endog_mbar, padding_mbar,
         include_intersections, no_double_jumps, single_intersection,
         disable_jump_checks,
@@ -506,7 +512,7 @@ def FUES(
     v_ref = v_hat[env_idx]
     kappa_ref = kappa_hat[env_idx]
     x_cntn_ref = x_cntn_hat[env_idx]
-    del_a_ref = del_a[env_idx]
+    del_kappa_ref = del_kappa_hat[env_idx]
 
     if include_intersections and intersections.shape[0] > 0:
         if return_intersections_separately:
@@ -522,12 +528,12 @@ def FUES(
                 v_ref,
                 kappa_ref,
                 x_cntn_ref,
-                del_a_ref)
+                del_kappa_ref)
             return fues_result, inter_tuple
 
         (all_e, all_v, all_p1,
          all_p2, all_d, is_inter) = _merge_sorted_with_few(
-            x_dcsn_ref, v_ref, kappa_ref, x_cntn_ref, del_a_ref,
+            x_dcsn_ref, v_ref, kappa_ref, x_cntn_ref, del_kappa_ref,
             intersections[:, 0], intersections[:, 1], intersections[:, 2],
             intersections[:, 3], intersections[:, 4],
         )
@@ -550,17 +556,17 @@ def FUES(
             v_ref[post_mask],
             kappa_ref[post_mask],
             x_cntn_ref[post_mask],
-            del_a_ref[post_mask],
+            del_kappa_ref[post_mask],
         )
         return fues_result, inter_tuple
 
     return (x_dcsn_ref[post_mask], v_ref[post_mask],
-            kappa_ref[post_mask], x_cntn_ref[post_mask], del_a_ref[post_mask])
+            kappa_ref[post_mask], x_cntn_ref[post_mask], del_kappa_ref[post_mask])
 
 
 @njit(cache=True)
 def FUES_jit(
-    x_dcsn_hat, v_hat, kappa_hat, x_cntn_hat, del_a,
+    x_dcsn_hat, v_hat, kappa_hat, x_cntn_hat, del_kappa_hat,
     m_bar, LB,
     endog_mbar, padding_mbar,
     include_intersections,
@@ -577,12 +583,12 @@ def FUES_jit(
 
     Returns
     -------
-    tuple of (x_dcsn_ref, v_ref, kappa_ref, x_cntn_ref, del_a_ref)
+    tuple of (x_dcsn_ref, v_ref, kappa_ref, x_cntn_ref, del_kappa_ref)
         Refined arrays after upper-envelope scan, intersection
         insertion, and post-clean.
     """
     e_out, keep_scan, intersections = _scan(
-        x_dcsn_hat, v_hat, kappa_hat, x_cntn_hat, del_a,
+        x_dcsn_hat, v_hat, kappa_hat, x_cntn_hat, del_kappa_hat,
         m_bar, LB, endog_mbar, padding_mbar,
         include_intersections, no_double_jumps, single_intersection,
         disable_jump_checks,
@@ -599,7 +605,7 @@ def FUES_jit(
     v_ref = np.empty(n_kept)
     kappa_ref = np.empty(n_kept)
     x_cntn_ref = np.empty(n_kept)
-    del_a_ref = np.empty(n_kept)
+    del_kappa_ref = np.empty(n_kept)
     idx = 0
     for i in range(n):
         if keep_scan[i]:
@@ -607,13 +613,13 @@ def FUES_jit(
             v_ref[idx] = v_hat[i]
             kappa_ref[idx] = kappa_hat[i]
             x_cntn_ref[idx] = x_cntn_hat[i]
-            del_a_ref[idx] = del_a[i]
+            del_kappa_ref[idx] = del_kappa_hat[i]
             idx += 1
 
     if include_intersections and intersections.shape[0] > 0:
         (all_e, all_v, all_p1,
          all_p2, all_d, is_inter) = _merge_sorted_with_few(
-            x_dcsn_ref, v_ref, kappa_ref, x_cntn_ref, del_a_ref,
+            x_dcsn_ref, v_ref, kappa_ref, x_cntn_ref, del_kappa_ref,
             intersections[:, 0], intersections[:, 1], intersections[:, 2],
             intersections[:, 3], intersections[:, 4],
         )
@@ -626,7 +632,7 @@ def FUES_jit(
     post_mask = _postclean_double_jump_mask(
         x_dcsn_ref, x_cntn_ref, m_bar, is_inter, eps_d)
     return (x_dcsn_ref[post_mask], v_ref[post_mask],
-            kappa_ref[post_mask], x_cntn_ref[post_mask], del_a_ref[post_mask])
+            kappa_ref[post_mask], x_cntn_ref[post_mask], del_kappa_ref[post_mask])
 
 
 @njit(cache=True)
@@ -635,7 +641,7 @@ def _scan(
     v_hat,
     kappa_hat,
     x_cntn_hat,
-    del_a,
+    del_kappa_hat,
     m_bar,
     LB,
     endog_mbar,
@@ -664,9 +670,12 @@ def _scan(
     kappa_hat : array
         Primary control (e.g. consumption).
     x_cntn_hat : array
-        Continuation grid (e.g. next-period assets).
-    del_a : array
-        Policy gradient (for endogenous m_bar).
+        Continuation grid (e.g. next-period assets);
+        intersection payload only in this scan.
+    del_kappa_hat : array
+        Derivative of the control ``kappa`` along the
+        endogenous grid (grid-local threshold for the
+        endogenous m_bar).
     m_bar : float
         Jump threshold.
     LB : int
@@ -714,9 +723,9 @@ def _scan(
     last_was_jump = False
     prev_j = 0
 
-    # Pre-compute abs(del_a) for endogenous m_bar (avoids per-iteration
+    # Pre-compute abs(del_kappa_hat) for endogenous m_bar (avoids per-iteration
     # np.abs)
-    abs_del_a = np.abs(del_a) if endog_mbar else del_a
+    abs_del_kappa_hat = np.abs(del_kappa_hat) if endog_mbar else del_kappa_hat
 
     for i in range(N - 2):
 
@@ -751,7 +760,7 @@ def _scan(
         g_1 = (v_hat[i + 1] - v_hat[j]) * inv_de_lead
 
         if endog_mbar:
-            M_max = max(abs_del_a[j], abs_del_a[i + 1]) + padding_mbar
+            M_max = max(abs_del_kappa_hat[j], abs_del_kappa_hat[i + 1]) + padding_mbar
         else:
             M_max = m_bar
 
@@ -824,7 +833,7 @@ def _scan(
                 # Only create intersection if it's within bounds
                 if create_intersection and keep_i1:
                     L = make_pair_from_indices_or_fallback(
-                        x_dcsn_hat, v_hat, kappa_hat, x_cntn_hat, del_a,
+                        x_dcsn_hat, v_hat, kappa_hat, x_cntn_hat, del_kappa_hat,
                         j, idx_f if idx_f != -1 else -1, k, j, N
                     )
                     safe_extrap = find_safe_extrapolation_point(
@@ -841,7 +850,7 @@ def _scan(
                         v_hat,
                         kappa_hat,
                         x_cntn_hat,
-                        del_a,
+                        del_kappa_hat,
                         idx_b if idx_b != -1 else -1,
                         i + 1,
                         i + 1,
@@ -913,7 +922,7 @@ def _scan(
                 added_intersection_last_iter = False
                 if include_intersections and not last_was_jump:
                     L = make_pair_from_indices_or_fallback(
-                        x_dcsn_hat, v_hat, kappa_hat, x_cntn_hat, del_a,
+                        x_dcsn_hat, v_hat, kappa_hat, x_cntn_hat, del_kappa_hat,
                         -1, -1, k, j, N
                     )
                     safe_extrap = find_safe_extrapolation_point(
@@ -930,7 +939,7 @@ def _scan(
                         v_hat,
                         kappa_hat,
                         x_cntn_hat,
-                        del_a,
+                        del_kappa_hat,
                         m_ind if m_ind != -1 else -1,
                         i + 1,
                         i + 1,
@@ -988,7 +997,7 @@ def _scan(
                     )
 
                     L = make_pair_from_indices_or_fallback(
-                        x_dcsn_hat, v_hat, kappa_hat, x_cntn_hat, del_a,
+                        x_dcsn_hat, v_hat, kappa_hat, x_cntn_hat, del_kappa_hat,
                         j, idx_fwd if found_fwd else -1, k, j, N
                     )
 
@@ -1006,7 +1015,7 @@ def _scan(
                         v_hat,
                         kappa_hat,
                         x_cntn_hat,
-                        del_a,
+                        del_kappa_hat,
                         idx_back if idx_back != -1 else -1,
                         i + 1,
                         i + 1,

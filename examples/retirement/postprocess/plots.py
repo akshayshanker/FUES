@@ -40,7 +40,7 @@ def _style_axis_spines(ax, *, color="0.65", linewidth=0.8, all_sides: bool = Fal
         pass
 
 
-def plot_egrids(age, e_grid, vf_work, c_worker, del_a, g_size, cp, save_path, tag='sigma0'):
+def plot_egrids(age, e_grid, vf_work, c_worker, dela_worker, g_size, cp, save_path, tag='sigma0'):
     """Plot unrefined vs refined endogenous grid for age.
 
     Left plot is value, right plot is policy points.
@@ -56,8 +56,10 @@ def plot_egrids(age, e_grid, vf_work, c_worker, del_a, g_size, cp, save_path, ta
         Dictionary of value unrefined corrs. for worker by age
     c_worker : dict
         Dictionary of unrefined consumption points for worker by age
-    del_a : dict
-        Dictionary of unrefined derivative of policy function for worker by age
+    dela_worker : dict
+        Dictionary of the unrefined EGM concavity series (kikku's
+        ``fn_concavity`` output, stored as ``dela_dcsn_hat``) for the
+        worker by age; passed to FUES in the ``del_kappa_hat`` slot
     g_size : int
         Grid size for the model for labeling.
     cp : RetirementModel
@@ -71,16 +73,16 @@ def plot_egrids(age, e_grid, vf_work, c_worker, del_a, g_size, cp, save_path, ta
     x = np.array(e_grid[age])
     vf = np.array(vf_work[age])
     c = np.array(c_worker[age])
-    del_a = np.array(del_a[age])
+    dela = np.array(dela_worker[age])
     a_prime = np.array(cp.asset_grid_A)
 
     # 2. Generate refined grid, value function and policy using FUES
     fues_result, intersections = fues_alg(
-        x, vf, c, a_prime, del_a, m_bar=1.0001,
+        x, vf, c, a_prime, dela, m_bar=1.0001,
         include_intersections=True,
         return_intersections_separately=True
     )
-    x_clean, vf_clean, c_clean, a_prime_clean, del_a_clean = fues_result
+    x_clean, vf_clean, c_clean, a_prime_clean, dela_clean = fues_result
     inter_e, inter_v, inter_p1, inter_p2, inter_d = intersections
 
     # 3. Make plots

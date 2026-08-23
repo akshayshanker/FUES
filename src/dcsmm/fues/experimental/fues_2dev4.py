@@ -129,7 +129,7 @@ def add_intersection(
     e_grid,
     a_prime,
     policy_2,
-    del_a,
+    del_kappa_hat,
     idx1,
     idx2,
     idx3,
@@ -151,7 +151,7 @@ def add_intersection(
         t_left = (intr_point[0] - e_grid[idx1]) / max(EPS_D, e_grid[idx2] - e_grid[idx1])
         inter_p1[n_inter] = a_prime[idx1] + t_left * (a_prime[idx2] - a_prime[idx1])
         inter_p2[n_inter] = policy_2[idx1] + t_left * (policy_2[idx2] - policy_2[idx1])
-        inter_d[n_inter] = del_a[idx1] + t_left * (del_a[idx2] - del_a[idx1])
+        inter_d[n_inter] = del_kappa_hat[idx1] + t_left * (del_kappa_hat[idx2] - del_kappa_hat[idx1])
 
         # Right branch point (slightly after intersection)
         inter_e[n_inter + 1] = intr_point[0] + EPS_SEP
@@ -161,7 +161,7 @@ def add_intersection(
         t_right = (intr_point[0] - e_grid[idx3]) / max(EPS_D, e_grid[idx4] - e_grid[idx3])
         inter_p1[n_inter + 1] = a_prime[idx3] + t_right * (a_prime[idx4] - a_prime[idx3])
         inter_p2[n_inter + 1] = policy_2[idx3] + t_right * (policy_2[idx4] - policy_2[idx3])
-        inter_d[n_inter + 1] = del_a[idx3] + t_right * (del_a[idx4] - del_a[idx3])
+        inter_d[n_inter + 1] = del_kappa_hat[idx3] + t_right * (del_kappa_hat[idx4] - del_kappa_hat[idx3])
 
         return n_inter + 2, intr_point[0], intr_point[1], inter_p1[n_inter], inter_d[n_inter]
 
@@ -344,7 +344,7 @@ def FUES(
     vf,
     policy_1,
     policy_2,
-    del_a,
+    del_kappa_hat,
     b=1e-10,
     m_bar=2.0,
     LB=4,
@@ -366,14 +366,14 @@ def FUES(
     vf = vf[idx]
     policy_1 = policy_1[idx]
     policy_2 = policy_2[idx]
-    del_a = del_a[idx]
+    del_kappa_hat = del_kappa_hat[idx]
 
     e_grid_out, vf_marked, intersections = _scan(
         e_grid,
         vf,
         policy_1,
         policy_2,
-        del_a,
+        del_kappa_hat,
         m_bar,
         LB,
         True,
@@ -388,7 +388,7 @@ def FUES(
     v_kept = vf[keep]
     p1_kept = policy_1[keep]
     p2_kept = policy_2[keep]
-    d_kept = del_a[keep]
+    d_kept = del_kappa_hat[keep]
 
     if include_intersections:
         # Extract intersection points
@@ -443,7 +443,7 @@ def FUES_sep_intersect(
     vf,
     policy_1,
     policy_2,
-    del_a,
+    del_kappa_hat,
     b=1e-10,
     m_bar=2.0,
     LB=4,
@@ -457,7 +457,7 @@ def FUES_sep_intersect(
     Returns
     -------
     fues_result : tuple
-        Standard FUES output (e_grid, vf, policy_1, policy_2, del_a)
+        Standard FUES output (e_grid, vf, policy_1, policy_2, del_kappa_hat)
     intersections : tuple
         Intersection points (inter_e, inter_v, inter_p1, inter_p2, inter_d)
     """
@@ -467,7 +467,7 @@ def FUES_sep_intersect(
     vf_sorted = vf[idx]
     policy_1_sorted = policy_1[idx]
     policy_2_sorted = policy_2[idx]
-    del_a_sorted = del_a[idx]
+    del_kappa_sorted = del_kappa_hat[idx]
 
     # Call scan WITH intersection tracking to get both FUES result and intersections
     e_grid_out, vf_marked, intersections = _scan(
@@ -475,7 +475,7 @@ def FUES_sep_intersect(
         vf_sorted,
         policy_1_sorted,
         policy_2_sorted,
-        del_a_sorted,
+        del_kappa_sorted,
         m_bar,
         LB,
         True,
@@ -491,7 +491,7 @@ def FUES_sep_intersect(
         vf_sorted[keep],
         policy_1_sorted[keep],
         policy_2_sorted[keep],
-        del_a_sorted[keep],
+        del_kappa_sorted[keep],
     )
 
     return fues_result, intersections
@@ -508,7 +508,7 @@ def _scan(
     vf,
     a_prime,
     policy_2,
-    del_a,
+    del_kappa_hat,
     m_bar,
     LB,
     fwd_scan_do,
@@ -540,7 +540,7 @@ def _scan(
         Next-period assets (policy function)
     policy_2 : array
         Secondary policy variable
-    del_a : array
+    del_kappa_hat : array
         Policy gradient
     m_bar : float
         Jump threshold (maximum marginal propensity to save)
@@ -625,7 +625,7 @@ def _scan(
             k_e = e_grid[k] if k >= 0 else e_grid[0]
             k_v = vf_full[k] if k >= 0 else vf_full[0]
             k_a = a_prime[k] if k >= 0 else a_prime[0]
-            k_d = del_a[k] if k >= 0 else del_a[0]
+            k_d = del_kappa_hat[k] if k >= 0 else del_kappa_hat[0]
 
         # Gradient from tail (k) to head (j) - slope of previous segment
         de_prev = max(EPS_D, e_grid[j] - k_e)
@@ -638,7 +638,7 @@ def _scan(
         g_1 = (vf_full[i + 1] - vf_full[j]) * inv_de_lead
 
         # Jump threshold: either fixed (m_bar) or endogenous based on policy gradients
-        M_max = max(np.abs(del_a[j]), np.abs(del_a[i + 1])) + padding_mbar
+        M_max = max(np.abs(del_kappa_hat[j]), np.abs(del_kappa_hat[i + 1])) + padding_mbar
         if not endog_mbar:
             M_max = m_bar
 
@@ -729,7 +729,7 @@ def _scan(
                                 e_grid,
                                 a_prime,
                                 policy_2,
-                                del_a,
+                                del_kappa_hat,
                                 idx_b,
                                 i + 1,
                                 j,
@@ -830,7 +830,7 @@ def _scan(
                         e_grid,
                         a_prime,
                         policy_2,
-                        del_a,
+                        del_kappa_hat,
                         m_ind,
                         i + 1,
                         k,
@@ -922,7 +922,7 @@ def _scan(
                                     e_grid,
                                     a_prime,
                                     policy_2,
-                                    del_a,
+                                    del_kappa_hat,
                                     idx_back,
                                     i + 1,
                                     j,

@@ -1093,7 +1093,7 @@ def _forced_intersection_twopoint(
     ----------
     intersections : 2d float array, shape (M, 5)
         Preallocated buffer for intersection rows:
-        [e, value, policy_1 (a'), policy_2, del_a].
+        [e, value, policy_1, policy_2, del_kappa_hat].
     n_inter : int
         Current count of filled rows in `intersections`.
     e_lo, e_hi : float

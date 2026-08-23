@@ -163,7 +163,7 @@ def FUES(
     vf,
     policy_1,
     policy_2,
-    del_a,
+    del_kappa_hat,
     b=1e-10,
     m_bar=2,
     LB=4,
@@ -183,8 +183,10 @@ def FUES(
             policy 1 points at endogenous grid
     policy_2: 1D array
             policy 2 points at endogenous grid
-    del_a: 1D array
-            derivative of policy function 1
+    del_kappa_hat: 1D array
+            derivative of policy function 1 (the control)
+            along the endogenous grid; supplies the
+            grid-local jump threshold when endog_mbar=True
     b: float64
         lower bound for the endogenous grid
 
@@ -206,12 +208,13 @@ def FUES(
                 policy 1 on refined grid
     policy_2_clean: 1D array
                     policy 2 on refined grid
-    del_a_clean: 1D array
-            gradient of policy 2 on refined grid
+    del_kappa_clean: 1D array
+            derivative of policy 1 on refined grid
 
     Notes
     -----
-    Policy 2 is used to determine jumps in policy.
+    Policy 1 is used to determine jumps in policy; policy 2
+    is carried through and filtered alongside.
 
     FUES attaches NaN values to vf array
     where points are sub-optimal and not to be retained.
@@ -223,7 +226,7 @@ def FUES(
     the only multiple EGM values occur on the lower
     bound (see Application 2 for DS, 2022).
 
-    If endogenous M_bar is used, then policy_a is assumed to
+    If endogenous M_bar is used, then policy 1 is assumed to
     be convex conditional on all future discrete choices.
 
     Todo
@@ -248,11 +251,11 @@ def FUES(
     vf = vf[sort_indices]
     policy_1 = policy_1[sort_indices]
     policy_2 = policy_2[sort_indices]
-    del_a = del_a[sort_indices]
+    del_kappa_hat = del_kappa_hat[sort_indices]
 
     # Scan attaches NaN to vf at all sub-optimal points
     e_grid_clean, vf_with_nans = _scan(
-        e_grid, vf, policy_1, del_a,
+        e_grid, vf, policy_1, del_kappa_hat,
         m_bar, LB,
         endog_mbar=endog_mbar,
         padding_mbar=padding_mbar)
@@ -263,7 +266,7 @@ def FUES(
             vf[non_nan_indices],
             policy_1[non_nan_indices],
             policy_2[non_nan_indices],
-            del_a[non_nan_indices])
+            del_kappa_hat[non_nan_indices])
 
 
 @njit
@@ -271,7 +274,7 @@ def _scan(
         e_grid,
         vf,
         a_prime,
-        del_a,
+        del_kappa_hat,
         m_bar,
         LB,
         fwd_scan_do=True,
@@ -314,8 +317,8 @@ def _scan(
 
             # Absolute gradients of policy function at current index
             # and at testing point
-            M_L = np.abs(del_a[j])
-            M_U = np.abs(del_a[i + 1])
+            M_L = np.abs(del_kappa_hat[j])
+            M_U = np.abs(del_kappa_hat[i + 1])
             # print(M_U)
             M_max = max(M_L, M_U) + padding_mbar
 

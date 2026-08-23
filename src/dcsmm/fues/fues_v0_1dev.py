@@ -331,7 +331,7 @@ def _postclean_double_jump_mask(e_grid, a_prime, m_bar, skip_mask, eps_d=EPS_D):
 
 
 def FUES(
-    e_grid, vlu, policy_1, policy_2, del_a,
+    e_grid, vlu, policy_1, policy_2, del_kappa_hat,
     b=1e-10, m_bar=1.0, LB=4, endog_mbar=False, padding_mbar=0.0,
     include_intersections=True,
     return_intersections_separately=False,
@@ -365,18 +365,20 @@ def FUES(
     policy_2 : ndarray, shape (N,)
         Secondary policy aligned with `e_grid` (e.g., asset policy a'). Used
         in jump classification and as payload in intersections.
-    del_a : ndarray, shape (N,)
-        Policy-gradient-like series used for endogenous jump thresholds.
+    del_kappa_hat : ndarray, shape (N,)
+        Derivative of the control (`policy_1`) along the endogenous grid.
+        With `endog_mbar=True` it supplies the grid-local jump threshold
+        applied to the `policy_1` difference quotient.
 
     b : float, default 1e-10
         Legacy argument retained for signature stability. Not used.
     m_bar : float, default 1.0
         Jump threshold for same-branch tests. If `endog_mbar=True`, the
-        threshold adapts using `del_a` with `padding_mbar`.
+        threshold adapts using `del_kappa_hat` with `padding_mbar`.
     LB : int, default 4
         Look-back/forward buffer length used by backward/forward scans.
     endog_mbar : bool, default False
-        If True, uses endogenous jump threshold based on `del_a`.
+        If True, uses endogenous jump threshold based on `del_kappa_hat`.
     padding_mbar : float, default 0.0
         Extra padding added to the endogenous threshold.
     include_intersections : bool, default True
@@ -428,7 +430,9 @@ def FUES(
     - When `single_intersection=True`, only one intersection point is created on the
       right side of the crossing, reducing the total number of points but potentially
       affecting envelope smoothness at discrete choice switches.
-    - Both policies are used to detect jumps. Policy 1 used in forward and backward scans.
+    - The scan's jump quotient and the forward/backward scans are computed on
+      `policy_1` (the control); `policy_2` enters only the double-jump
+      post-clean and the intersection payload.
 
     """
     # Use provided epsilons or fall back to module defaults
@@ -442,17 +446,17 @@ def FUES(
     vlu = np.asarray(vlu, dtype=np.float64)
     policy_1 = np.asarray(policy_1, dtype=np.float64)
     policy_2 = np.asarray(policy_2, dtype=np.float64)
-    del_a = np.asarray(del_a, dtype=np.float64)
+    del_kappa_hat = np.asarray(del_kappa_hat, dtype=np.float64)
 
     idx = np.argsort(e_grid)
     e_grid = e_grid[idx]
     vlu = vlu[idx]
     policy_1 = policy_1[idx]
     policy_2 = policy_2[idx]
-    del_a = del_a[idx]
+    del_kappa_hat = del_kappa_hat[idx]
 
     e_out, keep_scan, intersections = _scan(
-        e_grid, vlu, policy_1, policy_2, del_a,
+        e_grid, vlu, policy_1, policy_2, del_kappa_hat,
         m_bar, LB, endog_mbar, padding_mbar,
         include_intersections, no_double_jumps, single_intersection,
         disable_jump_checks,
@@ -464,7 +468,7 @@ def FUES(
     v_kept = vlu[env_idx]
     p1_kept = policy_1[env_idx]
     p2_kept = policy_2[env_idx]
-    d_kept = del_a[env_idx]
+    d_kept = del_kappa_hat[env_idx]
 
     if include_intersections and intersections.shape[0] > 0:
         if return_intersections_separately:
@@ -541,7 +545,7 @@ def _scan(
     vlu,
     a_prime,
     policy_2,
-    del_a,
+    del_kappa_hat,
     m_bar,
     LB,
     endog_mbar,
@@ -574,13 +578,15 @@ def _scan(
     vlu : array
         Value function at each grid point (read-only, no longer modified)
     a_prime : array
-        Next-period assets (policy function)
+        Primary control (`policy_1` from the wrapper); the jump
+        quotient is computed on this array
     policy_2 : array
-        Secondary policy variable
-    del_a : array
-        Policy gradient
+        Secondary policy variable (intersection payload)
+    del_kappa_hat : array
+        Derivative of the control along the endogenous grid
+        (grid-local threshold when `endog_mbar=True`)
     m_bar : float
-        Jump threshold (maximum marginal propensity to save)
+        Jump threshold (bound on the control difference quotient)
     LB : int
         Lookback buffer size for backward/forward scans
     endog_mbar : bool
@@ -661,7 +667,7 @@ def _scan(
         inv_de_lead = 1.0 / de_lead
         g_1 = (vlu[i + 1] - vlu[j]) * inv_de_lead
 
-        M_max = max(np.abs(del_a[j]), np.abs(del_a[i + 1])) + padding_mbar
+        M_max = max(np.abs(del_kappa_hat[j]), np.abs(del_kappa_hat[i + 1])) + padding_mbar
         
         if not endog_mbar:
             M_max = m_bar
@@ -751,12 +757,12 @@ def _scan(
                 # Only create intersection if it's within bounds
                 if create_intersection and keep_i1:
                     L = make_pair_from_indices_or_fallback(
-                        e_grid, vlu, a_prime, policy_2, del_a,
+                        e_grid, vlu, a_prime, policy_2, del_kappa_hat,
                         j, idx_f if idx_f != -1 else -1, k, j, N
                     )
                     safe_extrap = find_safe_extrapolation_point(e_grid, a_prime, i+1, N, M_max, forward=True, eps_d=eps_d, eps_fwd_back=eps_fwd_back)
                     R = make_pair_from_indices_or_fallback(
-                        e_grid, vlu, a_prime, policy_2, del_a,
+                        e_grid, vlu, a_prime, policy_2, del_kappa_hat,
                         idx_b if idx_b != -1 else -1, i+1, i+1, safe_extrap, N
                     )
 
@@ -821,12 +827,12 @@ def _scan(
                 added_intersection_last_iter = False
                 if include_intersections and not last_was_jump:
                     L = make_pair_from_indices_or_fallback(
-                        e_grid, vlu, a_prime, policy_2, del_a,
+                        e_grid, vlu, a_prime, policy_2, del_kappa_hat,
                         -1, -1, k, j, N
                     )
                     safe_extrap = find_safe_extrapolation_point(e_grid, a_prime, i+1, N, M_max, forward=True, eps_d=eps_d, eps_fwd_back=eps_fwd_back)
                     R = make_pair_from_indices_or_fallback(
-                        e_grid, vlu, a_prime, policy_2, del_a,
+                        e_grid, vlu, a_prime, policy_2, del_kappa_hat,
                         m_ind if m_ind != -1 else -1, i+1, i+1, safe_extrap, N
                     )
 
@@ -868,13 +874,13 @@ def _scan(
                     )
                     
                     L = make_pair_from_indices_or_fallback(
-                        e_grid, vlu, a_prime, policy_2, del_a,
+                        e_grid, vlu, a_prime, policy_2, del_kappa_hat,
                         j, idx_fwd if found_fwd else -1, k, j, N
                     )
                     
                     safe_extrap = find_safe_extrapolation_point(e_grid, a_prime, i+1, N, M_max, forward=True, eps_d=eps_d, eps_fwd_back=eps_fwd_back)
                     R = make_pair_from_indices_or_fallback(
-                        e_grid, vlu, a_prime, policy_2, del_a,
+                        e_grid, vlu, a_prime, policy_2, del_kappa_hat,
                         idx_back if idx_back != -1 else -1, i+1, i+1, safe_extrap, N
                     )
                     

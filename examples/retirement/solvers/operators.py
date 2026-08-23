@@ -118,7 +118,7 @@ def make_work_cons(model, callables, ue_method='FUES'):
 
     def dcsn_mover(dv_cntn, ddv_cntn, v_cntn, grid):
         """B: continuation → decision (EGM + UE)."""
-        c_hat, v_hat, x_dcsn_hat, del_a = _invert_euler(
+        c_hat, v_hat, x_dcsn_hat, dela_dcsn_hat = _invert_euler(
             dv_cntn, ddv_cntn, v_cntn, grid, 0.0)
 
         t_ue = time.time()
@@ -139,7 +139,7 @@ def make_work_cons(model, callables, ue_method='FUES'):
         dela_dcsn = np.zeros_like(refined["x_cntn_ref"])
 
         return (x_dcsn, v_dcsn, c_dcsn, dela_dcsn, ue_time,
-                c_hat, v_hat, x_dcsn_hat, del_a)
+                c_hat, v_hat, x_dcsn_hat, dela_dcsn_hat)
 
     def arvl_mover(x_dcsn, v_dcsn, c_dcsn, v_cntn, grid):
         """I: decision → arrival."""
