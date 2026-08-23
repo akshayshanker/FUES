@@ -62,7 +62,7 @@ set than this repo's pins, and their runtime needs are already covered by
 `[examples]` (the same discipline `setup/setup.sh` uses).
 
 
-The examples are best explored through their notebooks, in
+The examples are best first explored through their notebooks, in
 `examples/retirement/notebooks/` and `examples/durables/notebooks/`, rendered
 on the [docs site](https://akshayshanker.github.io/FUES/).
 
@@ -78,11 +78,11 @@ python -m examples.retirement.run --slot-override '$draw.settings.grid_size=3000
 
 See the [retirement example docs](https://akshayshanker.github.io/FUES/examples/retirement_choice_model/) for CLI arguments, parameter overrides, and outputs. The [interactive notebook](examples/retirement/notebooks/retirement_fues.ipynb) walks through the model step by step.
 
-Formal benchmarking and parameter sweeps used in the paper are run on an HPC cluster using the PBS scripts in [`benchmarks/retirement/`](benchmarks/retirement/). Pre-computed paper results (tables and figures) are in [`paper-results/`](paper-results/).
+Formal benchmarking and parameter sweeps used in the paper are run on an HPC cluster using the PBS scripts in [`benchmarks/`](benchmarks/retirement/). Pre-computed paper results (tables and figures) are in [`paper-results/`](paper-results/).
 
 ### Option 3 — Developer (editable)
 
-Full setup with editable install, examples, and all dependencies including the dolo-plus compiler. Use this if you are modifying the source.
+Full setup with editable install if you want to modify.
 
 ```bash
 git clone https://github.com/akshayshanker/FUES.git
@@ -98,16 +98,9 @@ To contribute, add pytest and autopep8 on top:
 pip install pytest autopep8
 ```
 
-Run a timing sweep (Cartesian product of slot-range axes; see
-`benchmarks/retirement/retirement_timings.sh`):
-
-```bash
-python -m examples.retirement.run --sweep \
-  --slot-range @benchmarks/retirement/timing_deltas.yaml \
-  --slot-range @benchmarks/retirement/timing_grids.yaml \
-  --slot-range @benchmarks/retirement/timing_methods.yaml \
-  --sweep-runs 3
-```
+The paper's timing sweeps and their driver scripts live in
+`benchmarks/<model>/`; the commands are documented in
+[Running locally](https://akshayshanker.github.io/FUES/running-locally/).
 
 ---
 
@@ -135,7 +128,7 @@ FUES/
 │   └── uenvelope/        # upper-envelope registry
 ├── examples/
 │   ├── retirement/       # retirement choice (+ notebooks/)
-│   ├── durables/         # durables with adjustment frictions
+│   ├── durables/         # durables with adjustment frictions (+ notebooks/)
 │   └── housing_renting/  # discrete housing + capital tax
 ├── benchmarks/          # PBS/HPC scripts that reproduce paper results
 ├── paper-results/        # paper tables + figures (committed outputs)
