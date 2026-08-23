@@ -110,8 +110,7 @@ nav:
   - Home: index.md
   - Quickstart: start-here/quickstart.md
 
-  - Method:
-    - The FUES algorithm: algorithm/fues-algorithm.md
+  - The FUES algorithm: algorithm/fues-algorithm.md
 
   - Applications:
     - Overview: examples/index.md
