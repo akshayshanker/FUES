@@ -110,10 +110,11 @@ cannot express `--no-deps`. Vanilla EconForge dolo lacks the factory modules.
   grid-local jump threshold, and the fifth return is `del_kappa_ref` (both
   renamed from `del_a` / `del_a_ref` in 0.6.0dev8; older docs prose also
   called the input `del_x_cntn`). The scan computes its jump quotient on
-  `kappa_hat` (the control), while the paper describes jump detection on the
-  continuation policy and some docs state `m_bar` as the maximum marginal
-  propensity to save; in the consumption-saving examples both quotients are
-  bounded near one, so either reading of `m_bar` gives the same guidance.
+  `kappa_hat` (the control), so the docs state `m_bar` as the maximum
+  marginal propensity to consume; the paper describes jump detection on the
+  continuation policy, whose derivative gives the saving-propensity reading.
+  In the consumption-saving examples both quotients are bounded near one, so
+  either reading of `m_bar` gives the same guidance.
 - Results directories: `results/` is gitignored per-run output and absent from
   a clone; `paper-results/` holds committed cluster-run snapshots — tables and
   stray LaTeX intermediates, no figures: repo-wide `*.png`/`*.pdf` ignore
@@ -127,9 +128,8 @@ cannot express `--no-deps`. Vanilla EconForge dolo lacks the factory modules.
   rerun-backed numbers. Retirement tables include a parameter footer; the
   durables sweeps do not (only the 2026-04-06 run commits a settings YAML).
 - `benchmarks/` and `paper-results/` are August 2026 renames of
-  `experiments/` and `replication/`; a few files, `paper-results/README.md`
-  among them, still describe the old layout — as does any checkout predating
-  this file's commit (when this was written, the GitHub default branch). The
+  `experiments/` and `replication/`; a checkout predating the rename shows
+  the old layout. The
   tracked PBS scripts hard-code NCI Gadi; `benchmarks/retirement/*.sh` are
   qsub-able PBS jobs despite the extension, and "single core" timing means
   each solve is single-threaded while the allocation parallelises sweep rows.
@@ -140,8 +140,8 @@ cannot express `--no-deps`. Vanilla EconForge dolo lacks the factory modules.
 
 The install and run commands in README.md, `docs/start-here/quickstart.md`,
 `docs/running-locally.md`, and `docs/getting-started/installation.md` were
-executed and passed in fresh virtual environments: the three install options
-including the pinned `--no-deps` lines (the manual route's
+executed and passed in fresh virtual environments: both install routes and
+the manual pinned sequence on the installation page (the manual route's
 `pip install lark multipledispatch` is load-bearing — without it the examples
 fail on import), both library snippets, the running-locally walkthrough
 (sweeps confirmed to vary the grid by reading sizes back from solved stages),
@@ -150,8 +150,7 @@ clone has five of the seven test files — a `.gitignore` rule for scratch
 `test_*.py` blankets new tests, which need `git add -f`).
 
 Known open items: the complexity wording across docs pages is not yet
-harmonised with the paper's own claim; `pyproject.toml` says 0.6.0, the
-changelog's latest entry 0.6.0dev6; `save_nest` fails to pickle dolo stage
+harmonised with the paper's own claim; `save_nest` fails to pickle dolo stage
 objects and the estimation driver only warns, so estimation runs may silently
 write no `.nst` files (`examples/durables/docs/estimation_outputs.md`
 documents intended, not verified, behaviour); the docs retirement benchmark

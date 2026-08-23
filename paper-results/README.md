@@ -1,65 +1,48 @@
-# Replication
+# Paper results
 
-Paper artifacts for Dobrescu and Shanker (2022), "A fast upper envelope scan method for discrete-continuous dynamic programming."
+Committed outputs for Dobrescu and Shanker (2022), "A fast upper envelope
+scan method for discrete-continuous dynamic programming."
 
-Each subdirectory corresponds to a paper application. Figures and tables are committed outputs from PBS cluster runs.
+Each model directory holds dated snapshots of PBS cluster runs, one
+`YYYY-MM-DD/NNN/` directory per run, copied from Gadi scratch with
+`scripts/pull_gadi_results.sh`. Tables (`.tex` and `.md`) are committed;
+figures are not — repo-wide `*.png` and `*.pdf` ignore rules keep binary
+outputs out of git, so figures are regenerated from the runs.
 
-## Applications
+## Layout
 
-| Directory | Paper section | What |
-|-----------|--------------|------|
-| `retirement/` | Section 2.1, Tables 1--2, Figures 4--5 | Discrete retirement choice (Iskhakov et al. 2017) |
-| `housing/` | Section 2.2 | Continuous housing investment with frictions |
-| `housing_renting/` | Section 2.3 | Discrete housing choice with capital income tax |
+```
+paper-results/
+├── retirement/       # Section 2.1: 2026-03-31/002, 2026-04-15/001
+├── durables/         # Section 2.2: 2026-04-06/004, 2026-04-15/001
+├── housing_renting/  # Section 2.3: placeholder, not yet populated
+└── README.md
+```
+
+The retirement snapshots include a parameter footer in their tables; the
+2026-04-06 durables run also commits the settings YAML used.
 
 ## Reproducing
 
-Each application has its own PBS script under `benchmarks/`. Results land on scratch and can be copied here.
-
-### Retirement (Section 2.1)
-
-```bash
-qsub benchmarks/retirement/retirement_timings.sh
-```
+The cluster scripts are in `benchmarks/<model>/`; see
+[Running on a PBS cluster](../docs/running-on-gadi.md) for site setup.
 
 ```bash
-cp $SCRATCH/FUES/solutions/retirement/<run_id>/retirement_timing.tex replication/retirement/tables/
-cp $SCRATCH/FUES/solutions/retirement/<run_id>/retirement_accuracy.tex replication/retirement/tables/
-cp $SCRATCH/FUES/solutions/retirement/<run_id>/plots/*.png replication/retirement/figures/
+qsub benchmarks/retirement/retirement_timings.sh   # Section 2.1
+qsub benchmarks/durables/run_durables.pbs          # Section 2.2
+qsub benchmarks/housing_renting/run_housing_single_core.sh   # Section 2.3
 ```
 
-### Housing investment (Section 2.2)
+Results land on scratch; copy a run's tables into a new dated directory
+here, for example:
 
 ```bash
-qsub benchmarks/durables/durables_timings.sh
-```
-
-### Housing-renting (Section 2.3)
-
-```bash
-qsub benchmarks/housing_renting/run_housing_single_core.sh
-```
-
-## Contents
-
-```
-replication/
-├── retirement/
-│   ├── figures/          # Figures 4-5
-│   └── tables/           # Tables 1-2 (.tex + .md)
-├── housing/              # (to be populated)
-│   ├── figures/
-│   └── tables/
-├── housing_renting/      # (to be populated)
-│   ├── figures/
-│   └── tables/
-└── README.md
+cp $SCRATCH/FUES/retirement/<run>/tables/*.tex paper-results/retirement/<date>/<n>/tables/
 ```
 
 ## Hardware
 
-Hardware varies by application. See each PBS script for exact settings.
-
-- **Retirement**: single Intel Xeon core, NCI Gadi expresssr queue, Python 3.12, numba
-- **Housing investment**: single core (same setup)
-- **Housing-renting**: multi-core / GPU depending on configuration
+Hardware varies by application; each PBS script records its exact
+resource requests. Retirement and durables timing runs use a single
+Intel Xeon core on the NCI Gadi expresssr queue (Python 3.12, numba);
+housing-renting runs are multi-core or GPU depending on configuration.
