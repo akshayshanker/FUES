@@ -14,8 +14,9 @@ envelope scan method for discrete–continuous dynamic programming." [SSRN
 
 FUES recovers the upper envelope of the EGM ([Carroll
 2006](https://doi.org/10.1016/j.econlet.2005.09.013)) value correspondence in
-discrete–continuous dynamic programming problems. It scans the endogenous grid in a single
-sub-linear pass, and identifies sub-optimal points as the conjunction of a
+discrete–continuous dynamic programming problems. It scans the endogenous
+grid in a single sub-linear pass, and identifies sub-optimal points as the
+conjunction of a
 discontinuous jump in the continuation policy and a concave right turn in the
 value correspondence. It imposes no monotonicity on the optimal policy and
 requires no numerical optimisation. See [How FUES
@@ -41,7 +42,7 @@ x_dcsn_ref, v_ref, kappa_ref, x_cntn_ref, _ = FUES(
 ```
 
 The returned arrays contain only the upper-envelope points. Convention:
-`*_hat` for raw correspondence, `*_ref` for refined upper-envelope objects.
+`*_hat` for EGM points, `*_ref` for refined upper-envelope objects.
 For a cell-by-cell walkthrough of exactly these calls on a small worked
 problem, see the [EGM / FUES walkthrough
 notebook](notebooks/egm_fues_transparent.ipynb).
