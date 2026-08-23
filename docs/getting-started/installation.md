@@ -1,7 +1,11 @@
 # Installation
 
-The installable package containing `fues` and `uenvelope` modules is `dcsmm`.
-Requires Python 3.11+.
+The installable package containing the `fues` and `uenvelope` modules is
+`dcsmm`; it requires Python 3.11 or later. The three options below match
+the README and the [Quickstart](../start-here/quickstart.md): Option 1
+installs the library alone, Option 2 sets up the example applications
+through the project script, and Option 3 builds the same environment as
+Option 2 by hand.
 
 ## Option 1: Library only
 
@@ -18,6 +22,10 @@ from dcsmm.fues import FUES
 from dcsmm.uenvelope import EGM_UE
 ```
 
+Since the project is under active development, install inside a virtual
+environment (`python3 -m venv .venv && source .venv/bin/activate` first);
+this route does not create one.
+
 Runtime dependencies, including `numba`, `numpy`, `scipy`,
 [`HARK`](https://github.com/econ-ark/HARK),
 [`ConSav`](https://github.com/NumEconCopenhagen/ConsumptionSaving), and
@@ -25,7 +33,7 @@ Runtime dependencies, including `numba`, `numpy`, `scipy`,
 installed automatically. See `pyproject.toml` for the full list and version
 pins.
 
-## Option 2: Repo checkout with examples
+## Option 2: With examples (setup script)
 
 Use this option if you also want the benchmark applications, notebooks, and
 replication scripts as well as the core library.
@@ -36,8 +44,11 @@ cd FUES
 source setup/setup.sh
 ```
 
-The setup script installs `dcsmm` in editable mode together with the example
-dependencies and activates the environment in your current shell.
+On the first run the script creates the project virtual environment
+(`.venv`; `~/venvs/fues` on Gadi), installs `dcsmm` in editable mode
+together with the example dependencies, and activates the environment in
+your current shell; on later runs it only activates. Pass `--update` to
+`git pull` and reinstall.
 
 You can then run a retirement solve:
 
@@ -50,10 +61,11 @@ Related pages:
 - [Quickstart](../start-here/quickstart.md) for the minimal run commands
 - [Running Locally](../running-locally.md) for command-line workflows
 
-## Option 3: Manual editable install
+## Option 3: Manual install
 
-Use this only if you already manage your own virtual environment and want to
-install the package manually rather than through `setup/setup.sh`.
+This is the sequence `setup/setup.sh` automates, for those who prefer to
+run it by hand or already manage their own virtual environment. It
+produces the same environment as Option 2.
 
 ```bash
 git clone https://github.com/akshayshanker/FUES.git
