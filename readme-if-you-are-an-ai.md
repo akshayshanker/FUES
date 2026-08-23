@@ -168,12 +168,13 @@ solves, and the housing GPU benchmarks — cluster jobs under `benchmarks/`.
 ```bash
 pip install -e ".[dev]" && pip install lark multipledispatch
 # then the two pinned --no-deps lines (dolang, dolo) from the Installation page
-pytest tests/test_imports.py tests/test_kikku.py -q   # sanity, about one second
+pytest tests/test_imports.py tests/test_kikku.py -q   # quick check, about one second
 pytest tests/ -q                 # full tracked suite; solves both examples, a few minutes
 python -m examples.retirement.run --slot-override '$draw.settings.grid_size=500'
 ```
 
-The last command runs the whole YAML-to-solve pipeline and prints a
+The last command runs the full path from YAML model definition to solved
+output and prints a
 four-method Euler-error and timing table in a few seconds (the first run adds
 one-off numba compilation). To exercise the library with no YAML machinery:
 

@@ -54,7 +54,7 @@ examples/<model>/
   imports from it. One deliberate exception: forward simulation may call
   the Euler-error diagnostics that live there, since both run after the
   model is solved.
-- **Root files are the pipeline, nothing else.** Run outputs go to
+- **Root files run the model, nothing else.** Run outputs go to
   `--output-dir` (default: the gitignored `results/`); committed paper
   outputs go to repo-root `paper-results/`; cluster job scripts live in
   repo-root `benchmarks/<model>/` — never inside the example.

@@ -55,7 +55,7 @@ source setup/setup.sh
 `setup/setup.sh` is the only script. Behaviour:
 
 - First run: creates `$FUES_VENV` (default `$HOME/venvs/fues`), installs
-  the scientific stack (numpy, numba, scipy), `dcsmm[examples]` (FUES +
+  the numerical packages (numpy, numba, scipy), `dcsmm[examples]` (FUES +
   HARK + ConSav + kikku + matplotlib + seaborn + …) in editable mode, the
   pinned `bright-forest` dolang and dolo commits (dolang `92b63c4`,
   dolo `c899b01`, installed `--no-deps`; they provide
@@ -66,7 +66,7 @@ source setup/setup.sh
   (`NUMBA_NUM_THREADS=1`, `NUMBA_CACHE_DIR=…`, `MPLBACKEND=Agg`).
 - `source setup/setup.sh --update`: `git pull` + reinstall
   `dcsmm[examples]` and `kikku[estimation]` `--no-deps` (keeps the pinned
-  scientific stack intact).
+  numerical packages intact).
 
 Full rebuild when dependencies change enough to warrant it:
 
@@ -223,7 +223,7 @@ qsub benchmarks/retirement/retirement_timings.sh
 qsub benchmarks/retirement/run_retirement_single_core.sh
 ```
 
-Before submitting a large job, do a 2-rank smoke test on a login node
+Before submitting a large job, do a 2-rank trial run on a login node
 or an interactive job:
 
 ```bash

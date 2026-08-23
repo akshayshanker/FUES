@@ -113,7 +113,7 @@ Since the discrete choice is itself a function of the state, define a discrete c
 
 ---
 
-## Modular Bellman Form
+## Modular Bellman form
 
 The formulation above follows the standard presentation in the literature: one Bellman equation with nested discrete and continuous choices. Below we rewrite the same model in staged Bellman form. In the code, each period is decomposed into linked subproblems with their own state spaces and Bellman operators.
 
@@ -223,7 +223,7 @@ sigma_work = get_policy(nest, "c", stage="labour_mkt_decision")
 print(f"Euler error: {euler(model, sigma_work):.4f}")
 ```
 
-`solve_nest` exposes the canonical retirement pipeline:
+`solve_nest` runs the full sequence from model files to solution:
 
 1. **Load syntax** — read the stage YAML, period template, and inter-period connectors from `syntax/`.
 2. **Select the upper-envelope method** — `FUES`, `DCEGM`, `RFC`, or `CONSAV`.
@@ -239,10 +239,10 @@ It then solves the three stages in reverse topological order each period:
 
 The returned `nest` dict contains the full solution history. Use `get_policy(nest, key, stage=...)` to extract policies and `get_timing(nest)` to extract mean upper-envelope and total solve times.
 
-For stationary models or repeated solves, pass back `model`, `stage_ops`, and `waves` to skip the pipeline:
+For stationary models or repeated solves, pass back `model`, `stage_ops`, and `waves` to skip rebuilding them:
 
 ```python
-# First call: full pipeline
+# First call: full build and solve
 nest, model, stage_ops, waves = solve_nest(
     "examples/retirement/syntax",
     method_switch="FUES",
@@ -275,7 +275,7 @@ All overrides go through a single CLI family that binds slots declared in
 - **`--slot-spec='{"method_switch":"RFC"}'`** selects an upper-envelope method by tag (`FUES`, `RFC`, `DCEGM`, or `CONSAV`); `expand_method_shortcut` in `solve.py` turns the tag into the full method-block payload.
 - **`--latex-grids=…`** (runner extra) gives the subset of grid sizes included in **LaTeX** timing/accuracy tables (markdown tables list all sweep rows).
 
-Each stage in `syntax/stages/` declares which parameters it consumes. The pipeline binds only the relevant settings and calibration entries to each stage, so unrelated keys are ignored.
+Each stage in `syntax/stages/` declares which parameters it consumes. The build binds only the relevant settings and calibration entries to each stage, so unrelated keys are ignored.
 
 Outputs are saved to `--output-dir` and include EGM grid plots, consumption policy plots, and printed timing and Euler-error tables. The table headings follow the paper labels MSS and LTM even though the callable method tags are `DCEGM` and `CONSAV`.
 
@@ -400,7 +400,7 @@ examples/retirement/
 │       └── retire_cons/          # Retiree EGM
 ├── model.py                    # RetirementModel (grids, callables)
 ├── solvers/operators.py        # Stage operator factories
-├── solve.py                    # Canonical pipeline (solve_nest)
+├── solve.py                    # Build-and-solve sequence (solve_nest)
 ├── benchmark.py                # Timing sweeps (via solve_nest)
 ├── notebooks/
 │   ├── retirement_fues.ipynb   # Interactive walkthrough
