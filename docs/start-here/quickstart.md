@@ -1,8 +1,11 @@
 # Quickstart
 
-This page covers two workflows. To use the upper envelope in your own
-model, start with the library sections below; a single `pip install` is
-enough. To reproduce the benchmark examples, jump to
+To use the upper envelope in your own
+model, start with the minimal use sections below. This just installs the FUES algorithm as 
+and the upper envelop wrapper `EGM_UE` as a single `pip install`. Without any 
+additional dependencies required  by the applications. 
+
+To run the applications, jump to
 [running the applications](#3-clone-and-set-up-the-environment).
 
 ## 1. Minimal use
@@ -24,7 +27,7 @@ x_dcsn_ref, v_ref, kappa_ref, x_cntn_ref, _ = FUES(
     v_hat,        # raw value correspondence (N,)
     kappa_hat,    # primary control, e.g. consumption (N,)
     x_cntn_hat,   # raw continuation / post-decision state (N,)
-    del_x_cntn,   # auxiliary jump-detection series, e.g. d x_cntn / d x_dcsn
+    del_kappa_hat,  # jump-detection series: derivative of the control kappa
     m_bar=1.2,    # jump threshold (approx max marginal propensity to save)
     LB=4,         # look-back buffer for forward/backward scans
 )
@@ -36,12 +39,21 @@ For a cell-by-cell walkthrough of exactly these calls on a small worked
 problem — every EGM step written out in raw NumPy — see the
 [transparent EGM / FUES notebook](../notebooks/egm_fues_transparent.ipynb).
 
-**Setting `m_bar`.** Use the maximum marginal propensity to consume in your
-model. For log utility with $\beta R < 1$, values in the range $1.0$–$1.2$
-work well. Setting `endog_mbar=True` lets FUES compute a grid-local
-threshold from the jump-detection series.
+**Setting `m_bar`.** Use the maximum marginal propensity to save in your
+model. For instance, in a consumption saving model with log utility and
+$\beta R < 1$, set `m_bar` to $(1.0 + E{-2})$. Higher values also work and
+will remove less points in coarser grids. In the limit, as the grid size
+grows, **any `m_bar` above the maximum MPC is guaranteed to recover the
+true upper envelope.** Setting `endog_mbar=True` lets FUES compute the
+"true" grid-local `m_bar` from `del_kappa_hat`, but one needs to pass
+through the derivative of the control variable `del_kappa_hat`.
 
-## 2. The upper-envelope registry
+> Importantly, note that FUES detects jumps in the control variable
+> `kappa_hat`, not the continuation state `x_cntn_hat`. The `x_cntn_hat`
+> is simply cleaned, and a refined continuation-state set of points is
+> returned.
+
+### 1.1 The upper-envelope registry
 
 To run FUES against MSS, RFC, and LTM on the same raw EGM output, use the
 unified `EGM_UE` interface:
