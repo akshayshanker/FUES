@@ -93,7 +93,7 @@ See the
 [durables application](../examples/continuous_housing_model.md) for the
 main non-monotone benchmark. 
 
-## 2. Clone and install to run applications 
+## 2. Clone and install to run applications and edit source
 
 To run the benchmark examples, clone the repository and run the setup
 script:
@@ -117,7 +117,7 @@ rendered on the [docs site](https://akshayshanker.github.io/FUES/), are the
 easiest way to experiment once you have cloned the repo; the sections below
 cover the command line.
 
-## 3. Run one example solve
+## 3. CLI runs of applications 
 
 The retirement model is the smaller benchmark and is convenient for a first
 run:
@@ -135,17 +135,24 @@ python -m examples.durables.run \
     --output-dir results/durables
 ```
 
+Details of how to run PBS cluster jobs are in the [Running on a PBS cluster](../running-on-gadi.md) page.
+
 ## 4. Output locations
 
-Runs write dated output folders under the model-specific results directory, for
-example:
+Each run creates a dated, auto-numbered folder inside the directory passed
+to `--output-dir` — so the two commands above write to:
 
 ```text
 results/retirement/YYYY-MM-DD/NNN/
 results/durables/YYYY-MM-DD/NNN/
 ```
 
-These folders contain the run's plots and tables. The durables runner writes `tables/sweep.md` (and `comparison.md` in compare mode); the retirement runner prints its method table to the console and writes plots, filling `tables/` only for timing sweeps.
+Omitting `--output-dir` gives the same locations, since `results/<model>/`
+is each runner's default. The folders hold the run's plots and tables: the
+durables runner writes `tables/sweep.md` (`comparison.md` in compare mode);
+the retirement runner prints its method table to the console and writes
+plots, filling `tables/` only for timing sweeps. The `results/` tree is
+gitignored.
 
 ## 5. Related pages
 
