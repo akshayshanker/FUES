@@ -10,19 +10,17 @@
 
 ---
 
-FUES recovers the upper envelope of the EGM ([Carroll 2006](https://doi.org/10.1016/j.econlet.2005.09.013)) value correspondence in discrete-continuous problems without requiring monotonicity of the optimal policy or numerical optimisation. FUES can also perform orders of magnitude faster than existing upper-envelope methods.
-
+FUES recovers the upper envelope of the EGM ([Carroll 2006](https://doi.org/10.1016/j.econlet.2005.09.013)) value correspondence in discrete-continuous problems without requiring monotonicity of the optimal policy or numerical optimisation. FUES can also perform orders of magnitude faster than existing upper-envelope method
 <p align="center">
   <img src="docs/images/pbs-scaling.png" alt="Upper-envelope scaling: FUES vs MSS, RFC, LTM" width="640">
 </p>
 
-This repo ships a unified upper-envelope interface (`uenvelope`) that dispatches to FUES and three benchmark methods: MSS ([Iskhakov et al. 2017](https://doi.org/10.3982/QE643)), LTM ([Druedahl & Jørgensen 2017](https://doi.org/10.1016/j.jedc.2016.11.005)), and RFC ([Dobrescu & Shanker 2024](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=4850746)).
+This repo ships the FUES algorithm described in the paper and a unified upper-envelope interface (`uenvelope`) that dispatches to FUES and other upper envelope methods: MSS ([Iskhakov et al. 2017](https://doi.org/10.3982/QE643)), LTM ([Druedahl & Jørgensen 2017](https://doi.org/10.1016/j.jedc.2016.11.005)), and RFC ([Dobrescu & Shanker 2024](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=4850746)). 
 
 > **Pre-release (v0.6.0dev7)** — Under active research development. API may change.
 >
 > Dobrescu, L.I. and Shanker, A. (2022). "A fast upper envelope scan method for discrete-continuous dynamic programming." [SSRN Working Paper.](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=4181302)
 
----
 
 ## Install
 
@@ -30,7 +28,7 @@ The installable package is `dcsmm` (contains `fues` and `uenvelope`). Requires P
 
 ### Option 1 — Library only
 
-Install FUES and the upper-envelope interface without cloning the repo. Lets you use `fues` and all other benchmark upper-envelope methods in your own applications.
+Simplest way to use FUES on your projects, install FUES and the upper-envelope interface without cloning the repo. This will let you use `fues` and all other benchmark upper-envelope methods in your own applications.
 
 ```bash
 pip install git+https://github.com/akshayshanker/FUES.git
@@ -45,7 +43,7 @@ Runtime dependencies (numba, numpy, scipy, [HARK](https://github.com/econ-ark/HA
 
 ### Option 2 — With examples
 
-Clone the repo and install with example dependencies (`matplotlib`, `pyyaml`, `seaborn`, [`kikku`](https://github.com/bright-forest/kikku)). Includes everything in Option 1 plus the example models in the repo checkout.
+Clone the repo and install with dependencies need for the applications to run (`matplotlib`, `pyyaml`, `seaborn`, [`kikku`](https://github.com/bright-forest/kikku)). Includes everything in Option 1 plus the example models in the repo checkout.
 
 ```bash
 git clone https://github.com/akshayshanker/FUES.git
@@ -57,15 +55,16 @@ pip install --no-deps \
   "dolo @ git+https://github.com/bright-forest/dolo.git@c899b0176d51f6354b5739a28e61ba45cd286a8b"
 ```
 
-The last two lines install the dolo-plus compiler that the example models
-use, pinned to the tested commits. They are installed `--no-deps`
+The last two lines install the dolo-plus (a reserach fork of `dolo`) compiler that the example models
+use. For the moment, they are installed `--no-deps`
 deliberately: the forks' packaging metadata targets a different dependency
 set than this repo's pins, and their runtime needs are already covered by
 `[examples]` (the same discipline `setup/setup.sh` uses).
 
-The retirement and durables examples run as a single solve via their `run`
-modules (from the repo root — the examples live in the checkout, not the
-installed package); parameters are overridden through slot paths:
+The retirement and durables examples each solve with one command through
+their `run` modules. Run them from the repo root: the examples live in the
+checkout, not in the installed package. Parameters are overridden on the
+command line through slot paths:
 
 ```bash
 python -m examples.retirement.run --slot-override '$draw.settings.grid_size=3000'
