@@ -7,7 +7,7 @@ usage and model description, see
 [retirement notebook](../notebooks/retirement_fues.ipynb).
 
 
-## Pipeline (`solve.py`)
+## Build and solve (`solve.py`)
 
 ### `solve_nest`
 
@@ -15,7 +15,7 @@ usage and model description, see
 solve_nest(registry_dir, spec_factory_name="spec_factory.yaml", draw=None, method_switch=None, model=None, stage_ops=None, waves=None, **more_slots)
 ```
 
-Canonical pipeline: load syntax, build the stage graph, and solve backward.
+The full sequence: load the model files, build the stage graph, and solve backward.
 
 Composition:
 
@@ -46,7 +46,7 @@ method_switch : str or dict, optional
     ``expand_method_shortcut``; nested ``{methods: [...]}`` dicts
     pass through.
 model, stage_ops, waves : optional
-    Pass back the previous call's returns to skip pipeline
+    Pass back the previous call's returns to skip the build
     reconstruction and JIT recompilation.
 more_slots
     Additional spec_factory slot bindings (e.g. ``**t.slots``
@@ -71,7 +71,7 @@ solve_backward(T, model, stage_ops, waves)
 
 Run backward induction over T periods.
 
-Pure combinator: no I/O, no pipeline, just the loop. Wires
+A pure function: no file access, no rebuilding, just the backward loop. Wires
 terminal-period continuations at ``h = 0``, then threads each
 period's solution into the next call of :func:`solve_period`.
 
