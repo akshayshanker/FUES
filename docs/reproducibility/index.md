@@ -16,7 +16,7 @@ sweeps — and records where each kind of output lives.
 ## Notebooks
 
 Interactive walkthroughs of the models and the method, rendered from the
-repo's Jupyter notebooks (see the [notebook overview](../tutorials/index.md)):
+repo's Jupyter notebooks:
 
 - [EGM / FUES walkthrough](../notebooks/egm_fues_transparent.ipynb) — the
   upper-envelope problem and the scan, step by step.

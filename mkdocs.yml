@@ -10,7 +10,6 @@ edit_uri: edit/main/docs/
 
 theme:
   name: material
-  custom_dir: docs/overrides
   palette:
     - media: "(prefers-color-scheme: light)"
       scheme: default
@@ -121,7 +120,6 @@ nav:
     - Housing-renting (draft): examples/housing-renting.md
 
   - Notebooks:
-    - Overview: tutorials/index.md
     - EGM / FUES walkthrough: notebooks/egm_fues_transparent.ipynb
     - Retirement choice: notebooks/retirement_fues.ipynb
     - Durables (Cobb–Douglas): notebooks/durables_fues.ipynb

@@ -48,7 +48,6 @@ Related pages:
 
 - [Quickstart](../start-here/quickstart.md) for the minimal run commands
 - [Running Locally](../running-locally.md) for command-line workflows
-- [Tutorials](../tutorials/index.md) for notebook walkthroughs
 
 ## Option 3: Manual editable install
 
