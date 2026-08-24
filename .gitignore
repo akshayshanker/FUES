@@ -93,3 +93,21 @@ kikku/
 *.synctex.gz
 *.bbl
 *.blg
+
+# AI assistant configuration and internal working notes (never public):
+# local paths, cluster accounts, and session context live in these.
+CLAUDE.md
+AGENTS.md
+GEMINI.md
+.cursor/
+.aider*
+.mcp.json
+.windsurfrules
+
+# Internal working material kept out of the public tree (lives in AI/):
+# port-stage demo and planning, scratch notebooks, personal plotting and
+# interactive-run scripts with machine-specific paths.
+examples/*/notebooks/portfolio_advice/
+examples/*/notebooks/experimental/
+scripts/interactive_plots/
+scripts/int/

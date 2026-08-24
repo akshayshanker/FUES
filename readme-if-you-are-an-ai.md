@@ -156,8 +156,8 @@ write no `.nst` files (`examples/durables/docs/estimation_outputs.md`
 documents intended, not verified, behaviour); the docs retirement benchmark
 table has not been reconciled with the current paper draft; and
 `src/dcsmm/fues/experimental/` is unexported exploration. The
-portfolio-choice extension is excluded from the public tree beyond the
-committed demo under `examples/durables/notebooks/portfolio_advice/`.
+portfolio-choice extension is not in the public tree: it lives in the
+authors' working tree only.
 Everything reproduces serially on an ordinary machine except the durables
 SMM estimation (multi-node MPI, terabyte-scale memory), the extra-large-grid
 solves, and the housing GPU benchmarks — cluster jobs under `benchmarks/`.

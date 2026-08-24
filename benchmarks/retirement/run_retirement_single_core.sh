@@ -28,9 +28,17 @@
 set -euo pipefail
 
 # -----------------------------------------------------------------------------
-# Resolve repo root - FUES project is at fixed location
+# Resolve repo root: the submission directory under PBS, otherwise the
+# script's own location (benchmarks/retirement/ -> repo root). Override
+# with FUES_REPO_ROOT.
 # -----------------------------------------------------------------------------
-REPO_ROOT="/home/141/as3442/dev/fues.dev/FUES"
+if [[ -n "${FUES_REPO_ROOT:-}" ]]; then
+    REPO_ROOT="${FUES_REPO_ROOT}"
+elif [[ -n "${PBS_O_WORKDIR:-}" && -f "${PBS_O_WORKDIR}/pyproject.toml" ]]; then
+    REPO_ROOT="${PBS_O_WORKDIR}"
+else
+    REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+fi
 EXAMPLE_DIR="${REPO_ROOT}/examples/retirement"
 
 echo "REPO_ROOT: ${REPO_ROOT}"

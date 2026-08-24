@@ -64,7 +64,7 @@ install. See `pyproject.toml` for the full list and version pins.
 
 ### Option 2 — With examples
 
-Clone the repository and run the setup script; it creates the project
+Clone the repository and run the setup script. This creates the project
 virtual environment (`.venv`), installs `dcsmm` (editable) with the
 application dependencies (`kikku`, the pinned dolo-plus compiler,
 plotting), verifies the install, and activates the environment:
@@ -74,11 +74,6 @@ git clone https://github.com/akshayshanker/FUES.git
 cd FUES
 source setup/setup.sh
 ```
-
-Re-source any time to activate; pass `--update` to `git pull` and
-reinstall. The equivalent manual pip sequence, including the exact
-dolo-plus pins, is in the
-[Installation docs](https://akshayshanker.github.io/FUES/getting-started/installation/).
 
 The examples are best first explored through their notebooks, in
 `examples/retirement/notebooks/` and `examples/durables/notebooks/`, rendered
