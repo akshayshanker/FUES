@@ -1,0 +1,1768 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="A fast upper envelope scan method for discrete–continuous dynamic programming. Dobrescu and Shanker (2022).">
+      
+      
+        <meta name="author" content="Loretti I. Dobrescu and Akshay Shanker">
+      
+      
+        <link rel="canonical" href="https://akshayshanker.github.io/FUES/examples/continuous_housing_model/">
+      
+      
+        <link rel="prev" href="../retirement_choice_model/">
+      
+      
+        <link rel="next" href="../housing-renting/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Continuous housing - FUES</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=IBM+Plex+Sans:300,300i,400,400i,700,700i%7CJetBrains+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"IBM Plex Sans";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#application-2-continuous-housing-investment-with-frictions" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="FUES" class="md-header__button md-logo" aria-label="FUES" data-md-component="logo">
+      
+  <img src="../../images/fues-logo.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            FUES
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Continuous housing
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+          <a href="javascript:void(0)" class="md-search__icon md-icon" title="Share" aria-label="Share" data-clipboard data-clipboard-text="" data-md-component="search-share" tabindex="-1">
+            
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9a3 3 0 0 0-3 3 3 3 0 0 0 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.15c-.05.21-.08.43-.08.66 0 1.61 1.31 2.91 2.92 2.91s2.92-1.3 2.92-2.91A2.92 2.92 0 0 0 18 16.08"/></svg>
+          </a>
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/akshayshanker/FUES" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    akshayshanker/FUES
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="FUES" class="md-nav__button md-logo" aria-label="FUES" data-md-component="logo">
+      
+  <img src="../../images/fues-logo.svg" alt="logo">
+
+    </a>
+    FUES
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/akshayshanker/FUES" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    akshayshanker/FUES
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../start-here/quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quickstart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../algorithm/fues-algorithm/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    The FUES algorithm
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Applications
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_4" id="__nav_4_label" tabindex="">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Applications
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../retirement_choice_model/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Retirement choice
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Continuous housing
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Continuous housing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#notation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Notation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1-model-environment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Model environment
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-euler-equations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Euler equations
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-modular-bellman-form" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Modular Bellman form
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. Modular Bellman form">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#stage-decomposition" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stage decomposition
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../housing-renting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Housing-renting (draft)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Notebooks
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Notebooks
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../notebooks/egm_fues_transparent/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    EGM / FUES walkthrough
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../notebooks/retirement_fues/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Retirement choice
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../notebooks/durables_fues/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Durables (Cobb–Douglas)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../notebooks/durables_fues_separable/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Durables (separable)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../reproducibility/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reproducibility
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_6" id="__nav_6_label" tabindex="">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reproducibility
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../running-locally/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Running locally
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../running-on-gadi/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Running on a PBS cluster
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" >
+        
+          
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/fues/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Core API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/retirement/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Retirement internals
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#notation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Notation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1-model-environment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Model environment
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-euler-equations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Euler equations
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-modular-bellman-form" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Modular Bellman form
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. Modular Bellman form">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#stage-decomposition" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stage decomposition
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+    <a href="https://github.com/akshayshanker/FUES/edit/main/docs/examples/continuous_housing_model.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m14.06 9 .94.94L5.92 19H5v-.92zm3.6-6c-.25 0-.51.1-.7.29l-1.83 1.83 3.75 3.75 1.83-1.83c.39-.39.39-1.04 0-1.41l-2.34-2.34c-.2-.2-.45-.29-.71-.29m-3.6 3.19L3 17.25V21h3.75L17.81 9.94z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="application-2-continuous-housing-investment-with-frictions">Application 2: Continuous Housing Investment with Frictions<a class="headerlink" href="#application-2-continuous-housing-investment-with-frictions" title="Link to this section">&para;</a></h1>
+<p><em>Source: Dobrescu and Shanker (2026), Section 2.2. The paper is the canonical
+reference for the economic model; this page writes out the notation and
+modular Bellman notation used in the codebase.</em></p>
+<h2 id="notation">Notation<a class="headerlink" href="#notation" title="Link to this section">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Symbol</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><span class="arithmatex">\(a_t\)</span></td>
+<td>Financial (liquid) assets at time <span class="arithmatex">\(t\)</span></td>
+</tr>
+<tr>
+<td><span class="arithmatex">\(H_t\)</span></td>
+<td>Housing (illiquid) assets at time <span class="arithmatex">\(t\)</span></td>
+</tr>
+<tr>
+<td><span class="arithmatex">\(c_t\)</span></td>
+<td>Non-housing consumption at time <span class="arithmatex">\(t\)</span></td>
+</tr>
+<tr>
+<td><span class="arithmatex">\(y_t\)</span></td>
+<td>Stochastic wage at time <span class="arithmatex">\(t\)</span> (Markov process)</td>
+</tr>
+<tr>
+<td><span class="arithmatex">\(d_t \in \{0,1\}\)</span></td>
+<td>Housing adjustment indicator (<span class="arithmatex">\(1\)</span> = adjust, <span class="arithmatex">\(0\)</span> =</td>
+</tr>
+<tr>
+<td></td>
+<td>keep)</td>
+</tr>
+<tr>
+<td><span class="arithmatex">\(r\)</span></td>
+<td>Rate of return on financial assets</td>
+</tr>
+<tr>
+<td><span class="arithmatex">\(\tau &gt; 0\)</span></td>
+<td>Proportional housing adjustment cost</td>
+</tr>
+<tr>
+<td><span class="arithmatex">\(\beta\)</span></td>
+<td>Discount factor</td>
+</tr>
+<tr>
+<td><span class="arithmatex">\(x_t = (1+r)a_t + y_t + d_t H_t\)</span></td>
+<td>Total wealth at time <span class="arithmatex">\(t\)</span></td>
+</tr>
+<tr>
+<td>$u : \mathbb{R}_+ \times</td>
+<td>Per-period utility over consumption and housing</td>
+</tr>
+<tr>
+<td>\mathbb{R}_+ \to</td>
+<td></td>
+</tr>
+<tr>
+<td>\mathbb{R} \cup</td>
+<td></td>
+</tr>
+<tr>
+<td>{-\infty}$</td>
+<td></td>
+</tr>
+<tr>
+<td><span class="arithmatex">\(\theta : \mathbb{R}_+ \to \mathbb{R} \cup \{-\infty\}\)</span></td>
+<td>Bequest function</td>
+</tr>
+<tr>
+<td><span class="arithmatex">\(V_t(a, H, y)\)</span></td>
+<td>Value function</td>
+</tr>
+<tr>
+<td><span class="arithmatex">\(\sigma_t^{a,d}\)</span>, <span class="arithmatex">\(\sigma_t^{H,d}\)</span></td>
+<td>Choice-specific policy functions for</td>
+</tr>
+<tr>
+<td></td>
+<td>assets and housing</td>
+</tr>
+<tr>
+<td><span class="arithmatex">\(\mathcal{I}_t(a, H, y)\)</span></td>
+<td>Discrete choice policy function</td>
+</tr>
+<tr>
+<td><span class="arithmatex">\(\Theta_t(a, H, y)\)</span></td>
+<td>Continuation marginal value of housing if not</td>
+</tr>
+<tr>
+<td></td>
+<td>adjusted</td>
+</tr>
+<tr>
+<td><span class="arithmatex">\(\iota\)</span></td>
+<td>Random stopping time: next period when <span class="arithmatex">\(d_\iota = 1\)</span></td>
+</tr>
+</tbody>
+</table>
+<h2 id="1-model-environment">1. Model environment<a class="headerlink" href="#1-model-environment" title="Link to this section">&para;</a></h2>
+<p>Households hold non-negative financial assets <span class="arithmatex">\(a_t\)</span> and non-negative housing
+<span class="arithmatex">\(H_t\)</span>. Financial assets earn a rate of return <span class="arithmatex">\(r\)</span>; housing earns no return.
+Liquid assets adjust frictionlessly, while adjusting housing to a new level
+<span class="arithmatex">\(H_{t+1}\)</span> costs <span class="arithmatex">\(\tau H_{t+1}\)</span>, <span class="arithmatex">\(\tau &gt; 0\)</span>. In period <span class="arithmatex">\(t \in \{0, 1, \ldots,
+T\}\)</span>, the household consumes <span class="arithmatex">\(c_t\)</span>, chooses <span class="arithmatex">\(a_{t+1}\)</span>, and selects a discrete
+adjustment indicator <span class="arithmatex">\(d_t \in \{0, 1\}\)</span>: when <span class="arithmatex">\(d_t = 0\)</span> housing is held fixed,
+<span class="arithmatex">\(H_{t+1} = H_t\)</span>; when <span class="arithmatex">\(d_t = 1\)</span> a new <span class="arithmatex">\(H_{t+1}\)</span> is chosen subject to the
+adjustment cost. Income <span class="arithmatex">\(y_t\)</span> is exogenous and follows a Markov process.</p>
+<p>The period budget constraint is</p>
+<div class="arithmatex">\[ (1+r)a_t + y_t + d_t H_t \geq a_{t+1} + c_t + d_t (1+\tau) H_{t+1}, \]</div>
+<p>where <span class="arithmatex">\(x_t = (1+r)a_t + y_t + d_t H_t\)</span> is total available wealth. The
+household lives through <span class="arithmatex">\(t = 0, \ldots, T\)</span> and values terminal bequests via
+<span class="arithmatex">\(\theta : \mathbb{R}_+ \to \mathbb{R} \cup \{-\infty\}\)</span>. Per-period utility
+<span class="arithmatex">\(u(c_t, H_{t+1})\)</span> is concave, jointly differentiable, and increasing in
+non-housing consumption and end-of-period housing (Yogo, 2016). The sequential
+problem is</p>
+<div class="arithmatex">\[ V_0(a_0, H_0, y_0) = \max_{(c_t, a_{t+1}, H_{t+1}, d_t)_{t=0}^{T}} \left\{
+\sum_{t=0}^{T} \beta^t \mathbb{E}\, u(c_t, H_{t+1}) \;+\; \mathbb{E}\,
+\beta^{T+1} \theta\bigl((1+r)a_{T+1} + H_{T+1}\bigr) \right\}, \]</div>
+<p>subject to the budget constraint, <span class="arithmatex">\(H_t \geq 0\)</span>, <span class="arithmatex">\(a_t \geq 0\)</span>, and given <span class="arithmatex">\((a_0,
+H_0, y_0)\)</span>. The terminal value is <span class="arithmatex">\(V_{T+1}(a_{T+1}, H_{T+1}) =
+\theta\bigl((1+r)a_{T+1} + H_{T+1}\bigr)\)</span>, and for <span class="arithmatex">\(t \leq T\)</span> the Bellman
+equation is</p>
+<div class="arithmatex">\[ V_t(a, H, y) = \max_{a', H', d} \left\{ u(c, H') + \beta \mathbb{E}_y
+V_{t+1}(a', H', y') \right\}, \]</div>
+<p>with primes denoting continuation states satisfying the budget constraint, <span class="arithmatex">\(c
+= y + (1+r)a + dH - a' - d(1+\tau)H'\)</span>, and <span class="arithmatex">\(H' = H\)</span> if <span class="arithmatex">\(d = 0\)</span>.</p>
+<h2 id="2-euler-equations">2. Euler equations<a class="headerlink" href="#2-euler-equations" title="Link to this section">&para;</a></h2>
+<p>The weak inequalities below allow for the occasionally binding non-negativity
+constraint on liquid assets.</p>
+<p>There is one Euler equation for each state. The financial-asset Euler equation
+is</p>
+<div class="arithmatex">\[ u_1(c_t, H_{t+1}) \geq \beta(1+r)\, \mathbb{E}_t\, u_1(c_{t+1}, H_{t+2}),
+\]</div>
+<p>with <span class="arithmatex">\(u_1\)</span> and <span class="arithmatex">\(u_2\)</span> denoting partial derivatives of <span class="arithmatex">\(u\)</span> with respect to its
+first and second arguments. When <span class="arithmatex">\(d_t = 1\)</span>, the housing Euler equation is</p>
+<div class="arithmatex">\[ (1+\tau)\, u_1(c_t, H_{t+1}) \geq \underbrace{\mathbb{E}_t
+\sum_{k=t}^{\iota-1} \beta^{k-t}\, u_2(c_k, H_{k+1})}_{\text{marginal value of
+the housing-services stream}} + \underbrace{\mathbb{E}_t\, \beta^{\iota-t}\,
+u_1(c_\iota, H_{\iota+1})}_{\text{marginal value of liquidating housing at
+time } \iota}. \]</div>
+<p>The financial Euler equation is standard. The housing Euler equation features
+a random stopping time <span class="arithmatex">\(\iota\)</span>, defined as the next period with <span class="arithmatex">\(d_\iota = 1\)</span>.
+The shadow value of housing is the discounted expected marginal utility at the
+next liquidation date plus the intervening stream of housing-services
+utilities.</p>
+<p><strong>Functional form.</strong> The recursive solution implies measurable policy
+functions <span class="arithmatex">\(\sigma_t^a\)</span>, <span class="arithmatex">\(\sigma_t^H\)</span>, and <span class="arithmatex">\(\mathcal{I}_t\)</span>, with
+branch-specific versions <span class="arithmatex">\(\sigma_t^{a,d}\)</span> and <span class="arithmatex">\(\sigma_t^{H,d}\)</span>. On the adjust
+branch at time <span class="arithmatex">\(t\)</span>,</p>
+<div class="arithmatex">\[ c = (1+r)a + H + y - \sigma_t^{a,1}(a, H, y) - (1+\tau)\sigma_t^{H,1}(a, H,
+y), \]</div>
+<p>with</p>
+<div class="arithmatex">\[ a' = \sigma_t^{a,1}(a, H, y), \qquad H' = \sigma_t^{H,1}(a, H, y). \]</div>
+<p>Let <span class="arithmatex">\(d_{t+1} = \mathcal{I}_{t+1}(a', H', y')\)</span>. Next-period consumption is then
+determined by the same budget constraint on the realized branch:</p>
+<div class="arithmatex">\[ c' = (1+r)a' + d_{t+1} H' + y' - \sigma_{t+1}^{a,d_{t+1}}(a', H', y') -
+d_{t+1}(1+\tau)\sigma_{t+1}^{H,d_{t+1}}(a', H', y'). \]</div>
+<p>Define</p>
+<div class="arithmatex">\[ H'' = \begin{cases} \sigma_{t+1}^{H,1}(a', H', y'), &amp; d_{t+1} = 1, \\ H', &amp;
+d_{t+1} = 0 . \end{cases} \]</div>
+<p>Substituting the policies into the housing Euler equation yields</p>
+<div class="arithmatex">\[ (1+\tau)\, u_1(c, H') \geq u_2(c, H') + \beta \mathbb{E}_y \left\{
+\mathcal{I}_{t+1}(a', H', y')\, u_1(c', H'') \right\} + \beta \mathbb{E}_y
+\left\{ (1 - \mathcal{I}_{t+1}(a', H', y')) \bigl[ \Theta_{t+1}(a', H', y') +
+u_2(c', H') \bigr] \right\}. \]</div>
+<p>The multiplier <span class="arithmatex">\(\Theta_t\)</span> collects the continuation marginal value of housing
+when the household does not adjust:</p>
+<div class="arithmatex">\[ \Theta_t(a, H, y) = \beta \mathbb{E}_y \left\{ \mathcal{I}_{t+1}(a', H',
+y')\, u_1(c', H'') \right\} + \beta \mathbb{E}_y \left\{ (1 -
+\mathcal{I}_{t+1}(a', H', y')) \bigl[ \Theta_{t+1}(a', H', y') + u_2(c', H')
+\bigr] \right\}. \]</div>
+<p>The functional financial Euler equation is</p>
+<div class="arithmatex">\[ u_1(c, H') \geq \beta(1+r)\, \mathbb{E}_y\, u_1(c', H''), \]</div>
+<p>with <span class="arithmatex">\(c\)</span>, <span class="arithmatex">\(c'\)</span>, and <span class="arithmatex">\(H''\)</span> defined as above.</p>
+<h2 id="3-modular-bellman-form">3. Modular Bellman form<a class="headerlink" href="#3-modular-bellman-form" title="Link to this section">&para;</a></h2>
+<p>The formulation above is the standard one: one Bellman equation with a
+discrete choice embedded in the budget constraint. We now rewrite the same
+model in staged Bellman form. In the code, each period is split into linked
+subproblems with their own state spaces and Bellman operators.</p>
+<blockquote>
+<p><strong>Timing notation.</strong> We use the multi-stage Bellman notation of <a href="https://llorracc.github.io/SolvingMicroDSOPs/">Carroll
+  (2026)</a> and <a href="https://bright-forest.github.io/bellman-ddsl/bellman-calculus/">Carroll and
+  Shanker
+  (2026)</a>.
+  Each stage has three information sets: &gt;
+- <strong>Arrival</strong> (<span class="arithmatex">\(\prec\)</span>): the state on entering the stage.
+- <strong>Decision</strong> (unmarked): the information set on which the agent chooses.
+- <strong>Continuation</strong> (<span class="arithmatex">\(\succ\)</span>): the outgoing state after the within-stage
+  choice and transition. &gt;
+To keep the notation readable, when a consumption-stage formula is written
+  only in <span class="arithmatex">\(w\)</span>, <span class="arithmatex">\(H\)</span>, or <span class="arithmatex">\(m\)</span>, it should be read pointwise in a fixed income
+  state <span class="arithmatex">\(z\)</span>. In the implementation, the corresponding value and policy arrays
+  retain a full <span class="arithmatex">\(z\)</span> index.</p>
+</blockquote>
+<p>A household lives for <span class="arithmatex">\(T\)</span> periods, holding financial assets <span class="arithmatex">\(a \ge 0\)</span> and
+housing <span class="arithmatex">\(H \ge 0\)</span>. Each period it draws an i.i.d. innovation
+<span class="arithmatex">\(\varepsilon_{\succ} \sim N(0,1)\)</span>, updates persistent income via <span class="arithmatex">\(\log
+z_{\succ} = \rho_z \log z + \sigma_z \varepsilon_{\succ}\)</span>, earns income
+<span class="arithmatex">\(\mathrm{y}(z_{\succ})\)</span>, and makes a discrete tenure choice <span class="arithmatex">\(d \in \{0,
+1\}\)</span> — keep or adjust housing — followed by a non-durable consumption
+choice (plus a durable choice under the adjuster branch). Financial assets
+earn gross return
+<span class="arithmatex">\(R = 1+r\)</span>; adjusting housing costs <span class="arithmatex">\(\tau H_{\succ}\)</span>. The stage equations below
+keep <span class="arithmatex">\(\delta\)</span> (housing depreciation) and <span class="arithmatex">\(R_H\)</span> (housing gross return) as free
+parameters; the simplest case of the main text sets <span class="arithmatex">\(\delta = 0\)</span> and <span class="arithmatex">\(R_H =
+1\)</span>.</p>
+<h3 id="stage-decomposition">Stage decomposition<a class="headerlink" href="#stage-decomposition" title="Link to this section">&para;</a></h3>
+<p>Each period decomposes into three stages, solved in reverse. Ordered forward:</p>
+<ol>
+<li><strong><code>tenure</code></strong> (branching + <span class="arithmatex">\(\mathbb{E}_{\varepsilon_{\succ}}\)</span>) — discrete
+   choice <span class="arithmatex">\(\max(\mathrm{v}_{\mathrm{kp}, \succ}, \mathrm{v}_{\mathrm{adj},
+   \succ})\)</span>; income innovation <span class="arithmatex">\(\varepsilon_{\succ}\)</span> draws; asset returns
+   realised; durables liquidated on the adjuster branch.</li>
+<li>Keeper continuation state: <span class="arithmatex">\(w_{\mathrm{kp}} = Ra +
+     \mathrm{y}(z_{\succ})\)</span>.</li>
+<li>Adjuster continuation state: <span class="arithmatex">\(w_{\mathrm{adj}} = Ra +
+     \mathrm{y}(z_{\succ}) + R_H(1-\delta)H\)</span>.</li>
+<li><strong><code>keeper_cons</code></strong> (1D EGM + FUES) — consumption choice on cash-on-hand
+   <span class="arithmatex">\(w_{\mathrm{kp}}\)</span>; housing passes through.</li>
+<li><strong><code>adjuster_cons</code></strong> (2D partial EGM + FUES) — joint choice of consumption
+   and new housing on total wealth <span class="arithmatex">\(w_{\mathrm{adj}}\)</span>.</li>
+</ol>
+<p>In <code>keeper_cons</code> and <code>adjuster_cons</code>, the Bellman equations below are written
+conditional on the realized income state <span class="arithmatex">\(z_{\succ}\)</span>. Economically this is a
+one-dimensional EGM problem for each <span class="arithmatex">\((z, H)\)</span> slice of the keeper problem and
+a one-dimensional wealth problem for each <span class="arithmatex">\(z\)</span> slice of the adjuster problem.</p>
+<details style="border-left:3px solid #1565c0;padding:8px 16px;
+margin:12px 0;background:rgba(21,101,192,0.04);border-radius:4px;">
+<summary style="cursor:pointer;font-weight:600;font-size:0.95em;">
+<code>tenure</code> — discrete branching + income shock</summary>
+
+| Perch | State variables | Description |
+| :--- | :--- | :--- |
+| Arrival $(\prec)$ | $a,\; H,\; z$ | Assets, housing, previous income |
+|  |  | realisation |
+| Decision | $a,\; H,\; z$ | Identity transition; agent chooses branch |
+| Cont. **kp** $(\succ)$ | $w_{\mathrm{kp}}, H_{\mathrm{kp}}, z_{\succ}$ |
+|  |  | Cash-on-hand, housing, new income |
+| Cont. **adj** $(\succ)$ | $w_{\mathrm{adj}}, z_{\succ}$ | Total liquid |
+|  |  | wealth, new income |
+
+**Arrival → decision (identity).** &ensp; $a = a_{\prec},\; H =
+H_{\prec},\; z = z_{\prec}$. The previous income realisation $z$ is known at
+decision; the innovation $\varepsilon_{\succ}$ has not yet resolved.
+
+**Decision → continuation (two branches).** &ensp; The innovation
+$\varepsilon_{\succ} \sim N(0,1)$ resolves on the continuation edge, producing
+$z_{\succ} = z^{\rho_z}\exp(\sigma_z\,\varepsilon_{\succ})$. Conditional on
+$z_{\succ}$, each branch maps $(a, H, z_{\succ})$ to a distinct continuation
+space.
+
+*Keep branch* — housing depreciates and is retained:
+
+$$w_{\mathrm{kp}} = R\,a + \mathrm{y}(z_{\succ}), \qquad H_{\mathrm{kp}} =
+(1-\delta)\,H.$$
+
+*Adjust branch* — housing is liquidated at resale value $R_H(1-\delta)H$ and
+folded into liquid wealth:
+
+$$w_{\mathrm{adj}} = R\,a + R_H(1-\delta)\,H + \mathrm{y}(z_{\succ}).$$
+
+**Bellman step $\mathbb{B}$** &ensp; Conditional on $z_{\succ}$, pick the
+better branch:
+
+$$\mathrm{v}(a, H, z_{\succ}) =
+\max\bigl(\,\mathrm{v}_{\mathrm{kp},\succ}(w_{\mathrm{kp}},
+H_{\mathrm{kp}}),\;\;
+\mathrm{v}_{\mathrm{adj},\succ}(w_{\mathrm{adj}})\,\bigr).$$
+
+**Marginal-value propagation.** &ensp; Writing $\mathbb{1}_{\mathrm{adj}}$ for
+the branch indicator, the envelope conditions at decision are
+
+$$\partial_a \mathrm{v} = \mathbb{1}_{\mathrm{adj}}\, R\,
+\partial_{w_{\mathrm{adj}}} \mathrm{v}_{\mathrm{adj},\succ} + (1 -
+\mathbb{1}_{\mathrm{adj}})\, R\, \partial_{w_{\mathrm{kp}}}
+\mathrm{v}_{\mathrm{kp},\succ},$$
+
+$$\partial_H \mathrm{v} = \mathbb{1}_{\mathrm{adj}}\, R_H(1-\delta)\,
+\partial_{w_{\mathrm{adj}}} \mathrm{v}_{\mathrm{adj},\succ} + (1 -
+\mathbb{1}_{\mathrm{adj}})\, (1-\delta)\, \partial_{H_{\mathrm{kp}}}
+\mathrm{v}_{\mathrm{kp},\succ}.$$
+
+**Expectation step $\mathbb{I}$** &ensp; Integrate over $\varepsilon_{\succ}$
+with $z_{\succ} = z^{\rho_z}\exp(\sigma_z\,\varepsilon_{\succ})$:
+
+$$\mathrm{v}_{\prec}(a, H, z) =
+\mathbb{E}_{\varepsilon_{\succ}}\!\bigl[\mathrm{v}(a, H, z_{\succ})\bigr],
+\qquad \partial_a \mathrm{v}_{\prec} =
+\mathbb{E}_{\varepsilon_{\succ}}\!\bigl[\partial_a \mathrm{v}\bigr], \qquad
+\partial_H \mathrm{v}_{\prec} =
+\mathbb{E}_{\varepsilon_{\succ}}\!\bigl[\partial_H \mathrm{v}\bigr].$$
+
+</details>
+
+<details style="border-left:3px solid #00897b;padding:8px 16px;
+margin:12px 0;background:rgba(0,137,123,0.04);border-radius:4px;">
+<summary style="cursor:pointer;font-weight:600;font-size:0.95em;">
+<code>keeper_cons</code> — keeper consumption (1D EGM + FUES)</summary>
+
+| Perch | Variables | Description |
+| :--- | :--- | :--- |
+| Arrival $(\prec)$ | $w_{\prec},\, H_{\prec}$ | Cash-on-hand, inherited |
+|  |  | (fixed) housing |
+| Decision | $w,\, H$ | Identity transition; no within-stage shock before |
+|  |  | optimisation |
+| Continuation $(\succ)$ | $a_{\succ},\, H_{\succ} = H$ | Post-savings |
+|  |  | assets; housing |
+|  |  | passes through |
+
+**Bellman step $\mathbb{B}$** &ensp; The keeper optimises over consumption
+alone:
+
+$$\mathrm{v}_{\mathrm{kp}}(w, H) = \max_{c \ge 0}\;\bigl\{\mathrm{u}(c, H) +
+\beta\,\mathrm{v}_{\succ}(w - c,\; H)\bigr\},$$
+
+subject to $a_{\succ} = w - c \ge 0$ and $H_{\succ} = H$. The FOC is
+
+$$ \mathrm{u}_1(c, H) = \beta\, \partial_a \mathrm{v}_{\succ}(a_{\succ}, H).
+$$
+
+*EGM step.* &ensp; Fix $a_{\succ}$ on the exogenous grid. The financial Euler
+inverts analytically:
+
+$$ c_{\succ} = \mathrm{u}_1^{-1}\!\bigl(\beta\, \partial_a
+\mathrm{v}_{\succ}(a_{\succ}, H)\bigr), \qquad w_{\succ} = a_{\succ} +
+c_{\succ}, $$
+
+which yields the endogenous cash-on-hand grid. FUES selects the upper envelope
+from the pooled constrained and unconstrained EGM points.
+
+*Non-concavity.* &ensp; The continuation $\mathrm{v}_{\succ}(a_{\succ}, H)$ is
+next period's tenure-stage arrival value. The branching $\max$ introduces
+primary kinks at the keep/adjust switching threshold; future switching
+thresholds propagate backward as *secondary kinks* — the DC-EGM mechanism of
+[Iskhakov et al. (2017)](https://doi.org/10.3982/QE643). $\partial_a
+\mathrm{v}_{\succ}(\cdot, H)$ is non-monotone, and the EGM-constructed
+$w_{\succ}(a_{\succ})$ mapping has crossing segments.
+
+**Return to arrival $\mathbb{I}$** &ensp; The arrival transition is identity
+($w = w_{\prec}, H = H_{\prec}$). The envelope theorem gives
+
+$$\partial_w \mathrm{v}_{\mathrm{kp}}(w, H) = \mathrm{u}_1(c^\star, H), \qquad
+\partial_H \mathrm{v}_{\mathrm{kp}}(w, H) = \mathrm{u}_2(c^\star, H) + \beta\,
+\partial_H \mathrm{v}_{\succ}(a_{\succ}, H).$$
+
+The marginal $\partial_H \mathrm{v}_{\mathrm{kp}}$ — housing-services value
+plus the continuation shadow value — is the quantity $\Theta$ in §2's
+stopping-time representation.
+
+</details>
+
+<details style="border-left:3px solid #7c4dff;padding:8px 16px;
+margin:12px 0;background:rgba(124,77,255,0.04);border-radius:4px;">
+<summary style="cursor:pointer;font-weight:600;font-size:0.95em;">
+<code>adjuster_cons</code> — adjuster consumption (2D partial EGM + FUES)
+</summary>
+
+| Perch | Variables | Description |
+| :--- | :--- | :--- |
+| Arrival $(\prec)$ | $m_{\prec}$ | Total liquidated wealth from the tenure |
+|  |  | stage |
+| Decision | $m$ | Same scalar total wealth |
+| Continuation $(\succ)$ | $a_{\succ},\, H_{\succ}$ | New savings and new |
+|  |  | housing |
+
+**Bellman step $\mathbb{B}$** &ensp; The adjuster jointly chooses consumption
+and new housing:
+
+$$\mathrm{v}_{\mathrm{adj}}(m) = \max_{c,\, H_{\succ} \ge
+0}\;\bigl\{\mathrm{u}(c, H_{\succ}) + \beta\,\mathrm{v}_{\succ}(m - c -
+(1+\tau)\,H_{\succ},\; H_{\succ})\bigr\},$$
+
+subject to $a_{\succ} = m - c - (1+\tau)\, H_{\succ} \ge 0$. The two FOCs are
+
+$$ \mathrm{u}_1(c, H_{\succ}) = \beta\, \partial_a \mathrm{v}_{\succ}, \qquad
+(1+\tau)\, \mathrm{u}_1(c, H_{\succ}) = \mathrm{u}_2(c, H_{\succ}) + \beta\,
+\partial_H \mathrm{v}_{\succ}. $$
+
+The housing FOC equates the marginal cost $(1+\tau)\, \mathrm{u}_1$ to the
+marginal benefit $\mathrm{u}_2 + \beta\, \partial_H \mathrm{v}_{\succ}$.
+
+*Partial EGM.* &ensp; Fix $H_{\succ}$ on an exogenous grid. For each
+$\hat{H}_i$: invert the financial Euler to obtain $c_{\succ}(a_{\succ},
+\hat{H}_i)$, recover the endogenous wealth $m_{\succ} = a_{\succ} + c_{\succ}
++ (1+\tau)\, \hat{H}_i$, and evaluate the Bellman value $\hat{\mathrm{v}}$.
+Pool candidates across the full $(a_{\succ}, \hat{H}_i)$ grid and apply FUES
+to recover $(c^\star, H_{\succ}^\star)$ as functions of $m$.
+
+*Multiple roots.* &ensp; The mapping $a_{\succ} \mapsto m_{\succ}$ is
+**non-monotone** for two compounding reasons: (i) secondary kinks from future
+tenure switches make $\partial_a \mathrm{v}_{\succ}(\cdot, H)$ non-monotone;
+(ii) housing is simultaneously a consumption good and an asset, and the
+resulting intertemporal income effects produce discontinuous drops in housing
+investment at tenure-switch thresholds. The housing policy
+$H_{\succ}^\star(m)$ exhibits upward and downward jumps. MSS and LTM require
+locally isolated monotone segments and cannot resolve this structure. FUES
+scans the full cloud in a single $O(n \log n)$ pass.
+
+**Return to arrival $\mathbb{I}$** &ensp; The arrival transition is identity
+($m = m_{\prec}$). The envelope theorem gives
+
+$$\partial_m \mathrm{v}_{\mathrm{adj}}(m) = \mathrm{u}_1(c^\star,
+H_{\succ}^\star).$$
+
+</details>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../retirement_choice_model/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Retirement choice">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                Retirement choice
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../housing-renting/" class="md-footer__link md-footer__link--next" aria-label="Next: Housing-renting (draft)">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                Housing-renting (draft)
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      &copy; 2022–2026 Akshay Shanker &mdash; Logo font: TNG Title by Ukraine Fonts
+    </div>
+  
+  
+</div>
+      
+        
+<div class="md-social">
+  
+    
+    
+    
+    
+    <a href="https://github.com/akshayshanker/FUES" target="_blank" rel="noopener" title="Source code on GitHub" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+    </a>
+  
+    
+    
+    
+    
+    <a href="https://papers.ssrn.com/sol3/papers.cfm?abstract_id=4181302" target="_blank" rel="noopener" title="Working paper on SSRN" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M0 64C0 28.7 28.7 0 64 0h149.5c17 0 33.3 6.7 45.3 18.7l106.5 106.6c12 12 18.7 28.3 18.7 45.3V448c0 35.3-28.7 64-64 64H64c-35.3 0-64-28.7-64-64zm208-5.5V152c0 13.3 10.7 24 24 24h93.5zM120 256c-13.3 0-24 10.7-24 24s10.7 24 24 24h144c13.3 0 24-10.7 24-24s-10.7-24-24-24zm0 96c-13.3 0-24 10.7-24 24s10.7 24 24 24h144c13.3 0 24-10.7 24-24s-10.7-24-24-24z"/></svg>
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.tracking", "navigation.sections", "navigation.indexes", "navigation.top", "navigation.footer", "content.code.copy", "content.code.annotate", "content.action.edit", "search.highlight", "search.suggest", "search.share", "toc.follow"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+        <script src="../../javascripts/mathjax.js"></script>
+      
+        <script src="../../javascripts/fues-interactive.js"></script>
+      
+        <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+      
+        <script src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
+      
+    
+  </body>
+</html>
