@@ -512,6 +512,13 @@ def check_parameter_names(resolved_calibration_keys, free_names, calib_overrides
                 offending.append(
                     f"{name!r} ({role} of types target {target!r}) is a "
                     f"calibration key and would shadow a model parameter")
+            if name not in free:
+                # Without this the first trial would raise inside expand_types,
+                # every candidate would be scored at the penalty, and the run
+                # would only fail after the whole cross-entropy loop.
+                offending.append(
+                    f"{name!r} ({role} of types target {target!r}) must be "
+                    f"listed under free so that every candidate carries it")
     for name in free:
         if name in mapped or name in keys:
             continue
@@ -568,8 +575,11 @@ def load_types_spec(est_yaml):
         n = int(block['n'])
     except (TypeError, ValueError):
         raise ValueError(f"estimation.types.n must be an integer, got {block['n']!r}")
-    if n < 1:
-        raise ValueError(f"estimation.types.n must be at least 1, got {n}")
+    if n < 2:
+        # One member is the single-beta model with an unidentified spread.
+        raise ValueError(
+            f"estimation.types.n must be at least 2 (one member would leave the "
+            f"spread parameter without any effect), got {n}")
     parameters = block.get('parameters')
     if not isinstance(parameters, dict) or not parameters:
         raise ValueError(

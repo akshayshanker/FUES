@@ -198,6 +198,58 @@ def test_fit_table_csv_weight_identity_and_md_rounding(tmp_path):
         )
 
 
+def test_fit_table_scores_nan_simulated_moments_as_penalty(tmp_path):
+    """A NaN simulated moment is the fixed penalty, with a NaN share.
+
+    Built from the saved run's ``fit_table.csv`` with two simulated cells
+    blanked (the form kikku's diagnostics give a moment outside the
+    simulated horizon). Oracle: kikku's ``NAN_PENALTY`` and the weight rule
+    applied by hand to the remaining rows; the shares of the finite rows
+    must still add to 100.
+    """
+    import math
+    from kikku.run.estimate import NAN_PENALTY
+
+    src = RUN_DIR / "fit_table.csv"
+    run_dir = tmp_path / "est_nan"
+    run_dir.mkdir()
+    with src.open(newline="") as f:
+        rows = list(csv.DictReader(f))
+    blanked = {rows[0]["moment"], rows[3]["moment"]}
+    for r in rows:
+        if r["moment"] in blanked:
+            r["simulated"] = ""
+            r["residual"] = ""
+    with (run_dir / "fit_table.csv").open("w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
+        writer.writeheader()
+        writer.writerows(rows)
+    for name in ("summary.json", "theta_best.json", "theta_se.json", "manifest.json"):
+        if (RUN_DIR / name).is_file():
+            (run_dir / name).write_bytes((RUN_DIR / name).read_bytes())
+
+    write_estimation_tables([("nan", read_run(run_dir))], tmp_path, fits=[("nan", run_dir)])
+    with (tmp_path / "fit_nan.csv").open(newline="") as f:
+        out = list(csv.DictReader(f))
+    pen = [r for r in out if r["moment"] in blanked]
+    fin = [r for r in out if r["moment"] not in blanked]
+    assert len(pen) == 2
+    assert all(float(r["contribution"]) == NAN_PENALTY for r in pen)
+    assert all(r["penalised"] == "True" for r in pen)
+    assert all(math.isnan(float(r["contribution_pct"])) for r in pen)
+    assert all(r["penalised"] == "False" for r in fin)
+    finite_total = sum(float(r["contribution"]) for r in fin)
+    for r in fin:
+        data, sim = float(r["data"]), float(r["simulated"])
+        w = 1.0 / data**2 if abs(data) >= 1.0 else 1.0
+        assert float(r["contribution"]) == pytest.approx(w * (sim - data) ** 2, rel=1e-9, abs=1e-12)
+        assert float(r["contribution_pct"]) == pytest.approx(
+            100.0 * float(r["contribution"]) / finite_total, rel=1e-9, abs=1e-9)
+    assert sum(float(r["contribution_pct"]) for r in fin) == pytest.approx(100.0, abs=1e-6)
+    # Penalised rows sort first (the penalty dwarfs every finite term).
+    assert out[0]["moment"] in blanked and out[1]["moment"] in blanked
+
+
 def test_fit_table_caption_states_last_evaluation_when_at_best_absent():
     """Without fit_table_at_best.csv the caption names the last CE evaluation."""
     assert not (RUN_DIR / "fit_table_at_best.csv").exists()

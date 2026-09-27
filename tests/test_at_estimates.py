@@ -250,6 +250,52 @@ def test_write_outputs_and_objective_reconciliation(run, tmp_path):
     assert set(cohort_rows[0]) >= {"age group", "variable", "data", "simulated"}
 
 
+def test_penalised_moments_are_scored_as_kikku_scores_them(run):
+    """Age groups outside the simulated horizon reconcile with kikku's loss.
+
+    At ``t0 = 40`` (the calibration default, used when a run is launched
+    without the ``--params-override t0=20`` the PBS scripts pass) the target
+    moments of age groups 2 to 4 lie before the horizon and are NaN. kikku's
+    loss adds ``NAN_PENALTY`` for each; the fit rows must do the same, keep
+    finite shares over the finite rows, and the total must equal the loss
+    the driver's own criterion computes at the same parameters. Oracle: the
+    driver's ``build_criterion`` (kikku's loss), not the tool.
+    """
+    from kikku.run.estimate import NAN_PENALTY
+    from examples.durables.estimate import build_criterion
+
+    run40 = dict(run)
+    run40["calib_overrides"] = {**(run.get("calib_overrides") or {}), "t0": 40}
+    solved = at_estimates.solve_at_estimates(run40, REGISTRY_ROOT, grid=run["grid"])
+    sim_data = at_estimates.simulate_at_estimates(
+        run40, solved, N=run["N_sim"], seed=run["simulation_seed"])
+    spec_path = REGISTRY_ROOT / run["registry"] / "estimation" / f"{run['spec_name']}.yaml"
+    spec = load_estimation_spec(str(spec_path))
+    sett = _stage(solved[0][1]).settings
+    sim_moments = at_estimates.simulated_moments_at_estimates(
+        sim_data, spec["moment_spec"], sett)
+    # The driver's criterion supplies both the oracle loss and the filtered
+    # set of target data moments it scores.
+    criterion, _moment_fn, data_moments, _denorm = build_criterion(
+        REGISTRY_ROOT / run["registry"], spec, run["spec_factory"],
+        run.get("solver_method"), run40["calib_overrides"], run["grid"],
+        run["N_sim"], run["simulation_seed"], None)
+    rows = at_estimates.fit_at_estimates(run40, sim_moments, data_moments)
+
+    penalised = [r for r in rows if r["penalised"]]
+    finite = [r for r in rows if not r["penalised"]]
+    assert penalised, "t0 = 40 must leave age groups before the horizon unmatched"
+    assert all(r["contribution"] == NAN_PENALTY for r in penalised)
+    assert all(np.isnan(r["contribution_pct"]) for r in penalised)
+    assert all(np.isfinite(r["contribution_pct"]) for r in finite)
+    assert sum(r["contribution_pct"] for r in finite) == pytest.approx(100.0, abs=1e-6)
+
+    total = sum(r["contribution"] for r in rows)
+    loss = criterion(dict(run["theta_best"]))
+    assert total == pytest.approx(loss, rel=1e-12, abs=1e-6)
+    assert total > NAN_PENALTY * len(penalised)
+
+
 def _copy_fixture_without_manifest(src, dest):
     dest.mkdir(parents=True)
     for name in ("summary.json", "theta_best.json", "theta_mean.json", "theta_se.json"):

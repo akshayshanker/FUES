@@ -23,9 +23,12 @@ from pathlib import Path
 import numpy as np
 import yaml
 
-from kikku.run.estimate import load_estimation_spec
+from kikku.run.estimate import NAN_PENALTY, load_estimation_spec
 from kikku.run.moments import _age_group_masks, make_moment_fn
 
+from examples.durables.estimate import (
+    check_parameter_names, resolved_calibration_keys,
+)
 from examples.durables.solve import solve
 from examples.durables.solvers.beta_types import expand_types
 from examples.durables.solvers.simulate import simulate_lifecycle
@@ -196,6 +199,57 @@ def types_spec_for_run(run, registry_root):
     return types or None
 
 
+def types_spec_from_record(beta_types):
+    """Rebuild the ``types`` block from the ``beta_types`` record of a run.
+
+    The record the driver writes into ``summary.json`` carries, for every
+    heterogeneous parameter, the names of its location and spread
+    parameters and its transform, which is all ``expand_types`` needs.
+    Returns ``None`` when the run had no types.
+    """
+    if not beta_types or not isinstance(beta_types, dict):
+        return None
+    params = beta_types.get("parameters") or {}
+    if not params or "n" not in beta_types:
+        return None
+    parameters = {}
+    for name, info in params.items():
+        if not isinstance(info, dict) or "location" not in info or "spread" not in info:
+            return None
+        parameters[name] = {
+            "location": info["location"],
+            "spread": info["spread"],
+            "transform": info.get("transform", "logit"),
+        }
+    return {"n": int(beta_types["n"]), "parameters": parameters}
+
+
+def _types_spec_for_solve(run, registry_root):
+    """The types block to expand ``theta_best`` with, and where it came from.
+
+    The run's own record (``summary.json``) is the authority, because the
+    spec file in the registry may have changed since the run. When both
+    exist they must agree on ``n`` and on the parameter names; a
+    disagreement is an error rather than a silent switch of model.
+    """
+    from_record = types_spec_from_record(run.get("beta_types"))
+    from_file = types_spec_for_run(run, registry_root)
+    if from_record is None and from_file is None:
+        return None
+    if from_record is not None and from_file is not None:
+        same_n = int(from_record["n"]) == int(from_file.get("n", -1))
+        same_names = set(from_record["parameters"]) == set(from_file.get("parameters") or {})
+        if not (same_n and same_names):
+            raise ValueError(
+                "the run's beta_types record and the registry's spec file disagree "
+                f"on the types block (record: {from_record}; file: {from_file}); "
+                "re-solving would use a different model from the estimation")
+    if from_record is not None:
+        return from_record
+    # An older run without the record: the file is the only source.
+    return from_file
+
+
 def solve_at_estimates(run, registry_root, grid=None, method_switch=None):
     """Re-solve the model at ``theta_best``.
 
@@ -235,12 +289,18 @@ def solve_at_estimates(run, registry_root, grid=None, method_switch=None):
     registry_dir = str(Path(registry_root) / run["registry"])
     factory = run["spec_factory"]
     calib_overrides = dict(run.get("calib_overrides") or {})
-    types_spec = types_spec_for_run(run, registry_root)
+    types_spec = _types_spec_for_solve(run, registry_root)
 
     if types_spec is None:
         members = [(1.0, dict(run["theta_best"]))]
     else:
         members = expand_types(run["theta_best"], types_spec)
+
+    # Every calibration handed to solve() must consist of names the solver
+    # will read; solve() ignores unknown names silently (the gamma_c defect).
+    keys = resolved_calibration_keys(registry_dir, factory)
+    for _share, calib_k in members:
+        check_parameter_names(keys, list(calib_k), calib_overrides, None)
 
     solved = []
     for share, calib_k in members:
@@ -386,11 +446,19 @@ def fit_at_estimates(run, sim_moments, data_moments):
     -------
     list of dict
         Rows ``moment``, ``data``, ``simulated``, ``residual``,
-        ``contribution``, ``contribution_pct``. The contribution is
-        ``w * (sim - data)^2`` with ``w = 1/data^2`` when
-        ``|data| >= 1`` and ``w = 1`` otherwise, which is kikku's
-        default weight. ``contribution_pct`` is 100 times the share of
-        the sum of contributions.
+        ``contribution``, ``contribution_pct``, ``penalised``. The
+        contribution is ``w * (sim - data)^2`` with ``w = 1/data^2`` when
+        ``|data| >= 1`` and ``w = 1`` otherwise, which is kikku's default
+        weight. Only keys the moment function produces are scored (a data
+        column the model has no counterpart for is not a model moment). A
+        produced moment that is NaN (an age group outside the simulated
+        horizon, for instance) is scored exactly as kikku's loss scores it:
+        contribution ``NAN_PENALTY`` (1e6), ``penalised`` true, residual
+        NaN. ``contribution_pct`` is 100 times the share of the sum over the
+        finite rows, so the percentages add to 100 over the fit that the
+        parameters can move; the penalised rows carry ``contribution_pct``
+        NaN. Over the driver's filtered target set, the sum of all
+        contributions equals kikku's loss.
     """
     del run  # the run identifies the estimates; the loss uses the two dicts
     keys = sorted(
@@ -401,19 +469,30 @@ def fit_at_estimates(run, sim_moments, data_moments):
     for key in keys:
         data = float(data_moments[key])
         sim = float(sim_moments[key])
-        residual = sim - data
-        contribution = _weight(data) * residual * residual
+        if np.isfinite(sim):
+            residual = sim - data
+            contribution = _weight(data) * residual * residual
+            penalised = False
+        else:
+            residual = float("nan")
+            contribution = float(NAN_PENALTY)
+            penalised = True
         rows.append({
             "moment": key,
             "data": data,
             "simulated": sim,
             "residual": residual,
             "contribution": contribution,
+            "penalised": penalised,
         })
-    total = sum(r["contribution"] for r in rows)
+    finite_total = sum(r["contribution"] for r in rows if not r["penalised"])
     for row in rows:
-        row["contribution_pct"] = (
-            100.0 * row["contribution"] / total if total > 0.0 else 0.0)
+        if row["penalised"]:
+            row["contribution_pct"] = float("nan")
+        else:
+            row["contribution_pct"] = (
+                100.0 * row["contribution"] / finite_total
+                if finite_total > 0.0 else 0.0)
     return rows
 
 
@@ -597,15 +676,18 @@ def write_outputs(run, registry_root, out_dir, grid=None, N=None, seed=None):
             f,
             fieldnames=[
                 "moment", "data", "simulated", "residual",
-                "contribution", "contribution_pct",
+                "contribution", "contribution_pct", "penalised",
             ],
         )
         writer.writeheader()
         writer.writerows(fit_rows)
-    total = sum(r["contribution"] for r in fit_rows)
+    n_penalised = sum(1 for r in fit_rows if r["penalised"])
+    finite_total = sum(r["contribution"] for r in fit_rows if not r["penalised"])
+    total = finite_total + n_penalised * float(NAN_PENALTY)
     print(
         f"sum of contributions: {total:.8f}  "
-        f"objective: {run['objective']}")
+        f"(finite fit {finite_total:.8f} + {n_penalised} penalised moments x "
+        f"{NAN_PENALTY:g})  objective: {run['objective']}")
 
     cohort_rows = _cohort_rows(run, registry_root, sim_moments, data_moments)
     cohort_path = out_dir / "cohort_means.csv"

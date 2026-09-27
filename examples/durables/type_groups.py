@@ -45,6 +45,18 @@ that place in the process, except for ``all``:
                before pooling: outside any solve, inside kikku's
                ``estimate()`` call path;
     all        every rank raises inside every member solve.
+
+When the variable is set the module prints a warning on import, so a
+production run cannot carry it unnoticed.
+
+Termination after an exception that escapes ``estimate()`` itself (a
+checkpoint that cannot be written, for instance): the ``finally`` releases
+the workers from the worker loop, but they then wait in the collectives
+that follow ``estimate()`` while the root propagates the exception. The
+process group ends because the driver is launched with ``python -m mpi4py``,
+which aborts every rank when one rank dies with an uncaught exception; the
+PBS scripts all launch that way, and a launch without ``-m mpi4py`` would
+leave the workers waiting until the walltime.
 """
 
 import os
@@ -63,6 +75,13 @@ SPLIT_CALLS = 0
 
 _FORCE_FAIL_ENV = "FUES_TYPES_FORCE_FAIL"
 _hook_calls = {"member": 0, "root_trial": 0}
+
+if os.environ.get(_FORCE_FAIL_ENV):
+    print(
+        f"WARNING: {_FORCE_FAIL_ENV}={os.environ[_FORCE_FAIL_ENV]!r} is set: "
+        "a type member will be made to fail on purpose. This is a test hook; "
+        "unset it for any real estimation.",
+        file=sys.stderr, flush=True)
 
 
 def check_divisibility(comm, K, n_points=1):

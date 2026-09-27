@@ -18,6 +18,8 @@ import sys
 from datetime import date
 from pathlib import Path
 
+from kikku.run.estimate import NAN_PENALTY
+
 from .tables import _md_table
 
 PARAMETER_ORDER = [
@@ -434,13 +436,20 @@ def _read_fit_rows(run_dir):
         reader = csv.DictReader(f)
         for raw in reader:
             data = float(raw["data"])
-            sim = float(raw["simulated"])
-            if raw.get("residual") not in (None, ""):
-                resid = float(raw["residual"])
+            sim = float(raw["simulated"]) if raw.get("simulated") not in (None, "") else math.nan
+            penalised = not math.isfinite(sim)
+            if penalised:
+                # A NaN simulated moment enters kikku's loss as the fixed
+                # penalty, not as a squared residual.
+                resid = math.nan
+                contrib = float(NAN_PENALTY)
             else:
-                resid = sim - data
-            w = _smm_weight(data)
-            contrib = w * (sim - data) ** 2
+                if raw.get("residual") not in (None, ""):
+                    resid = float(raw["residual"])
+                else:
+                    resid = sim - data
+                w = _smm_weight(data)
+                contrib = w * (sim - data) ** 2
             rows.append(
                 {
                     "moment": raw["moment"],
@@ -448,14 +457,18 @@ def _read_fit_rows(run_dir):
                     "simulated": sim,
                     "residual": resid,
                     "contribution": contrib,
+                    "penalised": penalised,
                 }
             )
-    total = sum(r["contribution"] for r in rows)
-    if total > 0 and math.isfinite(total):
-        for r in rows:
-            r["contribution_pct"] = 100.0 * r["contribution"] / total
-    else:
-        for r in rows:
+    # Shares of the loss are taken over the finite rows, the part of the fit
+    # the parameters can move; penalised rows are shown with a NaN share.
+    finite_total = sum(r["contribution"] for r in rows if not r["penalised"])
+    for r in rows:
+        if r["penalised"]:
+            r["contribution_pct"] = math.nan
+        elif finite_total > 0:
+            r["contribution_pct"] = 100.0 * r["contribution"] / finite_total
+        else:
             r["contribution_pct"] = 0.0
     rows.sort(key=lambda r: r["contribution"], reverse=True)
     return rows, at_best
@@ -518,6 +531,7 @@ def _write_fit_csv(path, rows):
                 "residual",
                 "contribution",
                 "contribution_pct",
+                "penalised",
             ],
         )
         writer.writeheader()
@@ -530,6 +544,7 @@ def _write_fit_csv(path, rows):
                     "residual": r["residual"],
                     "contribution": r["contribution"],
                     "contribution_pct": r["contribution_pct"],
+                    "penalised": r.get("penalised", False),
                 }
             )
     return path
