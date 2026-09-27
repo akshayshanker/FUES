@@ -461,10 +461,78 @@ def _read_fit_rows(run_dir):
     return rows, at_best
 
 
-def _fmt_fit_num(value):
+def _fmt_fit_display(value):
+    """Four significant figures; comma-grouped integers when |value| > 1e4.
+
+    ``'{:.4g}'`` is the rule for ordinary cells (0.2645, 1.182). Above
+    1e4 that format switches to scientific notation (1.478e+05); those
+    values are printed as rounded integers with thousands separators
+    (147,759) so a level moment in Australian dollars stays readable.
+    """
     if not _is_finite(value):
         return "n/a"
-    return f"{float(value):.16g}"
+    v = float(value)
+    if abs(v) > 1e4:
+        return f"{int(round(v)):,}"
+    return f"{v:.4g}"
+
+
+def _fmt_fit_pct(value):
+    """Contribution share of the loss, two decimal places."""
+    if not _is_finite(value):
+        return "n/a"
+    return f"{float(value):.2f}"
+
+
+def _format_fit_display_rows(rows):
+    """Display rows: moment, data, simulated, residual, contribution_pct.
+
+    The raw ``contribution`` column is omitted from the displayed table;
+    it remains in the full-precision CSV written by
+    :func:`write_estimation_tables`.
+    """
+    formatted = []
+    for r in rows:
+        formatted.append(
+            {
+                "moment": r["moment"],
+                "data": _fmt_fit_display(r["data"]),
+                "simulated": _fmt_fit_display(r["simulated"]),
+                "residual": _fmt_fit_display(r["residual"]),
+                "contribution_pct": _fmt_fit_pct(r["contribution_pct"]),
+            }
+        )
+    return formatted
+
+
+def _write_fit_csv(path, rows):
+    """Write the fit rows at full precision, including contribution."""
+    path = Path(path)
+    with path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(
+            f,
+            fieldnames=[
+                "moment",
+                "data",
+                "simulated",
+                "residual",
+                "contribution",
+                "contribution_pct",
+            ],
+        )
+        writer.writeheader()
+        for r in rows:
+            writer.writerow(
+                {
+                    "moment": r["moment"],
+                    "data": r["data"],
+                    "simulated": r["simulated"],
+                    "residual": r["residual"],
+                    "contribution": r["contribution"],
+                    "contribution_pct": r["contribution_pct"],
+                }
+            )
+    return path
 
 
 def fit_table(run_dir, fmt="md", top_n=None):
@@ -474,6 +542,9 @@ def fit_table(run_dir, fmt="md", top_n=None):
     the lifecycle tool), otherwise ``fit_table.csv``. In the latter case
     the caption states that the simulated column is the last
     cross-entropy evaluation, not the evaluation at ``theta_best``.
+    Displayed columns are moment, data, simulated, residual and
+    contribution percent (two decimals). Data, simulated and residual
+    use four significant figures.
     """
     if fmt not in ("md", "tex"):
         raise ValueError(f"fmt must be 'md' or 'tex', got {fmt!r}")
@@ -481,19 +552,8 @@ def fit_table(run_dir, fmt="md", top_n=None):
     if top_n is not None:
         rows = rows[: int(top_n)]
     caption = _FIT_CAPTION_AT_BEST if at_best else _FIT_CAPTION_LAST_EVAL
-    cols = ["moment", "data", "simulated", "residual", "contribution", "contribution_pct"]
-    formatted = []
-    for r in rows:
-        formatted.append(
-            {
-                "moment": r["moment"],
-                "data": _fmt_fit_num(r["data"]),
-                "simulated": _fmt_fit_num(r["simulated"]),
-                "residual": _fmt_fit_num(r["residual"]),
-                "contribution": _fmt_fit_num(r["contribution"]),
-                "contribution_pct": _fmt_fit_num(r["contribution_pct"]),
-            }
-        )
+    cols = ["moment", "data", "simulated", "residual", "contribution_pct"]
+    formatted = _format_fit_display_rows(rows)
     if fmt == "md":
         return _md_table(formatted, cols, caption, params=None)
     tex_cols = [
@@ -501,7 +561,6 @@ def fit_table(run_dir, fmt="md", top_n=None):
         "data",
         "simulated",
         "residual",
-        "contribution",
         r"contribution \%",
     ]
     tex_rows = []
@@ -512,7 +571,6 @@ def fit_table(run_dir, fmt="md", top_n=None):
                 "data": r["data"],
                 "simulated": r["simulated"],
                 "residual": r["residual"],
-                "contribution": r["contribution"],
                 r"contribution \%": r["contribution_pct"],
             }
         )
@@ -522,7 +580,7 @@ def fit_table(run_dir, fmt="md", top_n=None):
 
 
 def write_estimation_tables(runs, out_dir, fits=()):
-    """Write ``parameters.md/.tex`` and one fit pair per ``fits`` entry.
+    """Write ``parameters.md/.tex`` and one fit triple per ``fits`` entry.
 
     Parameters
     ----------
@@ -532,7 +590,10 @@ def write_estimation_tables(runs, out_dir, fits=()):
     out_dir : path
         Destination folder, created if needed.
     fits : iterable of (label, run_dir)
-        Each pair writes ``fit_<label>.md`` and ``fit_<label>.tex``.
+        Each pair writes ``fit_<label>.md``, ``fit_<label>.tex`` and
+        ``fit_<label>.csv``. The CSV keeps full precision, including
+        the raw SMM contribution; the Markdown and LaTeX tables are
+        the rounded display form.
 
     Returns
     -------
@@ -549,6 +610,8 @@ def write_estimation_tables(runs, out_dir, fits=()):
         path.write_text(text, encoding="utf-8")
         written.append(path)
     for label, run_dir in fits:
+        rows, _at_best = _read_fit_rows(run_dir)
+        written.append(_write_fit_csv(out_dir / f"fit_{label}.csv", rows))
         for fmt in ("md", "tex"):
             path = out_dir / f"fit_{label}.{fmt}"
             path.write_text(fit_table(run_dir, fmt=fmt), encoding="utf-8")

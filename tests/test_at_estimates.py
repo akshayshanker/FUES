@@ -22,7 +22,9 @@ Oracles
 """
 
 import csv
+import json
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -246,6 +248,84 @@ def test_write_outputs_and_objective_reconciliation(run, tmp_path):
         cohort_rows = list(csv.DictReader(f))
     assert cohort_rows
     assert set(cohort_rows[0]) >= {"age group", "variable", "data", "simulated"}
+
+
+def _copy_fixture_without_manifest(src, dest):
+    dest.mkdir(parents=True)
+    for name in ("summary.json", "theta_best.json", "theta_mean.json", "theta_se.json"):
+        shutil.copy2(src / name, dest / name)
+    assert not (dest / "manifest.json").exists()
+
+
+def test_load_run_infers_layout_without_manifest(tmp_path):
+    """Without manifest.json, registry and spec come from the folder layout.
+
+    ``<tmp>/separable/baseline_large_egm/est_x/`` infers registry
+    ``separable``, spec ``baseline_large_egm``, factory
+    ``spec_factory.yaml`` and grid ``None``. ``solve_at_estimates``
+    raises without a grid and succeeds when one is passed. The same
+    layout with spec folder ``baseline_large_egm_males`` infers
+    ``spec_factory_males.yaml``.
+    """
+    dest = tmp_path / "separable" / "baseline_large_egm" / "est_x"
+    _copy_fixture_without_manifest(RUN_DIR, dest)
+    run = at_estimates.load_run(dest)
+    assert run["registry"] == "separable"
+    assert run["spec_name"] == "baseline_large_egm"
+    assert run["spec_factory"] == "spec_factory.yaml"
+    assert run["grid"] is None
+
+    with pytest.raises(ValueError, match="grid"):
+        at_estimates.solve_at_estimates(run, REGISTRY_ROOT)
+
+    solved = at_estimates.solve_at_estimates(
+        run, REGISTRY_ROOT, grid={"n_a": 30, "n_h": 30, "n_w": 30},
+    )
+    assert len(solved) == 1
+    share, nest, grids = solved[0]
+    assert share == 1.0
+    assert nest is not None
+    assert grids is not None
+
+    dest_males = tmp_path / "separable" / "baseline_large_egm_males" / "est_x"
+    _copy_fixture_without_manifest(RUN_DIR, dest_males)
+    run_males = at_estimates.load_run(dest_males)
+    assert run_males["registry"] == "separable"
+    assert run_males["spec_name"] == "baseline_large_egm_males"
+    assert run_males["spec_factory"] == "spec_factory_males.yaml"
+    assert run_males["grid"] is None
+
+
+@pytest.mark.skipif(
+    not TYPES_RUN_DIRS,
+    reason="types fixture not yet produced (Task E2)",
+)
+def test_types_fixture_nests_and_panels_carry_summary_nodes():
+    """The four re-solved nests and the pooled panels match summary nodes.
+
+    ``solve_at_estimates`` returns four entries; each nest's
+    ``keeper_cons`` calibration ``beta`` equals the corresponding
+    ``summary.json['beta_types']['nodes']`` value. The pooled panels
+    carry ``type_idx`` and ``beta`` taking exactly those four nodes.
+    """
+    types_dir = TYPES_RUN_DIRS[0]
+    summary = json.loads((types_dir / "summary.json").read_text())
+    nodes = np.asarray(summary["beta_types"]["nodes"], dtype=np.float64)
+    run = at_estimates.load_run(types_dir)
+    solved = at_estimates.solve_at_estimates(run, REGISTRY_ROOT)
+    assert len(solved) == 4
+    nest_betas = np.array(
+        [float(_stage(nest).calibration["beta"]) for _share, nest, _grids in solved],
+        dtype=np.float64,
+    )
+    np.testing.assert_allclose(nest_betas, nodes, rtol=0, atol=0)
+
+    sim_data = at_estimates.simulate_at_estimates(run, solved, N=200)
+    assert "type_idx" in sim_data
+    assert "beta" in sim_data
+    unique = np.unique(sim_data["beta"])
+    np.testing.assert_allclose(np.sort(unique), np.sort(nodes), rtol=0, atol=0)
+    assert np.array_equal(sim_data["beta"], nodes[sim_data["type_idx"]])
 
 
 def test_gadi_guard_requires_out(monkeypatch, run):

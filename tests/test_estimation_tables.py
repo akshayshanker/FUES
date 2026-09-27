@@ -7,11 +7,18 @@ Oracles
   ``beta`` and ``beta_bar``, three otherwise). The cell regex is spec 7-E.
 * Row order: the module-level ``PARAMETER_ORDER``, then any other name
   alphabetically. A synthetic two-run table is the oracle for ``n/a``.
-* Fit contributions: ``w (simulated - data)^2`` with
+* Fit contributions: checked on the full-precision
+  ``fit_<label>.csv`` written by ``write_estimation_tables``.
+  ``contribution == w (simulated - data)^2`` with
   ``w = 1 / data^2`` when ``|data| >= 1`` and ``w = 1`` otherwise, the
   default weights of ``kikku.run.estimate.make_criterion``
   (``kikku/run/estimate.py`` lines 138-143). Tolerance ``1e-9``.
-  The sum-to-100 property of ``contribution_pct`` is not an oracle.
+  The displayed Markdown table drops the raw contribution column and
+  prints data, simulated and residual at four significant figures
+  (comma-grouped integers when ``|value| > 1e4``) and
+  ``contribution_pct`` to two decimals, sorted by contribution
+  descending. The sum-to-100 property of ``contribution_pct`` is not
+  an oracle.
 * Caption provenance: spec 5.4 / 7-E, when ``fit_table_at_best.csv`` is
   absent.
 * Gadi guard: spec 5.7; ``os.path.isdir("/scratch/tp66")`` is patched.
@@ -19,6 +26,7 @@ Oracles
 
 from __future__ import annotations
 
+import csv
 import json
 import os
 import re
@@ -46,6 +54,12 @@ TYPES_ROOT = REPO / "tests" / "fixtures" / "estimation_run_types"
 
 CELL_RE = re.compile(r"^-?\d+\.\d{3,4} \(\d+\.\d+\)$")
 FOUR_DEC = {"beta", "beta_bar"}
+
+# Display cells: comma-grouped integers above 1e4, otherwise '{:.4g}'.
+FIT_NUM_RE = re.compile(
+    r"^-?(?:\d{1,3}(?:,\d{3})+|(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?)$"
+)
+FIT_PCT_RE = re.compile(r"^-?\d+\.\d{2}$")
 
 
 def _md_rows(text):
@@ -128,26 +142,60 @@ def test_parameter_table_tex_has_table_and_run_symbols():
     assert LATEX_SYMBOLS["rho"] == r"\rho"
 
 
-def test_fit_table_contribution_identity():
-    """Each displayed contribution equals the SMM weighted squared residual."""
-    text = fit_table(RUN_DIR, fmt="md")
-    rows = _md_rows(text)
-    assert rows
-    headers = set(rows[0])
-    assert {"moment", "data", "simulated", "residual", "contribution_pct"} <= headers
-    assert "contribution" in headers, (
-        "the table must show contribution so the SMM identity can be checked "
-        "from the displayed columns (spec 7-E); the CSV contribution is "
-        "unweighted (kikku diagnostics without weights)"
-    )
+def test_fit_table_csv_weight_identity_and_md_rounding(tmp_path):
+    """CSV keeps full precision for the SMM identity; Markdown is rounded.
 
-    for row in rows:
+    The weight identity is ``contribution == w (simulated - data)^2``
+    with ``w = 1/data^2`` when ``|data| >= 1`` else 1, checked at 1e-9
+    on ``fit_<label>.csv``. The Markdown table drops the raw
+    contribution column, prints data/simulated/residual at four
+    significant figures (comma-grouped integers when ``|value| > 1e4``),
+    prints ``contribution_pct`` to two decimals, and follows the CSV
+    sort order (contribution descending).
+    """
+    run = read_run(RUN_DIR)
+    write_estimation_tables([("saved", run)], tmp_path, fits=[("saved", RUN_DIR)])
+    csv_path = tmp_path / "fit_saved.csv"
+    assert csv_path.is_file()
+    with csv_path.open(newline="") as f:
+        csv_rows = list(csv.DictReader(f))
+    assert csv_rows
+    assert set(csv_rows[0]) >= {
+        "moment",
+        "data",
+        "simulated",
+        "residual",
+        "contribution",
+        "contribution_pct",
+    }
+
+    contributions = []
+    for row in csv_rows:
         data = float(row["data"])
         sim = float(row["simulated"])
         contrib = float(row["contribution"])
         w = (1.0 / data ** 2) if abs(data) >= 1.0 else 1.0
         expected = w * (sim - data) ** 2
         assert abs(contrib - expected) < 1e-9, (row["moment"], contrib, expected)
+        contributions.append(contrib)
+    assert contributions == sorted(contributions, reverse=True)
+
+    text = fit_table(RUN_DIR, fmt="md")
+    md_rows = _md_rows(text)
+    assert md_rows
+    headers = set(md_rows[0])
+    assert {"moment", "data", "simulated", "residual", "contribution_pct"} <= headers
+    assert "contribution" not in headers
+    assert [r["moment"] for r in md_rows] == [r["moment"] for r in csv_rows]
+
+    for row in md_rows:
+        for col in ("data", "simulated", "residual"):
+            cell = row[col]
+            assert FIT_NUM_RE.match(cell), (row["moment"], col, cell)
+        assert FIT_PCT_RE.match(row["contribution_pct"]), (
+            row["moment"],
+            row["contribution_pct"],
+        )
 
 
 def test_fit_table_caption_states_last_evaluation_when_at_best_absent():
@@ -170,6 +218,7 @@ def test_write_estimation_tables_writes_expected_files(tmp_path):
     assert names == {
         "parameters.md",
         "parameters.tex",
+        "fit_saved.csv",
         "fit_saved.md",
         "fit_saved.tex",
     }

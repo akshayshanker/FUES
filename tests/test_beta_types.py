@@ -199,6 +199,37 @@ def test_discretise_types_default_transform_is_logit():
     assert np.array_equal(shares, shares_beta)
 
 
+def test_expand_types_zero_spread_gives_identical_calibrations():
+    """sigma_beta exactly 0.0 yields K identical calibrations at beta_bar."""
+    theta = {"beta_bar": 0.94, "sigma_beta": 0.0, "alpha": 0.6, "tau": 0.12}
+    types_spec = {
+        "n": 4,
+        "parameters": {
+            "beta": {"location": "beta_bar", "spread": "sigma_beta"},
+        },
+    }
+    records = expand_types(theta, types_spec)
+    assert len(records) == 4
+    for share, calib in records:
+        assert share == 0.25
+        assert calib["beta"] == 0.94
+        assert calib["alpha"] == 0.6 and calib["tau"] == 0.12
+        assert set(calib) == {"alpha", "tau", "beta"}
+    assert all(calib == records[0][1] for _share, calib in records)
+
+
+def test_draw_types_shares_not_summing_to_one_stay_in_range():
+    """Three shares of 1/3 in float64 never produce an index >= K."""
+    shares = np.array([1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0], dtype=np.float64)
+    k = len(shares)
+    for seed in range(25):
+        idx = draw_types(10000, shares, seed)
+        assert idx.dtype == np.int64
+        assert idx.min() >= 0
+        assert idx.max() < k
+        assert not np.any(idx >= k)
+
+
 def test_expand_types_drops_location_and_spread_and_sets_beta():
     theta = {"beta_bar": 0.94, "sigma_beta": 0.2, "alpha": 0.6, "tau": 0.12}
     # transform omitted: default is logit (spec 5.6).
@@ -461,6 +492,25 @@ def test_initial_particles_do_not_depend_on_beta(solved_two_betas):
     for key in p_lo:
         assert p_lo[key].dtype == p_hi[key].dtype, key
         assert np.array_equal(p_lo[key], p_hi[key]), key
+
+
+def test_simulate_lifecycle_handles_a_type_with_zero_agents(solved_two_betas):
+    """A birth draw that leaves one type empty must not raise.
+
+    Shares (1.0, 0.0) force every agent onto type 0. The result has
+    shape (70, 8) and every ``type_idx`` is 0.
+    """
+    nest_a, grids_a = solved_two_betas[0.90]
+    nest_b, grids_b = solved_two_betas[0.97]
+    types = [(1.0, nest_a, grids_a), (0.0, nest_b, grids_b)]
+    sim = simulate_lifecycle(
+        nest_a, grids_a, N=8, seed=99, types=types,
+    )
+    assert sim["c"].shape == (70, 8)
+    assert sim["a"].shape == (70, 8)
+    assert sim["type_idx"].shape == (8,)
+    assert np.array_equal(sim["type_idx"], np.zeros(8, dtype=np.int64))
+    assert np.array_equal(sim["beta"], np.full(8, 0.90))
 
 
 def test_two_types_walk_each_agent_with_its_own_policy(solved_two_betas):
