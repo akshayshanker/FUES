@@ -31,6 +31,17 @@ Layout: scripts regrouped into `selfgen/`, `data-estimation/separable/females/`,
 `scripts/run_pbs.sh` (now recursive, patterns match the relative path,
 `old/` skipped) and `docs/running-on-gadi.md` updated.
 
+Python environment staged on jobfs. With twelve 4,160-rank jobs re-importing
+the scientific stack from the venv on `/home` (NFS) at every 3-iteration
+segment start, `strace` on a rank showed `stat` calls of 0.1–0.5 s each, ranks
+blocked in `stat`/`openat` with the node 99% idle, and segment start-up of
+20+ minutes against ~3 in September (the σ_w test's segments grew from
+586–641 s to 1,300–1,734 s as the xxl jobs started). Every script now copies
+`~/venvs/fues` and the repo's `examples/` and `src/` once per node onto jobfs
+(`mpiexec -n <nodes> --map-by ppr:1:node`) and runs Python from the copy;
+`RUN_ID` and `RESUME` overrides let a job continue another job's checkpoint
+(`batches/resubmit_2026-09-28_nfs_storm.sh` records the repair).
+
 Retired to `old/` after reading every job log since 30 Jun 2026: the male
 hugemem scripts (0 converged in 8 runs; 192 hugemem cores are capped at 5h,
 which allows 100 iterations, and the male estimation needs more) and
