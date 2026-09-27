@@ -16,11 +16,11 @@
 # ~104 ranks per estimation point.
 # ---------------------------------------------------------------
 
-MOD="syntax/separable"
-SPEC="selfgen_sweep_gamma_c_egm.yaml"
-SPEC_FACTORY="spec_factory_males.yaml"   # male calibration overlay (main_males); selfgen self-generates data
-GRID=300
-N_SIM=10000
+MOD="${MOD:-syntax/separable}"
+SPEC="${SPEC:-selfgen_sweep_gamma_c_egm.yaml}"
+SPEC_FACTORY="${SPEC_FACTORY:-spec_factory_males.yaml}"   # male calibration overlay (main_males); selfgen self-generates data
+GRID="${GRID:-300}"
+N_SIM="${N_SIM:-10000}"
 
 module purge
 module load python3/3.12.1

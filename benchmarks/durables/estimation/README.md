@@ -63,6 +63,26 @@ The NEGM scripts use the same estimation spec as their EGM twin (the
 `--methods-override adjuster_cons.upper_env.upper_envelope=NEGM`; the
 separate spec name keeps EGM and NEGM results in separate folders.
 
+## Variants through `qsub -v`
+
+Every active script reads `MOD`, `SPEC`, `SPEC_FACTORY`, `GRID` and `N_SIM`
+from the environment before falling back to its defaults, so one script
+serves a family of runs:
+
+```bash
+qsub -N xxlEGM_s7 -v SPEC=baseline_xlarge_egm_seed7.yaml \
+     benchmarks/durables/estimation/data-estimation/separable/females/run_xxl_egm.pbs
+```
+
+Results are filed under the spec's name, so a variant needs its own spec
+file (a copy with the changed line and a title noting the change):
+`baseline_xlarge_*_seed{7,11,99,123,2026}.yaml` change only
+`sampling_seed`; `baseline_xlarge_egm*_nsim20k.yaml` are the base specs under
+a new name for `N_SIM=20000` runs; `selfgen_sweep_gamma_c_low_{egm,negm}.yaml`
+sweep the five lowest γ_c values with 1,040 CE samples per point.
+`batches/submit_tier1.sh` and `submit_tier2.sh` are the 28 Sep 2026 run
+plan (NEGM at xxl, CE-seed robustness, low-γ_c recovery, N_SIM sensitivity).
+
 ## Retired scripts (`old/`)
 
 Kept for reference; `scripts/run_pbs.sh` skips them. Retired on 28 Sep 2026

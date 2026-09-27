@@ -16,10 +16,10 @@
 # ~104 ranks per estimation point.
 # ---------------------------------------------------------------
 
-MOD="syntax/separable"
-SPEC="selfgen_sweep_gamma_c_egm.yaml"
-GRID=300
-N_SIM=10000
+MOD="${MOD:-syntax/separable}"
+SPEC="${SPEC:-selfgen_sweep_gamma_c_egm.yaml}"
+GRID="${GRID:-300}"
+N_SIM="${N_SIM:-10000}"
 
 module purge
 module load python3/3.12.1

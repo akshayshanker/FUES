@@ -20,12 +20,12 @@
 # iterations as possible). Process restarted each segment to release RSS.
 # ---------------------------------------------------------------
 
-MOD="syntax/separable"
-SPEC="baseline_xlarge_negm_males.yaml"
-SPEC_FACTORY="spec_factory_males.yaml"
+MOD="${MOD:-syntax/separable}"
+SPEC="${SPEC:-baseline_xlarge_negm_males.yaml}"
+SPEC_FACTORY="${SPEC_FACTORY:-spec_factory_males.yaml}"
 METHODS="--methods-override adjuster_cons.upper_env.upper_envelope=NEGM"
-GRID=600
-N_SIM=10000
+GRID="${GRID:-600}"
+N_SIM="${N_SIM:-10000}"
 
 module purge
 module load python3/3.12.1
