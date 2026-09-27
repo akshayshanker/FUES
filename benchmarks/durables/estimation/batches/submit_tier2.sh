@@ -1,5 +1,5 @@
 #!/bin/bash
-# submit_tier2.sh — run plan of 28 Sep 2026, tier 2 (about 200k SU, 6 jobs):
+# submit_tier2.sh — run plan of 28 Sep 2026, tier 2 (about 260k SU, 8 jobs):
 #   * low-gamma_c recovery sweeps with 1,040 CE samples per point (double):
 #     does more sampling fix recovery below gamma_c ~ 3.3?
 #   * xxl EGM, both sexes, with N_SIM=20000: simulation-noise sensitivity
@@ -24,4 +24,4 @@ for seed in 11 99; do
     sub "xxlEGM_s$seed"  "$D/females/run_xxl_egm.pbs"      "SPEC=baseline_xlarge_egm_seed$seed.yaml,PURPOSE=CE-seed-robustness"
     sub "xxlEGMm_s$seed" "$D/males/run_xxl_egm_males.pbs"  "SPEC=baseline_xlarge_egm_males_seed$seed.yaml,PURPOSE=CE-seed-robustness"
 done
-echo "6 jobs submitted. Watch with: qstat -u \$USER"
+echo "8 jobs submitted. Watch with: qstat -u \$USER"
