@@ -50,7 +50,19 @@ New: `run_xxl_negm.pbs` (6h) and `run_xxl_negm_males.pbs` (7h), NEGM at the
 `examples/durables/syntax/separable/estimation/baseline_xlarge_negm_males.yaml`
 (the male EGM spec under a NEGM title, as the female NEGM spec already is;
 the method itself comes from `--methods-override`). The `batches/`
-submitters now launch the xlarge/xxl set. Every converged run since 10 Sep
+submitters now launch the xlarge/xxl set. All active scripts take `MOD`,
+`SPEC`, `SPEC_FACTORY`, `GRID` and `N_SIM` from the environment (`qsub -v`),
+and 24 spec variants were added for the 28 Sep run plan
+(`batches/submit_tier1.sh`, `submit_tier2.sh`): CE `sampling_seed` 7, 11, 99,
+123 and 2026 for the four xxl estimates, `N_SIM=20000` twins, and low-γ_c
+recovery sweeps with 1,040 samples per point; settings-robustness twins
+(`_hmax8`, `_hmax12p5`, `_hmax15`, `_nwage6`, `_nwage8`) for the female xlarge
+EGM and NEGM specs (`batches/submit_tier2b_settings.sh`). Every job now writes
+a run manifest (`manifest_est_<run id>.json` beside its results and a line in
+`manifests/runs.csv`: job id, commit, spec, overrides, ranks, purpose), takes
+`NRANKS`, `PPR`, `ITERS_PER_RESTART`, `EXTRA_SETTINGS` and `RESULTS_ROOT` from
+the environment, and `scripts/collect_estimation_results.py` joins manifests,
+`summary.json` files and PBS logs into one table. Every converged run since 10 Sep
 reproduced the earlier loss to six decimals, so a re-run of an unchanged
 spec only confirms a result already under `/g/data/tp66/results`.
 

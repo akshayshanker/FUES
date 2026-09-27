@@ -72,6 +72,54 @@ The NEGM scripts use the same estimation spec as their EGM twin (the
 `--methods-override adjuster_cons.upper_env.upper_envelope=NEGM`; the
 separate spec name keeps EGM and NEGM results in separate folders.
 
+## Variants through `qsub -v`
+
+Every active script reads `MOD`, `SPEC`, `SPEC_FACTORY`, `GRID` and `N_SIM`
+from the environment before falling back to its defaults, so one script
+serves a family of runs:
+
+```bash
+qsub -N xxlEGM_s7 -v SPEC=baseline_xlarge_egm_seed7.yaml \
+     benchmarks/durables/estimation/data-estimation/separable/females/run_xxl_egm.pbs
+```
+
+Results are filed under the spec's name, so a variant needs its own spec
+file (a copy with the changed line and a title noting the change):
+`baseline_xlarge_*_seed{7,11,99,123,2026}.yaml` change only
+`sampling_seed`; `baseline_xlarge_egm*_nsim20k.yaml` are the base specs under
+a new name for `N_SIM=20000` runs; `selfgen_sweep_gamma_c_low_{egm,negm}.yaml`
+sweep the five lowest γ_c values with 1,040 CE samples per point.
+`batches/submit_tier1.sh` and `submit_tier2.sh` are the 28 Sep 2026 run
+plan (NEGM at xxl, CE-seed robustness, low-γ_c recovery, N_SIM sensitivity).
+
+## Robustness campaign, 28–30 Sep 2026
+
+Dimensions and where each lives:
+
+| Dimension | Values | How it is set | Spec name carries |
+|---|---|---|---|
+| CE sampling seed | 42 (base), 7, 123, 2026, 11, 99 | `sampling_seed` inside the spec | `_seed<n>` |
+| Upper envelope | EGM (FUES), NEGM | `--methods-override …=NEGM` in the script | `_egm` / `_negm` |
+| Sex | females (base calibration), males | script (`spec_factory_males.yaml`, `_14_1` moments) | `_males` |
+| Income grid `N_wage` | 4 (base), 6, 8 | `EXTRA_SETTINGS=N_wage=6`; needs 56 ranks/node (`NRANKS=2080,PPR=7`) | `_nwage<n>` |
+| Housing ceiling `h_max` | 10 (base), 8, 12.5, 15 | `EXTRA_SETTINGS=h_max=15;w_max=17.5` (`w_max` keeps its 2.5 gap) | `_hmax<x>` |
+| Simulated agents `N_SIM` | 10000 (base), 20000 | `N_SIM=20000` | `_nsim20k` |
+| CE samples per point (recovery) | 520 (base), 1,040 | ranks per sweep point | `selfgen_sweep_gamma_c_low_*` |
+
+Seed, sex and method variants run at the xxl size (4,160 samples); the
+settings variants at the xlarge size (2,080 samples), whose base results are
+30.953188 (EGM) and 30.926550 (NEGM) for females.
+
+**Recovering a result.** Every job writes
+`<results>/<mod>/<spec>/manifest_est_<run id>.json` (job id, git commit,
+spec, every override, ranks, walltime, purpose) and appends a line to
+`<results>/manifests/runs.csv`; the estimation itself writes `summary.json`
+(θ, SE, objective, converged, iterations) into `est_<run id>/`. The PBS log is
+`/g/data/tp66/logs/durables/<job id>.gadi-pbs.OU`. `scripts/collect_estimation_results.py`
+joins all of these into one CSV/Markdown table with the variant fields as
+columns (run it on Gadi, or on the Mac against the sshfs mount with
+`--results ~/gadi/g/data/tp66/results/durables/estimation --logs ~/gadi/g/data/tp66/logs/durables`).
+
 ## Retired scripts (`old/`)
 
 Kept for reference; `scripts/run_pbs.sh` skips them. Retired on 28 Sep 2026
