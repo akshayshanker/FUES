@@ -1,11 +1,5 @@
-# Estimation spec for durables
-#
-# Estimates 4 behavioral parameters against moments the model can produce.
-# Uses identity weighting (Phase A).
-#
-# Two data modes:
-#   data_source: selfgen    -> generate "data" by simulating at theta_true (recovery test)
-#   data_source: precomputed -> load from moments.csv (Eggsandbaskets format)
+# Estimation spec (Cobb-Douglas registry): LARGE NEGM
+# 1000-grid, 1040 samples (10 normalsr nodes), NEGM adjuster override
 #
 # Cobb-Douglas version of the separable file of the same name. alpha is the
 # Cobb-Douglas share of non-durable consumption, not the separable utility
@@ -24,14 +18,14 @@ estimation:
     tau:
       bounds: [0.04, 0.25]
     theta:
-      bounds: [0.5, 3.0]        # terminal-value weight (calibrated 1.3498)
+      bounds: [0.5, 3.0]
 
   method: cross-entropy
   method_options:
-    n_samples: 520
+    n_samples: 1040
     n_elite: 20
     max_iter: 200
-    tol: 1e-9
+    tol: 1e-6
     sampling_seed: 42           # RNG for CE parameter draws (which thetas to try)
     simulation_seed: 99         # RNG for model simulation shocks (CRN — same for all thetas)
     noise_fraction: 0.10        # 10% uniform draws for exploration
