@@ -44,7 +44,22 @@ mkdir -p "$RUN_DIR"
 cd "$RUN_DIR"
 echo "  Run dir:   $(pwd)"
 
-source "$HOME/venvs/fues/bin/activate"
+# --- Stage the Python environment on every node's local disk -----------------
+# With twelve 4,160-rank jobs re-importing the stack from the venv on /home
+# at every segment start, NFS stat calls took 0.1-0.5 s each and a segment's
+# start-up grew from ~3 to 20+ minutes (measured 28 Sep 2026, 03:45). One copy
+# of the venv and of examples/ + src/ per node, then every import is local.
+STAGE="${STAGE:-$PBS_JOBFS/fues_env}"
+NNODES="$(sort -u "$PBS_NODEFILE" | wc -l)"
+echo "  Staging venv + repo onto jobfs of $NNODES node(s) at $(date +%H:%M:%S)"
+mpiexec -n "$NNODES" --map-by ppr:1:node \
+    bash -c 'set -e; mkdir -p "$1/repo"; cp -r "$HOME/venvs/fues" "$1/venv"; cp -r "$2/examples" "$2/src" "$1/repo/"' _ "$STAGE" "$REPO_ROOT"
+[ -x "$STAGE/venv/bin/python3" ] || { echo "ERROR: staging the venv on $STAGE failed" >&2; exit 1; }
+export VIRTUAL_ENV="$STAGE/venv"
+export PATH="$STAGE/venv/bin:$PATH"
+export PYTHONPATH="$STAGE/repo/src:$STAGE/repo"
+export PYTHONDONTWRITEBYTECODE=1
+echo "  Staged at $(date +%H:%M:%S): python=$(command -v python3)"
 RESULTS_ROOT="${RESULTS_ROOT:-/g/data/tp66/results/durables/estimation}"
 
 export OMP_NUM_THREADS=1
@@ -60,7 +75,6 @@ export PYTHONMALLOC=malloc
 export OPENBLAS_NUM_THREADS=1
 export NUMBA_CACHE_DIR=$PBS_JOBFS/numba_cache
 mkdir -p $NUMBA_CACHE_DIR
-find "$HOME/venvs/fues/lib/" -name "*.nbc" -o -name "*.nbi" 2>/dev/null | xargs rm -f 2>/dev/null
 export OMPI_MCA_coll_hcoll_enable=0
 # UCC excluded alongside hcoll: on 23 Sep 2026 (job 179615514) 146 ranks died
 # with SIGBUS inside UCC's shared-memory collectives as nodes ran out of memory.
@@ -76,7 +90,7 @@ WALL_SECONDS=18000              # must match #PBS -l walltime=5:00:00 (5h)
 SAFETY_BUFFER=600               # reserve 10 min for final checkpoint
 START_TS=$(date +%s)
 DEADLINE=$((START_TS + WALL_SECONDS - SAFETY_BUFFER))
-RUN_ID=$(date +%Y%m%d_%H%M%S)
+RUN_ID="${RUN_ID:-$(date +%Y%m%d_%H%M%S)}"   # pass RUN_ID=<earlier run id> with RESUME=1 to continue a checkpointed run
 
 # --- Run manifest: what this job is, written next to its results ------------
 # One JSON per run at $RESULTS_ROOT/<mod>/<spec stem>/manifest_est_<run id>.json
@@ -101,7 +115,7 @@ cat > "$MANIFEST_DIR/manifest_est_$RUN_ID.json" <<MANIFEST_EOF
   "methods": "${METHODS:-}", "nranks": "$NRANKS", "ppr": "$PPR",
   "iters_per_restart": "$ITERS_PER_RESTART", "wall_seconds": "$WALL_SECONDS",
   "ncpus": "$PBS_NCPUS", "queue": "${PBS_QUEUE:-}", "started": "$STARTED",
-  "submitted_from": "$PBS_O_WORKDIR", "purpose": "$PURPOSE"
+  "submitted_from": "$PBS_O_WORKDIR", "purpose": "$PURPOSE", "resumed": "${RESUME:-0}"
 }
 MANIFEST_EOF
 CSV="$RESULTS_ROOT/manifests/runs.csv"
@@ -111,7 +125,7 @@ echo "  Variant: spec=$SPEC | N_SIM=$N_SIM | ranks=$NRANKS | ppr=$PPR | iters/se
 echo "  Manifest: $MANIFEST_DIR/manifest_est_$RUN_ID.json"
 
 RESTART_NUM=0
-RESUME_FLAG=""
+RESUME_FLAG="${RESUME:+--resume}"
 EXIT_CODE=0
 LAST_SEG_DUR=0
 
