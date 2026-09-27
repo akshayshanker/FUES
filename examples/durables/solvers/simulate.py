@@ -602,7 +602,7 @@ def simulate_lifecycle(nest, grids,
     sim_data : dict
         ``(T, N)`` panels including ``c``, ``a_nxt``, ``h_nxt``,
         ``z_idx``, ``discrete``, utility aggregates, etc. With ``types``,
-        also ``beta_type`` (int64, the type index) and ``beta`` (float64).
+        also ``type_idx`` (int64, the type index) and ``beta`` (float64).
     """
     if types is None:
         return simulate_type_subset(
@@ -623,7 +623,8 @@ def simulate_lifecycle(nest, grids,
             use_empirical_init=use_empirical_init,
             init_dispersion=init_dispersion, init_gender=init_gender)))
 
-    return pool_by_type(parts, type_idx, betas, N)
+    member_values = {"beta": betas}
+    return pool_by_type(parts, type_idx, N, member_values)
 
 
 # ---------------------------------------------------------------------------

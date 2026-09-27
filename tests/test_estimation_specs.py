@@ -45,7 +45,8 @@ def test_free_parameters_are_model_parameters(registry, spec_path):
     )
     keys = resolved_calibration_keys(registry, factory)
     mapped = set()
-    for target, blk in types_block(raw).items():
+    parameters = (types_block(raw).get("parameters") or {})
+    for target, blk in parameters.items():
         assert target in keys and target not in spec["free"]
         mapped |= {blk["location"], blk["spread"]}
         assert not (mapped & keys)

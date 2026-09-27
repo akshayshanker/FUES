@@ -27,6 +27,7 @@ from examples.durables.solvers.simulate import (  # noqa: E402
 )
 from examples.durables.solvers.beta_types import (  # noqa: E402
     discretise_beta,
+    discretise_types,
     draw_types,
     expand_types,
     pool_by_type,
@@ -169,9 +170,44 @@ def test_discretise_beta_nodes_increasing_inside_unit_interval(beta_bar, sigma_b
         nodes, closed_form_nodes(beta_bar, sigma_beta), rtol=0, atol=TOL_CLOSED_FORM)
 
 
+def test_discretise_types_log_is_location_times_exp_spread_z():
+    location, spread = 2.0, 0.3
+    values, shares = discretise_types(location, spread, 4, "log")
+    expected = location * np.exp(spread * Z4)
+    assert values.dtype == np.float64
+    assert values.shape == (4,)
+    np.testing.assert_allclose(values, expected, rtol=0, atol=TOL_CLOSED_FORM)
+    assert np.all(np.diff(values) > 0)
+    assert np.array_equal(shares, np.array([0.25, 0.25, 0.25, 0.25]))
+
+
+def test_discretise_types_identity_is_location_plus_spread_z():
+    location, spread = 1.5, 0.2
+    values, shares = discretise_types(location, spread, 4, "identity")
+    expected = location + spread * Z4
+    assert values.dtype == np.float64
+    assert values.shape == (4,)
+    np.testing.assert_allclose(values, expected, rtol=0, atol=TOL_CLOSED_FORM)
+    assert np.all(np.diff(values) > 0)
+    assert np.array_equal(shares, np.array([0.25, 0.25, 0.25, 0.25]))
+
+
+def test_discretise_types_default_transform_is_logit():
+    values, shares = discretise_types(0.94, 0.2, 4)
+    nodes, shares_beta = discretise_beta(0.94, 0.2, 4)
+    assert np.array_equal(values, nodes)
+    assert np.array_equal(shares, shares_beta)
+
+
 def test_expand_types_drops_location_and_spread_and_sets_beta():
     theta = {"beta_bar": 0.94, "sigma_beta": 0.2, "alpha": 0.6, "tau": 0.12}
-    types_spec = {"beta": {"n": 4, "location": "beta_bar", "spread": "sigma_beta"}}
+    # transform omitted: default is logit (spec 5.6).
+    types_spec = {
+        "n": 4,
+        "parameters": {
+            "beta": {"location": "beta_bar", "spread": "sigma_beta"},
+        },
+    }
     records = expand_types(theta, types_spec)
     assert len(records) == 4
     expected = closed_form_nodes(0.94, 0.2)
@@ -183,12 +219,66 @@ def test_expand_types_drops_location_and_spread_and_sets_beta():
     # theta is not mutated
     assert theta == {"beta_bar": 0.94, "sigma_beta": 0.2, "alpha": 0.6, "tau": 0.12}
 
-    with pytest.raises(ValueError):
-        expand_types({"beta_bar": 0.94, "alpha": 0.6}, types_spec)
+
+def test_expand_types_two_logit_parameters_are_comonotonic():
+    theta = {
+        "beta_bar": 0.94, "sigma_beta": 0.2,
+        "alpha_bar": 0.6, "sigma_alpha": 0.15,
+        "tau": 0.12,
+    }
+    types_spec = {
+        "n": 4,
+        "parameters": {
+            "beta": {"location": "beta_bar", "spread": "sigma_beta", "transform": "logit"},
+            "alpha": {"location": "alpha_bar", "spread": "sigma_alpha", "transform": "logit"},
+        },
+    }
+    records = expand_types(theta, types_spec)
+    expected_beta = closed_form_nodes(0.94, 0.2)
+    expected_alpha = closed_form_nodes(0.6, 0.15)
+    assert len(records) == 4
+    for k, (share, calib) in enumerate(records):
+        assert share == 0.25
+        assert set(calib) == {"tau", "beta", "alpha"}
+        assert calib["tau"] == 0.12
+        assert abs(calib["beta"] - expected_beta[k]) <= TOL_CLOSED_FORM
+        assert abs(calib["alpha"] - expected_alpha[k]) <= TOL_CLOSED_FORM
+    # Member 0 carries the smallest value of every listed parameter.
+    assert records[0][1]["beta"] == min(c["beta"] for _, c in records)
+    assert records[0][1]["alpha"] == min(c["alpha"] for _, c in records)
+
+
+def test_expand_types_value_errors():
+    types_spec = {
+        "n": 4,
+        "parameters": {
+            "beta": {"location": "beta_bar", "spread": "sigma_beta", "transform": "logit"},
+        },
+    }
+    theta = {"beta_bar": 0.94, "sigma_beta": 0.2, "alpha": 0.6}
+
     with pytest.raises(ValueError):
         expand_types({"sigma_beta": 0.2, "alpha": 0.6}, types_spec)
     with pytest.raises(ValueError):
+        expand_types({"beta_bar": 0.94, "alpha": 0.6}, types_spec)
+    with pytest.raises(ValueError):
         expand_types({**theta, "beta": 0.95}, types_spec)
+    with pytest.raises(ValueError):
+        expand_types(theta, {"parameters": types_spec["parameters"]})
+    with pytest.raises(ValueError):
+        expand_types(theta, {**types_spec, "n": 0})
+    with pytest.raises(ValueError):
+        expand_types(theta, {
+            "n": 4,
+            "parameters": {
+                "beta": {"location": "beta_bar", "spread": "sigma_beta",
+                         "transform": "boxcox"},
+            },
+        })
+    with pytest.raises(ValueError):
+        expand_types({"beta_bar": 1.2, "sigma_beta": 0.2, "alpha": 0.6}, types_spec)
+    with pytest.raises(ValueError):
+        expand_types({"beta_bar": 0.0, "sigma_beta": 0.2, "alpha": 0.6}, types_spec)
 
 
 def test_draw_types_frequencies_and_determinism():
@@ -287,28 +377,29 @@ def test_pool_by_type_restores_rows_and_marks_type():
         idx = np.flatnonzero(type_idx == k)
         parts.append((idx, {key: arr[..., idx] for key, arr in truth.items()}))
 
-    pooled = pool_by_type(parts, type_idx, betas, N)
+    pooled = pool_by_type(parts, type_idx, N, {"beta": betas})
     for key, arr in truth.items():
         assert pooled[key].dtype == arr.dtype, key
         assert pooled[key].shape == arr.shape, key
         assert np.array_equal(pooled[key], arr), key
-    assert pooled["beta_type"].dtype == np.int64
-    assert np.array_equal(pooled["beta_type"], type_idx)
+    assert pooled["type_idx"].dtype == np.int64
+    assert np.array_equal(pooled["type_idx"], type_idx)
     assert pooled["beta"].dtype == np.float64
     assert np.array_equal(pooled["beta"], betas[type_idx])
-    assert set(pooled) == set(truth) | {"beta_type", "beta"}
+    assert set(pooled) == set(truth) | {"type_idx", "beta"}
 
     # A type with no agents contributes empty arrays and changes nothing.
     empty = (np.zeros(0, dtype=np.int64),
              {key: arr[..., :0] for key, arr in truth.items()})
-    pooled4 = pool_by_type(parts + [empty], type_idx, np.append(betas, 0.99), N)
+    pooled4 = pool_by_type(parts + [empty], type_idx, N,
+                           {"beta": np.append(betas, 0.99)})
     for key, arr in truth.items():
         assert np.array_equal(pooled4[key], arr), key
-    assert np.array_equal(pooled4["beta_type"], type_idx)
+    assert np.array_equal(pooled4["type_idx"], type_idx)
 
     # Parts that do not cover every agent are refused.
     with pytest.raises(ValueError):
-        pool_by_type(parts[:2], type_idx, betas, N)
+        pool_by_type(parts[:2], type_idx, N, {"beta": betas})
 
 
 # --------------------------------------------------------------------------
@@ -338,10 +429,10 @@ def test_golden_digest_with_a_single_type(solved, registry):
     beta = float(_base_stage(nest).calibration["beta"])
     sim = simulate_lifecycle(nest, grids, N=N_GOLD, seed=SEED_GOLD,
                              types=[(1.0, nest, grids)])
-    assert set(sim) == set(GOLDEN[registry]) | {"beta_type", "beta"}
+    assert set(sim) == set(GOLDEN[registry]) | {"type_idx", "beta"}
     _assert_matches_golden(sim, registry)
-    assert sim["beta_type"].dtype == np.int64
-    assert np.array_equal(sim["beta_type"], np.zeros(N_GOLD, dtype=np.int64))
+    assert sim["type_idx"].dtype == np.int64
+    assert np.array_equal(sim["type_idx"], np.zeros(N_GOLD, dtype=np.int64))
     assert sim["beta"].dtype == np.float64
     assert np.array_equal(sim["beta"], np.full(N_GOLD, beta))
 
@@ -355,7 +446,7 @@ def test_golden_digest_via_subset_and_pool(solved, registry):
     assert set(part) == set(GOLDEN[registry])
     _assert_matches_golden(part, registry)
     pooled = pool_by_type([(everyone, part)], np.zeros(N_GOLD, dtype=np.int64),
-                          [beta], N_GOLD)
+                          N_GOLD, {"beta": [beta]})
     _assert_matches_golden(pooled, registry)
 
 
@@ -381,7 +472,7 @@ def test_two_types_walk_each_agent_with_its_own_policy(solved_two_betas):
 
     sim = simulate_lifecycle(nest_lo, grids_lo, N=N_GOLD, seed=SEED_GOLD, types=types)
     type_idx = draw_types(N_GOLD, np.array([0.5, 0.5]), SEED_GOLD)
-    assert np.array_equal(sim["beta_type"], type_idx)
+    assert np.array_equal(sim["type_idx"], type_idx)
     assert set(np.unique(sim["beta"]).tolist()) == {0.90, 0.97}
     assert np.array_equal(sim["beta"], np.where(type_idx == 0, 0.90, 0.97))
     assert 0 < type_idx.sum() < N_GOLD  # both types present
