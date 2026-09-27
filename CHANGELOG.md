@@ -54,6 +54,50 @@ submitters now launch the xlarge/xxl set. Every converged run since 10 Sep
 reproduced the earlier loss to six decimals, so a re-run of an unchanged
 spec only confirms a result already under `/g/data/tp66/results`.
 
+Cobb-Douglas estimation specs under
+`examples/durables/syntax/cobb_douglas/estimation/` copy the separable
+data, targets and sample sizes, with `rho` in place of `gamma_c` and
+`gamma_h` and with `theta` estimated. The unused plotting export
+`cobb_douglas/estimation/moments.csv` is deleted. The driver now
+refuses a free parameter or calibration override whose name is not a
+key of the calibration the solver will use, which closes the defect
+in which the old Cobb-Douglas spec estimated `gamma_c` and the solver
+ignored it. `manifest.json` is written to the results folder as well
+as scratch, and records `spec_factory`, `solver_method`, `git_commit`
+and `beta_types` (`n`, `shares`, and per parameter its `nodes` and
+`implied_mean` at `theta_best`).
+Trial exceptions are logged and counted on every
+rank; when every evaluation fails the driver exits with code 3 even
+though kikku reports convergence. Serial runs accept `--n-samples`;
+serial and MPI runs accept `--n-elite`.
+
+A `types` block replaces free `beta` by
+`beta_bar` and `sigma_beta` on the logit scale
+`x = ln(1/beta - 1)`, discretised as K equiprobable quantiles with
+equal shares. Each agent draws a type once at birth. Under MPI a
+group of K ranks evaluates one candidate (one type per rank). Specs
+`baseline_large_egm_types.yaml` are in both registries. The
+communicator size must be a multiple of the number of types times the
+number of sweep points, checked on every rank before any split.
+
+`examples.durables.postprocess.at_estimates` and
+`notebooks/lifecycle_at_estimates.ipynb` re-solve at the estimates
+and write the lifecycle figure, `fit_table_at_best.csv` and
+`cohort_means.csv`. `examples.durables.postprocess.estimation_tables`
+writes the parameter table and per-run fit tables.
+`scripts/pull_gadi_results.sh --estimation` copies estimation JSON and
+CSV from `/g/data/tp66/results/durables/estimation/` to
+`paper-results/durables/estimation/raw/`. New PBS scripts:
+`data-estimation/cobb_douglas/{females,males}/` and the two
+`run_large_egm_types.pbs` jobs (4,160 cores).
+
+Not fixed, and recorded as they stand: `fit_table.csv` still reports
+unweighted contributions from the last cross-entropy evaluation, not
+the weighted fit at `theta_best`; the self-generated data solve still
+ignores `--methods-override`; kikku's age-group masks still use four
+of the five years of each data bin; `save_nest` still leaves
+zero-byte `.nst` files; self-generated runs with types are deferred.
+
 ## Unreleased — 2026-09-27 — Dependency pins moved to fork heads
 
 All three external pins now point at the current head of their remote

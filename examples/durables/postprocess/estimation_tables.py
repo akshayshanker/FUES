@@ -189,11 +189,13 @@ def _fmt_list(values):
 
 
 def _types_footer_cell(block):
-    """One cell describing a types block; shape is still being finalised.
+    """One cell describing the types block the driver writes.
 
-    Expected shape, read defensively:
-    ``{n, shares, parameters: {name: {values, mean}}}``.
-    Any other keys are printed as ``key=value``.
+    Shape written by ``examples.durables.estimate.types_summary``:
+    ``{n, shares, parameters: {name: {location, spread, transform, nodes,
+    implied_mean}}, nodes, implied_mean}`` (the last two repeat the ``beta``
+    entry for convenience and are not printed twice). Any other key is
+    printed as ``key=value``.
     """
     if not block or not isinstance(block, dict):
         return "n/a"
@@ -206,8 +208,8 @@ def _types_footer_cell(block):
             lines.append(f"n={n}")
         for name, info in params.items():
             if isinstance(info, dict):
-                values = info.get("values")
-                mean = info.get("mean")
+                values = info.get("nodes", info.get("values"))
+                mean = info.get("implied_mean", info.get("mean"))
             else:
                 values = info
                 mean = None
@@ -231,7 +233,7 @@ def _types_footer_cell(block):
         leftover = [
             f"{k}={block[k]}"
             for k in block
-            if k not in ("n", "shares", "parameters")
+            if k not in ("n", "shares", "parameters", "nodes", "implied_mean")
         ]
         if leftover:
             lines.extend(leftover)

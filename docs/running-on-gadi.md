@@ -208,13 +208,41 @@ qsub benchmarks/durables/run_durables.pbs
 # Paper table: grid × tau × method sweep
 qsub benchmarks/durables/run_durables_tests.pbs
 
-# Estimation (MPI); scripts are grouped under estimation/ by purpose:
-#   selfgen/                              parameter-recovery sweeps on self-generated data
-#   data-estimation/separable/females/    estimation on the female moments (default calibration)
-#   data-estimation/separable/males/      estimation on the male moments
-#   generic/                              env-configurable single run
+# Estimation (MPI). Scripts live under benchmarks/durables/estimation/:
+#   data-estimation/<registry>/<females|males>/   data-moment jobs
+#                                                 (separable and cobb_douglas)
+#   selfgen/                                      parameter-recovery sweeps
+#   generic/old/                                  retired env-variable script
 qsub benchmarks/durables/estimation/data-estimation/separable/females/run_xxl_egm.pbs
+
+# Cobb-Douglas jobs are copies of the separable scripts with
+# MOD="syntax/cobb_douglas" and a distinct #PBS -N. Submit the
+# copied script:
+qsub benchmarks/durables/estimation/data-estimation/cobb_douglas/females/run_xlarge_egm.pbs
+
+# Four-type discount-factor jobs: 4,160 cores (4 types x 1,040
+# candidates). The communicator size must be a multiple of the
+# number of types (and of types times sweep points when a sweep
+# is used).
+qsub benchmarks/durables/estimation/data-estimation/separable/females/run_large_egm_types.pbs
+qsub benchmarks/durables/estimation/data-estimation/cobb_douglas/females/run_large_egm_types.pbs
 ```
+The driver checks on every rank, before splitting any communicator, that
+the core count is a multiple of the number of types times the number of
+sweep points, and stops with a message such as `communicator size 6 is
+not a multiple of n_points x K = 1 x 4 = 4` otherwise.
+
+To copy finished estimation JSON and CSV from Gadi
+(`/g/data/tp66/results/durables/estimation/`) onto this machine
+under `paper-results/durables/estimation/raw/`, from the Mac:
+
+```bash
+bash scripts/pull_gadi_results.sh --estimation
+```
+
+Nest files (`*.nst`) and pickle files stay on Gadi. Without
+`--estimation` the script still does its existing three rsyncs
+(scratch results, PBS scripts, dated snapshot) and nothing else.
 
 ### Retirement
 
