@@ -123,6 +123,7 @@ nav:
     - Retirement choice: notebooks/retirement_fues.ipynb
     - Durables (Cobb–Douglas): notebooks/durables_fues.ipynb
     - Durables (separable): notebooks/durables_fues_separable.ipynb
+    - Lifecycle at the estimates: notebooks/lifecycle_at_estimates.ipynb
 
   - Reproducibility:
     - Overview: reproducibility/index.md
