@@ -9,7 +9,12 @@
 #   bash resubmit_2026-09-28_nfs_storm.sh validate   # step A: sigma_w NEGM sweep only
 #   bash resubmit_2026-09-28_nfs_storm.sh wave1      # step B: 7 running xxl + 2 sweeps
 #   bash resubmit_2026-09-28_nfs_storm.sh wave2      # step C: remaining 7 running xxl
-#   bash resubmit_2026-09-28_nfs_storm.sh queued     # step D: the 21 never-started jobs
+#   bash resubmit_2026-09-28_nfs_storm.sh queued     # step D: the never-started jobs
+#
+# Record of what actually ran (28 Sep 2026): validate 05:05 -> 179974956; the three
+# tier-1 EGM seed runs stopped at their budgets and were resumed at 06:15 as
+# 179975348/349/350 (wave1/wave2 entries for them are therefore no-ops); queued
+# ran at 06:48 -> 179975695..713, with 686/688 re-issued as resumes 179975717/718.
 set -euo pipefail
 D=benchmarks/durables/estimation/data-estimation/separable
 S=benchmarks/durables/estimation/selfgen
@@ -55,9 +60,11 @@ queued)
     fresh 179972347 xxlNEGMm_s123  "$D/males/run_xxl_negm_males.pbs" "SPEC=baseline_xlarge_negm_males_seed123.yaml"
     fresh 179972351 xxlNEGMm_s2026 "$D/males/run_xxl_negm_males.pbs" "SPEC=baseline_xlarge_negm_males_seed2026.yaml"
     # tier 2
-    fresh 179972686 xxlEGM_N20k  "$D/females/run_xxl_egm.pbs"     "SPEC=baseline_xlarge_egm_nsim20k.yaml,N_SIM=20000"
+    # 179972686 and 179972688 had started (old script) by the time this step ran on 28 Sep 06:48;
+    # they were resumed from their checkpoints (iteration 14) instead of restarted:
+    resume 179972686 xxlEGM_N20k "$D/females/run_xxl_egm.pbs" 20260928_044323 "SPEC=baseline_xlarge_egm_nsim20k.yaml,N_SIM=20000"
+    resume 179972688 xxlEGM_s11  "$D/females/run_xxl_egm.pbs" 20260928_045352 "SPEC=baseline_xlarge_egm_seed11.yaml"
     fresh 179972687 xxlEGMm_N20k "$D/males/run_xxl_egm_males.pbs" "SPEC=baseline_xlarge_egm_males_nsim20k.yaml,N_SIM=20000"
-    fresh 179972688 xxlEGM_s11   "$D/females/run_xxl_egm.pbs"     "SPEC=baseline_xlarge_egm_seed11.yaml"
     fresh 179972689 xxlEGMm_s11  "$D/males/run_xxl_egm_males.pbs" "SPEC=baseline_xlarge_egm_males_seed11.yaml"
     fresh 179972690 xxlEGM_s99   "$D/females/run_xxl_egm.pbs"     "SPEC=baseline_xlarge_egm_seed99.yaml"
     fresh 179972691 xxlEGMm_s99  "$D/males/run_xxl_egm_males.pbs" "SPEC=baseline_xlarge_egm_males_seed99.yaml"
