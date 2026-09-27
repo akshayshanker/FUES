@@ -8,7 +8,7 @@ import yaml
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
 from kikku.run.estimate import load_estimation_spec
-from examples.durables.solve import load_spec, make_spec
+from examples.durables.estimate import resolved_calibration_keys
 
 SYNTAX = REPO / "examples" / "durables" / "syntax"
 CASES = [
@@ -20,14 +20,6 @@ CASES = [
 
 def _case_id(value):
     return value.name if isinstance(value, Path) else str(value)
-
-
-def resolved_calibration_keys(registry, spec_factory_name):
-    """Keys of the first-stage calibration that solve() builds from make_spec."""
-    recipe = load_spec(str(registry / spec_factory_name))
-    spec = make_spec(recipe, registry_dir=str(registry))
-    stage_names = list(recipe.stages.keys())
-    return set(spec[stage_names[0]][0]["calibration"].keys())
 
 
 def types_block(raw):

@@ -18,6 +18,13 @@ Oracles
   ``cobb_douglas/calibration/main.yaml`` read directly from the file, not
   through ``make_spec``.
 * ``denorm``: ``normalisation: 1.0e-05`` in ``separable/settings.yaml``.
+
+A second group runs the same grid and sample on the Cobb-Douglas registry
+(``baseline_large_egm.yaml`` / ``baseline_large_egm_males.yaml``): one
+finite evaluation with every target moment finite (70 keys on the female
+factory; 66 on the male factory, where four age-group columns are absent
+from the precomputed CSV), sensitivity of those moments to ``rho``, and
+the start-up guard rejecting ``gamma_c``.
 """
 
 import sys
@@ -321,6 +328,114 @@ def test_types_spec_without_group_solves_the_members_in_sequence(spec, capsys):
     assert criterion.n_failures == 1
     out = capsys.readouterr().out
     assert "[trial failure]" in out and "ValueError" in out and "'beta'" in out
+
+
+# ---------------------------------------------------------------------------
+# Cobb-Douglas registry: finite loss, rho sensitivity, gamma_c guard
+# ---------------------------------------------------------------------------
+
+CD_SPEC_NAMES = {
+    "spec_factory.yaml": "baseline_large_egm.yaml",
+    "spec_factory_males.yaml": "baseline_large_egm_males.yaml",
+}
+
+# Calibration values from cobb_douglas/calibration/main.yaml; rho is the
+# name that must reach the solver (the gamma_c incident of Section 2).
+CD_THETA = {
+    "beta": 0.945,
+    "alpha": 0.7,
+    "rho": 2.0,
+    "tau": 0.12,
+    "theta": 1.3498,
+}
+
+# Filtered precomputed keys after build_criterion's target-prefix match:
+# the female CSV contributes 70; the male CSV contributes 66 because four
+# age-group columns present for the _0 (female) suffixes are absent for _1.
+N_TARGET_MOMENTS = {
+    "spec_factory.yaml": 70,
+    "spec_factory_males.yaml": 66,
+}
+
+
+@pytest.fixture(scope="module")
+def cd_specs():
+    return {
+        factory: load_estimation_spec(str(COBB_DOUGLAS / "estimation" / name))
+        for factory, name in CD_SPEC_NAMES.items()
+    }
+
+
+@pytest.fixture(scope="module")
+def cd_criteria(cd_specs):
+    """The driver's criterion for each Cobb-Douglas calibration chain."""
+    est = _driver()
+    return {
+        factory: est.build_criterion(
+            COBB_DOUGLAS, cd_specs[factory], factory, None, dict(CALIB_OVERRIDES), dict(GRID),
+            N_SIM, SIMULATION_SEED, None,
+        )
+        for factory in FACTORIES
+    }
+
+
+@pytest.fixture(scope="module")
+def cd_evals(cd_criteria):
+    """One solve per factory at rho=2.0; one extra trial at rho=3.0.
+
+    The rho=2.0 ``criterion`` call is the evaluation reused by the finite-loss
+    check; the rho=3.0 trial is only for the sensitivity comparison.
+    """
+    out = {}
+    for factory, (criterion, moment_fn, data_moments, denorm) in cd_criteria.items():
+        loss = criterion(dict(CD_THETA))
+        moments_rho2 = dict(criterion.last_sim_moments)
+        moments_rho3 = moment_fn(criterion.trial({**CD_THETA, "rho": 3.0}))
+        out[factory] = {
+            "criterion": criterion,
+            "data_moments": data_moments,
+            "denorm": denorm,
+            "loss": loss,
+            "moments_rho2": moments_rho2,
+            "moments_rho3": moments_rho3,
+        }
+    return out
+
+
+@pytest.mark.parametrize("factory", FACTORIES)
+def test_cd_one_evaluation_is_finite_with_70_finite_targets(cd_evals, factory):
+    ev = cd_evals[factory]
+    assert ev["denorm"] == pytest.approx(DENORM_EXPECTED)
+    assert len(ev["data_moments"]) == N_TARGET_MOMENTS[factory]
+    assert np.isfinite(ev["loss"]) and ev["loss"] < BIG_LOSS
+    assert ev["criterion"].n_failures == 0
+
+    sim = ev["moments_rho2"]
+    missing = sorted(k for k in ev["data_moments"] if k not in sim)
+    not_finite = sorted(
+        k for k in ev["data_moments"] if k in sim and not np.isfinite(sim[k])
+    )
+    assert missing == [], f"{factory}: simulated moments lack {missing}"
+    assert not_finite == [], f"{factory}: NaN or inf simulated moments {not_finite}"
+
+
+@pytest.mark.parametrize("factory", FACTORIES)
+def test_cd_moments_respond_to_rho(cd_evals, factory):
+    ev = cd_evals[factory]
+    m_lo = ev["moments_rho2"]
+    m_hi = ev["moments_rho3"]
+    max_abs_diff = max(abs(m_lo[k] - m_hi[k]) for k in ev["data_moments"])
+    assert max_abs_diff > 1e-3, f"{factory}: max |diff| = {max_abs_diff}"
+
+
+@pytest.mark.parametrize("factory", FACTORIES)
+def test_cd_guard_rejects_gamma_c_as_calibration_override(cd_specs, factory):
+    est = _driver()
+    keys = est.resolved_calibration_keys(COBB_DOUGLAS, factory)
+    with pytest.raises(ValueError, match="gamma_c"):
+        est.check_parameter_names(
+            keys, list(cd_specs[factory]["free"]), {"t0": 20, "gamma_c": 3.0}, None,
+        )
 
 
 # ---------------------------------------------------------------------------
