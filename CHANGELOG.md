@@ -40,10 +40,17 @@ iteration 44; runs on expresssr at three times the normalsr rate), and the
 36 grid-600 ranks per 48 cores, so a quarter of the charged cores idle, and
 with `n_samples` equal to the rank count they run a 2,880-sample estimator
 that cannot reproduce the 4,160-sample xxl results).
-`run_large_egm_males.pbs` moves from 5h to 10h (5h stopped unconverged at
-111 iterations; ≤1,040 cores may run 48h) and `run_xxl_egm_males.pbs` from
-5h to 6h (one of five 5h runs stopped at 69 of 72 iterations; walltime is
-charged as used). Every converged run since 10 Sep
+The six `large` scripts (1,040 normalsr or 192 hugemem cores) are retired
+as well, superseded by the xlarge and xxl runs; the male ones never
+converged in 5h. `run_xxl_egm_males.pbs` moves from 5h to 6h (one of five
+5h runs stopped at 69 of 72 iterations; walltime is charged as used).
+
+New: `run_xxl_negm.pbs` (6h) and `run_xxl_negm_males.pbs` (7h), NEGM at the
+4,160-sample size for both sexes, with the spec
+`examples/durables/syntax/separable/estimation/baseline_xlarge_negm_males.yaml`
+(the male EGM spec under a NEGM title, as the female NEGM spec already is;
+the method itself comes from `--methods-override`). The `batches/`
+submitters now launch the xlarge/xxl set. Every converged run since 10 Sep
 reproduced the earlier loss to six decimals, so a re-run of an unchanged
 spec only confirms a result already under `/g/data/tp66/results`.
 

@@ -6,8 +6,8 @@ grouped by purpose:
 | Folder | Contents |
 |---|---|
 | `selfgen/` | Parameter-recovery sweeps: data are generated from the model at known parameters, then re-estimated (γ_c sweep at 5,200 cores; σ_w sweep at 1,040 cores; EGM and NEGM upper envelopes; female and male calibration overlays) |
-| `data-estimation/separable/females/` | Estimation on the female moments with the default calibration (`calibration/main.yaml`) |
-| `data-estimation/separable/males/` | Estimation on the male moments (`spec_factory_males.yaml`) |
+| `data-estimation/separable/females/` | Estimation on the female moments with the default calibration (`calibration/main.yaml`): xlarge (2,080 samples) and xxl (4,160 samples), EGM and NEGM |
+| `data-estimation/separable/males/` | Estimation on the male moments (`spec_factory_males.yaml`): xxl, EGM and NEGM |
 | `generic/` | `run_estimation.pbs`: one run, configured through `MOD`, `SPEC`, `GRID`, `N_SIM` environment variables |
 | `batches/` | Convenience submitters for the usual job sets (run from the repo root) |
 
@@ -45,22 +45,23 @@ substrings against the path (`scripts/run_pbs.sh selfgen egm`).
 
 | Script | Queue | ncpus | mem | walltime | Spec | Iters/segment | Upper envelope |
 |---|---|---|---|---|---|---|---|
-| `data-estimation/separable/females/run_large_egm.pbs` | normalsr | 1040 | 4800GB | 5:00:00 | baseline_large_egm.yaml | 3 | FUES (EGM) |
-| `data-estimation/separable/females/run_large_egm_hugemem.pbs` | hugemem | 192 | 5000GB | 5:00:00 | baseline_large_egm.yaml | 25 | FUES (EGM) |
-| `data-estimation/separable/females/run_large_negm.pbs` | normalsr | 1040 | 4800GB | 5:00:00 | baseline_large_negm.yaml | 3 | NEGM |
-| `data-estimation/separable/females/run_large_negm_hugemem.pbs` | hugemem | 192 | 5000GB | 5:00:00 | baseline_large_negm.yaml | 25 | NEGM |
 | `data-estimation/separable/females/run_xlarge_egm.pbs` | normalsr | 2080 | 9600GB | 5:00:00 | baseline_xlarge_egm.yaml | 3 | FUES (EGM) |
 | `data-estimation/separable/females/run_xlarge_negm.pbs` | normalsr | 2080 | 9600GB | 5:00:00 | baseline_xlarge_negm.yaml | 3 | NEGM |
 | `data-estimation/separable/females/run_xxl_egm.pbs` | normalsr | 4160 | 19200GB | 5:00:00 | baseline_xlarge_egm.yaml | 3 | FUES (EGM) |
-| `data-estimation/separable/males/run_large_egm_males.pbs` | normalsr | 1040 | 4800GB | 10:00:00 | baseline_large_egm_males.yaml | 3 | FUES (EGM) |
-| `data-estimation/separable/males/run_large_negm_males.pbs` | normalsr | 1040 | 4800GB | 5:00:00 | baseline_large_negm_males.yaml | 3 | NEGM |
+| `data-estimation/separable/females/run_xxl_negm.pbs` | normalsr | 4160 | 19200GB | 6:00:00 | baseline_xlarge_negm.yaml | 3 | NEGM |
 | `data-estimation/separable/males/run_xxl_egm_males.pbs` | normalsr | 4160 | 19200GB | 6:00:00 | baseline_xlarge_egm_males.yaml | 3 | FUES (EGM) |
+| `data-estimation/separable/males/run_xxl_negm_males.pbs` | normalsr | 4160 | 19200GB | 7:00:00 | baseline_xlarge_negm_males.yaml | 3 | NEGM |
 | `selfgen/run_selfgen_sweep_gamma_c_egm.pbs` | normalsr | 5200 | 24000GB | 5:00:00 | selfgen_sweep_gamma_c_egm.yaml | 10 | FUES (EGM) |
 | `selfgen/run_selfgen_sweep_gamma_c_egm_males.pbs` | normalsr | 5200 | 24000GB | 5:00:00 | selfgen_sweep_gamma_c_egm.yaml | 10 | FUES (EGM) |
 | `selfgen/run_selfgen_sweep_gamma_c_negm.pbs` | normalsr | 5200 | 24000GB | 5:00:00 | selfgen_sweep_gamma_c_negm.yaml | 10 | NEGM |
 | `selfgen/run_selfgen_sweep_gamma_c_negm_males.pbs` | normalsr | 5200 | 24000GB | 5:00:00 | selfgen_sweep_gamma_c_negm.yaml | 10 | NEGM |
 | `selfgen/run_selfgen_sweep_sigma_w_egm.pbs` | normalsr | 1040 | 4800GB | 5:00:00 | selfgen_sweep_sigma_w_egm.yaml | 10 | FUES (EGM) |
 | `selfgen/run_selfgen_sweep_sigma_w_negm.pbs` | normalsr | 1040 | 4800GB | 5:00:00 | selfgen_sweep_sigma_w_negm.yaml | 10 | NEGM |
+
+The NEGM scripts use the same estimation spec as their EGM twin (the
+`*_negm*.yaml` files differ only in their title line) and select NEGM with
+`--methods-override adjuster_cons.upper_env.upper_envelope=NEGM`; the
+separate spec name keeps EGM and NEGM results in separate folders.
 
 ## Retired scripts (`old/`)
 
@@ -69,20 +70,28 @@ after reading every job log since 30 Jun 2026:
 
 | Script | Queue | ncpus | mem | walltime | Spec | Iters/segment | Upper envelope |
 |---|---|---|---|---|---|---|---|
+| `data-estimation/separable/females/old/run_large_egm.pbs` | normalsr | 1040 | 4800GB | 5:00:00 | baseline_large_egm.yaml | 3 | FUES (EGM) |
+| `data-estimation/separable/females/old/run_large_egm_hugemem.pbs` | hugemem | 192 | 5000GB | 5:00:00 | baseline_large_egm.yaml | 25 | FUES (EGM) |
+| `data-estimation/separable/females/old/run_large_negm.pbs` | normalsr | 1040 | 4800GB | 5:00:00 | baseline_large_negm.yaml | 3 | NEGM |
+| `data-estimation/separable/females/old/run_large_negm_hugemem.pbs` | hugemem | 192 | 5000GB | 5:00:00 | baseline_large_negm.yaml | 25 | NEGM |
 | `data-estimation/separable/females/old/run_xxl_egm_normal.pbs` | normal | 3840 | 15200GB | 5:00:00 | baseline_xlarge_egm.yaml | 3 | FUES (EGM) |
+| `data-estimation/separable/males/old/run_large_egm_males.pbs` | normalsr | 1040 | 4800GB | 10:00:00 | baseline_large_egm_males.yaml | 3 | FUES (EGM) |
 | `data-estimation/separable/males/old/run_large_egm_males_hugemem.pbs` | hugemem | 192 | 5000GB | 5:00:00 | baseline_large_egm_males.yaml | 25 | FUES (EGM) |
+| `data-estimation/separable/males/old/run_large_negm_males.pbs` | normalsr | 1040 | 4800GB | 5:00:00 | baseline_large_negm_males.yaml | 3 | NEGM |
 | `data-estimation/separable/males/old/run_large_negm_males_hugemem.pbs` | hugemem | 192 | 5000GB | 5:00:00 | baseline_large_negm_males.yaml | 25 | NEGM |
 | `data-estimation/separable/males/old/run_xxl_egm_males_normal.pbs` | normal | 3840 | 15200GB | 5:00:00 | baseline_xlarge_egm_males.yaml | 3 | FUES (EGM) |
 | `generic/old/run_estimation.pbs` | expresssr | 520 | 2400GB | 1:00:00 | `$SPEC` (default baseline.yaml) | none | FUES (EGM) |
 
+- `*/old/run_large_*.pbs` (1,040 normalsr cores or 192 hugemem cores):
+  superseded by the xlarge and xxl runs, which sample 2,080 and 4,160 draws
+  per iteration against 1,040 and 192. The male variants never converged in
+  their 5 h budget (0 of 11 runs); the hugemem ones were the cheapest per
+  iteration (27 SU) but hugemem jobs of 144–192 cores are capped at 5 h.
 - `*/old/run_xxl_egm*_normal.pbs`: 0 converged in 14 two-hour runs. The
   Cascade Lake nodes fit only 36 grid-600 ranks per 48-core node, so a
   quarter of the charged cores idle, and with `n_samples` equal to the rank
   count they run a 2,880-sample estimator that cannot reproduce the
   4,160-sample xxl results.
-- `males/old/run_large_*_males_hugemem.pbs`: 0 converged in 8 runs. Hugemem
-  jobs of 144–192 cores are capped at 5 h, which allows 100 iterations at
-  25 per segment, and the male estimation needs more than that.
 - `generic/old/run_estimation.pbs`: no restart loop, so memory growth ends
   it near iteration 44, and `expresssr` charges three times the normalsr rate.
 
@@ -92,5 +101,8 @@ confirms a result already under `/g/data/tp66/results/durables/estimation/`.
 
 Memory per rank on `normalsr` is at most 4.6 GB (480 GB per 104-core node);
 the 5,200-core sweeps therefore use 10-iteration segments and the grid-600
-runs 3-iteration segments. The xxl runs converge in 3.4–4.4 h; the male one
-has 6 h because one 5-hour run stopped at 69 of 72 iterations.
+runs 3-iteration segments. The xxl EGM runs converge in 3.4–4.4 h (65 and
+72 iterations); the male EGM script has 6 h because one 5-hour run stopped
+at 69 of 72 iterations, and the NEGM scripts 6 h and 7 h because NEGM took
+26 per cent more iterations than EGM at the xlarge size. Walltime is
+charged as used.

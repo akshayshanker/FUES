@@ -7,8 +7,8 @@ SCRIPT_DIR="benchmarks/durables/estimation"
 echo "Submitting baseline estimation jobs..."
 echo ""
 
-qsub "$SCRIPT_DIR/data-estimation/separable/females/run_large_egm.pbs"
-qsub "$SCRIPT_DIR/data-estimation/separable/females/run_large_negm.pbs"
+qsub "$SCRIPT_DIR/data-estimation/separable/females/run_xxl_egm.pbs"
+qsub "$SCRIPT_DIR/data-estimation/separable/females/run_xxl_negm.pbs"
 qsub "$SCRIPT_DIR/data-estimation/separable/females/run_xlarge_egm.pbs"
 qsub "$SCRIPT_DIR/data-estimation/separable/females/run_xlarge_negm.pbs"
 

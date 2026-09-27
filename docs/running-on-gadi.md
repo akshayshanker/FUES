@@ -213,7 +213,7 @@ qsub benchmarks/durables/run_durables_tests.pbs
 #   data-estimation/separable/females/    estimation on the female moments (default calibration)
 #   data-estimation/separable/males/      estimation on the male moments
 #   generic/                              env-configurable single run
-qsub benchmarks/durables/estimation/data-estimation/separable/females/run_large_egm.pbs
+qsub benchmarks/durables/estimation/data-estimation/separable/females/run_xxl_egm.pbs
 ```
 
 ### Retirement
