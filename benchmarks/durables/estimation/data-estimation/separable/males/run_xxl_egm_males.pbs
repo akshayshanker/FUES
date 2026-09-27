@@ -4,7 +4,7 @@
 #PBS -N est_xxlEGMm
 #PBS -l ncpus=4160
 #PBS -l mem=19200GB
-#PBS -l walltime=5:00:00
+#PBS -l walltime=6:00:00
 #PBS -l jobfs=1600GB
 #PBS -l storage=scratch/tp66+gdata/tp66
 #PBS -l wd
@@ -13,9 +13,9 @@
 
 # ---------------------------------------------------------------
 # XXL EGM (FUES, 2x xlarge cores) MALES : 600-grid, 4160 samples (= n_samples), 40 normalsr nodes
-# Estimated cost: 2.0 SU x 4160 cores x 5h = 41600 SU max
+# Estimated cost: 2.0 SU x 4160 cores x 6h = 49920 SU max (runs converge in 3.9-4.4h)
 # Runs CE-SMM in ITERS_PER_RESTART-iter checkpointed segments until the
-# optimiser converges/errors OR the 5h walltime is exhausted (as many
+# optimiser converges/errors OR the 6h walltime is exhausted (as many
 # iterations as possible). Process restarted each segment to release RSS.
 # ---------------------------------------------------------------
 
@@ -74,7 +74,7 @@ echo "  Mod: $MOD | Spec: $SPEC | Factory: $SPEC_FACTORY | Grid: $GRID | Cores: 
 
 # --- Time-bounded restart loop --------------------------------------------
 ITERS_PER_RESTART=3
-WALL_SECONDS=18000              # must match #PBS -l walltime=5:00:00 (5h)
+WALL_SECONDS=21600              # must match #PBS -l walltime=6:00:00 (6h; one 5h run stopped at 69/72 iterations)
 SAFETY_BUFFER=600               # reserve 10 min for final checkpoint
 START_TS=$(date +%s)
 DEADLINE=$((START_TS + WALL_SECONDS - SAFETY_BUFFER))

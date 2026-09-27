@@ -35,11 +35,15 @@ Retired to `old/` after reading every job log since 30 Jun 2026: the male
 hugemem scripts (0 converged in 8 runs; 192 hugemem cores are capped at 5h,
 which allows 100 iterations, and the male estimation needs more) and
 `generic/run_estimation.pbs` (no restart loop, so memory growth ends it near
-iteration 44; runs on expresssr at three times the normalsr rate). The
-`_normal` xxl pair moves from 2h to 5h (2h reached 24–36 of the 65–72
-iterations needed; 3,024+ cores on `normal` may run 5h) and
-`run_large_egm_males.pbs` from 5h to 10h (5h stopped unconverged at 111
-iterations; ≤1,040 cores may run 48h). Every converged run since 10 Sep
+iteration 44; runs on expresssr at three times the normalsr rate), and the
+`_normal` xxl pair (0 converged in 14 two-hour runs; Cascade Lake nodes fit
+36 grid-600 ranks per 48 cores, so a quarter of the charged cores idle, and
+with `n_samples` equal to the rank count they run a 2,880-sample estimator
+that cannot reproduce the 4,160-sample xxl results).
+`run_large_egm_males.pbs` moves from 5h to 10h (5h stopped unconverged at
+111 iterations; ≤1,040 cores may run 48h) and `run_xxl_egm_males.pbs` from
+5h to 6h (one of five 5h runs stopped at 69 of 72 iterations; walltime is
+charged as used). Every converged run since 10 Sep
 reproduced the earlier loss to six decimals, so a re-run of an unchanged
 spec only confirms a result already under `/g/data/tp66/results`.
 
