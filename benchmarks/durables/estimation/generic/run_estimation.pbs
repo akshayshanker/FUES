@@ -34,19 +34,24 @@ module purge
 module load python3/3.12.1
 module load openmpi/4.1.5
 
-# --- Navigate to repo root ---
-# PBS_O_WORKDIR is where qsub was run. If submitted from the repo root, use it directly.
-# If submitted from benchmarks/durables/estimation/, go up 3 levels.
-if [ -f "$PBS_O_WORKDIR/pyproject.toml" ]; then
-    REPO_ROOT="$PBS_O_WORKDIR"
-elif [ -f "$PBS_O_WORKDIR/../../../pyproject.toml" ]; then
-    REPO_ROOT="$(cd "$PBS_O_WORKDIR/../../.." && pwd)"
-else
-    echo "ERROR: Cannot find repo root from PBS_O_WORKDIR=$PBS_O_WORKDIR" >&2
-    exit 1
+# Locate the repo root: walk up from the submission directory until
+# pyproject.toml is found, so the script can live at any depth under it.
+REPO_ROOT="$PBS_O_WORKDIR"
+while [ ! -f "$REPO_ROOT/pyproject.toml" ] && [ "$REPO_ROOT" != "/" ]; do
+    REPO_ROOT="$(dirname "$REPO_ROOT")"
+done
+if [ ! -f "$REPO_ROOT/pyproject.toml" ]; then
+    echo "ERROR: Cannot find repo root above PBS_O_WORKDIR=$PBS_O_WORKDIR" >&2; exit 1
 fi
-cd "$REPO_ROOT"
-echo "  Repo root: $(pwd)"
+echo "  Repo root: $REPO_ROOT"
+
+# Import from the repo but do not run inside it: a core file or any other
+# stray output then lands on scratch, not on the 10 GiB home quota.
+export PYTHONPATH="$REPO_ROOT${PYTHONPATH:+:$PYTHONPATH}"
+RUN_DIR="${RUN_DIR:-/scratch/tp66/$USER/durables_est/jobs/${PBS_JOBID%%.*}}"
+mkdir -p "$RUN_DIR"
+cd "$RUN_DIR"
+echo "  Run dir:   $(pwd)"
 
 # --- Activate venv on /home/ (NFS, not Lustre) ---
 # Created by setup/setup_durables_est.sh. Lean: no HARK/sympy/matplotlib.
@@ -74,7 +79,10 @@ find "$HOME/venvs/fues/lib/" -name "*.nbc" -o -name "*.nbi" 2>/dev/null | xargs 
 
 # Suppress OpenMPI warnings
 export OMPI_MCA_coll_hcoll_enable=0
-export OMPI_MCA_coll=^hcoll
+# UCC excluded alongside hcoll: on 23 Sep 2026 (job 179615514) 146 ranks died
+# with SIGBUS inside UCC's shared-memory collectives as nodes ran out of memory.
+export OMPI_MCA_coll_ucc_enable=0
+export OMPI_MCA_coll=^hcoll,ucc
 export PMIX_MCA_gds=hash
 
 # --- Run ---
@@ -88,19 +96,17 @@ echo "  Cores: $PBS_NCPUS"
 
 mpiexec -n $PBS_NCPUS \
     --map-by ppr:13:numa \
-    python3 -u -m mpi4py -m examples.durables.estimate \
+    bash -c 'ulimit -c 0; exec python3 -u -m mpi4py -m examples.durables.estimate "$@"' _ \
         --mod "$MOD" \
         --spec "$SPEC" \
         --scratch /scratch/tp66/$USER/durables_est \
         --results /g/data/tp66/results/durables/estimation \
+        --local-results none \
         --settings-override n_a=$GRID n_h=$GRID n_w=$GRID \
         --params-override t0=20 \
         --N-sim $N_SIM
+EXIT_CODE=$?
 
-echo "Finished at $(date)"
+echo "Finished at $(date) (exit code $EXIT_CODE)"
+exit $EXIT_CODE
 
-# --- Move logs to dated subfolder ---
-LOG_DIR=/g/data/tp66/logs/durables/$(date +%Y-%m-%d)
-mkdir -p "$LOG_DIR"
-mv /g/data/tp66/logs/durables/${PBS_JOBNAME}.o${PBS_JOBID%%.*} "$LOG_DIR/" 2>/dev/null
-mv /g/data/tp66/logs/durables/${PBS_JOBNAME}.e${PBS_JOBID%%.*} "$LOG_DIR/" 2>/dev/null

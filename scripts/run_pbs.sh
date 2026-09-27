@@ -5,11 +5,14 @@
 # so it works no matter where you call it from.
 #
 # Usage:
-#   ./scripts/run_pbs.sh                       # list + submit ALL *.pbs in benchmarks/durables/estimation
+#   ./scripts/run_pbs.sh                       # list + submit ALL *.pbs under benchmarks/durables/estimation
 #   ./scripts/run_pbs.sh -y                    # submit ALL, skip the confirm prompt
-#   ./scripts/run_pbs.sh males                 # only files whose name contains 'males'
-#   ./scripts/run_pbs.sh large egm             # files matching ALL given substrings (large AND egm)
-#   ./scripts/run_pbs.sh run_large_egm_males.pbs run_xlarge_egm.pbs   # specific files
+#   ./scripts/run_pbs.sh males                 # only files whose path contains 'males'
+#   ./scripts/run_pbs.sh selfgen egm           # paths matching ALL given substrings (selfgen AND egm)
+#   ./scripts/run_pbs.sh run_large_egm_males.pbs run_xlarge_egm.pbs   # specific files (any subfolder)
+#
+# Scripts live in subfolders (selfgen/, data-estimation/separable/{females,males}/,
+# generic/); patterns are matched against the path relative to estimation/.
 #
 # These jobs are expensive (each large run is ~10k SU, xlarge ~21k, sweeps ~52k),
 # hence the confirmation. Use -y only when you mean it.
@@ -31,7 +34,12 @@ for a in "$@"; do
         *.pbs)
             if   [ -f "$a" ];           then EXPLICIT+=("$a")
             elif [ -f "$EST_DIR/$a" ];  then EXPLICIT+=("$EST_DIR/$a")
-            else echo "WARN: not found, skipping: $a" >&2; fi ;;
+            else
+                # bare file name: look for it in any subfolder
+                found="$(find "$EST_DIR" -name "$(basename "$a")" -type f | head -1)"
+                if [ -n "$found" ]; then EXPLICIT+=("$found")
+                else echo "WARN: not found, skipping: $a" >&2; fi
+            fi ;;
         *) PATTERNS+=("$a") ;;
     esac
 done
@@ -40,23 +48,22 @@ JOBS=()
 if [ "${#EXPLICIT[@]}" -gt 0 ]; then
     JOBS=("${EXPLICIT[@]}")
 else
-    for f in "$EST_DIR"/*.pbs; do
-        [ -e "$f" ] || continue
-        name="$(basename "$f")"
+    while IFS= read -r f; do
+        rel="${f#"$EST_DIR"/}"          # e.g. selfgen/run_selfgen_sweep_gamma_c_egm.pbs
         keep=1
         if [ "${#PATTERNS[@]}" -gt 0 ]; then
             for p in "${PATTERNS[@]}"; do
-                case "$name" in *"$p"*) ;; *) keep=0 ;; esac
+                case "$rel" in *"$p"*) ;; *) keep=0 ;; esac
             done
         fi
         [ "$keep" -eq 1 ] && JOBS+=("$f")
-    done
+    done < <(find "$EST_DIR" -name '*.pbs' -type f | sort)
 fi
 
-[ "${#JOBS[@]}" -gt 0 ] || { echo "No matching .pbs jobs in $EST_DIR" >&2; exit 1; }
+[ "${#JOBS[@]}" -gt 0 ] || { echo "No matching .pbs jobs under $EST_DIR" >&2; exit 1; }
 
 echo "Will submit ${#JOBS[@]} job(s) from benchmarks/durables/estimation:"
-for j in "${JOBS[@]}"; do echo "  $(basename "$j")"; done
+for j in "${JOBS[@]}"; do echo "  ${j#"$EST_DIR"/}"; done
 echo
 
 if [ "$ASSUME_YES" -ne 1 ]; then

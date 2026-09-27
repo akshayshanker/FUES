@@ -208,8 +208,12 @@ qsub benchmarks/durables/run_durables.pbs
 # Paper table: grid × tau × method sweep
 qsub benchmarks/durables/run_durables_tests.pbs
 
-# Estimation (MPI)
-qsub benchmarks/durables/estimation/run_large_egm.pbs
+# Estimation (MPI); scripts are grouped under estimation/ by purpose:
+#   selfgen/                              parameter-recovery sweeps on self-generated data
+#   data-estimation/separable/females/    estimation on the female moments (default calibration)
+#   data-estimation/separable/males/      estimation on the male moments
+#   generic/                              env-configurable single run
+qsub benchmarks/durables/estimation/data-estimation/separable/females/run_large_egm.pbs
 ```
 
 ### Retirement

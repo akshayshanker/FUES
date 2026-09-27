@@ -7,8 +7,8 @@ SCRIPT_DIR="benchmarks/durables/estimation"
 echo "Submitting gamma_c sweep jobs (females)..."
 echo ""
 
-qsub "$SCRIPT_DIR/run_selfgen_sweep_gamma_c_egm.pbs"
-qsub "$SCRIPT_DIR/run_selfgen_sweep_gamma_c_negm.pbs"
+qsub "$SCRIPT_DIR/selfgen/run_selfgen_sweep_gamma_c_egm.pbs"
+qsub "$SCRIPT_DIR/selfgen/run_selfgen_sweep_gamma_c_negm.pbs"
 
 echo ""
 echo "Submitted 2 jobs. Check with: qstat -u \$USER"

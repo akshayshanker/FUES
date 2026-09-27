@@ -7,8 +7,8 @@ SCRIPT_DIR="benchmarks/durables/estimation"
 echo "Submitting male baseline estimation jobs..."
 echo ""
 
-qsub "$SCRIPT_DIR/run_large_egm_males.pbs"
-qsub "$SCRIPT_DIR/run_large_negm_males.pbs"
+qsub "$SCRIPT_DIR/data-estimation/separable/males/run_large_egm_males.pbs"
+qsub "$SCRIPT_DIR/data-estimation/separable/males/run_large_negm_males.pbs"
 
 echo ""
 echo "Submitted 2 jobs. Check with: qstat -u \$USER"

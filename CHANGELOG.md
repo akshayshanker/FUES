@@ -2,6 +2,35 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased — 2026-09-28 — Gadi estimation jobs hardened and regrouped
+
+Cause: on 23 Sep 2026 sweep job 179615514 lost 146 ranks to SIGBUS inside
+UCC's shared-memory collectives as nodes ran out of memory; the ranks were
+running inside the repository, so 134 core files (5.6 GiB) filled the home
+quota, which then broke result saves and the git index on Gadi.
+
+Every script under `benchmarks/durables/estimation/` now: finds the repo root
+by walking up from the submission directory (no fixed depth); runs from
+`/scratch/tp66/$USER/durables_est/jobs/<jobid>` with the repo on
+`PYTHONPATH`, and passes `--local-results none`, so nothing is written under
+`$HOME`; launches each rank through `bash -c 'ulimit -c 0; exec python3 …'`
+(a `ulimit` in the job script does not reach ranks started by OpenMPI's
+remote daemons); excludes UCC as well as hcoll
+(`OMPI_MCA_coll=^hcoll,ucc`); and returns the last segment's exit status
+instead of that of a log `mv` that could never match (PBS writes `.OU`/`.ER`
+only after the job ends). The 5,200-core γ_c sweeps use 10-iteration
+segments (rank RSS grows ~60 MB/iter against a 4.6 GB/rank node limit); the
+σ_w sweeps gain the same checkpointed restart loop, having previously been
+killed near iteration 40 for exceeding node memory. `#PBS -l walltime` set
+to 5:00:00 on the four scripts whose `WALL_SECONDS=18000` already assumed
+it.
+
+Layout: scripts regrouped into `selfgen/`, `data-estimation/separable/females/`,
+`data-estimation/separable/males/` and `generic/`, with an index in
+`benchmarks/durables/estimation/README.md`; `batches/*.sh`,
+`scripts/run_pbs.sh` (now recursive, patterns match the relative path) and
+`docs/running-on-gadi.md` updated.
+
 ## Unreleased — 2026-09-27 — Dependency pins moved to fork heads
 
 All three external pins now point at the current head of their remote
