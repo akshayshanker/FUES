@@ -84,8 +84,11 @@ def collect(results, logs):
         rel = run_dir.relative_to(results).parts          # mod, spec, [point], est_...
         mod, spec = rel[0], rel[1]
         point = rel[2] if len(rel) == 4 else ""
-        manifest_path = results / mod / spec / f"manifest_{run_id}.json"
-        manifest = json.loads(manifest_path.read_text()) if manifest_path.exists() else {}
+        # one manifest per job that worked on this run (a resumed run has several); take the latest
+        manifests = sorted((results / mod / spec).glob(f"manifest_{run_id}*.json"), key=lambda q: q.stat().st_mtime)
+        manifest = json.loads(manifests[-1].read_text()) if manifests else {}
+        if len(manifests) > 1:
+            manifest["job_id"] = "+".join(json.loads(m.read_text()).get("job_id", "") for m in manifests)
         s = json.loads(summary.read_text())
         row = {"mod": mod, "spec": spec, "run_id": run_id, "sweep_point": point or s.get("sweep_point") or "",
                "job_id": manifest.get("job_id", ""), "job_name": manifest.get("job_name", ""),

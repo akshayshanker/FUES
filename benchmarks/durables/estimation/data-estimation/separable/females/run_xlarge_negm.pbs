@@ -108,7 +108,7 @@ MANIFEST_DIR="$RESULTS_ROOT/$MOD_NAME/$SPEC_STEM"
 mkdir -p "$MANIFEST_DIR" "$RESULTS_ROOT/manifests"
 GIT_COMMIT="$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)"
 STARTED="$(date +%Y-%m-%dT%H:%M:%S%z)"
-cat > "$MANIFEST_DIR/manifest_est_$RUN_ID.json" <<MANIFEST_EOF
+cat > "$MANIFEST_DIR/manifest_est_${RUN_ID}_job${PBS_JOBID%%.*}.json" <<MANIFEST_EOF
 {
   "run_id": "est_$RUN_ID", "job_id": "${PBS_JOBID%%.*}", "job_name": "$PBS_JOBNAME",
   "script": "$SCRIPT_NAME", "git_commit": "$GIT_COMMIT",
@@ -124,7 +124,7 @@ CSV="$RESULTS_ROOT/manifests/runs.csv"
 [ -f "$CSV" ] || echo "run_id,job_id,job_name,script,git_commit,mod,spec,spec_factory,grid,n_sim,extra_settings,methods,nranks,ppr,iters_per_restart,wall_seconds,ncpus,started,purpose" > "$CSV"
 echo "est_$RUN_ID,${PBS_JOBID%%.*},$PBS_JOBNAME,$SCRIPT_NAME,$GIT_COMMIT,$MOD,$SPEC,${SPEC_FACTORY:-},$GRID,$N_SIM,$EXTRA_SETTINGS,${METHODS:-},$NRANKS,$PPR,$ITERS_PER_RESTART,$WALL_SECONDS,$PBS_NCPUS,$STARTED,$PURPOSE" >> "$CSV"
 echo "  Variant: spec=$SPEC | N_SIM=$N_SIM | ranks=$NRANKS | ppr=$PPR | iters/segment=$ITERS_PER_RESTART | extra settings=${EXTRA_SETTINGS:-none} | methods=${METHODS:-default}"
-echo "  Manifest: $MANIFEST_DIR/manifest_est_$RUN_ID.json"
+echo "  Manifest: $MANIFEST_DIR/manifest_est_${RUN_ID}_job${PBS_JOBID%%.*}.json"
 
 RESTART_NUM=0
 RESUME_FLAG="${RESUME:+--resume}"
