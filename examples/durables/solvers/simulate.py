@@ -23,6 +23,7 @@ from kikku.asva.simulate import simulate, draw_shocks
 from .branching import make_tenure_forward
 from .keeper_egm import make_keeper_forward
 from .adjuster_egm import make_adjuster_forward
+from .beta_types import draw_types, pool_by_type
 
 
 def _base_stage(nest):
@@ -466,35 +467,60 @@ def make_initial_particles(N, grids, nest, seed=42,
 # Main entry point: thin combinator
 #
 # Composition:
-#   initial_particles
+#   initial_particles, shock draws (for all N agents)
+#     -> take the agents of one type
 #     -> build_period_pushforwards  [stage ops]
 #     -> simulate(graph, twister, pushforward_by_t, ...)   [kikku]
 #     -> _records_to_panels(history)                  [reshape]
 #     -> _compute_utility_stats(panels)               [aggregate]
+#
+# With discount-factor types:
+#   draw_types -> K x simulate_type_subset -> pool_by_type
 # ------------------------------------------------------------------
 
-def simulate_lifecycle(nest, grids,
-                       N=10000, seed=42,
-                       use_empirical_init=False,
-                       init_dispersion=0.0, init_gender='male'):
-    """Forward-simulate the lifecycle (no Euler; use evaluate_euler_* post-hoc).
+def _take_agents(draws, particles, agent_idx):
+    """The agents in ``agent_idx`` from a population's shock draws and particles.
+
+    kikku's ``draw_shocks`` returns ``draws[t][point]`` as one ``(N,)`` array
+    per period and shock point, and ``make_initial_particles`` returns
+    ``(N,)`` arrays, so every per-agent array is indexed on its only axis.
+    """
+    draws_sub = {
+        t: {name: arr[agent_idx] for name, arr in draws_t.items()}
+        for t, draws_t in draws.items()}
+    particles_sub = {key: arr[agent_idx] for key, arr in particles.items()}
+    return draws_sub, particles_sub
+
+
+def simulate_type_subset(nest, grids, agent_idx, N, seed,
+                         use_empirical_init=False,
+                         init_dispersion=0.0, init_gender='male'):
+    """Walk the agents in ``agent_idx`` with this nest's policies.
+
+    The shocks and the initial particles are drawn for all ``N`` agents,
+    with the same calls and seeds as always (``draw_shocks(...,
+    rng_seed=seed)`` and ``make_initial_particles(..., seed=seed)``), so an
+    agent's draws are the same whatever its type; the subset is then taken
+    and walked, its records reshaped to panels, and its utility statistics
+    computed with this nest's callables.
 
     Parameters
     ----------
-    nest : dict
-        Solved nest from ``solve()``.  Must contain ``'graph'``
-        and ``'inter_conn'``. Each solution entry carries ``'callables'``.
-    grids : dict
+    nest, grids :
+        The solved model of this type.
+    agent_idx : ndarray, int64, shape (n_k,)
+        Original indices of the agents of this type.
     N : int
+        Number of agents in the whole population.
     seed : int
     use_empirical_init, init_dispersion, init_gender :
         Forwarded to ``make_initial_particles``.
 
     Returns
     -------
-    sim_data : dict
-        ``(T, N)`` panels including ``c``, ``a_nxt``, ``h_nxt``,
-        ``z_idx``, ``discrete``, utility aggregates, etc.
+    dict
+        The keys of :func:`simulate_lifecycle`, as ``(T, n_k)`` panels and
+        ``(n_k,)`` statistics in the order of ``agent_idx``.
     """
     stage0 = _base_stage(nest)
     t0 = int(stage0.calibration["t0"])
@@ -509,33 +535,95 @@ def simulate_lifecycle(nest, grids,
 
     pushforward_by_t = build_period_pushforwards(nest, grids)
 
-    # exogenous shocks
+    # exogenous shocks, for the whole population
     markov_draw = _make_markov_draw(grids)
     draws = draw_shocks(
         N, t0, T_end,
         {'markov': lambda n, rng: rng.random(n)},
         rng_seed=seed)
 
-    # I/O boundary: initial conditions
+    # I/O boundary: initial conditions, for the whole population
     particles = make_initial_particles(
         N, grids, nest, seed=seed,
         use_empirical=use_empirical_init,
         dispersion=init_dispersion, gender=init_gender)
+
+    # the agents of this type
+    agent_idx = np.asarray(agent_idx, dtype=np.int64)
+    draws_k, particles_k = _take_agents(draws, particles, agent_idx)
 
     # lifecycle walk (kikku generic)
     history, _ = simulate(
         graph=graph, twister=twister_rename,
         stage_forwards_by_t=pushforward_by_t,
         twister_fn=markov_draw,
-        initial_particles=particles,
-        t0=t0, T_end=T_end, draws=draws)
+        initial_particles=particles_k,
+        t0=t0, T_end=T_end, draws=draws_k)
 
     # records -> panels -> utility stats
-    sim_data = _records_to_panels(history, nest, N)
+    sim_data = _records_to_panels(history, nest, len(agent_idx))
     sim_data.update(_compute_utility_stats(
         sim_data, nest, nest["solutions"][0]["callables"]))
 
     return sim_data
+
+
+def simulate_lifecycle(nest, grids,
+                       N=10000, seed=42,
+                       use_empirical_init=False,
+                       init_dispersion=0.0, init_gender='male',
+                       types=None):
+    """Forward-simulate the lifecycle (no Euler; use evaluate_euler_* post-hoc).
+
+    Parameters
+    ----------
+    nest : dict
+        Solved nest from ``solve()``.  Must contain ``'graph'``
+        and ``'inter_conn'``. Each solution entry carries ``'callables'``.
+    grids : dict
+    N : int
+    seed : int
+        Seeds three streams: the shocks (``default_rng(seed)`` inside
+        ``draw_shocks``), the initial conditions (``default_rng(seed + 1)``
+        inside ``make_initial_particles``) and, when ``types`` is given, the
+        birth draw of each agent's type
+        (``SeedSequence(seed, spawn_key=(1,))`` inside ``draw_types``).
+    use_empirical_init, init_dispersion, init_gender :
+        Forwarded to ``make_initial_particles``.
+    types : list of (share, nest_k, grids_k), optional
+        Permanent discount-factor types. Each agent draws its type once at
+        birth with these shares and is walked with that type's policies;
+        each type's ``beta`` is read from its own solved model. When given,
+        ``nest`` and ``grids`` are not used for the walk. When absent (the
+        default) the output is that of the single model ``nest``.
+
+    Returns
+    -------
+    sim_data : dict
+        ``(T, N)`` panels including ``c``, ``a_nxt``, ``h_nxt``,
+        ``z_idx``, ``discrete``, utility aggregates, etc. With ``types``,
+        also ``beta_type`` (int64, the type index) and ``beta`` (float64).
+    """
+    if types is None:
+        return simulate_type_subset(
+            nest, grids, np.arange(N, dtype=np.int64), N, seed,
+            use_empirical_init=use_empirical_init,
+            init_dispersion=init_dispersion, init_gender=init_gender)
+
+    shares = np.array([share for share, _, _ in types], dtype=np.float64)
+    betas = [float(_base_stage(nest_k).calibration["beta"])
+             for _, nest_k, _ in types]
+    type_idx = draw_types(N, shares, seed)
+
+    parts = []
+    for k, (_, nest_k, grids_k) in enumerate(types):
+        agent_idx = np.flatnonzero(type_idx == k)
+        parts.append((agent_idx, simulate_type_subset(
+            nest_k, grids_k, agent_idx, N, seed,
+            use_empirical_init=use_empirical_init,
+            init_dispersion=init_dispersion, init_gender=init_gender)))
+
+    return pool_by_type(parts, type_idx, betas, N)
 
 
 # ---------------------------------------------------------------------------
