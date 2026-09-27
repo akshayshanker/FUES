@@ -7,9 +7,13 @@
 #    2. rsync the PBS scripts and mod/ settings as-is from Gadi home
 #    3. Create a dated snapshot in paper-results/durables/YYYY-MM-DD/NNN/
 #    4. Copy tables, settings snapshot, and PBS snapshot into the snapshot dir
+#    5. With --estimation: rsync estimation JSON and CSV from
+#       /g/data/tp66/results/durables/estimation/ into
+#       paper-results/durables/estimation/raw/ (nest and pickle files stay on Gadi)
 #
 #  Usage (from repo root, locally):
 #    bash scripts/pull_gadi_results.sh
+#    bash scripts/pull_gadi_results.sh --estimation
 #
 #  Requirements:
 #    - SSH config has a 'gadi' host entry (e.g. as3442@gadi.nci.org.au)
@@ -28,6 +32,44 @@ GADI_SCRATCH="/scratch/tp66/${GADI_USER}/FUES/durables"
 
 LOCAL_STAGING="${REPO_ROOT}/_gadi_staging"
 REPLICATION_BASE="${REPO_ROOT}/paper-results/durables"
+
+# Copy only directories, JSON and CSV from SOURCE into DEST.
+# SOURCE may be a local path or a host:path. DEST is a local directory.
+# Nest files (*.nst) and pickle files (*.pkl) are excluded. Local files
+# already in DEST are left in place (no --delete).
+rsync_estimation() {
+    local SOURCE="$1"
+    local DEST="$2"
+    mkdir -p "${DEST}"
+    rsync -avz --progress \
+        "${SOURCE}" \
+        "${DEST}" \
+        --include='*/' \
+        --include='*.json' \
+        --include='*.csv' \
+        --exclude='*'
+}
+
+# When this file is sourced, stop after defining the function so a rehearsal
+# can call rsync_estimation with a local SOURCE and DEST.
+if [[ "${BASH_SOURCE[0]}" != "${0}" ]]; then
+    return 0
+fi
+
+PULL_ESTIMATION=0
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --estimation)
+            PULL_ESTIMATION=1
+            shift
+            ;;
+        *)
+            echo "Unknown argument: $1" >&2
+            echo "Usage: bash scripts/pull_gadi_results.sh [--estimation]" >&2
+            exit 1
+            ;;
+    esac
+done
 
 # --- Step 1: Pull latest results from scratch ---
 echo "=== Step 1: Pull results from Gadi scratch ==="
@@ -132,6 +174,15 @@ echo "=== Done ==="
 echo "Snapshot: ${SNAP_DIR}"
 echo "Contents:"
 find "${SNAP_DIR}" -type f | sort | sed 's|^|  |'
+
+# --- Optional: estimation JSON and CSV from /g/data ---
+if [[ "${PULL_ESTIMATION}" -eq 1 ]]; then
+    echo ""
+    echo "=== Step 5: Pull estimation results from Gadi ==="
+    rsync_estimation \
+        "${GADI_HOST}:/g/data/tp66/results/durables/estimation/" \
+        "${REPO_ROOT}/paper-results/durables/estimation/raw/"
+fi
 
 # --- Cleanup staging ---
 rm -rf "${LOCAL_STAGING}"

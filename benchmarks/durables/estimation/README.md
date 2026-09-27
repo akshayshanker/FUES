@@ -8,6 +8,7 @@ grouped by purpose:
 | `selfgen/` | Parameter-recovery sweeps: data are generated from the model at known parameters, then re-estimated (γ_c sweep at 5,200 cores; σ_w sweep at 1,040 cores; EGM and NEGM upper envelopes; female and male calibration overlays) |
 | `data-estimation/separable/females/` | Estimation on the female moments with the default calibration (`calibration/main.yaml`): xlarge (2,080 samples) and xxl (4,160 samples), EGM and NEGM |
 | `data-estimation/separable/males/` | Estimation on the male moments (`spec_factory_males.yaml`): xxl, EGM and NEGM |
+| `data-estimation/cobb_douglas/` | Same xlarge and xxl jobs as the separable folders, plus the four-type large EGM job, with `MOD="syntax/cobb_douglas"` |
 | `generic/` | `run_estimation.pbs`: one run, configured through `MOD`, `SPEC`, `GRID`, `N_SIM` environment variables |
 | `batches/` | Convenience submitters for the usual job sets (run from the repo root) |
 
@@ -49,8 +50,16 @@ substrings against the path (`scripts/run_pbs.sh selfgen egm`).
 | `data-estimation/separable/females/run_xlarge_negm.pbs` | normalsr | 2080 | 9600GB | 5:00:00 | baseline_xlarge_negm.yaml | 3 | NEGM |
 | `data-estimation/separable/females/run_xxl_egm.pbs` | normalsr | 4160 | 19200GB | 5:00:00 | baseline_xlarge_egm.yaml | 3 | FUES (EGM) |
 | `data-estimation/separable/females/run_xxl_negm.pbs` | normalsr | 4160 | 19200GB | 6:00:00 | baseline_xlarge_negm.yaml | 3 | NEGM |
+| `data-estimation/separable/females/run_large_egm_types.pbs` | normalsr | 4160 | 19200GB | 5:00:00 | baseline_large_egm_types.yaml | 3 | FUES (EGM) |
 | `data-estimation/separable/males/run_xxl_egm_males.pbs` | normalsr | 4160 | 19200GB | 6:00:00 | baseline_xlarge_egm_males.yaml | 3 | FUES (EGM) |
 | `data-estimation/separable/males/run_xxl_negm_males.pbs` | normalsr | 4160 | 19200GB | 7:00:00 | baseline_xlarge_negm_males.yaml | 3 | NEGM |
+| `data-estimation/cobb_douglas/females/run_xlarge_egm.pbs` | normalsr | 2080 | 9600GB | 5:00:00 | baseline_xlarge_egm.yaml | 3 | FUES (EGM) |
+| `data-estimation/cobb_douglas/females/run_xlarge_negm.pbs` | normalsr | 2080 | 9600GB | 5:00:00 | baseline_xlarge_negm.yaml | 3 | NEGM |
+| `data-estimation/cobb_douglas/females/run_xxl_egm.pbs` | normalsr | 4160 | 19200GB | 5:00:00 | baseline_xlarge_egm.yaml | 3 | FUES (EGM) |
+| `data-estimation/cobb_douglas/females/run_xxl_negm.pbs` | normalsr | 4160 | 19200GB | 6:00:00 | baseline_xlarge_negm.yaml | 3 | NEGM |
+| `data-estimation/cobb_douglas/females/run_large_egm_types.pbs` | normalsr | 4160 | 19200GB | 5:00:00 | baseline_large_egm_types.yaml | 3 | FUES (EGM) |
+| `data-estimation/cobb_douglas/males/run_xxl_egm_males.pbs` | normalsr | 4160 | 19200GB | 6:00:00 | baseline_xlarge_egm_males.yaml | 3 | FUES (EGM) |
+| `data-estimation/cobb_douglas/males/run_xxl_negm_males.pbs` | normalsr | 4160 | 19200GB | 7:00:00 | baseline_xlarge_negm_males.yaml | 3 | NEGM |
 | `selfgen/run_selfgen_sweep_gamma_c_egm.pbs` | normalsr | 5200 | 24000GB | 5:00:00 | selfgen_sweep_gamma_c_egm.yaml | 10 | FUES (EGM) |
 | `selfgen/run_selfgen_sweep_gamma_c_egm_males.pbs` | normalsr | 5200 | 24000GB | 5:00:00 | selfgen_sweep_gamma_c_egm.yaml | 10 | FUES (EGM) |
 | `selfgen/run_selfgen_sweep_gamma_c_negm.pbs` | normalsr | 5200 | 24000GB | 5:00:00 | selfgen_sweep_gamma_c_negm.yaml | 10 | NEGM |
