@@ -16,12 +16,12 @@ sub() {   # sub <job name> <script> [VAR=value[,VAR=value]]
 }
 
 echo "Tier 2 (2026-09-28): low-gamma_c sweeps, N_SIM sensitivity, seeds 11 and 99"
-sub sw_gamClo_EGM  "$S/run_selfgen_sweep_gamma_c_egm.pbs"   "SPEC=selfgen_sweep_gamma_c_low_egm.yaml"
-sub sw_gamClo_NEGM "$S/run_selfgen_sweep_gamma_c_negm.pbs"  "SPEC=selfgen_sweep_gamma_c_low_negm.yaml"
-sub xxlEGM_N20k    "$D/females/run_xxl_egm.pbs"      "SPEC=baseline_xlarge_egm_nsim20k.yaml,N_SIM=20000"
-sub xxlEGMm_N20k   "$D/males/run_xxl_egm_males.pbs"  "SPEC=baseline_xlarge_egm_males_nsim20k.yaml,N_SIM=20000"
+sub sw_gamClo_EGM  "$S/run_selfgen_sweep_gamma_c_egm.pbs"   "SPEC=selfgen_sweep_gamma_c_low_egm.yaml,PURPOSE=low-gamma_c-recovery-with-1040-samples/point"
+sub sw_gamClo_NEGM "$S/run_selfgen_sweep_gamma_c_negm.pbs"  "SPEC=selfgen_sweep_gamma_c_low_negm.yaml,PURPOSE=low-gamma_c-recovery-with-1040-samples/point"
+sub xxlEGM_N20k    "$D/females/run_xxl_egm.pbs"      "SPEC=baseline_xlarge_egm_nsim20k.yaml,N_SIM=20000,PURPOSE=simulation-noise-sensitivity"
+sub xxlEGMm_N20k   "$D/males/run_xxl_egm_males.pbs"  "SPEC=baseline_xlarge_egm_males_nsim20k.yaml,N_SIM=20000,PURPOSE=simulation-noise-sensitivity"
 for seed in 11 99; do
-    sub "xxlEGM_s$seed"  "$D/females/run_xxl_egm.pbs"      "SPEC=baseline_xlarge_egm_seed$seed.yaml"
-    sub "xxlEGMm_s$seed" "$D/males/run_xxl_egm_males.pbs"  "SPEC=baseline_xlarge_egm_males_seed$seed.yaml"
+    sub "xxlEGM_s$seed"  "$D/females/run_xxl_egm.pbs"      "SPEC=baseline_xlarge_egm_seed$seed.yaml,PURPOSE=CE-seed-robustness"
+    sub "xxlEGMm_s$seed" "$D/males/run_xxl_egm_males.pbs"  "SPEC=baseline_xlarge_egm_males_seed$seed.yaml,PURPOSE=CE-seed-robustness"
 done
 echo "6 jobs submitted. Watch with: qstat -u \$USER"

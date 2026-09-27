@@ -55,7 +55,14 @@ submitters now launch the xlarge/xxl set. All active scripts take `MOD`,
 and 24 spec variants were added for the 28 Sep run plan
 (`batches/submit_tier1.sh`, `submit_tier2.sh`): CE `sampling_seed` 7, 11, 99,
 123 and 2026 for the four xxl estimates, `N_SIM=20000` twins, and low-γ_c
-recovery sweeps with 1,040 samples per point. Every converged run since 10 Sep
+recovery sweeps with 1,040 samples per point; settings-robustness twins
+(`_hmax8`, `_hmax12p5`, `_hmax15`, `_nwage6`, `_nwage8`) for the female xlarge
+EGM and NEGM specs (`batches/submit_tier2b_settings.sh`). Every job now writes
+a run manifest (`manifest_est_<run id>.json` beside its results and a line in
+`manifests/runs.csv`: job id, commit, spec, overrides, ranks, purpose), takes
+`NRANKS`, `PPR`, `ITERS_PER_RESTART`, `EXTRA_SETTINGS` and `RESULTS_ROOT` from
+the environment, and `scripts/collect_estimation_results.py` joins manifests,
+`summary.json` files and PBS logs into one table. Every converged run since 10 Sep
 reproduced the earlier loss to six decimals, so a re-run of an unchanged
 spec only confirms a result already under `/g/data/tp66/results`.
 

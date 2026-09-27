@@ -45,6 +45,7 @@ cd "$RUN_DIR"
 echo "  Run dir:   $(pwd)"
 
 source "$HOME/venvs/fues/bin/activate"
+RESULTS_ROOT="${RESULTS_ROOT:-/g/data/tp66/results/durables/estimation}"
 
 export OMP_NUM_THREADS=1
 export MKL_NUM_THREADS=1
@@ -70,12 +71,44 @@ export PMIX_MCA_gds=hash
 echo "Starting SELFGEN SWEEP gamma_c (NEGM) at $(date)"
 echo "  Mod: $MOD | Spec: $SPEC | Grid: $GRID | Nodes: $((PBS_NCPUS/104)) | Cores: $PBS_NCPUS"
 
-ITERS_PER_RESTART=10             # 104 ranks/node at <=4.6 GB each; rank RSS grows ~60 MB/iter
+ITERS_PER_RESTART="${ITERS_PER_RESTART:-10}"             # 104 ranks/node at <=4.6 GB each; rank RSS grows ~60 MB/iter
 WALL_SECONDS=18000              # must match #PBS -l walltime=5:00:00 (5h)
 SAFETY_BUFFER=600               # reserve 10 min for final checkpoint
 START_TS=$(date +%s)
 DEADLINE=$((START_TS + WALL_SECONDS - SAFETY_BUFFER))
 RUN_ID=$(date +%Y%m%d_%H%M%S)
+
+# --- Run manifest: what this job is, written next to its results ------------
+# One JSON per run at $RESULTS_ROOT/<mod>/<spec stem>/manifest_est_<run id>.json
+# and one line in $RESULTS_ROOT/manifests/runs.csv, so every result folder can
+# be tied back to its job, commit, spec and overrides.
+SCRIPT_NAME="run_selfgen_sweep_gamma_c_negm.pbs"
+EXTRA_SETTINGS="${EXTRA_SETTINGS:-}"            # e.g. "h_max=15;w_max=17.5" (';' separated)
+NRANKS="${NRANKS:-$PBS_NCPUS}"                  # MPI ranks (= CE samples); default one per core
+PPR="${PPR:-13}"                                 # ranks per NUMA domain (fewer = more memory per rank)
+PURPOSE="${PURPOSE:-}"
+MOD_NAME="$(basename "$MOD")"; SPEC_STEM="${SPEC%.yaml}"
+MANIFEST_DIR="$RESULTS_ROOT/$MOD_NAME/$SPEC_STEM"
+mkdir -p "$MANIFEST_DIR" "$RESULTS_ROOT/manifests"
+GIT_COMMIT="$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+STARTED="$(date +%Y-%m-%dT%H:%M:%S%z)"
+cat > "$MANIFEST_DIR/manifest_est_$RUN_ID.json" <<MANIFEST_EOF
+{
+  "run_id": "est_$RUN_ID", "job_id": "${PBS_JOBID%%.*}", "job_name": "$PBS_JOBNAME",
+  "script": "$SCRIPT_NAME", "git_commit": "$GIT_COMMIT",
+  "mod": "$MOD", "spec": "$SPEC", "spec_factory": "${SPEC_FACTORY:-}",
+  "grid": "$GRID", "n_sim": "$N_SIM", "extra_settings": "$EXTRA_SETTINGS",
+  "methods": "${METHODS:-}", "nranks": "$NRANKS", "ppr": "$PPR",
+  "iters_per_restart": "$ITERS_PER_RESTART", "wall_seconds": "$WALL_SECONDS",
+  "ncpus": "$PBS_NCPUS", "queue": "${PBS_QUEUE:-}", "started": "$STARTED",
+  "submitted_from": "$PBS_O_WORKDIR", "purpose": "$PURPOSE"
+}
+MANIFEST_EOF
+CSV="$RESULTS_ROOT/manifests/runs.csv"
+[ -f "$CSV" ] || echo "run_id,job_id,job_name,script,git_commit,mod,spec,spec_factory,grid,n_sim,extra_settings,methods,nranks,ppr,iters_per_restart,wall_seconds,ncpus,started,purpose" > "$CSV"
+echo "est_$RUN_ID,${PBS_JOBID%%.*},$PBS_JOBNAME,$SCRIPT_NAME,$GIT_COMMIT,$MOD,$SPEC,${SPEC_FACTORY:-},$GRID,$N_SIM,$EXTRA_SETTINGS,${METHODS:-},$NRANKS,$PPR,$ITERS_PER_RESTART,$WALL_SECONDS,$PBS_NCPUS,$STARTED,$PURPOSE" >> "$CSV"
+echo "  Variant: spec=$SPEC | N_SIM=$N_SIM | ranks=$NRANKS | ppr=$PPR | iters/segment=$ITERS_PER_RESTART | extra settings=${EXTRA_SETTINGS:-none} | methods=${METHODS:-default}"
+echo "  Manifest: $MANIFEST_DIR/manifest_est_$RUN_ID.json"
 
 RESTART_NUM=0
 RESUME_FLAG=""
@@ -98,15 +131,15 @@ while : ; do
     echo "=== Restart segment $RESTART_NUM at $(date) (${REMAINING}s of budget left) ==="
     SEG_START=$(date +%s)
 
-    mpiexec -n $PBS_NCPUS \
-        --map-by ppr:13:numa \
+    mpiexec -n "$NRANKS" \
+        --map-by "ppr:$PPR:numa" \
         bash -c 'ulimit -c 0; exec python3 -u -m mpi4py -m examples.durables.estimate "$@"' _ \
             --mod "$MOD" \
             --spec "$SPEC" \
             --scratch /scratch/tp66/$USER/durables_est \
-            --results /g/data/tp66/results/durables/estimation \
+            --results "$RESULTS_ROOT" \
             --local-results none \
-            --settings-override n_a=$GRID n_h=$GRID n_w=$GRID \
+            --settings-override n_a=$GRID n_h=$GRID n_w=$GRID ${EXTRA_SETTINGS//;/ } \
             --params-override t0=20 \
             --N-sim $N_SIM \
             --methods-override adjuster_cons.cntn_to_dcsn_mover.upper_envelope=NEGM \
