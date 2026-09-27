@@ -52,14 +52,11 @@ substrings against the path (`scripts/run_pbs.sh selfgen egm`).
 | `data-estimation/separable/females/run_xlarge_egm.pbs` | normalsr | 2080 | 9600GB | 5:00:00 | baseline_xlarge_egm.yaml | 3 | FUES (EGM) |
 | `data-estimation/separable/females/run_xlarge_negm.pbs` | normalsr | 2080 | 9600GB | 5:00:00 | baseline_xlarge_negm.yaml | 3 | NEGM |
 | `data-estimation/separable/females/run_xxl_egm.pbs` | normalsr | 4160 | 19200GB | 5:00:00 | baseline_xlarge_egm.yaml | 3 | FUES (EGM) |
-| `data-estimation/separable/females/run_xxl_egm_normal.pbs` | normal | 3840 | 15200GB | 2:00:00 | baseline_xlarge_egm.yaml | 3 | FUES (EGM) |
-| `data-estimation/separable/males/run_large_egm_males.pbs` | normalsr | 1040 | 4800GB | 5:00:00 | baseline_large_egm_males.yaml | 3 | FUES (EGM) |
-| `data-estimation/separable/males/run_large_egm_males_hugemem.pbs` | hugemem | 192 | 5000GB | 5:00:00 | baseline_large_egm_males.yaml | 25 | FUES (EGM) |
+| `data-estimation/separable/females/run_xxl_egm_normal.pbs` | normal | 3840 | 15200GB | 5:00:00 | baseline_xlarge_egm.yaml | 3 | FUES (EGM) |
+| `data-estimation/separable/males/run_large_egm_males.pbs` | normalsr | 1040 | 4800GB | 10:00:00 | baseline_large_egm_males.yaml | 3 | FUES (EGM) |
 | `data-estimation/separable/males/run_large_negm_males.pbs` | normalsr | 1040 | 4800GB | 5:00:00 | baseline_large_negm_males.yaml | 3 | NEGM |
-| `data-estimation/separable/males/run_large_negm_males_hugemem.pbs` | hugemem | 192 | 5000GB | 5:00:00 | baseline_large_negm_males.yaml | 25 | NEGM |
 | `data-estimation/separable/males/run_xxl_egm_males.pbs` | normalsr | 4160 | 19200GB | 5:00:00 | baseline_xlarge_egm_males.yaml | 3 | FUES (EGM) |
-| `data-estimation/separable/males/run_xxl_egm_males_normal.pbs` | normal | 3840 | 15200GB | 2:00:00 | baseline_xlarge_egm_males.yaml | 3 | FUES (EGM) |
-| `generic/run_estimation.pbs` | expresssr | 520 | 2400GB | 1:00:00 | `$SPEC` (default baseline.yaml) | none | FUES (EGM) |
+| `data-estimation/separable/males/run_xxl_egm_males_normal.pbs` | normal | 3840 | 15200GB | 5:00:00 | baseline_xlarge_egm_males.yaml | 3 | FUES (EGM) |
 | `selfgen/run_selfgen_sweep_gamma_c_egm.pbs` | normalsr | 5200 | 24000GB | 5:00:00 | selfgen_sweep_gamma_c_egm.yaml | 10 | FUES (EGM) |
 | `selfgen/run_selfgen_sweep_gamma_c_egm_males.pbs` | normalsr | 5200 | 24000GB | 5:00:00 | selfgen_sweep_gamma_c_egm.yaml | 10 | FUES (EGM) |
 | `selfgen/run_selfgen_sweep_gamma_c_negm.pbs` | normalsr | 5200 | 24000GB | 5:00:00 | selfgen_sweep_gamma_c_negm.yaml | 10 | NEGM |
@@ -67,7 +64,28 @@ substrings against the path (`scripts/run_pbs.sh selfgen egm`).
 | `selfgen/run_selfgen_sweep_sigma_w_egm.pbs` | normalsr | 1040 | 4800GB | 5:00:00 | selfgen_sweep_sigma_w_egm.yaml | 10 | FUES (EGM) |
 | `selfgen/run_selfgen_sweep_sigma_w_negm.pbs` | normalsr | 1040 | 4800GB | 5:00:00 | selfgen_sweep_sigma_w_negm.yaml | 10 | NEGM |
 
+## Retired scripts (`old/`)
+
+Kept for reference; `scripts/run_pbs.sh` skips them. Retired on 28 Sep 2026
+after reading every job log since 30 Jun 2026:
+
+| Script | Queue | ncpus | mem | walltime | Spec | Iters/segment | Upper envelope |
+|---|---|---|---|---|---|---|---|
+| `data-estimation/separable/males/old/run_large_egm_males_hugemem.pbs` | hugemem | 192 | 5000GB | 5:00:00 | baseline_large_egm_males.yaml | 25 | FUES (EGM) |
+| `data-estimation/separable/males/old/run_large_negm_males_hugemem.pbs` | hugemem | 192 | 5000GB | 5:00:00 | baseline_large_negm_males.yaml | 25 | NEGM |
+| `generic/old/run_estimation.pbs` | expresssr | 520 | 2400GB | 1:00:00 | `$SPEC` (default baseline.yaml) | none | FUES (EGM) |
+
+- `males/old/run_large_*_males_hugemem.pbs`: 0 converged in 8 runs. Hugemem
+  jobs of 144–192 cores are capped at 5 h, which allows 100 iterations at
+  25 per segment, and the male estimation needs more than that.
+- `generic/old/run_estimation.pbs`: no restart loop, so memory growth ends
+  it near iteration 44, and `expresssr` charges three times the normalsr rate.
+
+Every converged run since 10 Sep 2026 reproduced the earlier loss to six
+decimals (the estimator is seeded), so re-running an unchanged spec only
+confirms a result already under `/g/data/tp66/results/durables/estimation/`.
+
 Memory per rank on `normalsr` is at most 4.6 GB (480 GB per 104-core node);
 the 5,200-core sweeps therefore use 10-iteration segments and the grid-600
 runs 3-iteration segments. The `_normal` variants underpopulate Cascade Lake
-nodes (36 ranks per node) to reach 5.3 GB per rank.
+nodes (36 ranks per node) to reach 5.3 GB per rank, and need the full 5 h.

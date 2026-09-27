@@ -4,7 +4,7 @@
 #PBS -N n_xxlEGMm
 #PBS -l ncpus=3840
 #PBS -l mem=15200GB
-#PBS -l walltime=2:00:00
+#PBS -l walltime=5:00:00
 #PBS -l jobfs=400GB
 #PBS -l storage=scratch/tp66+gdata/tp66
 #PBS -l wd
@@ -16,7 +16,8 @@
 # 80 nodes => ncpus=3840, mem=15200GB (190 GB/node, <=192 physical).
 # GRID=600 needs ~5 GB/rank, so nodes are UNDERPOPULATED: 36 ranks/node
 # (--map-by ppr:9:numa) => 2880 MPI ranks (= n_samples), ~5.3 GB/rank.
-# 2-hour test run.  Cost: 2.0 SU x 3840 cores x 2h = 15360 SU.
+# 5-hour run (2h reached only 24-36 of the 65-72 iterations needed; 3,024+
+# cores on normal allow 5h).  Cost: 2.0 SU x 3840 cores x 5h = 38400 SU max.
 # Restart loop resets RSS each segment to survive the SMM leak.
 # ---------------------------------------------------------------
 
@@ -76,7 +77,7 @@ echo "  Mod: $MOD | Spec: $SPEC | Factory: $SPEC_FACTORY | Grid: $GRID | Nodes: 
 
 # --- Time-bounded restart loop --------------------------------------------
 ITERS_PER_RESTART=3
-WALL_SECONDS=7200              # must match #PBS -l walltime=2:00:00 (2h)
+WALL_SECONDS=18000              # must match #PBS -l walltime=5:00:00 (5h)
 SAFETY_BUFFER=300             # reserve 5 min for final checkpoint + log move
 START_TS=$(date +%s)
 DEADLINE=$((START_TS + WALL_SECONDS - SAFETY_BUFFER))

@@ -57,7 +57,7 @@ else
             done
         fi
         [ "$keep" -eq 1 ] && JOBS+=("$f")
-    done < <(find "$EST_DIR" -name '*.pbs' -type f | sort)
+    done < <(find "$EST_DIR" -name '*.pbs' -type f -not -path '*/old/*' | sort)   # old/ holds retired scripts
 fi
 
 [ "${#JOBS[@]}" -gt 0 ] || { echo "No matching .pbs jobs under $EST_DIR" >&2; exit 1; }
