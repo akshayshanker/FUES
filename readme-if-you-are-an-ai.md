@@ -77,7 +77,8 @@ A plain `pip install` ships only `src/dcsmm`; `examples/`, `tests/`, and
 `benchmarks/` live in the checkout and run from the repo root as
 `python -m examples.retirement.run`. Four projects divide the labour: this
 repository (algorithm and applications); `kikku`, pinned in the `[examples]`
-extra at tag v0.2.0 of `bright-forest/kikku`, a mechanical run layer providing
+extra at commit `a54619c` of `bright-forest/kikku` (the `main` head: tag
+v0.2.0 plus one docs-only commit), a mechanical run layer providing
 the slot-keyed command line (`--slot-override`, `--slot-spec`, `--slot-range`,
 `--sweep`) and EGM builder utilities, deliberately ignorant of which slots a
 model defines; the `bright-forest` forks of `dolo` and `dolang` ("dolo-plus"),

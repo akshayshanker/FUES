@@ -75,9 +75,11 @@ if [[ ! -d "$VENV_DIR" ]]; then
     echo "[setup] Installing dcsmm[examples] (editable)"
     pip install -e ".[examples]" --quiet
 
+    # Pins are the fork `master` heads as of 2026-09-27; both commits are the
+    # 30 Jun 2026 sync from the bellman-ddsl monorepo, so they belong together.
     echo "[setup] Installing dolang + dolo (public bright-forest repos, master)"
     pip install lark multipledispatch --quiet
-    pip install --no-deps "dolang @ git+https://github.com/bright-forest/dolang.py.git@92b63c44f44394d511b101cc3ea687505721f97f" --quiet
+    pip install --no-deps "dolang @ git+https://github.com/bright-forest/dolang.py.git@97c33783b1059512c61a24b7aced534b633f68e1" --quiet
     pip install --no-deps "dolo @ git+https://github.com/bright-forest/dolo.git@c899b0176d51f6354b5739a28e61ba45cd286a8b" --quiet
 
     if [[ "$IS_GADI" -eq 1 ]]; then
@@ -107,17 +109,33 @@ fi
 # untouched, so the pinned numpy/numba/scipy stack isn't disturbed.
 # kikku is force-reinstalled --no-deps to pick up upstream fixes without
 # re-resolving its (light) deps.
+#
+# bash reads a sourced file fully into memory before running it, so after
+# `git pull` the pinned reinstall lines below still belong to the PRE-pull
+# version of this file. The pull therefore hands over to the pulled copy
+# (re-sourced with the guard variable set), which does the reinstall with
+# the pins that were just pulled.
 if [[ "$UPDATE" -eq 1 ]]; then
-    echo "[setup] git pull"
-    git pull
+    if [[ -n "${_FUES_SETUP_POST_PULL:-}" ]]; then
+        unset _FUES_SETUP_POST_PULL   # consumed: this is the re-sourced, post-pull run
+    else
+        echo "[setup] git pull"
+        if ! git pull; then
+            echo "[setup] ERROR: git pull failed; not reinstalling against a stale tree." >&2
+            return 1
+        fi
+        _FUES_SETUP_POST_PULL=1
+        source "${BASH_SOURCE[0]}" --update
+        return $?
+    fi
     echo "[setup] Reinstalling dcsmm[examples]"
     pip install -e ".[examples]" --quiet
-    echo "[setup] Force-reinstalling kikku"
+    echo "[setup] Force-reinstalling kikku (bright-forest main; same pin as pyproject.toml)"
     pip install --force-reinstall --no-deps \
-        "kikku[estimation] @ git+https://github.com/bright-forest/kikku.git@v0.2.0" --quiet
+        "kikku[estimation] @ git+https://github.com/bright-forest/kikku.git@a54619c7ff5488d5ab1b697b4c7021af7169a7ec" --quiet
     echo "[setup] Force-reinstalling dolang + dolo (public bright-forest repos, master)"
     pip install --force-reinstall --no-deps \
-        "dolang @ git+https://github.com/bright-forest/dolang.py.git@92b63c44f44394d511b101cc3ea687505721f97f" \
+        "dolang @ git+https://github.com/bright-forest/dolang.py.git@97c33783b1059512c61a24b7aced534b633f68e1" \
         "dolo @ git+https://github.com/bright-forest/dolo.git@c899b0176d51f6354b5739a28e61ba45cd286a8b" --quiet
     echo "[setup] Verifying critical imports"
     python3 -c "from HARK.interpolation import LinearInterp; print('  OK: HARK')"
@@ -125,6 +143,17 @@ if [[ "$UPDATE" -eq 1 ]]; then
     python3 -c "from dcsmm.fues import FUES; print('  OK: dcsmm.fues')"
     python3 -c "from kikku.run.sweep import sweep; print('  OK: kikku.run.sweep')"
     python3 -c "from dolo.compiler.methodization import _normalize_methods; print('  OK: dolo._normalize_methods')"
+    echo "[setup] Installed commits (compare with the pins in this file)"
+    python3 - <<'PY'
+import json
+import importlib.metadata as md
+for p in ("kikku", "dolang", "dolo"):
+    d = md.distribution(p)
+    u = json.loads(d.read_text("direct_url.json") or "{}")
+    vi = u.get("vcs_info")
+    where = vi["commit_id"][:7] if vi else u.get("url", "?")
+    print(f"  {p} {d.version} @ {where}")
+PY
 fi
 
 # ---- Runtime environment ------------------------------------------------

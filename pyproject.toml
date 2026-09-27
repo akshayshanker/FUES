@@ -24,6 +24,7 @@ dependencies = [
   "ConSav",
   "EconModel",  # ConSav 0.12 imports it but declares no dependencies
   "econ-ark",
+  "sympy",  # econ-ark 0.17.2 imports it (HARK.simulator) but does not declare it
   "pykdtree>=1.3.12",  # RFC engine (rfc_simple.py KDTree neighbour search)
 ]
 
@@ -49,7 +50,8 @@ examples = [
   "tqdm",
   "dill>=0.3.6",
   "quantecon",
-  "kikku[estimation] @ git+https://github.com/bright-forest/kikku.git@v0.2.0",
+  # bright-forest/kikku main as of 2026-09-27 (v0.2.0 plus one docs-only commit).
+  "kikku[estimation] @ git+https://github.com/bright-forest/kikku.git@a54619c7ff5488d5ab1b697b4c7021af7169a7ec",
 ]
 # Dev = [examples] + test + format. pip resolves the self-reference.
 dev = [

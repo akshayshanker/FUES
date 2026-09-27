@@ -2,6 +2,46 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased — 2026-09-27 — Dependency pins moved to fork heads
+
+All three external pins now point at the current head of their remote
+branch, verified against `git ls-remote` on 2026-09-27:
+
+- `dolang`: `92b63c4` → `97c3378` (`bright-forest/dolang.py` `master`).
+  The old pin was a February commit on the `phase1.1_0.1` branch; master is
+  a squash of that branch's tip and adds `tag_verifier.py`, the
+  `solve_{}{}` / `DERIV_VAR` grammar, and `[~]` glyph normalisation. It is
+  the companion of the pinned dolo commit — both are the 30 Jun 2026 sync
+  from the bellman-ddsl monorepo. Changed in `setup/setup.sh` (install and
+  `--update` paths), `docs/getting-started/installation.md`,
+  `docs/running-on-gadi.md`.
+- `kikku`: tag `v0.2.0` → commit `a54619c` (`bright-forest/kikku` `main`;
+  the difference is one docs-only commit). Changed in `pyproject.toml` and
+  `setup/setup.sh`.
+- `dolo`: unchanged at `c899b01`, already the `master` head.
+
+`sympy` added to the core dependencies: `econ-ark` 0.17.2 (PyPI, 1 May 2026)
+imports it in `HARK.simulator` without declaring it, so a fresh install
+failed at `import HARK` and no `EGM_UE` engine that routes through HARK
+could load. Same pattern as the existing `EconModel` line.
+
+`setup/setup.sh --update` fixed for pin changes. bash reads a sourced file
+into memory before running it, so the reinstall lines that followed
+`git pull` came from the pre-pull script and re-pinned kikku and dolang to
+the old commits while every verification import still passed (a plain
+`pip install` does not move a git dependency whose version string is
+unchanged; only the `--force-reinstall` lines do). The pull now hands over
+to the freshly pulled copy of the script, a failed pull aborts the update
+instead of reinstalling against a stale tree, and the installed commits of
+kikku, dolang and dolo are printed at the end. Checkouts whose `setup.sh`
+predates this change must run `git pull` by hand once before `--update`;
+after that a single `--update` suffices.
+
+Verified in a fresh venv at the new pins (and again at the old dolang pin,
+with identical numbers): 29 tests and 16 subtests pass; the retirement CLI
+solves all four upper-envelope methods at the default grid; the durables
+CLI solves FUES and NEGM with simulation.
+
 ## 0.6.0dev8 — 2026-08-23 — del_kappa_hat rename (BREAKING for keyword callers)
 
 The FUES jump-threshold series is renamed to say what it is: the fifth

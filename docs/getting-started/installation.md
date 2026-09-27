@@ -66,15 +66,16 @@ pip install -e ".[examples]"
 pip install lark multipledispatch
 pip install --no-deps \
   "dolang @ git+https://github.com/bright-forest/dolang.py.git@"\
-"92b63c44f44394d511b101cc3ea687505721f97f" \
+"97c33783b1059512c61a24b7aced534b633f68e1" \
   "dolo @ git+https://github.com/bright-forest/dolo.git@"\
 "c899b0176d51f6354b5739a28e61ba45cd286a8b"
 ```
 
-The `[examples]` extra adds the application dependencies (`kikku`, pinned at a
-tagged release, plus plotting and estimation packages) on top of the core
-install. The last two lines install the pinned dolo-plus compiler that the
-example models import; they are deliberately `--no-deps` — the forks'
+The `[examples]` extra adds the application dependencies (`kikku`, pinned by
+commit to the `bright-forest/kikku` `main` head, plus plotting and estimation
+packages) on top of the core install. The last two lines install the pinned
+dolo-plus compiler that the example models import, pinned to the `master`
+heads of the two forks; they are deliberately `--no-deps` — the forks'
 packaging metadata conflicts with this repo's pins — which is why the extra
 cannot pull them in.
 

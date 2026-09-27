@@ -56,7 +56,7 @@ source setup/setup.sh
 - First run: creates `$FUES_VENV` (default `$HOME/venvs/fues`), installs
   the numerical packages (numpy, numba, scipy), `dcsmm[examples]` (FUES + HARK
   + ConSav + kikku + matplotlib + seaborn + …) in editable mode, the pinned
-  `bright-forest` dolang and dolo commits (dolang `92b63c4`, dolo `c899b01`,
+  `bright-forest` dolang and dolo commits (dolang `97c3378`, dolo `c899b01`,
   installed `--no-deps`; they provide `dolo.compiler.spec_factory`), and
   `mpi4py` built from source against the loaded MPI. Runs verification imports
   that exit non-zero if anything is missing.
