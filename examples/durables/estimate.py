@@ -11,6 +11,12 @@ Usage:
     mpirun -np 48 python3 -u -m mpi4py -m examples.durables.estimate \
         --mod syntax/separable --spec baseline.yaml
 
+    # MPI with permanent types (spec block `estimation.types`, n members per
+    # candidate): the rank count must be a multiple of n; each candidate is
+    # evaluated by a group of n ranks, one member per rank (type_groups.py).
+    mpirun -np 4160 python3 -u -m mpi4py -m examples.durables.estimate \
+        --mod syntax/separable --spec baseline_large_egm_types.yaml
+
     # With overrides
     python3 -m examples.durables.estimate \
         --mod syntax/cobb_douglas \
@@ -29,6 +35,7 @@ import pickle
 import shutil
 import subprocess
 import sys
+import time
 from datetime import datetime
 from itertools import product as cart_product
 from pathlib import Path
@@ -44,7 +51,11 @@ from kikku.run.moments import make_moment_fn, moment_names as get_moment_names
 from kikku.run.mpi import get_comm, is_root, bcast_item
 
 from .solve import solve
-from .solvers.simulate import simulate_lifecycle
+from .solvers.beta_types import draw_types, expand_types, pool_by_type
+from .solvers.simulate import simulate_lifecycle, simulate_type_subset
+from .type_groups import (
+    STOP, check_divisibility, make_group_trial, split_type_groups, worker_loop,
+)
 
 # Moment keys whose values are levels in model units (normalised by
 # `normalisation` in settings); they are multiplied by 1/normalisation so the
@@ -104,6 +115,13 @@ def _solver_method_from_cli(args):
     return None
 
 
+def _write_manifest(manifest, folders):
+    """Write ``manifest.json`` into every folder of ``folders``."""
+    for folder in folders:
+        with open(os.path.join(folder, 'manifest.json'), 'w') as f:
+            json.dump(manifest, f, indent=2)
+
+
 def _git_commit(repo_root):
     """Commit hash of the checkout at ``repo_root`` (``git rev-parse HEAD``).
 
@@ -156,6 +174,120 @@ def _denormalised_moment_fn(mod_dir, moment_spec, calib_overrides, setting_overr
     return moment_fn, denorm
 
 
+def _release_solver_memory():
+    """Collect garbage and return freed heap to the system after a solve.
+
+    ``malloc_trim`` exists in glibc only; on other platforms the call is
+    skipped (the ``OSError``/``AttributeError`` is the platform's absence of
+    the symbol, not a failure of the run).
+    """
+    gc.collect()
+    try:
+        import ctypes
+        ctypes.CDLL(None).malloc_trim(0)
+    except (OSError, AttributeError):
+        pass
+
+
+def _make_member_solver(
+    mod_dir, spec_factory, solver_method, calib_overrides, setting_overrides,
+    N_sim, simulation_seed, types_spec,
+):
+    """The per-member solve and the pooling step of a trial with types.
+
+    Returns ``(solve_member, pool)``:
+
+    * ``solve_member(theta, k) -> (agent_idx, panels_k)`` expands the candidate
+      into its K member calibrations (``expand_types``), solves member k with
+      ``{**calib_overrides, **calibration_k}``, and simulates only the agents
+      whose birth draw is k (``simulate_type_subset``);
+    * ``pool(theta, parts) -> panels`` scatters the K parts back into full
+      panels in the agents' original order (``pool_by_type``), adding
+      ``type_idx`` and one ``(N,)`` array per heterogeneous parameter.
+
+    The birth draw ``draw_types(N_sim, shares, simulation_seed)`` depends on
+    its arguments only, so every rank of a group computes the same assignment
+    and the root's pooling agrees with the members' subsets. The location and
+    spread parameters never reach the solver: ``expand_types`` removes them.
+    """
+    K = int(types_spec['n'])
+    names = list(types_spec['parameters'])
+
+    def members(theta):
+        records = expand_types(theta, types_spec)
+        if len(records) != K:
+            raise RuntimeError(
+                f"expand_types returned {len(records)} members for n={K}")
+        shares = np.array([share for share, _ in records], dtype=np.float64)
+        return records, draw_types(N_sim, shares, simulation_seed)
+
+    def solve_member(theta, k):
+        records, type_idx = members(theta)
+        _, calibration_k = records[k]
+        agent_idx = np.flatnonzero(type_idx == k)
+        nest, grids = solve(
+            str(mod_dir),
+            spec_factory_name=spec_factory,
+            method_switch=solver_method,
+            draw={
+                "calibration": {**calib_overrides, **calibration_k},
+                "settings": setting_overrides,
+            },
+            verbose=False,
+            strip_solved=True,
+        )
+        panels_k = simulate_type_subset(
+            nest, grids, agent_idx, N_sim, simulation_seed)
+        del nest, grids
+        _release_solver_memory()
+        return agent_idx, panels_k
+
+    def pool(theta, parts):
+        records, type_idx = members(theta)
+        member_values = {
+            name: [calibration_k[name] for _, calibration_k in records]
+            for name in names
+        }
+        return pool_by_type(list(parts), type_idx, N_sim, member_values)
+
+    return solve_member, pool
+
+
+def types_summary(types_spec, theta_best=None):
+    """The ``beta_types`` block of ``summary.json`` and ``manifest.json``.
+
+    Always: ``n``, ``shares`` and, per heterogeneous parameter, its
+    ``location``, ``spread`` and ``transform``. With ``theta_best``: the
+    ``nodes`` (member values) and the ``implied_mean`` (shares-weighted mean)
+    of every parameter at that candidate, and, when ``beta`` is among the
+    parameters, the same two as top-level ``nodes`` and ``implied_mean`` (the
+    names the spec gives them, Section 5.6).
+    """
+    K = int(types_spec['n'])
+    parameters = {
+        name: {
+            'location': block['location'],
+            'spread': block['spread'],
+            'transform': block.get('transform', 'logit'),
+        }
+        for name, block in types_spec['parameters'].items()
+    }
+    out = {'n': K, 'shares': [1.0 / K] * K, 'parameters': parameters}
+    if theta_best is None:
+        return out
+    records = expand_types(theta_best, types_spec)
+    shares = [float(share) for share, _ in records]
+    out['shares'] = shares
+    for name in parameters:
+        nodes = [float(calibration_k[name]) for _, calibration_k in records]
+        parameters[name]['nodes'] = nodes
+        parameters[name]['implied_mean'] = float(np.dot(shares, nodes))
+    if 'beta' in parameters:
+        out['nodes'] = parameters['beta']['nodes']
+        out['implied_mean'] = parameters['beta']['implied_mean']
+    return out
+
+
 def build_criterion(
     mod_dir, spec, spec_factory, solver_method, calib_overrides,
     setting_overrides, N_sim, simulation_seed, comm, *,
@@ -182,12 +314,17 @@ def build_criterion(
     * ``n_failures``: number of trial exceptions so far on this rank.
     * ``last_nest``: ``[nest, grids]`` from the most recent trial, kept for
       ``best.nst``; every earlier nest is cleared when a new one arrives.
+      With types it stays ``[None, None]``: a candidate has K nests, and
+      ``best.nst`` is not written for a types run.
 
-    ``types_spec`` (the ``estimation.types`` block) and ``group`` (the MPI
-    type group) are accepted for the discount-factor types of Task E2. Until
-    that work lands, a trial with a ``types_spec`` raises
-    ``NotImplementedError`` so that no run silently solves a single ``beta``
-    while the spec asks for K of them.
+    With ``types_spec`` (the ``estimation.types`` block) the trial is
+    ``expand_types -> K x (solve, simulate_type_subset) -> pool_by_type``:
+
+    * ``group=None`` (serial): the K members are solved in sequence inside
+      the trial on this process;
+    * ``group=(group_comm, K)`` (MPI): this process is a group root; the
+      trial is ``type_groups.make_group_trial``, which has every rank of the
+      group solve one member and pools the gathered parts.
     """
     moment_spec = spec['moment_spec']
     moment_fn, denorm = _denormalised_moment_fn(
@@ -232,9 +369,7 @@ def build_criterion(
     # After estimation, if is_final, the driver saves it as best.nst.
     _last_nest = [None, None]  # [nest, grids] — mutable container for closure
 
-    def trial(theta):
-        if types_spec is not None:
-            raise NotImplementedError('types are wired in Task E2')
+    def single_trial(theta):
         merged_calib = {**calib_overrides, **theta}
         nest, grids = solve(
             str(mod_dir),
@@ -263,6 +398,37 @@ def build_criterion(
         except (OSError, AttributeError):
             pass
         return panels
+
+    if types_spec is None:
+        trial = single_trial
+    else:
+        K = int(types_spec['n'])
+        solve_member, pool = _make_member_solver(
+            mod_dir, spec_factory, solver_method, calib_overrides,
+            setting_overrides, N_sim, simulation_seed, types_spec)
+
+        def log(message):
+            print(message, flush=True)
+
+        if group is None:
+            def serial_types_trial(theta):
+                """K member solves in sequence on this process, then pooling."""
+                parts, seconds = [], []
+                for k in range(K):
+                    start = time.perf_counter()
+                    parts.append(solve_member(theta, k))
+                    seconds.append(time.perf_counter() - start)
+                log("[types] serial member solve times (s): "
+                    + " ".join(f"k={k} {s:.2f}" for k, s in enumerate(seconds)))
+                return pool(theta, parts)
+
+            trial = serial_types_trial
+        else:
+            group_comm, K_group = group
+            if int(K_group) != K:
+                raise ValueError(
+                    f"group has K={K_group} members but the types block has n={K}")
+            trial = make_group_trial(group_comm, K, solve_member, pool, log)
 
     def logged_trial(theta):
         """Run the trial; print and count any exception before re-raising it.
@@ -320,11 +486,11 @@ def check_parameter_names(resolved_calibration_keys, free_names, calib_overrides
     * every name under ``free`` and every key of ``calib_overrides`` (from
       ``--params-override`` and the sweep block) must be a calibration key,
       except the names a ``types`` block maps through ``location`` and
-      ``spread``, which must *not* be calibration keys (they would shadow a
-      model parameter) and may not be passed as overrides (they never reach
-      the solver);
-    * each ``types`` target must be a calibration key and must not itself be
-      listed under ``free``.
+      ``spread`` (of every entry under ``types.parameters``), which must
+      *not* be calibration keys (they would shadow a model parameter) and
+      may not be passed as overrides (they never reach the solver);
+    * each ``types`` target (a key of ``types.parameters``) must be a
+      calibration key and must not itself be listed under ``free``.
 
     Only the keys of ``calib_overrides`` are examined.
     """
@@ -332,7 +498,7 @@ def check_parameter_names(resolved_calibration_keys, free_names, calib_overrides
     free = list(free_names)
     mapped = set()
     offending = []
-    for target, block in (types_spec or {}).items():
+    for target, block in _types_parameters(types_spec).items():
         if target not in keys:
             offending.append(f"{target!r} (types target) is not a calibration key")
         if target in free:
@@ -365,12 +531,61 @@ def check_parameter_names(resolved_calibration_keys, free_names, calib_overrides
         )
 
 
+def _types_parameters(types_spec):
+    """The ``parameters`` mapping of a types block (``{}`` when there is none)."""
+    return dict((types_spec or {}).get('parameters') or {})
+
+
+def _types_mapped_names(types_spec):
+    """Every location and spread name a types block maps."""
+    return {block[role] for block in _types_parameters(types_spec).values()
+            for role in ('location', 'spread')}
+
+
 def load_types_spec(est_yaml):
-    """Return the ``estimation.types`` block, or None when the spec has none."""
+    """Return the ``estimation.types`` block, or None when the spec has none.
+
+    The block has the shape
+
+        types:
+          n: 4                          # members per candidate
+          parameters:
+            beta: {location: beta_bar, spread: sigma_beta, transform: logit}
+
+    ``n`` and a non-empty ``parameters`` mapping are required; every entry
+    needs ``location`` and ``spread`` (``transform`` defaults to ``logit`` in
+    ``expand_types``). Member k takes the k-th equiprobable quantile of every
+    listed parameter (spec 5.6).
+    """
     block = (est_yaml or {}).get('types')
     if not block:
         return None
-    return dict(block)
+    if not isinstance(block, dict):
+        raise ValueError("estimation.types must be a mapping with 'n' and 'parameters'")
+    if 'n' not in block:
+        raise ValueError("estimation.types lacks 'n', the number of type members")
+    try:
+        n = int(block['n'])
+    except (TypeError, ValueError):
+        raise ValueError(f"estimation.types.n must be an integer, got {block['n']!r}")
+    if n < 1:
+        raise ValueError(f"estimation.types.n must be at least 1, got {n}")
+    parameters = block.get('parameters')
+    if not isinstance(parameters, dict) or not parameters:
+        raise ValueError(
+            "estimation.types lacks a non-empty 'parameters' mapping "
+            "(e.g. parameters: {beta: {location: beta_bar, spread: sigma_beta}})")
+    for target, entry in parameters.items():
+        if not isinstance(entry, dict):
+            raise ValueError(f"estimation.types.parameters.{target} must be a mapping")
+        for role in ('location', 'spread'):
+            if role not in entry:
+                raise ValueError(
+                    f"estimation.types.parameters.{target} lacks '{role}'")
+    out = dict(block)
+    out['n'] = n
+    out['parameters'] = {target: dict(entry) for target, entry in parameters.items()}
+    return out
 
 
 def check_types_data_source(types_spec, moment_spec):
@@ -388,7 +603,7 @@ def check_types_data_source(types_spec, moment_spec):
         raise ValueError(
             "estimation.types cannot be combined with moments.data_source: "
             "selfgen. The true values of the mapped parameters "
-            f"({sorted({b[r] for b in types_spec.values() for r in ('location', 'spread')})}) "
+            f"({sorted(_types_mapped_names(types_spec))}) "
             "have no defined source in a self-generated run. Use precomputed "
             "data moments, or drop the types block."
         )
@@ -424,6 +639,10 @@ def _run_single_estimation(
     N_sim = args.N_sim
     solver_method = _solver_method_from_cli(args)
     types_spec = load_types_spec(est_yaml)
+    # Types under MPI: the communicator is split into groups of K ranks
+    # below, after the last collective on `comm` that precedes estimate().
+    # In serial mode the K members are solved in sequence inside the trial.
+    types_mpi = types_spec is not None and not serial
     spec_name = Path(args.spec).stem
     mod_name = Path(args.mod).name  # e.g. 'separable', 'separable_males'
 
@@ -496,43 +715,21 @@ def _run_single_estimation(
         spec_for_criterion = spec
 
     # --- Build the criterion: trial (solve -> simulate -> panels), moments, loss ---
-    criterion, moment_fn, data_moments, denorm = build_criterion(
-        mod_dir, spec_for_criterion, args.spec_factory, solver_method,
-        calib_overrides, setting_overrides, N_sim, simulation_seed, comm,
-        types_spec=types_spec,
-    )
-    # [nest, grids] of the most recent trial; saved as best.nst when is_final.
-    _last_nest = criterion.last_nest
+    # With types under MPI the criterion is built on the group roots only,
+    # after the split below; workers never hold one.
+    if not types_mpi:
+        criterion, moment_fn, data_moments, denorm = build_criterion(
+            mod_dir, spec_for_criterion, args.spec_factory, solver_method,
+            calib_overrides, setting_overrides, N_sim, simulation_seed, comm,
+            types_spec=types_spec,
+        )
+        # [nest, grids] of the most recent trial; saved as best.nst when is_final.
+        _last_nest = criterion.last_nest
 
     # --- Create output directories ---
     if is_root(comm):
         os.makedirs(scratch_run, exist_ok=True)
         os.makedirs(results_run, exist_ok=True)
-        manifest = {
-            'mod': str(mod_dir),
-            'spec': str(spec_path),
-            'spec_factory': args.spec_factory,
-            'solver_method': solver_method,
-            'run_id': run_id,
-            'sweep_point': sub_label,
-            'calib_overrides': calib_overrides,
-            'n_samples': method_options.get('n_samples'),
-            'n_elite': method_options.get('n_elite'),
-            'max_iter': method_options.get('max_iter'),
-            'grid': setting_overrides,
-            'N_sim': N_sim,
-            'simulation_seed': simulation_seed,
-            'sampling_seed': method_options.get('sampling_seed'),
-            'free_params': list(param_spec.keys()),
-            'timestamp': run_id,
-            'git_commit': _git_commit(Path(__file__).resolve().parent.parent.parent),
-            'beta_types': None,
-        }
-        # Scratch is purged on Gadi; the results copy keeps the grid, N_sim,
-        # seeds, spec factory and method of a finished run with its estimates.
-        for folder in (scratch_run, results_run):
-            with open(os.path.join(folder, 'manifest.json'), 'w') as f:
-                json.dump(manifest, f, indent=2)
         print(f"  Scratch: {scratch_run}")
         print(f"  Results: {results_run}")
 
@@ -556,15 +753,86 @@ def _run_single_estimation(
     if getattr(args, 'max_iter', None) is not None:
         method_options['max_iter'] = args.max_iter
 
+    # --- Types under MPI: the two layers (spec 5.6, type_groups.py) ---
+    # The resume broadcast above was the last collective on `comm` before
+    # estimate(); from here the workers talk to their group root only, until
+    # they return to the post-estimate collectives on `comm` below.
+    group_comm = None
+    est_comm = comm
+    if types_mpi:
+        K = int(types_spec['n'])
+        group_comm, roots_comm = split_type_groups(comm, K)
+        if roots_comm is None:
+            # Worker: serve the group root until STOP, then take part in the
+            # two collectives on `comm` that follow estimate() on the roots
+            # (allreduce of the failure count, broadcast of all_failed) and
+            # in everything after (the is_final broadcasts, barriers, gather).
+            solve_member, _pool = _make_member_solver(
+                mod_dir, args.spec_factory, solver_method, calib_overrides,
+                setting_overrides, N_sim, simulation_seed, types_spec)
+            worker_loop(group_comm, solve_member)
+            comm.allreduce(0)
+            all_failed = bcast_item(None, comm, root=0)
+            return None, None, all_failed
+        est_comm = roots_comm
+        method_options['n_samples'] = roots_comm.Get_size()
+        if is_root(comm):
+            print(f"[types] K={K} members per candidate: {roots_comm.Get_size()} "
+                  f"groups of {K} ranks on {comm.Get_size()} ranks; "
+                  f"n_samples={roots_comm.Get_size()} candidates per iteration",
+                  flush=True)
+        criterion, moment_fn, data_moments, denorm = build_criterion(
+            mod_dir, spec_for_criterion, args.spec_factory, solver_method,
+            calib_overrides, setting_overrides, N_sim, simulation_seed, comm,
+            types_spec=types_spec, group=(group_comm, K),
+        )
+        _last_nest = criterion.last_nest
+
+    # --- Manifest (root): written once the run's options are final ---
+    # After the --max-iter merge and the split, so that max_iter and
+    # n_samples are the values estimate() runs with.
+    if is_root(comm):
+        manifest = {
+            'mod': str(mod_dir),
+            'spec': str(spec_path),
+            'spec_factory': args.spec_factory,
+            'solver_method': solver_method,
+            'run_id': run_id,
+            'sweep_point': sub_label,
+            'calib_overrides': calib_overrides,
+            'n_samples': method_options.get('n_samples'),
+            'n_elite': method_options.get('n_elite'),
+            'max_iter': method_options.get('max_iter'),
+            'grid': setting_overrides,
+            'N_sim': N_sim,
+            'simulation_seed': simulation_seed,
+            'sampling_seed': method_options.get('sampling_seed'),
+            'free_params': list(param_spec.keys()),
+            'timestamp': run_id,
+            'git_commit': _git_commit(Path(__file__).resolve().parent.parent.parent),
+            'beta_types': (types_summary(types_spec)
+                           if types_spec is not None else None),
+        }
+        # Scratch is purged on Gadi; the results copy keeps the grid, N_sim,
+        # seeds, spec factory and method of a finished run with its estimates.
+        _write_manifest(manifest, (scratch_run, results_run))
+
     # --- Estimate ---
-    result = estimate(
-        criterion, param_spec,
-        method=spec['method'],
-        method_options=method_options,
-        comm=comm,
-        verbose=is_root(comm),
-        resume_state=resume_state,
-    )
+    # The roots of a types run broadcast STOP to their workers whatever
+    # happens inside estimate(), so an exception there cannot leave the
+    # workers waiting for the next EVAL.
+    try:
+        result = estimate(
+            criterion, param_spec,
+            method=spec['method'],
+            method_options=method_options,
+            comm=est_comm,
+            verbose=is_root(comm),
+            resume_state=resume_state,
+        )
+    finally:
+        if group_comm is not None:
+            group_comm.bcast((STOP,), root=0)
 
     # Determine if this is a final segment (write results) or intermediate (checkpoint only)
     global_max = int(method_options.get('max_iter', 200))
@@ -614,20 +882,29 @@ def _run_single_estimation(
                 theta_se = {names_sorted[i]: float(se_vec[i])
                             for i in range(len(names_sorted))}
 
+        summary = {
+            'theta_best': result.theta,
+            'theta_mean': theta_mean,
+            'theta_se': theta_se,
+            'objective': result.objective,
+            'converged': result.converged,
+            'n_iter': result.n_iter,
+            'sweep_point': sub_label,
+            'calib_overrides': calib_overrides,
+        }
+        if types_spec is not None:
+            # The type nodes, shares and implied mean at theta_best; the
+            # manifest is rewritten so that it carries the same block.
+            beta_types = types_summary(types_spec, result.theta)
+            summary['beta_types'] = beta_types
+            manifest['beta_types'] = beta_types
+            _write_manifest(manifest, (scratch_run, results_run))
+
         for fname, obj in [
             ('theta_best.json', result.theta),
             ('theta_mean.json', theta_mean),
             ('theta_se.json', theta_se),
-            ('summary.json', {
-                'theta_best': result.theta,
-                'theta_mean': theta_mean,
-                'theta_se': theta_se,
-                'objective': result.objective,
-                'converged': result.converged,
-                'n_iter': result.n_iter,
-                'sweep_point': sub_label,
-                'calib_overrides': calib_overrides,
-            }),
+            ('summary.json', summary),
         ]:
             with open(os.path.join(results_run, fname), 'w') as f:
                 json.dump(obj, f, indent=2)
@@ -835,6 +1112,14 @@ def main():
         {**calib_overrides, **(sweep_spec or {})},
         types_spec,
     )
+    # Types under MPI need K ranks per candidate for every sweep point. The
+    # check runs on every rank, before any Split (the sweep split below and
+    # the type-group split inside _run_single_estimation), so that all ranks
+    # raise together and no output folder is created. A single rank solves
+    # the K members in sequence and needs no check.
+    if types_spec is not None and world_comm is not None and world_comm.Get_size() > 1:
+        n_points = len(_build_sweep_grid(sweep_spec)) if sweep_spec is not None else 1
+        check_divisibility(world_comm, int(types_spec['n']), n_points)
 
     # run_id: use --run-id if provided (restart loop), otherwise generate fresh
     run_id = args.run_id or datetime.now().strftime('%Y%m%d_%H%M%S')

@@ -47,7 +47,24 @@ SIMULATION_SEED = 99  # the separable specs' simulation_seed
 # with normalisation 1.0e-05 in separable/settings.yaml (line 71).
 DENORM_EXPECTED = 1.0e5
 
-TYPES_SPEC = {"beta": {"n": 4, "location": "beta_bar", "spread": "sigma_beta"}}
+# The generalised types block (spec 5.6): n members; member k takes the k-th
+# equiprobable quantile of every listed parameter on its transform scale.
+TYPES_SPEC = {
+    "n": 4,
+    "parameters": {
+        "beta": {"location": "beta_bar", "spread": "sigma_beta", "transform": "logit"},
+    },
+}
+
+# The two equiprobable normal quantiles for K = 2, Phi^{-1}(0.25) and
+# Phi^{-1}(0.75), written as numbers so the oracle is independent of the code.
+Z2 = np.array([-0.6744897501960817, 0.6744897501960817])
+
+
+def _logit_nodes(beta_bar, sigma_beta):
+    """Closed form of the type nodes on the logit scale, increasing in beta."""
+    x = np.log(1.0 / beta_bar - 1.0) + sigma_beta * Z2
+    return np.sort(1.0 / (1.0 + np.exp(x)))
 
 
 def _driver():
@@ -180,7 +197,8 @@ def test_guard_types_rules():
         est.check_parameter_names(keys, ["beta", "beta_bar", "sigma_beta"], {}, TYPES_SPEC)
 
     # A mapped name that is a calibration key would shadow a model parameter.
-    shadowing = {"beta": {"n": 4, "location": "alpha", "spread": "sigma_beta"}}
+    shadowing = {"n": 4, "parameters": {
+        "beta": {"location": "alpha", "spread": "sigma_beta"}}}
     with pytest.raises(ValueError, match=r"'alpha'"):
         est.check_parameter_names(keys, ["alpha", "sigma_beta"], {}, shadowing)
 
@@ -189,9 +207,19 @@ def test_guard_types_rules():
         est.check_parameter_names(keys, ["beta_bar", "sigma_beta"], {"beta_bar": 0.9}, TYPES_SPEC)
 
     # A types target that is not a calibration key.
-    stray = {"kappa": {"n": 4, "location": "kappa_bar", "spread": "sigma_kappa"}}
+    stray = {"n": 4, "parameters": {
+        "kappa": {"location": "kappa_bar", "spread": "sigma_kappa"}}}
     with pytest.raises(ValueError, match=r"'kappa'"):
         est.check_parameter_names(keys, ["kappa_bar", "sigma_kappa"], {}, stray)
+
+    # Two heterogeneous parameters: every location and spread is mapped.
+    two = {"n": 4, "parameters": {
+        "beta": {"location": "beta_bar", "spread": "sigma_beta"},
+        "alpha": {"location": "alpha_bar", "spread": "sigma_alpha"}}}
+    est.check_parameter_names(
+        keys, ["beta_bar", "sigma_beta", "alpha_bar", "sigma_alpha", "tau"], {"t0": 20}, two)
+    with pytest.raises(ValueError, match=r"'alpha'"):
+        est.check_parameter_names(keys, ["beta_bar", "sigma_beta", "alpha_bar", "sigma_alpha", "alpha"], {}, two)
 
     # Every offending name is listed in one message.
     with pytest.raises(ValueError) as excinfo:
@@ -211,6 +239,27 @@ def test_load_types_spec_is_none_for_the_existing_spec():
     assert est.load_types_spec({}) is None
     assert est.load_types_spec({"types": TYPES_SPEC}) == TYPES_SPEC
 
+    # The committed types spec of each registry loads with n = 4 and beta.
+    for registry in (SEPARABLE, COBB_DOUGLAS):
+        raw_types = yaml.safe_load(
+            (registry / "estimation" / "baseline_large_egm_types.yaml").read_text())
+        block = est.load_types_spec(raw_types["estimation"])
+        assert block["n"] == 4 and list(block["parameters"]) == ["beta"]
+        assert block["parameters"]["beta"]["location"] == "beta_bar"
+        assert block["parameters"]["beta"]["spread"] == "sigma_beta"
+        assert block["parameters"]["beta"]["transform"] == "logit"
+        assert set(raw_types["estimation"]["free"]) >= {"beta_bar", "sigma_beta"}
+        assert "beta" not in raw_types["estimation"]["free"]
+
+    # n is required, as is a non-empty parameters mapping with location and
+    # spread for every entry.
+    with pytest.raises(ValueError, match=r"'n'"):
+        est.load_types_spec({"types": {"parameters": TYPES_SPEC["parameters"]}})
+    with pytest.raises(ValueError, match="parameters"):
+        est.load_types_spec({"types": {"n": 4}})
+    with pytest.raises(ValueError, match="spread"):
+        est.load_types_spec({"types": {"n": 4, "parameters": {"beta": {"location": "beta_bar"}}}})
+
 
 def test_types_with_selfgen_data_are_refused_naming_both_keys():
     est = _driver()
@@ -224,28 +273,54 @@ def test_types_with_selfgen_data_are_refused_naming_both_keys():
 
 
 # ---------------------------------------------------------------------------
-# (f) a types spec without a group never runs a single beta silently
+# (f) a types spec without a group solves the K members in sequence
 # ---------------------------------------------------------------------------
 
-def test_types_spec_without_group_raises_and_is_counted(spec, capsys):
+def test_types_spec_without_group_solves_the_members_in_sequence(spec, capsys):
+    """Serial mode (no communicator): K solves inside one trial, then pooling.
+
+    Oracle: the two node values are the closed form ``_logit_nodes``; every
+    agent's ``beta`` equals the node of its ``type_idx``; both types are
+    present among 500 agents with equal shares; the panels keep the
+    single-model shape ``(T, N)`` so the moment function applies unchanged.
+    """
     est = _driver()
+    two_types = {"n": 2, "parameters": TYPES_SPEC["parameters"]}
     criterion, moment_fn, data_moments, denorm = est.build_criterion(
         SEPARABLE, spec, "spec_factory.yaml", None, dict(CALIB_OVERRIDES), dict(GRID),
-        N_SIM, SIMULATION_SEED, None, types_spec=TYPES_SPEC, group=None,
+        N_SIM, SIMULATION_SEED, None, types_spec=two_types, group=None,
     )
     theta = {**{k: v for k, v in _base_theta(spec).items() if k != "beta"},
              "beta_bar": 0.94, "sigma_beta": 0.1}
-    with pytest.raises(NotImplementedError, match="Task E2"):
-        criterion.trial(theta)
-    assert criterion.n_failures == 1
 
-    # Through kikku's closure the failure becomes the penalty loss, and the
-    # driver has printed it before re-raising (the 28 March 2026 incident
-    # was a silent NameError scored at BIG_LOSS).
-    assert criterion(theta) == BIG_LOSS
-    assert criterion.n_failures == 2
+    panels = criterion.trial(theta)
+    assert criterion.n_failures == 0
+    assert panels["c"].shape == (70, N_SIM)
+    assert panels["type_idx"].dtype == np.int64
+    counts = np.bincount(panels["type_idx"], minlength=2)
+    assert counts.shape == (2,) and counts.min() > 0 and counts.sum() == N_SIM
+    # The two node values agree with the closed form to 1e-12: the driver's
+    # nodes come from the algebraically identical form
+    # beta_bar / (beta_bar + (1 - beta_bar) exp(sigma z)), which differs from
+    # the literal 1/(1 + exp(x)) by one unit in the last place (spec 5.6).
+    nodes = _logit_nodes(0.94, 0.1)
+    pooled_nodes = np.unique(panels["beta"])
+    np.testing.assert_allclose(pooled_nodes, nodes, rtol=0, atol=1e-12)
+    # Every agent carries exactly the node of its type (nodes increase in k).
+    assert np.array_equal(panels["beta"], pooled_nodes[panels["type_idx"]])
     out = capsys.readouterr().out
-    assert "NotImplementedError" in out and "beta_bar" in out
+    assert "[types] serial member solve times" in out
+
+    loss = criterion(theta)
+    assert np.isfinite(loss) and loss < BIG_LOSS
+    assert criterion.n_failures == 0
+
+    # A candidate that carries beta beside the location and spread is a
+    # failure, printed and counted before kikku scores it at the penalty.
+    assert criterion({**theta, "beta": 0.95}) == BIG_LOSS
+    assert criterion.n_failures == 1
+    out = capsys.readouterr().out
+    assert "[trial failure]" in out and "ValueError" in out and "'beta'" in out
 
 
 # ---------------------------------------------------------------------------

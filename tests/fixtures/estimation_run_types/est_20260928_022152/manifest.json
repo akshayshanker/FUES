@@ -1,0 +1,62 @@
+{
+  "mod": "/Users/akshayshanker/Research/Repos/FUES2026/FUES-wt-cd-estimation/examples/durables/syntax/separable",
+  "spec": "/Users/akshayshanker/Research/Repos/FUES2026/FUES-wt-cd-estimation/examples/durables/syntax/separable/estimation/baseline_large_egm_types.yaml",
+  "spec_factory": "spec_factory.yaml",
+  "solver_method": null,
+  "run_id": "20260928_022152",
+  "sweep_point": null,
+  "calib_overrides": {
+    "t0": 20
+  },
+  "n_samples": 6,
+  "n_elite": 2,
+  "max_iter": 2,
+  "grid": {
+    "n_a": 30,
+    "n_h": 30,
+    "n_w": 30
+  },
+  "N_sim": 500,
+  "simulation_seed": 99,
+  "sampling_seed": 42,
+  "free_params": [
+    "beta_bar",
+    "sigma_beta",
+    "alpha",
+    "gamma_c",
+    "gamma_h",
+    "tau"
+  ],
+  "timestamp": "20260928_022152",
+  "git_commit": "1ea95ebba2e6aae4cc1257ad7abde9f5ecd78c05",
+  "beta_types": {
+    "n": 4,
+    "shares": [
+      0.25,
+      0.25,
+      0.25,
+      0.25
+    ],
+    "parameters": {
+      "beta": {
+        "location": "beta_bar",
+        "spread": "sigma_beta",
+        "transform": "logit",
+        "nodes": [
+          0.915614311415678,
+          0.9395126616745635,
+          0.9533716352355618,
+          0.9669627923962397
+        ],
+        "implied_mean": 0.9438653501805108
+      }
+    },
+    "nodes": [
+      0.915614311415678,
+      0.9395126616745635,
+      0.9533716352355618,
+      0.9669627923962397
+    ],
+    "implied_mean": 0.9438653501805108
+  }
+}
