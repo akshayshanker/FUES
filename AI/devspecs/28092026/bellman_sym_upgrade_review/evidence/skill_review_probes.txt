@@ -1,0 +1,6 @@
+{"criterion_sha256": "1ba806f166a45b2edf1e734b24dd73ee60504e76df9abc6d67aecbdd7f81cd51", "criterion_source": "/Users/akshayshanker/Research/Repos/FUES2026/FUES/.venv/lib/python3.12/site-packages/kikku/run/estimate.py", "kikku": "0.2.0", "mpi_auto_initialize": false, "numba": "0.64.0", "numpy": "2.3.5", "precision": "float64", "python": "3.12.7", "scipy": "1.17.1"}
+{"case": "trial exception", "equals_BIG_LOSS": true, "finite": true, "last_sim_moments": null, "loss": 10000000000.0, "recorded_error": "[criterion EXCEPTION] KeyError: 'synthetic missing calibration parameter'"}
+{"case": "missing simulated target", "equals_NAN_PENALTY": true, "finite": true, "last_sim_moments": {}, "loss": 1000000.0}
+{"case": "level in original units", "loss": 0.01, "relative_error": 0.1, "simulated": 11.0, "target": 10.0}
+{"case": "same proportional error after scaling", "loss": 9.99999999999999e-05, "relative_error": 0.09999999999999995, "simulated": 0.11, "target": 0.1}
+{"case": "retirement constrained current utility", "difference": 0.2231435513142097, "reported_consumption": 0.8, "resources": 1.0, "saving_floor": 0.2, "utility_at_reported_consumption": -0.2231435513142097, "utility_used_by_existing_value_line": 0.0}

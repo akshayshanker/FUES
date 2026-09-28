@@ -1,0 +1,5 @@
+{"module": "kikku.run.estimate", "path": "/Users/akshayshanker/Research/Repos/FUES2026/FUES/.venv/lib/python3.12/site-packages/kikku/run/estimate.py", "sha256": "1ba806f166a45b2edf1e734b24dd73ee60504e76df9abc6d67aecbdd7f81cd51"}
+{"module": "examples.durables.postprocess.at_estimates", "path": "/Users/akshayshanker/Research/Repos/FUES2026/FUES-wt-cd-estimation/examples/durables/postprocess/at_estimates.py", "sha256": "83ed34c1d8c4d05003258995a0ec746fcaef039432d3b283426c191160c104a3"}
+{"module": "kikku.run.moments", "path": "/Users/akshayshanker/Research/Repos/FUES2026/FUES/.venv/lib/python3.12/site-packages/kikku/run/moments.py", "sha256": "5e1a5f6a24d456c3b5392eeff6227af99db40e01cc5494292bf696906a93af8d"}
+{"criterion_loss": 1000000.01, "fit_contributions": 0.01, "fit_keys": ["present"]}
+{"age40_44_rows": [40, 41, 42, 43]}
