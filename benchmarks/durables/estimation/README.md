@@ -57,6 +57,7 @@ substrings against the path (`scripts/run_pbs.sh selfgen egm`).
 | `selfgen/run_selfgen_sweep_gamma_c_negm_males.pbs` | normalsr | 5200 | 24000GB | 5:00:00 | selfgen_sweep_gamma_c_negm.yaml | 10 | NEGM |
 | `selfgen/run_selfgen_sweep_sigma_w_egm.pbs` | normalsr | 1040 | 4800GB | 5:00:00 | selfgen_sweep_sigma_w_egm.yaml | 10 | FUES (EGM) |
 | `selfgen/run_selfgen_sweep_sigma_w_negm.pbs` | normalsr | 1040 | 4800GB | 5:00:00 | selfgen_sweep_sigma_w_negm.yaml | 10 | NEGM |
+| `generic/run_eval_theta.pbs` | normalsr | 104 | 480GB | 1:00:00 | any (`SPEC=`), plan JSON (`PLAN=`) | — | as the estimation (`METHODS=`) |
 
 The NEGM scripts use the same estimation spec as their EGM twin (the
 `*_negm*.yaml` files differ only in their title line) and select NEGM with
@@ -98,6 +99,28 @@ Dimensions and where each lives:
 | Joint ceiling (29 Sep) | `a_max = 20, h_max = 20` | `EXTRA_SETTINGS=a_max=20;h_max=20;w_max=30` | `_amax20_hmax20` |
 | Simulated agents `N_SIM` | 10000 (base), 20000 | `N_SIM=20000` | `_nsim20k` |
 | CE samples per point (recovery) | 520 (base), 1,040 | ranks per sweep point | `selfgen_sweep_gamma_c_low_*` |
+
+**Objective at fixed θ (`generic/run_eval_theta.pbs`, `examples/durables/eval_theta.py`).**
+A change in a numerical setting moves both the objective surface and the
+basin the cross-entropy sampler lands in. To separate the two, a plan JSON
+lists (θ, settings) pairs and the job evaluates the objective at each — one
+solve and simulation per pair, one MPI rank per evaluation, about 100 s and
+1 SU each at grid 600 — writing per-moment weighted contributions that sum to
+the loss (`<results>/eval_theta/<OUT>_<jobid>.{json,csv}`). A θ evaluated under
+the settings of the run that produced it reproduces that run's objective
+exactly, which checks the plan. The plans of 29 Sep are in `batches/eval_theta_*.json`.
+
+**Result of the `a_max` runs (29 Sep 2026).** The seed-42 baselines depend
+on the asset ceiling: at the baseline female θ (α .628, γ_c 1.253) the
+objective is 27.62 with `a_max = 7.5` and 33–34 once `a_max ≥ 10` (the
+asset ceiling alone +5.5, the adjuster wealth ceiling alone +2.5, grid
+spacing ≤ 0.25); the male baseline θ goes from 89.4 to 98–103. The ceiling
+truncates the over-saving of those θ (βR = 1.035) and redirects it into
+housing and consumption, which fits the real-wealth and consumption moments.
+With the ceiling lifted the estimate is α ≈ .40–.43, γ_c ≈ 2.1, objective
+29.3–29.5, the same for `a_max` 10/15/20 and for EGM and NEGM, and
+(`a_max = 20`, `w_max = 25`) is non-binding for every θ tried. Details and
+tables: `AI/working/29092026/session_amax_campaign.md`.
 
 Seed, sex and method variants run at the xxl size (4,160 samples); the
 settings variants of 28 Sep at the xlarge size (2,080 samples), whose base results are

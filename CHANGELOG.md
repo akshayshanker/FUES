@@ -18,6 +18,19 @@ three waves with the unchanged xxl scripts. `scripts/collect_estimation_results.
 gains an `a_max` column, read from the manifest's extra settings or from
 `_amax<x>` in the spec name.
 
+`examples/durables/eval_theta.py` (with `benchmarks/durables/estimation/generic/run_eval_theta.pbs`)
+evaluates the SMM objective at given θ vectors under chosen settings — one
+solve and simulation per pair, one MPI rank per evaluation, per-moment
+weighted contributions that sum to the loss — to separate what the
+cross-entropy sampler found from what a setting does to the objective
+surface (process pools do not work on Gadi: a forked worker aborts under
+GNU OpenMP, a spawned one hangs in its own MPI initialisation). Result: the
+seed-42 baselines depend on the asset ceiling — at the baseline θ the
+objective rises from 27.62 (females) and 89.42 (males) to 33–34 and 98–103
+once `a_max ≥ 10`, grid spacing accounting for at most 0.25 — and the
+ceiling-free female estimate is α ≈ .40–.43, γ_c ≈ 2.1 at 29.3–29.5,
+identical across `a_max` 10/15/20 and across EGM and NEGM.
+
 ## Unreleased — 2026-09-28 — Gadi estimation jobs hardened and regrouped
 
 Cause: on 23 Sep 2026 sweep job 179615514 lost 146 ranks to SIGBUS inside
