@@ -47,6 +47,15 @@ wave3)
     sub xxlNEGM_a10    "$D/females/run_xxl_negm.pbs"    "SPEC=baseline_xlarge_negm_amax10.yaml,EXTRA_SETTINGS=a_max=10;w_max=15"
     sub xxlNEGM_a15    "$D/females/run_xxl_negm.pbs"    "SPEC=baseline_xlarge_negm_amax15.yaml,EXTRA_SETTINGS=a_max=15;w_max=20"
     sub xxlNEGM_a20    "$D/females/run_xxl_negm.pbs"    "SPEC=baseline_xlarge_negm_amax20.yaml,EXTRA_SETTINGS=a_max=20;w_max=25" ;;
+wave4)
+    # Seed robustness of the a_max = 20 optimum (the seed-42 runs settled near
+    # 29.4 for females, above the seed-42 baseline's 27.62): the three best
+    # baseline seeds for females (11, 123, 7) and the two best for males (7, 2026).
+    sub xxlEGM_a20s11   "$D/females/run_xxl_egm.pbs"     "SPEC=baseline_xlarge_egm_amax20_seed11.yaml,EXTRA_SETTINGS=a_max=20;w_max=25"
+    sub xxlEGM_a20s123  "$D/females/run_xxl_egm.pbs"     "SPEC=baseline_xlarge_egm_amax20_seed123.yaml,EXTRA_SETTINGS=a_max=20;w_max=25"
+    sub xxlEGM_a20s7    "$D/females/run_xxl_egm.pbs"     "SPEC=baseline_xlarge_egm_amax20_seed7.yaml,EXTRA_SETTINGS=a_max=20;w_max=25"
+    sub xxlEGMm_a20s7   "$D/males/run_xxl_egm_males.pbs" "SPEC=baseline_xlarge_egm_males_amax20_seed7.yaml,EXTRA_SETTINGS=a_max=20;w_max=25"
+    sub xxlEGMm_a20s26  "$D/males/run_xxl_egm_males.pbs" "SPEC=baseline_xlarge_egm_males_amax20_seed2026.yaml,EXTRA_SETTINGS=a_max=20;w_max=25" ;;
 *)
-    echo "usage: $0 wave1|wave2|wave3" >&2; exit 1 ;;
+    echo "usage: $0 wave1|wave2|wave3|wave4" >&2; exit 1 ;;
 esac

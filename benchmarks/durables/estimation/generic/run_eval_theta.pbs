@@ -1,0 +1,84 @@
+#!/bin/bash
+#PBS -P tp66
+#PBS -q normalsr
+#PBS -N eval_theta
+#PBS -l ncpus=104
+#PBS -l mem=480GB
+#PBS -l walltime=1:00:00
+#PBS -l jobfs=50GB
+#PBS -l storage=scratch/tp66+gdata/tp66
+#PBS -l wd
+#PBS -o /g/data/tp66/logs/durables/
+#PBS -e /g/data/tp66/logs/durables/
+
+# ---------------------------------------------------------------
+# Objective at fixed parameter vectors (examples/durables/eval_theta.py):
+# one solve + one simulation per (theta, settings) pair, JOBS pairs in
+# parallel on one normalsr node. Used to separate what the cross-entropy
+# sampler found from what a numerical setting does to the objective surface.
+# Cost: 2 SU x 104 cores x walltime; eight grid-600 evaluations take
+# ~10-15 min (~50 SU). The node is mostly idle (a few processes), which is
+# the accepted price of a diagnostic this small.
+#
+#   qsub -v PLAN=benchmarks/durables/estimation/batches/eval_theta_amax_2026-09-29.json,SPEC=baseline_xlarge_egm.yaml,OUT=amax_females_egm \
+#        benchmarks/durables/estimation/generic/run_eval_theta.pbs
+#
+# Variables: PLAN (JSON plan, path relative to the repo root; required),
+# SPEC, MOD, SPEC_FACTORY, GRID, N_SIM, METHODS (e.g. the NEGM override),
+# JOBS (parallel evaluations, default 8), OUT (file stem; results go to
+# $RESULTS_ROOT/eval_theta/<OUT>_<jobid>.{json,csv}).
+# ---------------------------------------------------------------
+
+MOD="${MOD:-syntax/separable}"
+SPEC="${SPEC:-baseline_xlarge_egm.yaml}"
+SPEC_FACTORY="${SPEC_FACTORY:-spec_factory.yaml}"
+METHODS="${METHODS:-}"
+GRID="${GRID:-600}"
+N_SIM="${N_SIM:-10000}"
+JOBS="${JOBS:-8}"
+RESULTS_ROOT="${RESULTS_ROOT:-/g/data/tp66/results/durables/estimation}"
+OUT="${OUT:-eval}"
+if [ -z "${PLAN:-}" ]; then echo "ERROR: PLAN=<plan.json> is required" >&2; exit 1; fi
+
+module purge
+module load python3/3.12.1
+module load openmpi/4.1.5
+
+# Locate the repo root: walk up from the submission directory until
+# pyproject.toml is found, so the script can live at any depth under it.
+REPO_ROOT="$PBS_O_WORKDIR"
+while [ ! -f "$REPO_ROOT/pyproject.toml" ] && [ "$REPO_ROOT" != "/" ]; do
+    REPO_ROOT="$(dirname "$REPO_ROOT")"
+done
+if [ ! -f "$REPO_ROOT/pyproject.toml" ]; then
+    echo "ERROR: Cannot find repo root above PBS_O_WORKDIR=$PBS_O_WORKDIR" >&2; exit 1
+fi
+PLAN_PATH="$PLAN"; [ "${PLAN_PATH#/}" = "$PLAN_PATH" ] && PLAN_PATH="$REPO_ROOT/$PLAN"
+if [ ! -f "$PLAN_PATH" ]; then echo "ERROR: plan not found: $PLAN_PATH" >&2; exit 1; fi
+
+# Import from the repo but run on scratch (nothing lands on the home quota).
+export VIRTUAL_ENV="$HOME/venvs/fues"
+export PATH="$VIRTUAL_ENV/bin:$PATH"
+export PYTHONPATH="$REPO_ROOT${PYTHONPATH:+:$PYTHONPATH}"
+export PYTHONDONTWRITEBYTECODE=1
+export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMBA_NUM_THREADS=1
+RUN_DIR="/scratch/tp66/$USER/durables_est/jobs/${PBS_JOBID%%.*}"
+mkdir -p "$RUN_DIR" "$RESULTS_ROOT/eval_theta"
+cd "$RUN_DIR"
+ulimit -c 0
+
+OUT_STEM="$RESULTS_ROOT/eval_theta/${OUT}_${PBS_JOBID%%.*}"
+echo "  Repo root: $REPO_ROOT  commit $(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null)"
+echo "  Plan: $PLAN_PATH | spec $SPEC | mod $MOD | grid $GRID | N_SIM $N_SIM | methods ${METHODS:-default} | jobs $JOBS"
+echo "  Output: $OUT_STEM.{json,csv}"
+echo "  Started $(date)"
+
+python3 -u -m examples.durables.eval_theta \
+    --mod "$MOD" --spec "$SPEC" --spec-factory "$SPEC_FACTORY" \
+    --plan "$PLAN_PATH" --out "$OUT_STEM" \
+    --settings-override n_a=$GRID n_h=$GRID n_w=$GRID \
+    --params-override t0=20 --N-sim "$N_SIM" --jobs "$JOBS" \
+    $METHODS
+status=$?
+echo "  Finished $(date) with status $status"
+exit $status
