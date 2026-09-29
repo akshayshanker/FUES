@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased — 2026-09-29 — asset-ceiling robustness runs
+
+`a_max = 7.5` (= $750k at `normalisation: 1e-5`) lies below the data mean of
+financial assets at ages 55–59 ($803k for both sexes), and the simulation
+clamps policies at the grid edge, so the top of the asset distribution is
+compressed against the ceiling; at the 28 Sep optima the mean and standard
+deviation of financial assets at ages 45–59 carry 46% (females) and 44%
+(males) of the objective. Eleven xxl estimation specs vary the ceiling
+(`baseline_xlarge_{egm,negm}[_males]_amax{10,15,20}.yaml`, and
+`baseline_xlarge_egm[_males]_amax20_hmax20.yaml`), each identical to its base
+spec but for the header line, with the adjuster wealth ceiling moved in step
+(`w_max = a_max + 5`). `batches/submit_amax_2026-09-29.sh` submits them in
+three waves with the unchanged xxl scripts. `scripts/collect_estimation_results.py`
+gains an `a_max` column, read from the manifest's extra settings or from
+`_amax<x>` in the spec name.
+
 ## Unreleased — 2026-09-28 — Gadi estimation jobs hardened and regrouped
 
 Cause: on 23 Sep 2026 sweep job 179615514 lost 146 ranks to SIGBUS inside

@@ -94,12 +94,17 @@ Dimensions and where each lives:
 | Sex | females (base calibration), males | script (`spec_factory_males.yaml`, `_14_1` moments) | `_males` |
 | Income grid `N_wage` | 4 (base), 6, 8 | `EXTRA_SETTINGS=N_wage=6`; needs 56 ranks/node (`NRANKS=2080,PPR=7`) | `_nwage<n>` |
 | Housing ceiling `h_max` | 10 (base), 8, 12.5, 15 | `EXTRA_SETTINGS=h_max=15;w_max=17.5` (`w_max` keeps its 2.5 gap) | `_hmax<x>` |
+| Asset ceiling `a_max` (29 Sep) | 7.5 (base), 10, 15, 20 | `EXTRA_SETTINGS=a_max=15;w_max=20` (`w_max = a_max + 5`, the base offset; adjuster wealth is `1.045·a + h + y`) | `_amax<x>` |
+| Joint ceiling (29 Sep) | `a_max = 20, h_max = 20` | `EXTRA_SETTINGS=a_max=20;h_max=20;w_max=30` | `_amax20_hmax20` |
 | Simulated agents `N_SIM` | 10000 (base), 20000 | `N_SIM=20000` | `_nsim20k` |
 | CE samples per point (recovery) | 520 (base), 1,040 | ranks per sweep point | `selfgen_sweep_gamma_c_low_*` |
 
 Seed, sex and method variants run at the xxl size (4,160 samples); the
-settings variants at the xlarge size (2,080 samples), whose base results are
-30.953188 (EGM) and 30.926550 (NEGM) for females.
+settings variants of 28 Sep at the xlarge size (2,080 samples), whose base results are
+30.953188 (EGM) and 30.926550 (NEGM) for females. The 2,080-sample runs found
+poorer CE basins than the 4,160-sample ones, so the `a_max` variants of 29 Sep
+run at the xxl size (`batches/submit_amax_2026-09-29.sh`), against the xxl base
+results 27.618884 (EGM females), 89.421628 (EGM males) and 26.708638 (NEGM females).
 
 **Recovering a result.** Every job writes
 `<results>/<mod>/<spec>/manifest_est_<run id>.json` (job id, git commit,

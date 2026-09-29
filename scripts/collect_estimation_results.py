@@ -10,7 +10,7 @@ units, walltime and exit status. Runs that stopped before convergence write no
 summary.json; for those the collector reads the CE checkpoint
 <scratch>/<mod>/<spec>/est_<run>/state.pkl (best loss, best theta, iteration)
 and reports them with converged = False. Variant fields (method, sex, CE seed, N_wage,
-h_max, N_SIM, ranks) come from the manifest when present and from the spec
+a_max, h_max, N_SIM, ranks) come from the manifest when present and from the spec
 name otherwise, so runs made before manifests existed are still classified.
 
 Usage:
@@ -30,7 +30,7 @@ DEFAULT_LOGS = "/g/data/tp66/logs/durables"
 DEFAULT_SCRATCH = "/scratch/tp66/as3442/durables_est"
 PARAMS = ["alpha", "beta", "gamma_c", "gamma_h", "tau"]
 COLUMNS = (["mod", "spec", "run_id", "sweep_point", "job_id", "job_name", "started", "purpose",
-            "method", "sex", "seed", "n_wage", "h_max", "w_max", "n_sim", "nranks", "grid",
+            "method", "sex", "seed", "n_wage", "a_max", "h_max", "w_max", "n_sim", "nranks", "grid",
             "converged", "n_iter", "objective"] + PARAMS + [f"se_{p}" for p in PARAMS]
            + ["su", "walltime_h", "exit_status", "git_commit", "extra_settings", "path"])
 
@@ -45,10 +45,12 @@ def classify(spec, manifest):
     extra = dict(kv.split("=", 1) for kv in manifest.get("extra_settings", "").split(";") if "=" in kv)
     seed = re.search(r"_seed(\d+)", spec)
     nwage = extra.get("N_wage") or (re.search(r"_nwage(\d+)", spec) or [None, None])[1]
-    hmax = extra.get("h_max")
-    if hmax is None:
-        m = re.search(r"_hmax(\d+)(p(\d+))?", spec)
-        hmax = (m.group(1) + ("." + m.group(3) if m.group(3) else "")) if m else None
+    def ceiling(key, tag):
+        """Grid ceiling from the manifest's extra settings, else from the spec name (`_hmax12p5` = 12.5)."""
+        if extra.get(key) is not None:
+            return extra[key]
+        m = re.search(rf"_{tag}(\d+)(p(\d+))?", spec)
+        return (m.group(1) + ("." + m.group(3) if m.group(3) else "")) if m else None
     methods = manifest.get("methods", "")
     method = "NEGM" if ("NEGM" in methods or "negm" in spec) else "EGM"
     return {
@@ -56,7 +58,8 @@ def classify(spec, manifest):
         "sex": "males" if "males" in spec else "females",
         "seed": seed.group(1) if seed else "42",
         "n_wage": nwage or "4",
-        "h_max": hmax or "10",
+        "a_max": ceiling("a_max", "amax") or "7.5",
+        "h_max": ceiling("h_max", "hmax") or "10",
         "w_max": extra.get("w_max", "12.5"),
         "n_sim": manifest.get("n_sim") or ("20000" if "nsim20k" in spec else "10000"),
         "nranks": manifest.get("nranks", ""),
@@ -147,7 +150,7 @@ def collect(results, logs, scratch=None):
 
 
 def write_md(rows, path):
-    cols = ["spec", "sweep_point", "run_id", "method", "sex", "seed", "n_wage", "h_max", "n_sim",
+    cols = ["spec", "sweep_point", "run_id", "method", "sex", "seed", "n_wage", "a_max", "h_max", "n_sim",
             "converged", "n_iter", "objective"] + PARAMS + ["su"]
     fmt = lambda v: (f"{v:.4f}" if isinstance(v, float) else str(v)) if v not in (None, "") else ""
     lines = ["| " + " | ".join(cols) + " |", "|" + "---|" * len(cols)]
