@@ -1,0 +1,190 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 540" role="img" aria-labelledby="title desc">
+  <title id="title">Animated FUES scan diagram</title>
+  <desc id="desc">Two-panel academic diagram of the Fast Upper-Envelope Scan. The left panel shows the value correspondence over the endogenous grid and highlights a concave right turn. The right panel shows the continuation policy with a discontinuous jump. The animation illustrates the FUES rule: jump plus right turn implies deletion of the candidate point.</desc>
+  <defs>
+    <style>
+      :root {
+        --ink: #1d2430;
+        --muted: #8f98a7;
+        --grid: #d9dee8;
+        --panel: #f8fafc;
+        --blue: #1f4e79;
+        --green: #238b45;
+        --red: #b23a48;
+        --amber: #c5841f;
+      }
+
+      .title { font: 700 25px Georgia, "Times New Roman", serif; fill: var(--ink); }
+      .subtitle { font: 500 13px Georgia, "Times New Roman", serif; fill: #4f5968; }
+      .panel-title { font: 700 18px Georgia, "Times New Roman", serif; fill: var(--ink); }
+      .axis-label { font: 500 14px Georgia, "Times New Roman", serif; fill: var(--ink); }
+      .label { font: 500 13px Georgia, "Times New Roman", serif; fill: var(--ink); }
+      .small { font: 500 12px Georgia, "Times New Roman", serif; fill: #54606f; }
+      .formula { font: italic 500 15px Georgia, "Times New Roman", serif; fill: var(--ink); }
+      .rule { font: 700 16px Georgia, "Times New Roman", serif; fill: var(--red); }
+      .rule2 { font: 700 16px Georgia, "Times New Roman", serif; fill: var(--blue); }
+      .panel { fill: var(--panel); stroke: #d8dee8; stroke-width: 1.2; rx: 14; ry: 14; }
+      .axis { stroke: var(--ink); stroke-width: 2; }
+      .gridline { stroke: var(--grid); stroke-width: 1; stroke-dasharray: 4 5; }
+      .branch-a { fill: none; stroke: var(--blue); stroke-width: 4.5; stroke-linecap: round; stroke-linejoin: round; }
+      .branch-b { fill: none; stroke: var(--green); stroke-width: 4; stroke-linecap: round; stroke-linejoin: round; opacity: 0.9; }
+      .faint { opacity: 0.23; }
+      .env { fill: none; stroke: var(--ink); stroke-width: 5.5; stroke-linecap: round; stroke-linejoin: round; }
+      .secant-left { fill: none; stroke: var(--amber); stroke-width: 3; stroke-dasharray: 7 6; opacity: 0; animation: show-left 8s infinite; }
+      .secant-right { fill: none; stroke: var(--red); stroke-width: 3; stroke-dasharray: 7 6; opacity: 0; animation: show-right 8s infinite; }
+      .scan-window { fill: rgba(197,132,31,0.08); stroke: rgba(197,132,31,0.85); stroke-width: 2.5; stroke-dasharray: 6 5; opacity: 0; animation: show-window 8s infinite; }
+      .jump-line { stroke: var(--red); stroke-width: 3; stroke-dasharray: 4 4; opacity: 0; animation: show-jump 8s infinite; }
+      .jump-brace { fill: none; stroke: var(--red); stroke-width: 3; opacity: 0; animation: show-jump 8s infinite; }
+      .delete-x { stroke: var(--red); stroke-width: 4.5; stroke-linecap: round; opacity: 0; animation: show-delete 8s infinite; }
+      .candidate-drop { fill: #fff4f4; stroke: var(--red); stroke-width: 2.4; }
+      .candidate-keep { fill: white; stroke-width: 2.5; }
+      .candidate-a { stroke: var(--blue); }
+      .candidate-b { stroke: var(--green); }
+      .pulse-a { animation: pulse-a 8s infinite; }
+      .pulse-b { animation: pulse-b 8s infinite; }
+      .pulse-c { animation: pulse-c 8s infinite; }
+      .delete-note { opacity: 0; animation: show-delete 8s infinite; }
+      .jump-note { opacity: 0; animation: show-jump 8s infinite; }
+      .keep-note { opacity: 0.9; }
+
+      @keyframes pulse-a {
+        0%, 6%, 100% { r: 0; }
+        8%, 18% { r: 8.5; }
+        13% { r: 10; }
+        20%, 100% { r: 8.5; }
+      }
+      @keyframes pulse-b {
+        0%, 11%, 100% { r: 0; }
+        13%, 26% { r: 8.5; }
+        18% { r: 10; }
+        28%, 100% { r: 8.5; }
+      }
+      @keyframes pulse-c {
+        0%, 18%, 100% { r: 0; }
+        20%, 34% { r: 8.5; }
+        25% { r: 10; }
+        36%, 100% { r: 8.5; }
+      }
+      @keyframes show-window {
+        0%, 7%, 100% { opacity: 0; }
+        8%, 30% { opacity: 1; }
+        32%, 100% { opacity: 0; }
+      }
+      @keyframes show-left {
+        0%, 20%, 100% { opacity: 0; }
+        22%, 46% { opacity: 1; }
+        48%, 100% { opacity: 0; }
+      }
+      @keyframes show-right {
+        0%, 28%, 100% { opacity: 0; }
+        30%, 54% { opacity: 1; }
+        56%, 100% { opacity: 0; }
+      }
+      @keyframes show-jump {
+        0%, 34%, 100% { opacity: 0; }
+        36%, 62% { opacity: 1; }
+        64%, 100% { opacity: 0; }
+      }
+      @keyframes show-delete {
+        0%, 56%, 100% { opacity: 0; }
+        58%, 92% { opacity: 1; }
+        94%, 100% { opacity: 0; }
+      }
+    </style>
+  </defs>
+
+  <rect x="0" y="0" width="1100" height="540" fill="white"/>
+
+  <text x="60" y="46" class="title">Fast Upper-Envelope Scan (FUES)</text>
+  <text x="60" y="69" class="subtitle">Scan the sorted endogenous-grid correspondence. A discontinuous policy jump is admissible only after a crossing. Hence, jump + right turn implies deletion.</text>
+
+  <rect x="52" y="95" width="465" height="360" class="panel"/>
+  <rect x="583" y="95" width="465" height="360" class="panel"/>
+
+  <text x="78" y="128" class="panel-title">Value correspondence over the endogenous grid</text>
+  <text x="610" y="128" class="panel-title">Continuation policy over the endogenous grid</text>
+
+  <line x1="96" y1="375" x2="470" y2="375" class="axis"/>
+  <line x1="96" y1="375" x2="96" y2="156" class="axis"/>
+  <line x1="627" y1="375" x2="1001" y2="375" class="axis"/>
+  <line x1="627" y1="375" x2="627" y2="156" class="axis"/>
+
+  <line x1="96" y1="315" x2="470" y2="315" class="gridline"/>
+  <line x1="96" y1="255" x2="470" y2="255" class="gridline"/>
+  <line x1="96" y1="195" x2="470" y2="195" class="gridline"/>
+  <line x1="627" y1="315" x2="1001" y2="315" class="gridline"/>
+  <line x1="627" y1="255" x2="1001" y2="255" class="gridline"/>
+  <line x1="627" y1="195" x2="1001" y2="195" class="gridline"/>
+
+  <text x="237" y="414" class="axis-label">endogenous decision grid x-hat</text>
+  <text x="742" y="414" class="axis-label">endogenous decision grid x-hat</text>
+
+  <g transform="translate(36,320) rotate(-90)">
+    <text class="axis-label">value correspondence v-hat</text>
+  </g>
+  <g transform="translate(567,310) rotate(-90)">
+    <text class="axis-label">continuation state x_e-hat</text>
+  </g>
+
+  <path d="M118 332 C152 276, 198 230, 244 206 C286 186, 329 176, 371 179 C408 182, 435 193, 455 205" class="branch-a faint"/>
+  <path d="M118 344 C156 324, 204 295, 252 258 C293 228, 337 218, 378 223 C414 228, 438 214, 455 188" class="branch-b faint"/>
+  <path d="M118 230 C160 218, 202 206, 244 194 C290 181, 333 166, 373 150 C405 136, 433 120, 455 104" class="branch-b faint"/>
+
+  <path d="M118 332 C152 276, 198 230, 244 206 C286 186, 329 176, 371 179 C408 182, 435 193, 455 205" class="env"/>
+  <path d="M649 338 C690 326, 735 312, 780 296 C820 283, 858 267, 894 248 C930 229, 963 209, 990 188" class="branch-a"/>
+  <path d="M649 258 C690 241, 735 222, 780 202 C820 184, 858 170, 894 155 C930 140, 963 127, 990 114" class="branch-b"/>
+
+  <rect x="182" y="155" width="158" height="210" rx="12" ry="12" class="scan-window"/>
+  <text x="192" y="175" class="small" style="opacity:0; animation:show-window 8s infinite;">current scan window</text>
+
+  <path d="M188 238 L258 206" class="secant-left"/>
+  <path d="M258 206 L320 250" class="secant-right"/>
+  <text x="202" y="224" class="formula" style="opacity:0; animation:show-left 8s infinite;">g<tspan baseline-shift="sub" font-size="12">i</tspan></text>
+  <text x="286" y="214" class="formula" style="opacity:0; animation:show-right 8s infinite;">g<tspan baseline-shift="sub" font-size="12">i+1</tspan> &lt; g<tspan baseline-shift="sub" font-size="12">i</tspan></text>
+
+  <circle cx="188" cy="238" r="8.5" class="candidate-keep candidate-a"/>
+  <circle cx="258" cy="206" r="8.5" class="candidate-keep candidate-a"/>
+  <circle cx="320" cy="250" r="8.5" class="candidate-drop"/>
+
+  <circle cx="188" cy="238" class="candidate-keep candidate-a pulse-a"/>
+  <circle cx="258" cy="206" class="candidate-keep candidate-a pulse-b"/>
+  <circle cx="320" cy="250" class="candidate-drop pulse-c"/>
+
+  <text x="165" y="198" class="label">x̂<tspan baseline-shift="sub" font-size="11">i-1</tspan></text>
+  <text x="239" y="182" class="label">x̂<tspan baseline-shift="sub" font-size="11">i</tspan></text>
+  <text x="331" y="254" class="label">x̂<tspan baseline-shift="sub" font-size="11">i+1</tspan></text>
+
+  <line x1="780" y1="296" x2="780" y2="202" class="jump-line"/>
+  <path d="M792 296 C800 290, 800 286, 792 280 M792 202 C800 208, 800 212, 792 218" class="jump-brace"/>
+  <text x="807" y="247" class="label jump-note">jump &gt; M̄</text>
+
+  <circle cx="730" cy="312" r="8.5" class="candidate-keep candidate-a"/>
+  <circle cx="780" cy="296" r="8.5" class="candidate-keep candidate-a"/>
+  <circle cx="780" cy="202" r="8.5" class="candidate-drop"/>
+  <text x="706" y="328" class="label">x̂<tspan baseline-shift="sub" font-size="11">e,i-1</tspan></text>
+  <text x="760" y="318" class="label">x̂<tspan baseline-shift="sub" font-size="11">e,i</tspan></text>
+  <text x="792" y="196" class="label">x̂<tspan baseline-shift="sub" font-size="11">e,i+1</tspan></text>
+
+  <line x1="308" y1="238" x2="332" y2="262" class="delete-x"/>
+  <line x1="332" y1="238" x2="308" y2="262" class="delete-x"/>
+  <line x1="768" y1="190" x2="792" y2="214" class="delete-x"/>
+  <line x1="792" y1="190" x2="768" y2="214" class="delete-x"/>
+  <text x="356" y="228" class="rule delete-note">delete candidate</text>
+  <text x="336" y="248" class="small delete-note">sub-optimal right turn</text>
+
+  <circle cx="420" cy="163" r="6.5" fill="white" stroke="#1d2430" stroke-width="2"/>
+  <text x="388" y="148" class="small keep-note">after a crossing, a jump can be retained</text>
+  <text x="365" y="165" class="small keep-note">if the geometry turns left</text>
+
+  <rect x="64" y="468" width="972" height="46" rx="10" ry="10" fill="#fbfbfd" stroke="#d8dee8" stroke-width="1.2"/>
+  <text x="84" y="496" class="rule">FUES rule:</text>
+  <text x="184" y="496" class="label">if</text>
+  <text x="202" y="496" class="formula">|Δx̂<tspan baseline-shift="sub" font-size="12">e</tspan> / Δx̂| &gt; M̄</text>
+  <text x="378" y="496" class="label">and</text>
+  <text x="412" y="496" class="formula">g<tspan baseline-shift="sub" font-size="12">i+1</tspan> &lt; g<tspan baseline-shift="sub" font-size="12">i</tspan></text>
+  <text x="500" y="496" class="label">, remove point</text>
+  <text x="594" y="496" class="formula">(x̂<tspan baseline-shift="sub" font-size="12">i+1</tspan>, v̂<tspan baseline-shift="sub" font-size="12">i+1</tspan>)</text>
+  <text x="760" y="496" class="label">. A jump with</text>
+  <text x="842" y="496" class="rule2">a left turn</text>
+  <text x="924" y="496" class="label">signals a crossing.</text>
+</svg>
