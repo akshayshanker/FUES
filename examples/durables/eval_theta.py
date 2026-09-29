@@ -170,7 +170,11 @@ def main():
     print(f"eval_theta: {len(jobs)} evaluations, {args.jobs} in parallel, spec {spec_path.name}, "
           f"settings {base_settings}, calibration {calib_overrides}", flush=True)
     results = []
-    with ProcessPoolExecutor(max_workers=args.jobs) as ex:
+    # Workers are spawned, not forked: the parent has already loaded MKL/OpenMP
+    # through numpy and numba, and GNU OpenMP aborts a forked child
+    # ("fork() called from a process already using GNU OpenMP", Gadi, 29 Sep 2026).
+    import multiprocessing
+    with ProcessPoolExecutor(max_workers=args.jobs, mp_context=multiprocessing.get_context('spawn')) as ex:
         for r in ex.map(evaluate_one, jobs):
             print(f"  {r['label']:<40s} loss {r['loss']:.6f}  ({r['seconds']} s)", flush=True)
             results.append(r)
