@@ -23,6 +23,7 @@
 #   bash submit_amax_2026-09-29.sh wave4a  # 23:45: a_max 20 at seeds 11/123/7, EGM females (3 h 30 walltime)
 #   bash submit_amax_2026-09-29.sh wave4b  # a_max 20 at seeds 7/2026, EGM males (5 h); NEGM males a_max 20 (7 h)
 #   bash submit_amax_2026-09-29.sh wave5 negm_s11 egm_m_s11 negm_m_a10   # as the balance frees up
+#   bash submit_amax_2026-09-29.sh wave5 egm_s99 egm_s2026              # 04:55, 30 Sep: the remaining two female seeds
 #
 # Results are filed under each variant spec's name; every job writes a manifest.
 set -euo pipefail
@@ -79,6 +80,8 @@ wave5)
         negm_s11)  sub xxlNEGM_a20s11 "$D/females/run_xxl_negm.pbs"     "SPEC=baseline_xlarge_negm_amax20_seed11.yaml,EXTRA_SETTINGS=a_max=20;w_max=25,$V400"      "${W400[@]}" ;;
         egm_m_s11) sub xxlEGMm_a20s11 "$D/males/run_xxl_egm_males.pbs"  "SPEC=baseline_xlarge_egm_males_amax20_seed11.yaml,EXTRA_SETTINGS=a_max=20;w_max=25,$V500" "${W500[@]}" ;;
         negm_m_a10) sub xxlNEGMm_a10  "$D/males/run_xxl_negm_males.pbs" "SPEC=baseline_xlarge_negm_males_amax10.yaml,EXTRA_SETTINGS=a_max=10;w_max=15" ;;
+        egm_s99)   sub xxlEGM_a20s99  "$D/females/run_xxl_egm.pbs"     "SPEC=baseline_xlarge_egm_amax20_seed99.yaml,EXTRA_SETTINGS=a_max=20;w_max=25,$V330"   "${W330[@]}" ;;
+        egm_s2026) sub xxlEGM_a20s26  "$D/females/run_xxl_egm.pbs"     "SPEC=baseline_xlarge_egm_amax20_seed2026.yaml,EXTRA_SETTINGS=a_max=20;w_max=25,$V330" "${W330[@]}" ;;
         *) echo "unknown wave5 job: $j" >&2 ;;
     esac; done ;;
 *)
