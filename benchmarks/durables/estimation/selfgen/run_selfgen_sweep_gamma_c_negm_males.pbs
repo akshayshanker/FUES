@@ -87,7 +87,7 @@ echo "Starting SELFGEN SWEEP gamma_c MALES (NEGM) at $(date)"
 echo "  Mod: $MOD | Spec: $SPEC | Grid: $GRID | Nodes: $((PBS_NCPUS/104)) | Cores: $PBS_NCPUS"
 
 ITERS_PER_RESTART="${ITERS_PER_RESTART:-10}"             # 104 ranks/node at <=4.6 GB each; rank RSS grows ~60 MB/iter
-WALL_SECONDS=18000              # must match #PBS -l walltime=5:00:00 (5h)
+WALL_SECONDS="${WALL_SECONDS:-18000}"   # default matches #PBS -l walltime; pass WALL_SECONDS with qsub -l walltime=… to shorten
 SAFETY_BUFFER=600               # reserve 10 min for final checkpoint
 START_TS=$(date +%s)
 DEADLINE=$((START_TS + WALL_SECONDS - SAFETY_BUFFER))
