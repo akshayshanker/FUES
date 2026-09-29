@@ -10,7 +10,8 @@ Each evaluation is one solve and one simulation, as in ``estimate.py``'s
 ``trial`` (same ``N_sim``, same ``simulation_seed`` from the spec), so a θ
 evaluated under the settings of the run that produced it reproduces that
 run's objective to every printed digit; that is the check that the plan is
-set up correctly. Evaluations run in parallel processes.
+set up correctly. Under ``mpiexec -n K`` the evaluations are spread over the
+K ranks (one evaluation per rank at a time); without it they run serially.
 
 Plan file (JSON): a list of evaluations, each
     {"label": "base theta, a_max 15", "settings": {"a_max": 15, "w_max": 20},
@@ -23,26 +24,24 @@ defaults, relative squared deviations for |data| >= 1 and absolute ones
 otherwise), plus a CSV with the same rows.
 
 Usage:
-    python3 -m examples.durables.eval_theta --mod syntax/separable \
+    mpiexec -n 8 python3 -u -m mpi4py -m examples.durables.eval_theta --mod syntax/separable \
         --spec baseline_xlarge_egm.yaml --plan plan.json --out eval_theta \
-        --settings-override n_a=600 n_h=600 n_w=600 --params-override t0=20 \
-        --N-sim 10000 --jobs 8
-    (add ``--methods-override adjuster_cons.upper_env.upper_envelope=NEGM`` for NEGM)
+        --settings-override n_a=600 n_h=600 n_w=600 --params-override t0=20 --N-sim 10000
+    (add ``--methods-override adjuster_cons.upper_env.upper_envelope=NEGM`` for NEGM;
+    drop ``mpiexec … -m mpi4py`` to run serially)
 """
 
 import argparse
 import csv
 import json
-import os
-import sys
 import time
-from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 import numpy as np
 
 from kikku.run.estimate import load_estimation_spec, make_criterion
 from kikku.run.moments import make_moment_fn
+from kikku.run.mpi import get_comm
 
 from .estimate import _parse_key_value_list, _solver_method_from_cli
 from .solve import solve
@@ -154,7 +153,6 @@ def main():
     ap.add_argument('--params-override', nargs='*', default=[], dest='params_override')
     ap.add_argument('--methods-override', nargs='*', default=[], dest='methods_override')
     ap.add_argument('--N-sim', type=int, default=10000, dest='N_sim')
-    ap.add_argument('--jobs', type=int, default=1, help='evaluations run in parallel')
     args = ap.parse_args()
 
     example_root = Path(__file__).parent
@@ -167,17 +165,27 @@ def main():
     calib_overrides = _parse_key_value_list(args.params_override)
     jobs = [(mod_dir, spec_path, args.spec_factory, args.methods_override, calib_overrides,
              base_settings, args.N_sim, e) for e in plan]
-    print(f"eval_theta: {len(jobs)} evaluations, {args.jobs} in parallel, spec {spec_path.name}, "
-          f"settings {base_settings}, calibration {calib_overrides}", flush=True)
-    results = []
-    # Workers are spawned, not forked: the parent has already loaded MKL/OpenMP
-    # through numpy and numba, and GNU OpenMP aborts a forked child
-    # ("fork() called from a process already using GNU OpenMP", Gadi, 29 Sep 2026).
-    import multiprocessing
-    with ProcessPoolExecutor(max_workers=args.jobs, mp_context=multiprocessing.get_context('spawn')) as ex:
-        for r in ex.map(evaluate_one, jobs):
-            print(f"  {r['label']:<40s} loss {r['loss']:.6f}  ({r['seconds']} s)", flush=True)
-            results.append(r)
+    # Parallelism is by MPI rank (mpiexec -n K … -m mpi4py -m examples.durables.eval_theta):
+    # rank r evaluates entries r, r+K, …, and rank 0 gathers and writes. Process
+    # pools do not work here: kikku initialises MPI at import, GNU OpenMP aborts a
+    # forked child, and a spawned child hangs in its own MPI initialisation
+    # (jobs 180132068 and 180133439, Gadi, 29 Sep 2026). Serial without mpiexec.
+    comm = get_comm()
+    rank = comm.Get_rank() if comm is not None else 0
+    size = comm.Get_size() if comm is not None else 1
+    if rank == 0:
+        print(f"eval_theta: {len(jobs)} evaluations on {size} rank(s), spec {spec_path.name}, "
+              f"settings {base_settings}, calibration {calib_overrides}", flush=True)
+    mine = []
+    for i in range(rank, len(jobs), size):
+        r = evaluate_one(jobs[i])
+        r["index"] = i
+        print(f"  [rank {rank}] {r['label']:<50s} loss {r['loss']:.6f}  ({r['seconds']} s)", flush=True)
+        mine.append(r)
+    gathered = comm.gather(mine, root=0) if comm is not None else [mine]
+    if rank != 0:
+        return
+    results = sorted((r for part in gathered for r in part), key=lambda r: r["index"])
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.with_suffix('.json').write_text(json.dumps(

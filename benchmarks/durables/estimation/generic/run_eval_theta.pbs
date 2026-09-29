@@ -73,11 +73,16 @@ echo "  Plan: $PLAN_PATH | spec $SPEC | mod $MOD | grid $GRID | N_SIM $N_SIM | m
 echo "  Output: $OUT_STEM.{json,csv}"
 echo "  Started $(date)"
 
-python3 -u -m examples.durables.eval_theta \
+# One evaluation per MPI rank (JOBS ranks on this node); no process pools —
+# kikku initialises MPI at import, so forked or spawned workers fail.
+export OMPI_MCA_coll_ucc_enable=0
+export OMPI_MCA_coll="^hcoll,ucc"
+mpiexec -n "$JOBS" --map-by "ppr:$JOBS:node" --bind-to none \
+    bash -c 'ulimit -c 0; exec python3 -u -m mpi4py -m examples.durables.eval_theta "$@"' _ \
     --mod "$MOD" --spec "$SPEC" --spec-factory "$SPEC_FACTORY" \
     --plan "$PLAN_PATH" --out "$OUT_STEM" \
     --settings-override n_a=$GRID n_h=$GRID n_w=$GRID \
-    --params-override t0=20 --N-sim "$N_SIM" --jobs "$JOBS" \
+    --params-override t0=20 --N-sim "$N_SIM" \
     $METHODS
 status=$?
 echo "  Finished $(date) with status $status"
